@@ -7,7 +7,7 @@
             <form-group-field
                 id="form_config_bot_token"
                 class="col-md-6"
-                :field="r$.config.bot_token"
+                :field="r$!.config.bot_token"
                 :label="$gettext('Bot Token')"
             >
                 <template #description>
@@ -23,7 +23,7 @@
             <form-group-field
                 id="form_config_chat_id"
                 class="col-md-6"
-                :field="r$.config.chat_id"
+                :field="r$!.config.chat_id"
                 :label="$gettext('Chat ID')"
                 :description="$gettext('Unique identifier for the target chat or username of the target channel (in the format @channelusername).')"
             />
@@ -31,7 +31,7 @@
             <form-group-field
                 id="form_config_api"
                 class="col-md-6"
-                :field="r$.config.api"
+                :field="r$!.config.api"
                 :label="$gettext('Custom API Base URL')"
                 :description="$gettext('Leave blank to use the default Telegram API URL (recommended).')"
             />
@@ -43,7 +43,7 @@
             <form-group-field
                 id="form_config_text"
                 class="col-md-12"
-                :field="r$.config.text"
+                :field="r$!.config.text"
                 input-type="textarea"
                 :label="$gettext('Main Message Content')"
             />
@@ -51,7 +51,7 @@
             <form-group-multi-check
                 id="form_config_parse_mode"
                 class="col-md-12"
-                :field="r$.config.parse_mode"
+                :field="r$!.config.parse_mode"
                 :options="parseModeOptions"
                 stacked
                 radio
@@ -78,33 +78,20 @@ import {useTranslate} from "~/vendor/gettext";
 import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {WebhookComponentProps} from "~/components/Stations/Webhooks/EditModal.vue";
-import {WebhookRecordCommon, WebhookRecordTelegram} from "~/components/Stations/Webhooks/Form/form.ts";
-import {useAppScopedRegle} from "~/vendor/regle.ts";
-import {required} from "@regle/rules";
+import {useStationsWebhooksForm} from "~/components/Stations/Webhooks/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
+import {storeToRefs} from "pinia";
+import {variantToRef} from "@regle/core";
+import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
 
 defineProps<WebhookComponentProps>();
 
-type ThisWebhookRecord = WebhookRecordCommon & WebhookRecordTelegram;
+const formStore = useStationsWebhooksForm();
+const {r$: original$} = storeToRefs(formStore);
 
-const form = defineModel<ThisWebhookRecord>('form', {required: true});
+const r$ = variantToRef(original$, 'type', WebhookTypes.Telegram);
 
-const {r$} = useAppScopedRegle(
-    form,
-    {
-        config: {
-            bot_token: {required},
-            chat_id: {required},
-            text: {required},
-            parse_mode: {required}
-        }
-    },
-    {
-        namespace: 'station-webhooks'
-    }
-);
-
-const tabClass = useFormTabClass(r$);
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.telegramTab));
 
 const {$gettext} = useTranslate();
 

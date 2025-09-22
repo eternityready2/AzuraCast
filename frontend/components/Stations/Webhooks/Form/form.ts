@@ -254,10 +254,6 @@ export const useStationsWebhooksForm = defineStore(
         const {r$} = useAppRegle(
             form,
             () => {
-                const basicInfo = {
-                    name: {required}
-                };
-
                 const variant = createVariant(form, 'type', [
                     {
                         type: {
@@ -396,7 +392,7 @@ export const useStationsWebhooksForm = defineStore(
                 ]);
 
                 return {
-                    ...basicInfo,
+                    name: {required},
                     ...variant.value
                 };
             },
@@ -510,6 +506,7 @@ export const useStationsWebhooksForm = defineStore(
             type,
             setType,
             form,
+            getBlankForm,
             r$,
             $reset
         }

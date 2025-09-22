@@ -39,7 +39,7 @@
             <form-group-field
                 id="form_config_webhook_url"
                 class="col-md-12"
-                :field="r$.config.webhook_url"
+                :field="r$!.config.webhook_url"
                 input-type="url"
                 :label="$gettext('Web Hook URL')"
                 :description="$gettext('The URL that will receive the POST messages any time an event is triggered.')"
@@ -48,7 +48,7 @@
             <form-group-field
                 id="form_config_basic_auth_username"
                 class="col-md-6"
-                :field="r$.config.basic_auth_username"
+                :field="r$!.config.basic_auth_username"
                 :label="$gettext('Optional: HTTP Basic Authentication Username')"
                 :description="$gettext('If your web hook requires HTTP basic authentication, provide the username here.')"
             />
@@ -56,7 +56,7 @@
             <form-group-field
                 id="form_config_basic_auth_password"
                 class="col-md-6"
-                :field="r$.config.basic_auth_password"
+                :field="r$!.config.basic_auth_password"
                 :label="$gettext('Optional: HTTP Basic Authentication Password')"
                 :description="$gettext('If your web hook requires HTTP basic authentication, provide the password here.')"
             />
@@ -64,7 +64,7 @@
             <form-group-field
                 id="form_config_timeout"
                 class="col-md-6"
-                :field="r$.config.timeout"
+                :field="r$!.config.timeout"
                 input-type="number"
                 :input-attrs="{ min: '0.0', max: '600.0', step: '0.1' }"
                 :label="$gettext('Optional: Request Timeout (Seconds)')"
@@ -79,28 +79,19 @@ import FormGroupField from "~/components/Form/FormGroupField.vue";
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {WebhookComponentProps} from "~/components/Stations/Webhooks/EditModal.vue";
-import {WebhookRecordCommon, WebhookRecordGeneric} from "~/components/Stations/Webhooks/Form/form.ts";
+import {useStationsWebhooksForm} from "~/components/Stations/Webhooks/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import {useAppScopedRegle} from "~/vendor/regle.ts";
-import {required} from "@regle/rules";
+import {storeToRefs} from "pinia";
+import {variantToRef} from "@regle/core";
+import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
+import {computed} from "vue";
 
 defineProps<WebhookComponentProps>();
 
-type ThisWebhookRecord = WebhookRecordCommon & WebhookRecordGeneric;
+const formStore = useStationsWebhooksForm();
+const {r$: original$} = storeToRefs(formStore);
 
-const form = defineModel<ThisWebhookRecord>('form', {required: true});
+const r$ = variantToRef(original$, 'type', WebhookTypes.Generic);
 
-const {r$} = useAppScopedRegle(
-    form,
-    {
-        config: {
-            webhook_url: {required},
-        }
-    },
-    {
-        namespace: 'station-webhooks'
-    }
-);
-
-const tabClass = useFormTabClass(r$);
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.genericTab));
 </script>

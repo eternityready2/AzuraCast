@@ -7,7 +7,7 @@
             <form-group-field
                 id="form_config_bot_id"
                 class="col-md-6"
-                :field="r$.config.bot_id"
+                :field="r$!.config.bot_id"
                 :label="$gettext('Bot ID')"
             >
                 <template #description>
@@ -23,7 +23,7 @@
             <form-group-field
                 id="form_config_api"
                 class="col-md-6"
-                :field="r$.config.api"
+                :field="r$!.config.api"
                 :label="$gettext('Custom API Base URL')"
                 :description="$gettext('Leave blank to use the default GroupMe API URL (recommended).')"
             />
@@ -35,7 +35,7 @@
             <form-group-field
                 id="form_config_text"
                 class="col-md-12"
-                :field="r$.config.text"
+                :field="r$!.config.text"
                 input-type="textarea"
                 :label="$gettext('Main Message Content')"
             />
@@ -48,29 +48,19 @@ import FormGroupField from "~/components/Form/FormGroupField.vue";
 import CommonFormattingInfo from "~/components/Stations/Webhooks/Form/Common/FormattingInfo.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {WebhookComponentProps} from "~/components/Stations/Webhooks/EditModal.vue";
-import {WebhookRecordCommon, WebhookRecordGroupMe} from "~/components/Stations/Webhooks/Form/form.ts";
+import {useStationsWebhooksForm} from "~/components/Stations/Webhooks/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import {useAppScopedRegle} from "~/vendor/regle.ts";
-import {required} from "@regle/rules";
+import {storeToRefs} from "pinia";
+import {variantToRef} from "@regle/core";
+import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
+import {computed} from "vue";
 
 defineProps<WebhookComponentProps>();
 
-type ThisWebhookRecord = WebhookRecordCommon & WebhookRecordGroupMe;
+const formStore = useStationsWebhooksForm();
+const {r$: original$} = storeToRefs(formStore);
 
-const form = defineModel<ThisWebhookRecord>('form', {required: true});
+const r$ = variantToRef(original$, 'type', WebhookTypes.GroupMe);
 
-const {r$} = useAppScopedRegle(
-    form,
-    {
-        config: {
-            bot_id: {required},
-            text: {required}
-        }
-    },
-    {
-        namespace: 'station-webhooks'
-    }
-);
-
-const tabClass = useFormTabClass(r$);
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.groupMeTab));
 </script>

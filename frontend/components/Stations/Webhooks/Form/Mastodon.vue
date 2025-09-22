@@ -38,7 +38,7 @@
             <form-group-field
                 id="form_config_instance_url"
                 class="col-md-6"
-                :field="r$.config.instance_url"
+                :field="r$!.config.instance_url"
                 :label="$gettext('Mastodon Instance URL')"
                 :description="$gettext('If your Mastodon username is &quot;@test@example.com&quot;, enter &quot;example.com&quot;.')"
             />
@@ -46,7 +46,7 @@
             <form-group-field
                 id="form_config_access_token"
                 class="col-md-6"
-                :field="r$.config.access_token"
+                :field="r$!.config.access_token"
                 :label="$gettext('Access Token')"
             />
         </div>
@@ -55,7 +55,7 @@
             <form-group-multi-check
                 id="form_config_visibility"
                 class="col-md-12"
-                :field="r$.config.visibility"
+                :field="r$!.config.visibility"
                 :options="visibilityOptions"
                 stacked
                 radio
@@ -63,7 +63,7 @@
             />
         </div>
 
-        <common-social-post-fields v-model:form="form"/>
+        <common-social-post-fields/>
     </tab>
 </template>
 
@@ -76,32 +76,20 @@ import FormMarkup from "~/components/Form/FormMarkup.vue";
 import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {WebhookComponentProps} from "~/components/Stations/Webhooks/EditModal.vue";
-import {WebhookRecordCommon, WebhookRecordMastodon} from "~/components/Stations/Webhooks/Form/form.ts";
+import {useStationsWebhooksForm} from "~/components/Stations/Webhooks/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import {useAppScopedRegle} from "~/vendor/regle.ts";
-import {required} from "@regle/rules";
+import {storeToRefs} from "pinia";
+import {variantToRef} from "@regle/core";
+import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
 
 defineProps<WebhookComponentProps>();
 
-type ThisWebhookRecord = WebhookRecordCommon & WebhookRecordMastodon;
+const formStore = useStationsWebhooksForm();
+const {r$: original$} = storeToRefs(formStore);
 
-const form = defineModel<ThisWebhookRecord>('form', {required: true});
+const r$ = variantToRef(original$, 'type', WebhookTypes.Mastodon);
 
-const {r$} = useAppScopedRegle(
-    form,
-    {
-        config: {
-            instance_url: {required},
-            access_token: {required},
-            visibility: {required}
-        }
-    },
-    {
-        namespace: 'station-webhooks'
-    }
-);
-
-const tabClass = useFormTabClass(r$);
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.mastodonTab));
 
 const {$gettext} = useTranslate();
 

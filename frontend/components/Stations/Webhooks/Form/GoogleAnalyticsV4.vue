@@ -7,7 +7,7 @@
             <form-group-field
                 id="form_config_api_secret"
                 class="col-md-6"
-                :field="r$.config.api_secret"
+                :field="r$!.config.api_secret"
                 :label="$gettext('Measurement Protocol API Secret')"
                 :description="$gettext('This can be generated in the &quot;Events&quot; section for a measurement.')"
             />
@@ -15,7 +15,7 @@
             <form-group-field
                 id="form_config_measurement_id"
                 class="col-md-6"
-                :field="r$.config.measurement_id"
+                :field="r$!.config.measurement_id"
                 :label="$gettext('Measurement ID')"
                 :description="$gettext('A unique identifier (i.e. &quot;G-A1B2C3D4&quot;) for this measurement stream.')"
             />
@@ -27,29 +27,19 @@
 import FormGroupField from "~/components/Form/FormGroupField.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {WebhookComponentProps} from "~/components/Stations/Webhooks/EditModal.vue";
-import {WebhookRecordCommon, WebhookRecordGoogleAnalyticsV4} from "~/components/Stations/Webhooks/Form/form.ts";
+import {useStationsWebhooksForm} from "~/components/Stations/Webhooks/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import {useAppScopedRegle} from "~/vendor/regle.ts";
-import {required} from "@regle/rules";
+import {storeToRefs} from "pinia";
+import {variantToRef} from "@regle/core";
+import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
+import {computed} from "vue";
 
 defineProps<WebhookComponentProps>();
 
-type ThisWebhookRecord = WebhookRecordCommon & WebhookRecordGoogleAnalyticsV4;
+const formStore = useStationsWebhooksForm();
+const {r$: original$} = storeToRefs(formStore);
 
-const form = defineModel<ThisWebhookRecord>('form', {required: true});
+const r$ = variantToRef(original$, 'type', WebhookTypes.GoogleAnalyticsV4);
 
-const {r$} = useAppScopedRegle(
-    form,
-    {
-        config: {
-            api_secret: {required},
-            measurement_id: {required}
-        }
-    },
-    {
-        namespace: 'station-webhooks'
-    }
-);
-
-const tabClass = useFormTabClass(r$);
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.googleAnalyticsV4Tab));
 </script>

@@ -317,3 +317,7 @@ export type WebhookHooks =
     | { type: null };
 
 export type WebhookRecord = WebhookRecordCommon & WebhookHooks;
+
+export type WebhookResponseBody = WebhookRecord & {
+    type: WebhookTypes | null
+}

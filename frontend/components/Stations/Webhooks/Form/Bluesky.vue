@@ -7,7 +7,7 @@
             <form-group-field
                 id="form_config_username"
                 class="col-md-6"
-                :field="r$.config.handle"
+                :field="r$!.config.handle"
                 :label="$gettext('Bluesky Handle')"
                 :description="$gettext('The username associated with your account.')"
             />
@@ -15,13 +15,13 @@
             <form-group-field
                 id="form_config_password"
                 class="col-md-6"
-                :field="r$.config.app_password"
+                :field="r$!.config.app_password"
                 :label="$gettext('App Password')"
                 :description="$gettext('Create a new App Password for this service, then enter the key here (i.e. 0123-abcd-4567)')"
             />
         </div>
 
-        <common-social-post-fields v-model:form="form"/>
+        <common-social-post-fields/>
     </tab>
 </template>
 
@@ -40,9 +40,9 @@ import {WebhookTypes} from "~/entities/ApiInterfaces.ts";
 defineProps<WebhookComponentProps>();
 
 const formStore = useStationsWebhooksForm();
-const {form, r$: original$} = storeToRefs(formStore);
+const {r$: original$} = storeToRefs(formStore);
 
 const r$ = variantToRef(original$, 'type', WebhookTypes.Bluesky);
 
-const tabClass = useFormTabClass(computed(() => r$.value.$groups.blueskyTab));
+const tabClass = useFormTabClass(computed(() => r$.value!.$groups.blueskyTab));
 </script>
