@@ -42,7 +42,7 @@
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
-                        <th class="text-uppercase small">{{ $gettext('Type or Category') }}</th>
+                        <th class="text-uppercase small">{{ $gettext('Playlist') }}</th>
                         <th class="text-uppercase small">{{ $gettext('Selection Algorithm') }}</th>
                         <th class="text-uppercase small text-center" style="width: 80px;">
                             {{ $gettext('Delete') }}
@@ -64,14 +64,23 @@
                     >
                         <td>
                             <select
-                                v-model="entry.type"
+                                v-model="entry.playlist_id"
                                 class="form-select form-select-sm"
                             >
-                                <option value="music">{{ $gettext('Music (music and copyrighted material)') }}</option>
-                                <option value="talk">{{ $gettext('Talk (sermons, speeches, and live recordings)') }}</option>
-                                <option value="id">{{ $gettext('ID (station identification such as sweepers and jingles)') }}</option>
-                                <option value="promo">{{ $gettext('Promo (station promotion that is not considered an ID)') }}</option>
-                                <option value="ad">{{ $gettext('Ad (advert replacement files)') }}</option>
+                                <option
+                                    v-if="playlists.length === 0"
+                                    disabled
+                                    value=""
+                                >
+                                    {{ $gettext('No playlists found') }}
+                                </option>
+                                <option
+                                    v-for="pl in playlists"
+                                    :key="pl.id"
+                                    :value="pl.id"
+                                >
+                                    {{ pl.name }}
+                                </option>
                             </select>
                         </td>
                         <td>
@@ -143,17 +152,24 @@
 import ModalForm from '~/components/Common/ModalForm.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from '~/functions/useBaseEditModal';
-import {computed, reactive, ref, useTemplateRef} from 'vue';
+import {computed, reactive, ref, useTemplateRef, onMounted} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAppRegle} from '~/vendor/regle.ts';
 import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
+import {useApiRouter} from '~/functions/useApiRouter.ts';
+import {useAxios} from '~/vendor/axios.ts';
 
 interface ClockWheelEntry {
-    type: string;
+    playlist_id: number | null;
     algorithm: string;
+}
+
+interface Playlist {
+    id: number;
+    name: string;
 }
 
 const props = defineProps<BaseEditModalProps>();
@@ -162,6 +178,16 @@ const emit = defineEmits<BaseEditModalEmits>();
 const $modal = useTemplateRef('$modal');
 const {notifySuccess} = useNotify();
 const {$gettext} = useTranslate();
+const {getStationApiUrl} = useApiRouter();
+const {axios} = useAxios();
+
+const playlists = ref<Playlist[]>([]);
+
+onMounted(async () => {
+    const url = getStationApiUrl('/playlists');
+    const resp = await axios.get(url.value);
+    playlists.value = (resp.data as Playlist[]).map((p) => ({id: p.id, name: p.name}));
+});
 
 const blankForm = {
     name: '',
@@ -179,7 +205,7 @@ const {r$} = useAppRegle(form, {
 });
 
 const addEntry = () => {
-    entries.push({type: 'music', algorithm: 'random'});
+    entries.push({playlist_id: playlists.value[0]?.id ?? null, algorithm: 'random'});
 };
 
 const removeEntry = (index: number) => {
