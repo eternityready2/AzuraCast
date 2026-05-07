@@ -758,10 +758,6 @@ return static function (RouteCollectorProxy $group) {
                                 }
                             );
 
-                            $group->get(
-                                '/clock-wheels/schedule',
-                                Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':scheduleAction'
-                            )->setName('api:stations:clock-wheels:schedule');
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
