@@ -15,6 +15,7 @@ import IconIcInsertChart from "~icons/ic/baseline-insert-chart";
 import IconIcSettingsApplication from "~icons/ic/baseline-settings-applications";
 import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
+import IconIcCalendarToday from "~icons/ic/baseline-calendar-today";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
 
 export function useStationsMenu() {
@@ -181,22 +182,17 @@ export function useStationsMenu() {
             key: 'clock_wheels',
             label: $gettext('Clock Wheels'),
             icon: () => IconIcSchedule,
-            items: [
-                {
-                    key: 'clock_wheels_list',
-                    label: $gettext('Manage Wheels'),
-                    url: {
-                        name: 'stations:clock_wheels:index'
-                    },
-                },
-                {
-                    key: 'clock_wheels_schedule',
-                    label: $gettext('Schedule'),
-                    url: {
-                        name: 'stations:clock_wheels:schedule'
-                    },
-                },
-            ],
+            url: {
+                name: 'stations:clock_wheels:index'
+            },
+        },
+        {
+            key: 'clock_wheels_schedule',
+            label: $gettext('Events'),
+            icon: () => IconIcCalendarToday,
+            url: {
+                name: 'stations:clock_wheels:schedule'
+            },
         },
         {
             key: 'streaming',
