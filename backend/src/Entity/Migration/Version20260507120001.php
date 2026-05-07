@@ -15,30 +15,50 @@ final class Version20260507120001 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        // station_clock_wheels:
-        //   Remove: description (not in entity), strict_timing (replaced by is_active)
-        //   Add:    color (#rrggbb swatch)
-        //   Alter:  name from varchar(200) -> varchar(100)
+        // Add color if missing, shrink name — safe on any state
         $this->addSql("ALTER TABLE station_clock_wheels
-            DROP COLUMN description,
-            DROP COLUMN strict_timing,
-            ADD COLUMN color VARCHAR(7) NOT NULL DEFAULT '#e87722' AFTER name,
+            ADD COLUMN IF NOT EXISTS color VARCHAR(7) NOT NULL DEFAULT '#e87722' AFTER name,
             MODIFY COLUMN name VARCHAR(100) NOT NULL
         ");
+        $this->addSql("ALTER TABLE station_clock_wheels DROP COLUMN IF EXISTS description");
+        $this->addSql("ALTER TABLE station_clock_wheels DROP COLUMN IF EXISTS strict_timing");
 
-        // station_clock_wheel_slots:
-        //   Remove: label, position_seconds, weight (not in entity)
-        //   Rename: slot_type  -> type
-        //           sort_order -> slot_order
-        //   Add:    algorithm (selection strategy enum)
-        //   Alter:  duration_seconds to allow NULL (NULL = no hard cap / play full track)
+        // Slots: drop legacy columns if they exist
+        $this->addSql("ALTER TABLE station_clock_wheel_slots DROP COLUMN IF EXISTS label");
+        $this->addSql("ALTER TABLE station_clock_wheel_slots DROP COLUMN IF EXISTS position_seconds");
+        $this->addSql("ALTER TABLE station_clock_wheel_slots DROP COLUMN IF EXISTS weight");
+
+        // Rename slot_type -> type only if slot_type still exists
+        $db = $this->connection->getDatabase();
+        $hasSlotType = (int) $this->connection->fetchOne(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'station_clock_wheel_slots' AND COLUMN_NAME = 'slot_type'",
+            [$db]
+        );
+        if ($hasSlotType > 0) {
+            $this->addSql("ALTER TABLE station_clock_wheel_slots
+                CHANGE COLUMN slot_type `type` VARCHAR(20) NOT NULL DEFAULT 'music'");
+        } else {
+            $this->addSql("ALTER TABLE station_clock_wheel_slots
+                ADD COLUMN IF NOT EXISTS `type` VARCHAR(20) NOT NULL DEFAULT 'music'");
+        }
+
+        // Rename sort_order -> slot_order only if sort_order still exists
+        $hasSortOrder = (int) $this->connection->fetchOne(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'station_clock_wheel_slots' AND COLUMN_NAME = 'sort_order'",
+            [$db]
+        );
+        if ($hasSortOrder > 0) {
+            $this->addSql("ALTER TABLE station_clock_wheel_slots
+                CHANGE COLUMN sort_order slot_order SMALLINT NOT NULL DEFAULT 0");
+        } else {
+            $this->addSql("ALTER TABLE station_clock_wheel_slots
+                ADD COLUMN IF NOT EXISTS slot_order SMALLINT NOT NULL DEFAULT 0");
+        }
+
         $this->addSql("ALTER TABLE station_clock_wheel_slots
-            DROP COLUMN label,
-            DROP COLUMN position_seconds,
-            DROP COLUMN weight,
-            CHANGE COLUMN slot_type  `type`       VARCHAR(20) NOT NULL DEFAULT 'music',
-            CHANGE COLUMN sort_order  slot_order  SMALLINT NOT NULL DEFAULT 0,
-            ADD COLUMN algorithm VARCHAR(30) NOT NULL DEFAULT 'random' AFTER `type`,
+            ADD COLUMN IF NOT EXISTS algorithm VARCHAR(30) NOT NULL DEFAULT 'random',
             MODIFY COLUMN duration_seconds SMALLINT NULL DEFAULT NULL
         ");
     }
