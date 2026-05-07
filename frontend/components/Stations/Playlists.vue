@@ -269,7 +269,9 @@
                 <schedule-view-tab
                     ref="$scheduleTab"
                     :schedule-url="scheduleUrl"
+                    :show-create-button="true"
                     @click="doCalendarClick"
+                    @create="doCreateClockWheel"
                 />
             </tabs>
         </div>
@@ -297,6 +299,11 @@
         ref="$applyToModal"
         @relist="() => relist()"
     />
+    <clock-wheels-edit-modal
+        ref="$clockWheelsEditModal"
+        :create-url="clockWheelsUrl"
+        @relist="relist"
+    />
 </template>
 
 <script setup lang="ts">
@@ -320,6 +327,7 @@ import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
 import AddButton from "~/components/Common/AddButton.vue";
 import ScheduleViewTab from "~/components/Stations/Common/ScheduleViewTab.vue";
+import ClockWheelsEditModal from "~/components/Stations/ClockWheels/EditModal.vue";
 import {EventImpl} from "@fullcalendar/core/internal";
 import {useApiItemProvider} from "~/functions/dataTable/useApiItemProvider.ts";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
@@ -332,6 +340,7 @@ import {useApiRouter} from "~/functions/useApiRouter.ts";
 const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/playlists');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
+const clockWheelsUrl = getStationApiUrl('/clock-wheels');
 
 const {$gettext} = useTranslate();
 
@@ -370,6 +379,12 @@ const {doCreate, doEdit} = useHasEditModal($editModal);
 
 const doCalendarClick = (event: EventImpl) => {
     doEdit(event.extendedProps.edit_url);
+};
+
+const $clockWheelsEditModal = useTemplateRef('$clockWheelsEditModal');
+
+const doCreateClockWheel = () => {
+    $clockWheelsEditModal.value?.create();
 };
 
 const $reorderModal = useTemplateRef('$reorderModal');
