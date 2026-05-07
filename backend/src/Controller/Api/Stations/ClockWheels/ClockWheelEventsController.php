@@ -167,7 +167,7 @@ final class ClockWheelEventsController extends AbstractStationApiCrudController
     protected function createRecord(ServerRequest $request, array $data): object
     {
         $station = $request->getStation();
-        $clockWheel = $this->resolveClockWheel($data, $station->getId());
+        $clockWheel = $this->resolveClockWheel($data, $station->id);
 
         unset($data['clock_wheel_id']);
 
@@ -186,7 +186,7 @@ final class ClockWheelEventsController extends AbstractStationApiCrudController
         }
 
         if (isset($data['clock_wheel_id']) && $record instanceof StationClockWheelEvent) {
-            $stationId = $record->clock_wheel->station->getId();
+            $stationId = $record->clock_wheel->station->id;
             $record->clock_wheel = $this->resolveClockWheel($data, $stationId);
         }
 
