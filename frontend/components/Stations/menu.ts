@@ -16,6 +16,7 @@ import IconIcSettingsApplication from "~icons/ic/baseline-settings-applications"
 import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
 import IconIcCalendarToday from "~icons/ic/baseline-calendar-today";
+import IconIcCategory from "~icons/ic/baseline-category";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
 
 export function useStationsMenu() {
@@ -184,6 +185,14 @@ export function useStationsMenu() {
             icon: () => IconIcSchedule,
             url: {
                 name: 'stations:clock_wheels:index'
+            },
+        },
+        {
+            key: 'media_categories',
+            label: $gettext('Categories'),
+            icon: () => IconIcCategory,
+            url: {
+                name: 'stations:media_categories:index'
             },
         },
         {

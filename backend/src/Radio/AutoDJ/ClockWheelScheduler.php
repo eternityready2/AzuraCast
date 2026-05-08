@@ -6,13 +6,10 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
-use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
-use App\Entity\StationPlaylist;
-use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
@@ -32,7 +29,6 @@ final class ClockWheelScheduler implements EventSubscriberInterface
     use EntityManagerAwareTrait;
 
     public function __construct(
-        private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly StationQueueRepository $queueRepo,
         private readonly DuplicatePrevention $duplicatePrevention,
     ) {
@@ -158,60 +154,72 @@ final class ClockWheelScheduler implements EventSubscriberInterface
 
     /**
      * Resolve a single slot to a StationQueue entry.
+     * Queries station_media directly by type, so no playlist assignment is needed.
      */
     private function resolveSlot(
         StationClockWheelSlot $slot,
         array $recentHistory,
         DateTimeImmutable $expectedPlayTime
     ): ?StationQueue {
-        // If the slot is pinned to a specific playlist, use it directly.
-        if (null !== $slot->playlist) {
-            return $this->getSongFromPlaylist($slot->playlist, $recentHistory, $expectedPlayTime);
-        }
-
-        // Otherwise, fall back to any active playlist on the station.
-        // For now: pick the first enabled non-jingle playlist.
         $station = $slot->clock_wheel->station;
-        foreach ($station->playlists as $playlist) {
-            /** @var StationPlaylist $playlist */
-            if (!$playlist->is_enabled) {
-                continue;
-            }
-            $result = $this->getSongFromPlaylist($playlist, $recentHistory, $expectedPlayTime);
-            if (null !== $result) {
-                return $result;
-            }
-        }
+        $type = $slot->type;
+        $categoryId = $slot->category_id;
 
-        return null;
-    }
-
-    /**
-     * Pull a track from a playlist, respecting duplicate prevention.
-     */
-    private function getSongFromPlaylist(
-        StationPlaylist $playlist,
-        array $recentHistory,
-        DateTimeImmutable $expectedPlayTime
-    ): ?StationQueue {
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
-
-        if (empty($mediaQueue)) {
+        // Must have at least one filter.
+        if ($type === null && $categoryId === null) {
+            $this->logger->warning('Clock Wheel slot has neither type nor category set — skipping.');
             return null;
         }
 
-        if (!$playlist->avoid_duplicates) {
-            $validTrack = array_shift($mediaQueue);
-        } else {
-            // First attempt: strict duplicate prevention.
-            $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false);
+        // Build DQL dynamically: filter by type and/or category.
+        $dql = 'SELECT m FROM App\Entity\StationMedia m
+             JOIN m.storage_location sl
+             JOIN sl.stations st
+             WHERE st.id = :stationId';
 
-            // Fallback: allow duplicates when the library is too small to avoid repeats.
-            if (null === $validTrack) {
-                $mediaQueue = $this->spmRepo->getQueue($playlist);
-                $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
-            }
+        $params = ['stationId' => $station->id];
+
+        if ($type !== null) {
+            $dql .= ' AND m.type = :type';
+            $params['type'] = $type;
         }
+
+        if ($categoryId !== null) {
+            $dql .= ' AND m.category_id = :categoryId';
+            $params['categoryId'] = $categoryId;
+        }
+
+        // Fetch all media matching the slot filters from this station's storage locations.
+        /** @var StationMedia[] $candidates */
+        $candidates = $this->em->createQuery($dql)
+            ->setParameters($params)
+            ->getResult();
+
+        if (empty($candidates)) {
+            $this->logger->warning(
+                sprintf(
+                    'Clock Wheel slot: no media found with type "%s"%s for station %d.',
+                    $type?->value ?? '(any)',
+                    $categoryId !== null ? sprintf(' and category_id %d', $categoryId) : '',
+                    $station->id
+                )
+            );
+            return null;
+        }
+
+        // Build a lightweight queue-like array for duplicate prevention.
+        // DuplicatePrevention expects objects with a `media_id` property.
+        $mediaQueue = array_map(
+            static fn(StationMedia $m) => (object)['media_id' => $m->id, 'spm_id' => null],
+            $candidates
+        );
+
+        // Shuffle for random selection (respects 'random' algorithm default).
+        shuffle($mediaQueue);
+
+        // Apply duplicate prevention.
+        $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
+            ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
 
         if (null === $validTrack) {
             return null;
@@ -222,17 +230,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             return null;
         }
 
-        $spm = $this->em->find(StationPlaylistMedia::class, $validTrack->spm_id);
-        if ($spm instanceof StationPlaylistMedia) {
-            $spm->played($expectedPlayTime->getTimestamp());
-            $this->em->persist($spm);
-        }
-
-        $playlist->played_at = $expectedPlayTime;
-        $this->em->persist($playlist);
-
-        $queueEntry = StationQueue::fromMedia($playlist->station, $media);
-        $queueEntry->playlist = $playlist;
+        $queueEntry = StationQueue::fromMedia($station, $media);
         $this->em->persist($queueEntry);
 
         return $queueEntry;

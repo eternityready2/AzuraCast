@@ -27,6 +27,11 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:clock_wheels:index'
                 },
                 {
+                    path: 'media-categories',
+                    component: () => import('~/components/Stations/MediaCategories.vue'),
+                    name: 'stations:media_categories:index'
+                },
+                {
                     path: 'fallback',
                     component: () => import('~/components/Stations/Fallback.vue'),
                     name: 'stations:fallback'

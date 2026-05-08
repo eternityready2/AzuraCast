@@ -709,6 +709,37 @@ return static function (RouteCollectorProxy $group) {
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
 
+                    // Media Categories
+                    $group->group(
+                        '',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/media-categories',
+                                Controller\Api\Stations\MediaCategories\MediaCategoriesController::class . ':listAction'
+                            )->setName('api:stations:media-categories');
+
+                            $group->post(
+                                '/media-categories',
+                                Controller\Api\Stations\MediaCategories\MediaCategoriesController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/media-category/{id}',
+                                Controller\Api\Stations\MediaCategories\MediaCategoriesController::class . ':getAction'
+                            )->setName('api:stations:media-category');
+
+                            $group->put(
+                                '/media-category/{id}',
+                                Controller\Api\Stations\MediaCategories\MediaCategoriesController::class . ':editAction'
+                            );
+
+                            $group->delete(
+                                '/media-category/{id}',
+                                Controller\Api\Stations\MediaCategories\MediaCategoriesController::class . ':deleteAction'
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Media, true));
+
                     // Clock Wheels
                     $group->group(
                         '',

@@ -100,11 +100,23 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     // ------------------------------------------------------------------
 
     #[
-        OA\Property(example: 'music'),
-        ORM\Column(type: 'string', length: 20, enumType: ClockWheelSlotTypes::class),
-        Assert\NotNull
+        OA\Property(example: 'music', nullable: true),
+        ORM\Column(type: 'string', length: 20, nullable: true, enumType: ClockWheelSlotTypes::class)
     ]
-    public ClockWheelSlotTypes $type = ClockWheelSlotTypes::Music;
+    public ?ClockWheelSlotTypes $type = ClockWheelSlotTypes::Music;
+
+    /**
+     * Optional media category filter. When set, only tracks assigned
+     * to this category (and matching the type) will be considered.
+     */
+    #[
+        ORM\ManyToOne,
+        ORM\JoinColumn(name: 'category_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationMediaCategory $category = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $category_id = null;
 
     #[
         OA\Property(example: 'random'),
