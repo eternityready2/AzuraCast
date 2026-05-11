@@ -54,6 +54,7 @@ final class ConfigWriter implements EventSubscriberInterface
             WriteLiquidsoapConfiguration::class => [
                 ['writeHeaderFunctions', 35],
                 ['writePlaylistConfiguration', 30],
+                ['writeNewsBulletinConfiguration', 28],
                 ['writeCrossfadeConfiguration', 25],
                 ['writeHarborConfiguration', 20],
                 ['writePreBroadcastConfiguration', 10],
@@ -485,6 +486,32 @@ final class ConfigWriter implements EventSubscriberInterface
                 );
             }
         }
+    }
+
+    public function writeNewsBulletinConfiguration(WriteLiquidsoapConfiguration $event): void
+    {
+        $station = $event->getStation();
+        $backendConfig = $event->getBackendConfig();
+
+        if (!($backendConfig->ai_news_enabled ?? false)) {
+            return;
+        }
+
+        $bulletinPath = self::toRawString(
+            $station->getRadioTempDir() . '/news_bulletin.mp3'
+        );
+
+        $event->appendBlock(
+            <<<LIQ
+            # Hourly AI News Bulletin
+            news_bulletin_path = {$bulletinPath}
+            news_bulletin = single(news_bulletin_path)
+            radio = switch(id="news_bulletin", track_sensitive=false, [
+                ({0m}, news_bulletin),
+                ({true}, radio)
+            ])
+            LIQ
+        );
     }
 
     public function writeCrossfadeConfiguration(WriteLiquidsoapConfiguration $event): void

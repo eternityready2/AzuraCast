@@ -18,8 +18,8 @@ if [[ "$(uname -m)" = "aarch64" ]]; then
     ARCHITECTURE=arm64
 fi
 
-# wget -O /tmp/liquidsoap.deb (disabled v2.4.2)
-wget -O /tmp/liquidsoap.deb "https://github.com/savonet/liquidsoap-release-assets/releases/download/rolling-release-v2.4.x/liquidsoap-1cb72a0_2.4.3-debian-trixie-ocaml4.14.2-1_${ARCHITECTURE}.deb"
+# wget -O /tmp/liquidsoap.deb (v2.4.4, 2026-04-20 — formerly rolling-release-v2.4.x with stale commit 1cb72a0)
+wget -O /tmp/liquidsoap.deb "https://github.com/savonet/liquidsoap/releases/download/v2.4.4/liquidsoap_2.4.4-debian-trixie-ocaml4.14.2-1_${ARCHITECTURE}.deb"
 
 dpkg -i /tmp/liquidsoap.deb
 apt-get install -y -f --no-install-recommends

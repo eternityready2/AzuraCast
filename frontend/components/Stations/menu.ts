@@ -315,6 +315,14 @@ export function useStationsMenu() {
                         && station.value.features.media
                 },
                 {
+                    key: 'ai_news',
+                    label: $gettext('AI News Bulletin'),
+                    url: {
+                        name: 'stations:ai_news'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
+                {
                     key: 'queue',
                     label: $gettext('Upcoming Song Queue'),
                     url: {
