@@ -11,8 +11,8 @@ use Doctrine\ORM\EntityManagerInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\RequestOptions;
 use SimpleXMLElement;
-use Symfony\Component\Process\Process;
 use Throwable;
+use Symfony\Component\Process\Process;
 
 final class AiNewsGenerator
 {
@@ -21,7 +21,7 @@ final class AiNewsGenerator
     private const string PIPER_BIN = 'piper';
     private const string FFMPEG_BIN = 'ffmpeg';
     private const string DEFAULT_VOICE_MODEL = '/usr/local/share/piper-voices/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
-    private const string OUTPUT_FILENAME = 'news_bulletin.mp3';
+    public const string OUTPUT_FILENAME = 'news_bulletin.mp3';
     private const int MAX_HEADLINES = 10;
     private const int HTTP_TIMEOUT = 30;
 
@@ -60,15 +60,16 @@ final class AiNewsGenerator
         }
 
         try {
+            $startTime = microtime(true);
             $sourceUrls = $this->parseSourceUrls($backendConfig->ai_news_source_urls);
             if ([] === $sourceUrls) {
-                $this->persistStatus($station, 'error', 'No source URLs configured.');
+                $this->persistStatus($station, 'error', 'No source URLs configured.', null);
                 throw new \RuntimeException('No source URLs configured.');
             }
 
             $headlines = $this->fetchHeadlines($sourceUrls);
             if ([] === $headlines) {
-                $this->persistStatus($station, 'error', 'No headlines could be fetched from any source.');
+                $this->persistStatus($station, 'error', 'No headlines could be fetched from any source.', null);
                 throw new \RuntimeException('No headlines could be fetched from any source.');
             }
 
@@ -84,7 +85,16 @@ final class AiNewsGenerator
                 $outputPath
             );
 
-            $this->persistStatus($station, 'completed', null);
+            $elapsedSeconds = round(microtime(true) - $startTime, 2);
+            $metadata = [
+                'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                'story_count' => count($headlines),
+                'source_urls' => $sourceUrls,
+                'elapsed_seconds' => $elapsedSeconds,
+                'output_filename' => self::OUTPUT_FILENAME,
+                'headline_preview' => array_slice($headlines, 0, 3),
+            ];
+            $this->persistStatus($station, 'completed', null, $metadata);
 
             $this->logger->info(
                 sprintf('AI news bulletin generated for station "%s".', $station->name)
@@ -97,7 +107,7 @@ final class AiNewsGenerator
             );
 
             if ('error' !== $station->backend_config->ai_news_last_generation_status) {
-                $this->persistStatus($station, 'error', $e->getMessage());
+                $this->persistStatus($station, 'error', $e->getMessage(), null);
             }
 
             throw $e;
@@ -130,11 +140,9 @@ final class AiNewsGenerator
             if ($startMinutes <= $endMinutes) {
                 return $nowMinutes >= $startMinutes && $nowMinutes < $endMinutes;
             }
-            // Overnight range
             return $nowMinutes >= $startMinutes || $nowMinutes < $endMinutes;
         }
 
-        // Legacy H-H format (hour-only)
         if (preg_match('/^(\d{1,2})-(\d{1,2})$/', $activeHours, $matches)) {
             $start = (int) $matches[1];
             $end   = (int) $matches[2];
@@ -142,7 +150,6 @@ final class AiNewsGenerator
             if ($start <= $end) {
                 return $currentHour >= $start && $currentHour < $end;
             }
-            // Overnight range
             return $currentHour >= $start || $currentHour < $end;
         }
 
@@ -150,8 +157,6 @@ final class AiNewsGenerator
     }
 
     /**
-     * Split newline-separated source URLs into a clean list.
-     *
      * @return list<string>
      */
     private function parseSourceUrls(string $sourceUrls): array
@@ -165,13 +170,8 @@ final class AiNewsGenerator
     }
 
     /**
-     * Fetch multiple RSS/Atom feeds, collecting up to MAX_HEADLINES total.
-     *
-     * Any source failure causes the entire bulletin to be skipped (all sources are required).
-     *
      * @param list<string> $urls
      * @return list<array{title: string, description: string}>
-     * @throws \RuntimeException if any configured source cannot be fetched.
      */
     private function fetchHeadlines(array $urls): array
     {
@@ -201,8 +201,6 @@ final class AiNewsGenerator
     }
 
     /**
-     * Fetch a single RSS/Atom URL and return parsed headline items.
-     *
      * @return list<array{title: string, description: string}>
      */
     private function fetchAndParseUrl(string $url): array
@@ -247,9 +245,6 @@ final class AiNewsGenerator
         return $headlines;
     }
 
-    /**
-     * Extract plain text from a SimpleXMLElement child, stripping tags and decoding entities.
-     */
     private function extractTextField(SimpleXMLElement $item, string $field): string
     {
         if (!isset($item->{$field})) {
@@ -261,8 +256,6 @@ final class AiNewsGenerator
     }
 
     /**
-     * Build a deterministic spoken script from intro and extracted headlines.
-     *
      * @param list<array{title: string, description: string}> $headlines
      */
     private function buildScript(string $intro, array $headlines): string
@@ -284,11 +277,6 @@ final class AiNewsGenerator
         return implode("\n", $lines);
     }
 
-    /**
-     * Run the TTS + conversion pipeline and atomically write the final MP3.
-     *
-     * Pipeline: script → Piper (WAV) → ffmpeg (MP3) → atomic rename
-     */
     private function generateAudio(
         string $script,
         ?string $voiceModelPath,
@@ -306,7 +294,6 @@ final class AiNewsGenerator
         $tmpMp3 = $tempDir . '/news_bulletin_tmp.mp3';
 
         try {
-            // Step 1: Piper TTS → WAV
             $piper = new Process([
                 self::PIPER_BIN,
                 '--model', $modelPath,
@@ -316,7 +303,6 @@ final class AiNewsGenerator
             $piper->setTimeout(120);
             $piper->mustRun();
 
-            // Step 2: ffmpeg WAV → MP3
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
@@ -328,7 +314,6 @@ final class AiNewsGenerator
             $ffmpeg->setTimeout(60);
             $ffmpeg->mustRun();
 
-            // Step 3: Atomic rename to the path Liquidsoap expects.
             if (!@rename($tmpMp3, $outputPath)) {
                 throw new \RuntimeException(
                     sprintf('Failed to move bulletin to "%s".', $outputPath)
@@ -341,15 +326,15 @@ final class AiNewsGenerator
         }
     }
 
-    /**
-     * Persist generation status, timestamp, and optional error message to the station entity.
-     */
-    private function persistStatus(Station $station, string $status, ?string $error): void
+    private function persistStatus(Station $station, string $status, ?string $error, ?array $metadata = null): void
     {
         $backendConfig = $station->backend_config;
         $backendConfig->ai_news_last_generation_status = $status;
         $backendConfig->ai_news_last_generation_time = gmdate('Y-m-d\TH:i:s\Z');
         $backendConfig->ai_news_last_error = $error;
+        if (null !== $metadata) {
+            $backendConfig->ai_news_latest_bulletin = $metadata;
+        }
         $station->backend_config = $backendConfig;
 
         $this->em->persist($station);

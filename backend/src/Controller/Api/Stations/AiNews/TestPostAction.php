@@ -7,7 +7,6 @@ namespace App\Controller\Api\Stations\AiNews;
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\Api\Error;
-use App\Entity\Api\Status;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
@@ -51,25 +50,18 @@ final class TestPostAction implements SingleActionInterface
 
         try {
             $this->generator->generate($station, true);
-
+            $station = $this->em->refetch($station);
             $backendConfig = $station->backend_config;
-            $backendConfig->ai_news_last_generation_status = 'completed';
-            $backendConfig->ai_news_last_generation_time = gmdate('Y-m-d\TH:i:s\Z');
-            $backendConfig->ai_news_last_error = null;
-            $station->backend_config = $backendConfig;
-            $this->em->persist($station);
-            $this->em->flush();
 
-            return $response->withJson(Status::success());
+            return $response->withJson([
+                'success' => true,
+                'message' => __('AI news bulletin generated successfully.'),
+                'ai_news_last_generation_status' => $backendConfig->ai_news_last_generation_status,
+                'ai_news_last_generation_time' => $backendConfig->ai_news_last_generation_time,
+                'ai_news_last_error' => $backendConfig->ai_news_last_error,
+                'dashboard' => GetAction::buildDashboardPayload($station),
+            ]);
         } catch (Throwable $e) {
-            $backendConfig = $station->backend_config;
-            $backendConfig->ai_news_last_generation_status = 'error';
-            $backendConfig->ai_news_last_generation_time = gmdate('Y-m-d\TH:i:s\Z');
-            $backendConfig->ai_news_last_error = $e->getMessage();
-            $station->backend_config = $backendConfig;
-            $this->em->persist($station);
-            $this->em->flush();
-
             return $response->withStatus(500)->withJson(Error::fromException($e));
         }
     }

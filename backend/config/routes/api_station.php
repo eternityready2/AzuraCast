@@ -1037,6 +1037,11 @@ return static function (RouteCollectorProxy $group) {
                                 '/test',
                                 Controller\Api\Stations\AiNews\TestPostAction::class
                             )->setName('api:stations:ai-news:test');
+
+                            $group->get(
+                                '/bulletin',
+                                Controller\Api\Stations\AiNews\BulletinGetAction::class
+                            )->setName('api:stations:ai-news:bulletin');
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
