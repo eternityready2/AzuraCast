@@ -45,13 +45,17 @@ final class GetAction implements SingleActionInterface
         return $response->withJson([
             'ai_news_enabled' => $backendConfig->ai_news_enabled,
             'ai_news_intro' => $backendConfig->ai_news_intro,
+            'ai_news_reporter_name' => $backendConfig->ai_news_reporter_name,
             'ai_news_source_urls' => $backendConfig->ai_news_source_urls,
+            'ai_news_story_count' => $backendConfig->ai_news_story_count,
             'ai_news_active_hours' => $backendConfig->ai_news_active_hours,
             'ai_news_voice_model_path' => $backendConfig->ai_news_voice_model_path,
+            'ai_news_outro' => $backendConfig->ai_news_outro,
             'ai_news_last_generation_status' => $backendConfig->ai_news_last_generation_status,
             'ai_news_last_generation_time' => $backendConfig->ai_news_last_generation_time,
             'ai_news_last_error' => $backendConfig->ai_news_last_error,
             'dashboard' => $this->buildDashboardPayload($station),
+            'voice_options' => AiNewsGenerator::AVAILABLE_VOICE_MODELS,
         ]);
     }
 
@@ -78,6 +82,7 @@ final class GetAction implements SingleActionInterface
                 'generated_at' => $latestBulletin['generated_at'] ?? null,
                 'story_count' => $latestBulletin['story_count'] ?? null,
                 'source_urls' => $latestBulletin['source_urls'] ?? [],
+                'source_results' => $latestBulletin['source_results'] ?? [],
                 'elapsed_seconds' => $latestBulletin['elapsed_seconds'] ?? null,
                 'output_filename' => $latestBulletin['output_filename'] ?? null,
                 'headline_preview' => $latestBulletin['headline_preview'] ?? [],
@@ -87,7 +92,7 @@ final class GetAction implements SingleActionInterface
             'current_time_station' => (new \DateTimeImmutable('now', $station->getTimezoneObject()))->format(DATE_ATOM),
             'tts_engine' => 'piper',
             'audio_available' => $fileExists,
-            'bulletin_url' => '/api/station/' . $station->id . '/ai-news/bulletin',
+            'bulletin_url' => BulletinGetAction::getBulletinUrl($station),
         ];
     }
 

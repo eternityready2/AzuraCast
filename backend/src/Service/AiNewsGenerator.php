@@ -21,8 +21,28 @@ final class AiNewsGenerator
     private const string PIPER_BIN = 'piper';
     private const string FFMPEG_BIN = 'ffmpeg';
     private const string DEFAULT_VOICE_MODEL = '/usr/local/share/piper-voices/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
+    public const array AVAILABLE_VOICE_MODELS = [
+        [
+            'label' => 'Lessac (Default)',
+            'path' => '/usr/local/share/piper-voices/en/en_US/lessac/medium/en_US-lessac-medium.onnx',
+        ],
+        [
+            'label' => 'Joe',
+            'path' => '/usr/local/share/piper-voices/en/en_US/joe/medium/en_US-joe-medium.onnx',
+        ],
+        [
+            'label' => 'Ryan',
+            'path' => '/usr/local/share/piper-voices/en/en_US/ryan/medium/en_US-ryan-medium.onnx',
+        ],
+    ];
     public const string OUTPUT_FILENAME = 'news_bulletin.mp3';
+    public const array DEFAULT_SOURCE_URLS = [
+        'https://worthynews.com/feed/',
+        'https://www.raptureready.com/category/rapture-ready-news/feed/',
+        'https://feeds.bbci.co.uk/news/world/rss.xml',
+    ];
     private const int MAX_HEADLINES = 10;
+    private const int MAX_STORY_COUNT = 25;
     private const int HTTP_TIMEOUT = 30;
 
     public function __construct(
@@ -60,6 +80,7 @@ final class AiNewsGenerator
         }
 
         try {
+            $maxHeadlines = max(1, min(self::MAX_STORY_COUNT, $backendConfig->ai_news_story_count));
             $startTime = microtime(true);
             $sourceUrls = $this->parseSourceUrls($backendConfig->ai_news_source_urls);
             if ([] === $sourceUrls) {
@@ -67,14 +88,23 @@ final class AiNewsGenerator
                 throw new \RuntimeException('No source URLs configured.');
             }
 
-            $headlines = $this->fetchHeadlines($sourceUrls);
+            $fetchResults = $this->fetchHeadlines($sourceUrls, $maxHeadlines);
+            $headlines = $fetchResults['headlines'];
+            $sourceResults = $fetchResults['source_results'];
             if ([] === $headlines) {
-                $this->persistStatus($station, 'error', 'No headlines could be fetched from any source.', null);
-                throw new \RuntimeException('No headlines could be fetched from any source.');
+                $this->persistStatus($station, 'error', 'No RSS/Atom headlines could be fetched from configured sources.', [
+                    'source_results' => $sourceResults,
+                ]);
+                throw new \RuntimeException('No RSS/Atom headlines could be fetched from configured sources.');
             }
 
             $intro = $backendConfig->ai_news_intro ?: 'Here are the latest headlines.';
-            $script = $this->buildScript($intro, $headlines);
+            $script = $this->buildScript(
+                $intro,
+                $headlines,
+                $backendConfig->ai_news_reporter_name,
+                $backendConfig->ai_news_outro
+            );
 
             $tempDir = $station->getRadioTempDir();
             $outputPath = $tempDir . '/' . self::OUTPUT_FILENAME;
@@ -90,6 +120,7 @@ final class AiNewsGenerator
                 'generated_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 'story_count' => count($headlines),
                 'source_urls' => $sourceUrls,
+                'source_results' => $sourceResults,
                 'elapsed_seconds' => $elapsedSeconds,
                 'output_filename' => self::OUTPUT_FILENAME,
                 'headline_preview' => array_slice($headlines, 0, 3),
@@ -171,39 +202,66 @@ final class AiNewsGenerator
 
     /**
      * @param list<string> $urls
-     * @return list<array{title: string, description: string}>
+     * @return array{
+     *   headlines: list<array{title: string, description: string, source_url: string}>,
+     *   source_results: list<array{url: string, status: string, message: string, headline_count: int}>
+     * }
      */
-    private function fetchHeadlines(array $urls): array
+    private function fetchHeadlines(array $urls, int $maxHeadlines): array
     {
         $headlines = [];
+        $sourceResults = [];
 
         foreach ($urls as $url) {
             try {
-                foreach ($this->fetchAndParseUrl($url) as $item) {
-                    $headlines[] = $item;
-                    if (count($headlines) >= self::MAX_HEADLINES) {
-                        break 2;
+                $items = $this->fetchAndParseUrl($url, $maxHeadlines);
+                $headlineCount = count($items);
+
+                foreach ($items as $item) {
+                    $headlines[] = [
+                        ...$item,
+                        'source_url' => $url,
+                    ];
+                    if (count($headlines) >= $maxHeadlines) {
+                        break;
                     }
+                }
+
+                $sourceResults[] = [
+                    'url' => $url,
+                    'status' => $headlineCount > 0 ? 'ok' : 'empty',
+                    'message' => $headlineCount > 0
+                        ? sprintf('Fetched %d headline(s).', $headlineCount)
+                        : 'Feed parsed successfully but returned no usable headlines.',
+                    'headline_count' => $headlineCount,
+                ];
+
+            if (count($headlines) >= $maxHeadlines) {
+                    break;
                 }
             } catch (Throwable $e) {
                 $this->logger->warning(
-                    sprintf('Source "%s" failed: %s', $url, $e->getMessage())
+                    sprintf('Source "%s" skipped: %s', $url, $e->getMessage())
                 );
-                throw new \RuntimeException(
-                    sprintf('Failed to fetch source "%s": %s', $url, $e->getMessage()),
-                    0,
-                    $e
-                );
+                $sourceResults[] = [
+                    'url' => $url,
+                    'status' => 'skipped',
+                    'message' => $e->getMessage(),
+                    'headline_count' => 0,
+                ];
             }
         }
 
-        return $headlines;
+        return [
+            'headlines' => $headlines,
+            'source_results' => $sourceResults,
+        ];
     }
 
     /**
      * @return list<array{title: string, description: string}>
      */
-    private function fetchAndParseUrl(string $url): array
+    private function fetchAndParseUrl(string $url, int $maxHeadlines): array
     {
         $response = $this->httpClient->get($url, [
             RequestOptions::TIMEOUT => self::HTTP_TIMEOUT,
@@ -237,7 +295,7 @@ final class AiNewsGenerator
                 'description' => $this->extractTextField($item, 'description'),
             ];
 
-            if (count($headlines) >= self::MAX_HEADLINES) {
+            if (count($headlines) >= $maxHeadlines) {
                 break;
             }
         }
@@ -256,25 +314,78 @@ final class AiNewsGenerator
     }
 
     /**
-     * @param list<array{title: string, description: string}> $headlines
+     * @param list<array{title: string, description: string, source_url?: string}> $headlines
      */
-    private function buildScript(string $intro, array $headlines): string
+    private function buildScript(
+        string $intro,
+        array $headlines,
+        ?string $reporterName = null,
+        ?string $outro = null
+    ): string
     {
-        $lines = [$intro, ''];
+        $lines = [];
+
+        $reporterName = null !== $reporterName ? trim($reporterName) : null;
+        if (!empty($reporterName)) {
+            $lines[] = sprintf('This is %s.', $reporterName);
+            $lines[] = '';
+        }
+
+        $lines[] = $intro;
+        $lines[] = '';
 
         foreach ($headlines as $i => $item) {
             $num = $i + 1;
             $line = sprintf('%d. %s.', $num, $item['title']);
 
             if ('' !== $item['description']) {
-                $desc = mb_substr($item['description'], 0, 200);
-                $line .= ' ' . $desc;
+                $line .= ' ' . $this->truncateAtSentenceEnd($item['description']);
             }
 
             $lines[] = $line;
         }
 
+        $outro = null !== $outro ? trim($outro) : null;
+        if (!empty($outro)) {
+            $lines[] = '';
+            $lines[] = $outro;
+        }
+
         return implode("\n", $lines);
+    }
+
+    private function truncateAtSentenceEnd(string $description): string
+    {
+        $description = trim($description);
+        if ('' === $description) {
+            return '';
+        }
+
+        $sentences = preg_split('/(?<=[.!?])\s+/u', $description, -1, PREG_SPLIT_NO_EMPTY);
+        if (false === $sentences || [] === $sentences) {
+            return $description;
+        }
+
+        $softLimit = 240;
+        $selected = '';
+
+        foreach ($sentences as $index => $sentence) {
+            $candidate = '' === $selected
+                ? trim($sentence)
+                : $selected . ' ' . trim($sentence);
+
+            if (mb_strlen($candidate) > $softLimit && '' !== $selected) {
+                break;
+            }
+
+            $selected = $candidate;
+
+            if ($index >= 1 || mb_strlen($selected) >= $softLimit) {
+                break;
+            }
+        }
+
+        return '' !== $selected ? $selected : $description;
     }
 
     private function generateAudio(

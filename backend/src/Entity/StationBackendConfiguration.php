@@ -305,8 +305,18 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public ?string $ai_news_reporter_name = null {
+        set => Types::stringOrNull($value, true);
+    }
+
+    #[OA\Property]
     public string $ai_news_source_urls = '' {
         set (?string $value) => Types::string($value, '', true);
+    }
+
+    #[OA\Property]
+    public int $ai_news_story_count = 10 {
+        set (int|string|null $value) => max(1, min(25, Types::int($value, 10)));
     }
 
     #[OA\Property]
@@ -316,6 +326,11 @@ final class StationBackendConfiguration extends AbstractArrayEntity
 
     #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
+        set => Types::stringOrNull($value, true);
+    }
+
+    #[OA\Property]
+    public ?string $ai_news_outro = null {
         set => Types::stringOrNull($value, true);
     }
 

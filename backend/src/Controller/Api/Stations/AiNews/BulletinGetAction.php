@@ -6,6 +6,7 @@ namespace App\Controller\Api\Stations\AiNews;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
+use App\Entity\Station;
 use App\Http\HttpFactory;
 use App\Http\Response;
 use App\Http\ServerRequest;
@@ -73,14 +74,30 @@ final class BulletinGetAction implements SingleActionInterface
             ]);
         }
 
+        return $this->streamBulletin($station, $response, $bulletinPath);
+    }
+
+    public static function getBulletinUrl(Station $station): string
+    {
+        return '/api/station/' . $station->id . '/ai-news/bulletin';
+    }
+
+    private function streamBulletin(Station $station, Response $response, string $bulletinPath): ResponseInterface
+    {
         $fileSize = filesize($bulletinPath);
         $lastModified = filemtime($bulletinPath);
+        $dispositionFilename = sprintf(
+            '%s-ai-news-bulletin.mp3',
+            preg_replace('/[^a-z0-9]+/i', '-', strtolower($station->short_name)) ?: 'station'
+        );
 
         return $response
             ->withHeader('Content-Type', 'audio/mpeg')
             ->withHeader('Content-Length', (string) $fileSize)
             ->withHeader('Last-Modified', gmdate('D, d M Y H:i:s \G\M\T', (int) $lastModified))
             ->withHeader('Accept-Ranges', 'bytes')
+            ->withHeader('Content-Disposition', 'inline; filename="' . $dispositionFilename . '"')
+            ->withHeader('Cache-Control', 'private, max-age=60, must-revalidate')
             ->withBody($this->httpFactory->createStreamFromFile($bulletinPath, 'r'));
     }
 }

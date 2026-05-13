@@ -7,12 +7,15 @@ namespace App\Controller\Api\Stations\AiNews;
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\Api\Error;
+use App\Exception\ValidationException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\Validator\Constraints\IsTrue;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Throwable;
 
 #[
@@ -37,7 +40,8 @@ final class TestPostAction implements SingleActionInterface
     use EntityManagerAwareTrait;
 
     public function __construct(
-        private AiNewsGenerator $generator,
+        private readonly AiNewsGenerator $generator,
+        private readonly ValidatorInterface $validator,
     ) {
     }
 
@@ -47,6 +51,17 @@ final class TestPostAction implements SingleActionInterface
         array $params
     ): ResponseInterface {
         $station = $this->em->refetch($request->getStation());
+        $backendConfig = $station->backend_config;
+
+        $errors = $this->validator->validate(
+            $backendConfig->ai_news_enabled,
+            [
+                new IsTrue(message: __('Enable AI News before running a manual generation test.')),
+            ]
+        );
+        if (count($errors) > 0) {
+            throw ValidationException::fromValidationErrors($errors);
+        }
 
         try {
             $this->generator->generate($station, true);

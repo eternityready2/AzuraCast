@@ -38,9 +38,12 @@ final class PutAction implements SingleActionInterface
     private const array VALID_FIELDS = [
         'ai_news_enabled',
         'ai_news_intro',
+        'ai_news_reporter_name',
         'ai_news_source_urls',
+        'ai_news_story_count',
         'ai_news_active_hours',
         'ai_news_voice_model_path',
+        'ai_news_outro',
     ];
 
     public function __invoke(
