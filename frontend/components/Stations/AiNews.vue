@@ -79,7 +79,7 @@
                                     <button
                                         type="button"
                                         class="big-btn"
-                                        :disabled="isTesting"
+                                        :disabled="isGenerateDisabled"
                                         @click="runTest"
                                     >
                                         <span
@@ -89,6 +89,12 @@
                                         <span v-else>{{ generateButtonIcon }}</span>
                                         <span>{{ generateButtonText }}</span>
                                     </button>
+                                    <div
+                                        v-if="generateHelpText"
+                                        class="generate-help"
+                                    >
+                                        {{ generateHelpText }}
+                                    </div>
                                 </div>
 
                                 <div class="audio-section show">
@@ -99,17 +105,32 @@
                                         <div class="audio-placeholder">
                                             {{ latestBulletinText }}
                                         </div>
+                                        <audio
+                                            v-if="audioAvailable && bulletinPlaybackUrl"
+                                            :key="bulletinPlaybackUrl"
+                                            class="bulletin-player"
+                                            controls
+                                            preload="metadata"
+                                            :src="bulletinPlaybackUrl"
+                                        />
                                         <div
-                                            v-if="audioAvailable && bulletinUrl"
+                                            v-if="audioAvailable && bulletinPlaybackUrl"
                                             class="audio-link-row"
                                         >
                                             <a
-                                                :href="bulletinUrl"
+                                                :href="bulletinPlaybackUrl"
                                                 class="btn btn-secondary btn-sm"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                             >
-                                                {{ $gettext('Open Latest Bulletin Audio') }}
+                                                {{ $gettext('Open Audio') }}
+                                            </a>
+                                            <a
+                                                :href="bulletinPlaybackUrl"
+                                                class="btn btn-secondary btn-sm"
+                                                download="news_bulletin.mp3"
+                                            >
+                                                {{ $gettext('Download MP3') }}
                                             </a>
                                         </div>
                                         <div class="meta-row">
@@ -206,33 +227,26 @@
                                 </label>
                             </div>
 
-                            <div class="settings-group settings-group-tight">
-                                <label class="toggle-label-row" for="edit_ai_news_station_name">{{ $gettext('Station Name') }}</label>
-                                <input
-                                    id="edit_ai_news_station_name"
-                                    :value="stationDisplayName"
-                                    class="form-control form-control-dark"
-                                    type="text"
-                                    disabled
-                                >
-                                <div class="field-note">
-                                    {{ $gettext('Shown for visual parity with the reference dashboard.') }}
-                                </div>
-                            </div>
-
-                            <div class="settings-group settings-group-tight">
-                                <label class="toggle-label-row" for="edit_ai_news_reporter_name">{{ $gettext('AI Reporter Name') }}</label>
-                                <input
-                                    id="edit_ai_news_reporter_name"
-                                    :value="reporterDisplayName"
-                                    class="form-control form-control-dark"
-                                    type="text"
-                                    disabled
-                                >
-                                <div class="field-note">
-                                    {{ $gettext('The current API does not store a separate reporter name, so this remains a visual reference.') }}
-                                </div>
-                            </div>
+                            <form-group-field
+                                id="edit_ai_news_reporter_name"
+                                :field="r$.ai_news_reporter_name"
+                            >
+                                <template #label>
+                                    {{ $gettext('AI Reporter Name') }}
+                                </template>
+                                <template #default="{id, model}">
+                                    <input
+                                        :id="id"
+                                        v-model="model.$model"
+                                        class="form-control form-control-dark"
+                                        type="text"
+                                        :placeholder="$gettext('AzuraCast News Desk')"
+                                    >
+                                </template>
+                                <template #description>
+                                    {{ $gettext('Optional presenter line read before the bulletin intro.') }}
+                                </template>
+                            </form-group-field>
 
                             <form-group-field
                                 id="edit_ai_news_intro"
@@ -252,22 +266,23 @@
                                 </template>
                             </form-group-field>
 
-                            <div class="settings-group settings-group-tight">
-                                <label for="edit_ai_news_outro_visual_only">
+                            <form-group-field
+                                id="edit_ai_news_outro"
+                                :field="r$.ai_news_outro"
+                            >
+                                <template #label>
                                     {{ $gettext('Outro Script') }}
                                     <span class="label-helper">{{ $gettext('(read at end of every bulletin)') }}</span>
-                                </label>
-                                <textarea
-                                    id="edit_ai_news_outro_visual_only"
-                                    class="form-control form-control-dark"
-                                    rows="3"
-                                    :value="outroPlaceholder"
-                                    disabled
-                                />
-                                <div class="field-note">
-                                    {{ $gettext('Shown for dashboard parity only. The current backend does not persist an outro script.') }}
-                                </div>
-                            </div>
+                                </template>
+                                <template #default="{id, model}">
+                                    <textarea
+                                        :id="id"
+                                        v-model="model.$model"
+                                        class="form-control form-control-dark"
+                                        rows="3"
+                                    />
+                                </template>
+                            </form-group-field>
 
                             <form-group-field
                                 id="edit_ai_news_voice_model_path"
@@ -276,14 +291,37 @@
                                 <template #label>
                                     {{ $gettext('AI Voice') }}
                                 </template>
+                                <template #default="{model}">
+                                    <form-select
+                                        v-model="model.$model"
+                                        class="form-control-dark"
+                                        :options="voiceSelectOptions"
+                                    />
+                                </template>
+                                <template #description>
+                                    {{ $gettext('Choose an installed Piper voice model. Add more voices by downloading additional Piper models onto the server.') }}
+                                </template>
+                            </form-group-field>
+
+                            <form-group-field
+                                id="edit_ai_news_story_count"
+                                :field="r$.ai_news_story_count"
+                            >
+                                <template #label>
+                                    {{ $gettext('Stories Per Bulletin') }}
+                                </template>
                                 <template #default="{id, model}">
                                     <input
                                         :id="id"
                                         v-model="model.$model"
                                         class="form-control form-control-dark"
-                                        type="text"
-                                        :placeholder="$gettext('am_michael')"
+                                        type="number"
+                                        min="1"
+                                        max="25"
                                     >
+                                </template>
+                                <template #description>
+                                    {{ $gettext('How many headlines to include in each generated bulletin. Range: 1-25.') }}
                                 </template>
                             </form-group-field>
 
@@ -313,7 +351,7 @@
                                 :field="r$.ai_news_source_urls"
                             >
                                 <template #label>
-                                    {{ $gettext('News Sources') }}
+                                    {{ $gettext('RSS/Atom Feed Sources') }}
                                 </template>
                                 <template #default="{id, model}">
                                     <textarea
@@ -323,25 +361,34 @@
                                         rows="5"
                                     />
                                 </template>
+                                <template #description>
+                                    {{ $gettext('One RSS or Atom feed URL per line. Unsupported or non-feed URLs are skipped during generation unless a backend scraper is added for them.') }}
+                                </template>
                             </form-group-field>
 
-                            <div class="source-checks">
-                                <label
-                                    v-for="chip in sourceChips"
-                                    :key="chip.label"
-                                    class="check-label"
-                                    :class="{active: chip.active}"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        :checked="chip.active"
-                                        disabled
+                            <div class="settings-group settings-group-tight">
+                                <div class="source-list">
+                                    <div
+                                        v-for="source in fixedSources"
+                                        :key="source.key"
+                                        class="source-card"
+                                        :class="{active: source.active}"
                                     >
-                                    {{ chip.label }}
-                                </label>
-                            </div>
-                            <div class="field-note mb-4">
-                                {{ $gettext('These chips are derived from the configured source URLs for visual parity with the reference dashboard.') }}
+                                        <div class="source-card-head">
+                                            <span class="source-card-label">{{ source.label }}</span>
+                                            <span class="source-card-status" :class="`status-${source.status}`">{{ sourceStatusLabel(source.status) }}</span>
+                                        </div>
+                                        <div class="source-card-url">
+                                            {{ source.url }}
+                                        </div>
+                                        <div class="source-card-meta">
+                                            {{ source.message }}
+                                        </div>
+                                        <div v-if="source.headlineCount > 0" class="source-card-count">
+                                            {{ $gettext('Headlines fetched: ') + source.headlineCount }}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="btn-row">
@@ -376,6 +423,7 @@
 import {computed, onMounted, onUnmounted, ref} from "vue";
 import {useGettext} from "vue3-gettext";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
+import FormSelect from "~/components/Form/FormSelect.vue";
 import Loading from "~/components/Common/Loading.vue";
 import mergeExisting from "~/functions/mergeExisting";
 import {useResettableRef} from "~/functions/useResettableRef.ts";
@@ -389,9 +437,12 @@ import {ApiStatus} from "~/entities/ApiInterfaces.ts";
 interface AiNewsForm {
     ai_news_enabled: boolean;
     ai_news_intro: string | null;
+    ai_news_reporter_name: string | null;
     ai_news_source_urls: string | null;
+    ai_news_story_count: number;
     ai_news_active_hours: string | null;
     ai_news_voice_model_path: string | null;
+    ai_news_outro: string | null;
 }
 
 interface AiNewsStatusPayload {
@@ -403,6 +454,19 @@ interface AiNewsStatusPayload {
 interface AiNewsHeadlinePreviewItem {
     title: string;
     description: string;
+    source_url?: string;
+}
+
+interface AiNewsSourceResult {
+    url: string;
+    status: string;
+    message: string;
+    headline_count: number;
+}
+
+interface AiNewsVoiceOption {
+    label: string;
+    path: string;
 }
 
 interface AiNewsDashboardPayload {
@@ -410,6 +474,7 @@ interface AiNewsDashboardPayload {
         generated_at?: string | null;
         story_count?: number | null;
         source_urls?: string[];
+        source_results?: AiNewsSourceResult[];
         elapsed_seconds?: number | null;
         output_filename?: string | null;
         headline_preview?: AiNewsHeadlinePreviewItem[];
@@ -426,8 +491,13 @@ interface AiNewsDashboardPayload {
     bulletin_url?: string | null;
 }
 
+interface AiNewsTestResponse extends ApiStatus, AiNewsStatusPayload {
+    dashboard?: AiNewsDashboardPayload;
+}
+
 interface AiNewsResponse extends AiNewsForm, AiNewsStatusPayload {
     dashboard?: AiNewsDashboardPayload;
+    voice_options?: AiNewsVoiceOption[];
 }
 
 interface LogEntry {
@@ -452,13 +522,17 @@ const lastStatus = ref<string | null>(null);
 const lastTime = ref<string | null>(null);
 const lastError = ref<string | null>(null);
 const dashboard = ref<AiNewsDashboardPayload | null>(null);
+const voiceOptions = ref<AiNewsVoiceOption[]>([]);
 
 const {record: form, reset: resetForm} = useResettableRef<AiNewsForm>(() => ({
     ai_news_enabled: false,
     ai_news_intro: null,
+    ai_news_reporter_name: null,
     ai_news_source_urls: null,
+    ai_news_story_count: 10,
     ai_news_active_hours: null,
-    ai_news_voice_model_path: null
+    ai_news_voice_model_path: null,
+    ai_news_outro: null
 }));
 
 const {r$} = useAppRegle(form, {}, {});
@@ -473,16 +547,54 @@ const timeText = computed(() => lastTime.value ?? '—');
 const latestBulletin = computed(() => dashboard.value?.latest_bulletin ?? null);
 const audioAvailable = computed(() => dashboard.value?.audio_available ?? false);
 const bulletinUrl = computed(() => dashboard.value?.bulletin_url ?? null);
+const bulletinPlaybackUrl = computed(() => {
+    if (!bulletinUrl.value) {
+        return null;
+    }
+
+    const version = latestBulletin.value?.generated_at ?? dashboard.value?.file_info?.modified_at ?? null;
+    if (!version) {
+        return bulletinUrl.value;
+    }
+
+    const separator = bulletinUrl.value.includes('?') ? '&' : '?';
+    return `${bulletinUrl.value}${separator}v=${encodeURIComponent(version)}`;
+});
 const dashboardCurrentTime = computed(() => dashboard.value?.current_time_station ?? null);
 const dashboardNextBulletinTime = computed(() => dashboard.value?.next_bulletin_time ?? null);
 const dashboardTtsEngine = computed(() => dashboard.value?.tts_engine ?? null);
-const stationDisplayName = computed(() => $gettext('Current Station'));
-const reporterDisplayName = computed(() => {
-    return form.value.ai_news_voice_model_path || $gettext('AI News Voice');
+const voiceSelectOptions = computed(() => {
+    const options = voiceOptions.value.map((voice) => ({
+        text: voice.label,
+        value: voice.path,
+    }));
+
+    if (!options.some((option) => option.value === form.value.ai_news_voice_model_path) && form.value.ai_news_voice_model_path) {
+        options.push({
+            text: $gettext('Custom Voice Path'),
+            value: form.value.ai_news_voice_model_path,
+        });
+    }
+
+    return options;
 });
-const outroPlaceholder = computed(() => {
-    return $gettext('Not available in the current AzuraCast AI News configuration.');
-});
+const sourceCatalog = [
+    {
+        label: $gettext('Worthy News'),
+        url: 'https://worthynews.com/feed/',
+        tone: 'src-worthy'
+    },
+    {
+        label: $gettext('Rapture Ready'),
+        url: 'https://www.raptureready.com/category/rapture-ready-news/feed/',
+        tone: 'src-rapture'
+    },
+    {
+        label: $gettext('BBC World'),
+        url: 'https://feeds.bbci.co.uk/news/world/rss.xml',
+        tone: 'src-bbc'
+    }
+] as const;
 
 const activeHoursParts = computed(() => {
     const value = form.value.ai_news_active_hours?.trim() ?? '';
@@ -575,30 +687,44 @@ const latestBulletinText = computed(() => {
     return $gettext('No bulletin audio has been generated yet.');
 });
 
-const sourceLines = computed(() => {
-    return (form.value.ai_news_source_urls ?? '')
+const fixedSources = computed(() => {
+    const configuredUrls = (form.value.ai_news_source_urls ?? '')
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean);
-});
+    const sourceResults = latestBulletin.value?.source_results ?? [];
+    const resultMap = new Map(sourceResults.map((result) => [result.url, result]));
+    const activeUrls = latestBulletin.value?.source_urls ?? configuredUrls;
+    const knownSources = sourceCatalog.map((source) => {
+        const result = resultMap.get(source.url);
 
-const sourceChips = computed(() => {
-    const lines = sourceLines.value.map((line) => line.toLowerCase());
+        return {
+            key: source.url,
+            label: source.label,
+            url: source.url,
+            active: activeUrls.includes(source.url),
+            status: result?.status ?? 'idle',
+            message: result?.message ?? $gettext('No fetch attempt recorded yet.'),
+            headlineCount: result?.headline_count ?? 0,
+        };
+    });
+    const customSources = configuredUrls
+        .filter((url) => !sourceCatalog.some((source) => source.url === url))
+        .map((url, index) => {
+            const result = resultMap.get(url);
 
-    return [
-        {
-            label: $gettext('Worthy News'),
-            active: lines.some((line) => line.includes('worthy'))
-        },
-        {
-            label: $gettext('Rapture Ready'),
-            active: lines.some((line) => line.includes('rapture'))
-        },
-        {
-            label: $gettext('BBC World (fallback)'),
-            active: lines.some((line) => line.includes('bbc'))
-        }
-    ];
+            return {
+                key: `custom-${index}-${url}`,
+                label: $gettext('Custom RSS/Atom Feed'),
+                url,
+                active: activeUrls.includes(url),
+                status: result?.status ?? 'idle',
+                message: result?.message ?? $gettext('No fetch attempt recorded yet.'),
+                headlineCount: result?.headline_count ?? 0,
+            };
+        });
+
+    return [...knownSources, ...customSources];
 });
 
 const metaStoriesText = computed(() => {
@@ -610,9 +736,12 @@ const metaStoriesText = computed(() => {
 });
 const metaSourcesText = computed(() => {
     const activeSources = latestBulletin.value?.source_urls ?? [];
+    const sourceLabels = activeSources.map((url) => {
+        return sourceCatalog.find((source) => source.url === url)?.label ?? url;
+    });
 
-    return activeSources.length > 0
-        ? $gettext('Sources: ') + activeSources.join(', ')
+    return sourceLabels.length > 0
+        ? $gettext('Sources: ') + sourceLabels.join(', ')
         : $gettext('Sources: none configured');
 });
 const metaTimeText = computed(() => {
@@ -639,27 +768,14 @@ const headlinePreviewItems = computed(() => {
     }
 
     return previewItems.map((item, index) => {
-        const haystack = `${item.title} ${item.description}`.toLowerCase();
-        let source = $gettext('Feed');
-        let tone = 'src-info';
-
-        if (haystack.includes('worthy')) {
-            source = $gettext('Worthy');
-            tone = 'src-worthy';
-        } else if (haystack.includes('rapture')) {
-            source = $gettext('Rapture');
-            tone = 'src-rapture';
-        } else if (haystack.includes('bbc')) {
-            source = $gettext('BBC');
-            tone = 'src-bbc';
-        }
+        const source = sourceCatalog.find((sourceItem) => sourceItem.url === item.source_url) ?? null;
 
         return {
             id: `${index}-${item.title}`,
-            source,
+            source: source?.label ?? $gettext('Feed'),
             title: item.title,
             summary: item.description || $gettext('No summary available for this story.'),
-            tone
+            tone: source?.tone ?? 'src-info'
         };
     });
 });
@@ -699,12 +815,37 @@ const statusCards = computed(() => {
     ];
 });
 
-const generateButtonIcon = computed(() => '▶');
+const generateButtonIcon = computed(() => form.value.ai_news_enabled ? '▶' : '■');
+const isGenerateDisabled = computed(() => isTesting.value || !form.value.ai_news_enabled);
 const generateButtonText = computed(() => {
-    return isTesting.value
-        ? $gettext('Generating...')
-        : $gettext('Generate Now');
+    if (isTesting.value) {
+        return $gettext('Generating...');
+    }
+
+    if (!form.value.ai_news_enabled) {
+        return $gettext('Generation Disabled');
+    }
+
+    return $gettext('Generate Now');
 });
+const generateHelpText = computed(() => {
+    return form.value.ai_news_enabled
+        ? ''
+        : $gettext('Re-enable the bulletin before running a manual generation test.');
+});
+
+const sourceStatusLabel = (status: string) => {
+    switch (status) {
+        case 'ok':
+            return $gettext('Fetched');
+        case 'empty':
+            return $gettext('Empty');
+        case 'skipped':
+            return $gettext('Skipped');
+        default:
+            return $gettext('Standby');
+    }
+};
 
 const appendLog = (message: string, type = 'log-info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -721,6 +862,20 @@ const appendLog = (message: string, type = 'log-info') => {
     ];
 };
 
+const appendSourceResultsToLog = (sourceResults: AiNewsSourceResult[] = []) => {
+    sourceResults.forEach((result) => {
+        const label = sourceStatusLabel(result.status);
+        const headlineSuffix = result.headline_count > 0
+            ? $gettext(' Headlines fetched: ') + result.headline_count
+            : '';
+        const type = result.status === 'ok'
+            ? 'log-ok'
+            : (result.status === 'skipped' ? 'log-err' : 'log-info');
+
+        appendLog(`[${label}] ${result.url} - ${result.message}${headlineSuffix}`, type);
+    });
+};
+
 const setInitialLogs = () => {
     logEntries.value = [];
     appendLog($gettext('Ready. Click "Generate Now" to produce a bulletin with the current station settings.'), 'log-info');
@@ -735,6 +890,7 @@ const hydrateFromResponse = (data: AiNewsResponse) => {
     lastTime.value = data.ai_news_last_generation_time ?? null;
     lastError.value = data.ai_news_last_error ?? null;
     dashboard.value = data.dashboard ?? null;
+    voiceOptions.value = data.voice_options ?? [];
 
     setInitialLogs();
 
@@ -743,6 +899,8 @@ const hydrateFromResponse = (data: AiNewsResponse) => {
     } else if (lastStatus.value === 'error' && lastError.value) {
         appendLog($gettext('Latest bulletin failed: ') + lastError.value, 'log-err');
     }
+
+    appendSourceResultsToLog(data.dashboard?.latest_bulletin?.source_results ?? []);
 };
 
 const relist = async () => {
@@ -783,17 +941,33 @@ const saveChanges = async () => {
 };
 
 const runTest = async () => {
+    if (!form.value.ai_news_enabled) {
+        notifyError($gettext('Enable AI News before running a manual bulletin generation.'));
+        appendLog($gettext('Manual generation blocked while the bulletin is disabled.'), 'log-err');
+        return;
+    }
+
     isTesting.value = true;
-    appendLog($gettext('Fetching headlines from configured sources...'), 'log-info');
+    appendLog($gettext('Fetching headlines from configured RSS/Atom feeds...'), 'log-info');
 
     try {
-        const {data} = await axios.post<ApiStatus>(testUrl.value);
+        const {data} = await axios.post<AiNewsTestResponse>(testUrl.value);
         notifySuccess(data.message);
+        lastStatus.value = data.ai_news_last_generation_status ?? lastStatus.value;
+        lastTime.value = data.ai_news_last_generation_time ?? lastTime.value;
+        lastError.value = data.ai_news_last_error ?? null;
+        dashboard.value = data.dashboard ?? dashboard.value;
         appendLog($gettext('Bulletin generated successfully.'), 'log-ok');
         await relist();
-    } catch {
-        notifyError();
+    } catch (error: any) {
+        const apiMessage = error?.response?.data?.message;
+        notifyError(apiMessage);
+        lastStatus.value = 'error';
+        if (apiMessage) {
+            lastError.value = apiMessage;
+        }
         appendLog($gettext('Generation failed. Review the latest error status for details.'), 'log-err');
+        await relist();
     } finally {
         isTesting.value = false;
     }
@@ -1026,6 +1200,14 @@ const refreshHeadlinePreview = () => {
 .big-btn:disabled {
     opacity: 0.6;
     box-shadow: none;
+    cursor: not-allowed;
+}
+
+.generate-help {
+    margin-top: 0.75rem;
+    color: #fca5a5;
+    font-size: 0.8rem;
+    line-height: 1.45;
 }
 
 .spinner {
@@ -1065,6 +1247,19 @@ const refreshHeadlinePreview = () => {
     color: #cbd5e1;
     font-size: 0.9rem;
     line-height: 1.5;
+}
+
+.bulletin-player {
+    width: 100%;
+    margin-top: 0.9rem;
+    filter: saturate(0.9);
+}
+
+.audio-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.9rem;
 }
 
 .meta-row {
@@ -1323,30 +1518,74 @@ const refreshHeadlinePreview = () => {
     gap: 0.75rem;
 }
 
-.source-checks {
+.source-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.source-card {
+    border: 1px solid #2a2d3e;
+    border-radius: 0.9rem;
+    background: #0f1117;
+    padding: 0.9rem 1rem;
+}
+
+.source-card.active {
+    border-color: rgba(79, 142, 247, 0.6);
+    box-shadow: inset 0 0 0 1px rgba(79, 142, 247, 0.18);
+}
+
+.source-card-head {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.9rem;
-    margin-bottom: 0.25rem;
-}
-
-.check-label {
-    display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.15rem 0;
-    color: #94a3b8;
-    font-size: 0.85rem;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.35rem;
 }
 
-.check-label.active {
+.source-card-label {
     color: #e2e8f0;
+    font-size: 0.95rem;
+    font-weight: 600;
 }
 
-.check-label input {
-    width: 14px;
-    height: 14px;
-    accent-color: #4f8ef7;
+.source-card-status {
+    color: #4f8ef7;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.source-card-status.status-ok {
+    color: #34d399;
+}
+
+.source-card-status.status-empty {
+    color: #fbbf24;
+}
+
+.source-card-status.status-skipped {
+    color: #f87171;
+}
+
+.source-card-status.status-idle {
+    color: #94a3b8;
+}
+
+.source-card-url {
+    color: #94a3b8;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.source-card-meta,
+.source-card-count {
+    margin-top: 0.45rem;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    line-height: 1.45;
 }
 
 .btn-row {
