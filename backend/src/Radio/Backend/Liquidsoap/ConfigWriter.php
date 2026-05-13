@@ -503,13 +503,11 @@ final class ConfigWriter implements EventSubscriberInterface
 
         $event->appendBlock(
             <<<LIQ
-            # Hourly AI News Bulletin
             news_bulletin_path = {$bulletinPath}
-            news_bulletin = single(news_bulletin_path)
-            radio = switch(id="news_bulletin", track_sensitive=false, [
-                ({0m}, news_bulletin),
-                ({true}, radio)
-            ])
+            def queue_news_bulletin() =
+              requests.push(request.create(news_bulletin_path))
+            end
+            thread.when(predicate.activates({00m}), queue_news_bulletin)
             LIQ
         );
     }
