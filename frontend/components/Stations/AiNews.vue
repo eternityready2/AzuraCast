@@ -328,21 +328,48 @@
                             <div class="settings-group settings-group-tight">
                                 <label>{{ $gettext('Broadcast Window') }}</label>
                                 <div class="time-row">
-                                    <input
-                                        :value="activeHoursStart"
-                                        class="form-control form-control-dark"
-                                        type="time"
-                                        @input="updateActiveHoursStart"
-                                    >
-                                    <input
-                                        :value="activeHoursEnd"
-                                        class="form-control form-control-dark"
-                                        type="time"
-                                        @input="updateActiveHoursEnd"
-                                    >
+                                    <div class="time-field">
+                                        <label class="time-field-label">{{ $gettext('Start Time') }}</label>
+                                        <input
+                                            :value="activeHoursStart"
+                                            class="form-control form-control-dark"
+                                            type="time"
+                                            @input="updateActiveHoursStart"
+                                        >
+                                    </div>
+                                    <div class="time-field">
+                                        <label class="time-field-label">{{ $gettext('End Time') }}</label>
+                                        <input
+                                            :value="activeHoursEnd"
+                                            class="form-control form-control-dark"
+                                            type="time"
+                                            @input="updateActiveHoursEnd"
+                                        >
+                                    </div>
+                                </div>
+                                <div class="broadcast-slots">
+                                    <label class="broadcast-slot-option">
+                                        <input
+                                            v-model="form.ai_news_top_of_hour"
+                                            class="form-check-input"
+                                            type="checkbox"
+                                        >
+                                        <span>{{ $gettext('Top of hour') }}</span>
+                                    </label>
+                                    <label class="broadcast-slot-option">
+                                        <input
+                                            v-model="form.ai_news_bottom_of_hour"
+                                            class="form-check-input"
+                                            type="checkbox"
+                                        >
+                                        <span>{{ $gettext('Bottom of hour') }}</span>
+                                    </label>
                                 </div>
                                 <div class="field-note">
                                     {{ $gettext('Stored as a single HH:MM-HH:MM range in the current AzuraCast API.') }}
+                                </div>
+                                <div class="field-note">
+                                    {{ $gettext('Top of hour runs at xx:00. Bottom of hour runs at xx:30. Select one or both options.') }}
                                 </div>
                             </div>
 
@@ -441,6 +468,8 @@ interface AiNewsForm {
     ai_news_source_urls: string | null;
     ai_news_story_count: number;
     ai_news_active_hours: string | null;
+    ai_news_top_of_hour: boolean;
+    ai_news_bottom_of_hour: boolean;
     ai_news_voice_model_path: string | null;
     ai_news_outro: string | null;
 }
@@ -531,6 +560,8 @@ const {record: form, reset: resetForm} = useResettableRef<AiNewsForm>(() => ({
     ai_news_source_urls: null,
     ai_news_story_count: 10,
     ai_news_active_hours: null,
+    ai_news_top_of_hour: true,
+    ai_news_bottom_of_hour: false,
     ai_news_voice_model_path: null,
     ai_news_outro: null
 }));
@@ -608,6 +639,20 @@ const activeHoursParts = computed(() => {
 
 const activeHoursStart = computed(() => activeHoursParts.value.start);
 const activeHoursEnd = computed(() => activeHoursParts.value.end);
+const hasBroadcastSlotSelected = computed(() => form.value.ai_news_top_of_hour || form.value.ai_news_bottom_of_hour);
+const broadcastSlotLabels = computed(() => {
+    const labels: string[] = [];
+
+    if (form.value.ai_news_top_of_hour) {
+        labels.push($gettext('Top of hour'));
+    }
+
+    if (form.value.ai_news_bottom_of_hour) {
+        labels.push($gettext('Bottom of hour'));
+    }
+
+    return labels;
+});
 
 const liveBadgeClass = computed(() => {
     return form.value.ai_news_enabled ? 'is-live' : 'is-off';
@@ -648,7 +693,10 @@ const scheduleText = computed(() => {
         return $gettext('OFF');
     }
 
-    return form.value.ai_news_active_hours?.trim() || $gettext('All Day');
+    const activeWindow = form.value.ai_news_active_hours?.trim() || $gettext('All Day');
+    const slotSummary = broadcastSlotLabels.value.join(', ') || $gettext('No slots selected');
+
+    return `${activeWindow} • ${slotSummary}`;
 });
 
 const nextBulletinText = computed(() => {
@@ -928,6 +976,12 @@ onMounted(relist);
 const saveChanges = async () => {
     const {valid} = await r$.$validate();
     if (!valid) {
+        return;
+    }
+
+    if (!hasBroadcastSlotSelected.value) {
+        notifyError($gettext('Select at least one broadcast slot.'));
+        appendLog($gettext('Settings not saved because no broadcast slot was selected.'), 'log-err');
         return;
     }
 
@@ -1512,15 +1566,39 @@ const refreshHeadlinePreview = () => {
     opacity: 1;
 }
 
-.time-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+.time-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
 }
 
-.source-list {
-    display: grid;
-    gap: 0.75rem;
+.time-field-label {
+    margin-bottom: 0;
+    color: #94a3b8;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.broadcast-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.75rem;
+}
+
+.broadcast-slot-option {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 0;
+    color: #e2e8f0 !important;
+    font-size: 0.9rem !important;
+}
+
+.broadcast-slot-option .form-check-input {
+    margin: 0;
 }
 
 .source-card {
@@ -1631,6 +1709,11 @@ const refreshHeadlinePreview = () => {
     .btn-row {
         grid-template-columns: 1fr;
         flex-direction: column;
+    }
+
+    .broadcast-slots {
+        flex-direction: column;
+        gap: 0.65rem;
     }
 }
 </style>

@@ -49,6 +49,8 @@ final class GetAction implements SingleActionInterface
             'ai_news_source_urls' => $backendConfig->ai_news_source_urls,
             'ai_news_story_count' => $backendConfig->ai_news_story_count,
             'ai_news_active_hours' => $backendConfig->ai_news_active_hours,
+            'ai_news_top_of_hour' => $backendConfig->ai_news_top_of_hour,
+            'ai_news_bottom_of_hour' => $backendConfig->ai_news_bottom_of_hour,
             'ai_news_voice_model_path' => $backendConfig->ai_news_voice_model_path,
             'ai_news_outro' => $backendConfig->ai_news_outro,
             'ai_news_last_generation_status' => $backendConfig->ai_news_last_generation_status,
@@ -88,7 +90,12 @@ final class GetAction implements SingleActionInterface
                 'headline_preview' => $latestBulletin['headline_preview'] ?? [],
             ],
             'file_info' => $fileInfo,
-            'next_bulletin_time' => self::computeNextBulletinTime($backendConfig->ai_news_active_hours, $station),
+            'next_bulletin_time' => self::computeNextBulletinTime(
+                $backendConfig->ai_news_active_hours,
+                $station,
+                $backendConfig->ai_news_top_of_hour,
+                $backendConfig->ai_news_bottom_of_hour
+            ),
             'current_time_station' => (new \DateTimeImmutable('now', $station->getTimezoneObject()))->format(DATE_ATOM),
             'tts_engine' => 'piper',
             'audio_available' => $fileExists,
@@ -96,68 +103,110 @@ final class GetAction implements SingleActionInterface
         ];
     }
 
-    private static function computeNextBulletinTime(?string $activeHours, \App\Entity\Station $station): ?string
-    {
-        if (null === $activeHours || '' === trim($activeHours)) {
+    private static function computeNextBulletinTime(
+        ?string $activeHours,
+        \App\Entity\Station $station,
+        bool $topOfHour,
+        bool $bottomOfHour
+    ): ?string {
+        if (!$topOfHour && !$bottomOfHour) {
             return null;
         }
 
-        $activeHours = trim($activeHours);
         $now = new \DateTimeImmutable('now', $station->getTimezoneObject());
-        $currentHour = (int) $now->format('G');
-        $currentMinute = (int) $now->format('i');
-        $nowMinutes = $currentHour * 60 + $currentMinute;
+        $scheduleMinutes = self::getScheduleMinutes($topOfHour, $bottomOfHour);
+
+        if (null === $activeHours || '' === trim($activeHours)) {
+            return self::findNextScheduledTime($now, $scheduleMinutes)?->format(DATE_ATOM);
+        }
+
+        $activeHours = trim($activeHours);
 
         if (preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
-            $startHour = (int) $matches[1];
-            $startMinute = (int) $matches[2];
-            $endHour = (int) $matches[3];
-            $endMinute = (int) $matches[4];
-            $startMinutes = $startHour * 60 + $startMinute;
-            $endMinutes = $endHour * 60 + $endMinute;
+            $startMinutes = ((int) $matches[1]) * 60 + (int) $matches[2];
+            $endMinutes = ((int) $matches[3]) * 60 + (int) $matches[4];
 
-            if ($startMinutes <= $endMinutes) {
-                if ($nowMinutes < $startMinutes) {
-                    return $now->setTime($startHour, $startMinute)->format(DATE_ATOM);
-                }
-
-                if ($nowMinutes >= $endMinutes) {
-                    return $now->modify('+1 day')->setTime($startHour, $startMinute)->format(DATE_ATOM);
-                }
-
-                return $now->modify('+1 hour')->setTime((int) $now->modify('+1 hour')->format('G'), 0)->format(DATE_ATOM);
-            }
-
-            if ($nowMinutes >= $startMinutes || $nowMinutes < $endMinutes) {
-                return $now->modify('+1 hour')->setTime((int) $now->modify('+1 hour')->format('G'), 0)->format(DATE_ATOM);
-            }
-
-            return $now->setTime($startHour, $startMinute)->format(DATE_ATOM);
+            return self::findNextScheduledTimeInWindow($now, $scheduleMinutes, $startMinutes, $endMinutes)?->format(DATE_ATOM);
         }
 
         if (preg_match('/^(\d{1,2})-(\d{1,2})$/', $activeHours, $matches)) {
-            $startHour = (int) $matches[1];
-            $endHour = (int) $matches[2];
+            $startMinutes = ((int) $matches[1]) * 60;
+            $endMinutes = ((int) $matches[2]) * 60;
 
-            if ($startHour <= $endHour) {
-                if ($currentHour < $startHour) {
-                    return $now->setTime($startHour, 0)->format(DATE_ATOM);
+            return self::findNextScheduledTimeInWindow($now, $scheduleMinutes, $startMinutes, $endMinutes)?->format(DATE_ATOM);
+        }
+
+        return self::findNextScheduledTime($now, $scheduleMinutes)?->format(DATE_ATOM);
+    }
+
+    private static function getScheduleMinutes(bool $topOfHour, bool $bottomOfHour): array
+    {
+        $scheduleMinutes = [];
+
+        if ($topOfHour) {
+            $scheduleMinutes[] = 0;
+        }
+
+        if ($bottomOfHour) {
+            $scheduleMinutes[] = 30;
+        }
+
+        sort($scheduleMinutes);
+
+        return $scheduleMinutes;
+    }
+
+    private static function findNextScheduledTime(
+        \DateTimeImmutable $now,
+        array $scheduleMinutes
+    ): ?\DateTimeImmutable {
+        for ($hourOffset = 0; $hourOffset <= 24; $hourOffset++) {
+            $candidateHour = $now->modify(sprintf('+%d hour', $hourOffset));
+
+            foreach ($scheduleMinutes as $minute) {
+                $candidate = $candidateHour->setTime((int) $candidateHour->format('G'), $minute);
+                if ($candidate > $now) {
+                    return $candidate;
                 }
-
-                if ($currentHour >= $endHour) {
-                    return $now->modify('+1 day')->setTime($startHour, 0)->format(DATE_ATOM);
-                }
-
-                return $now->modify('+1 hour')->setTime((int) $now->modify('+1 hour')->format('G'), 0)->format(DATE_ATOM);
             }
-
-            if ($currentHour >= $startHour || $currentHour < $endHour) {
-                return $now->modify('+1 hour')->setTime((int) $now->modify('+1 hour')->format('G'), 0)->format(DATE_ATOM);
-            }
-
-            return $now->setTime($startHour, 0)->format(DATE_ATOM);
         }
 
         return null;
+    }
+
+    private static function findNextScheduledTimeInWindow(
+        \DateTimeImmutable $now,
+        array $scheduleMinutes,
+        int $startMinutes,
+        int $endMinutes
+    ): ?\DateTimeImmutable {
+        for ($hourOffset = 0; $hourOffset <= 48; $hourOffset++) {
+            $candidateHour = $now->modify(sprintf('+%d hour', $hourOffset));
+            $hour = (int) $candidateHour->format('G');
+
+            foreach ($scheduleMinutes as $minute) {
+                $candidate = $candidateHour->setTime($hour, $minute);
+                $candidateMinutes = $hour * 60 + $minute;
+
+                if (!self::isMinuteWithinWindow($candidateMinutes, $startMinutes, $endMinutes)) {
+                    continue;
+                }
+
+                if ($candidate > $now) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static function isMinuteWithinWindow(int $candidateMinutes, int $startMinutes, int $endMinutes): bool
+    {
+        if ($startMinutes <= $endMinutes) {
+            return $candidateMinutes >= $startMinutes && $candidateMinutes < $endMinutes;
+        }
+
+        return $candidateMinutes >= $startMinutes || $candidateMinutes < $endMinutes;
     }
 }

@@ -42,6 +42,8 @@ final class PutAction implements SingleActionInterface
         'ai_news_source_urls',
         'ai_news_story_count',
         'ai_news_active_hours',
+        'ai_news_top_of_hour',
+        'ai_news_bottom_of_hour',
         'ai_news_voice_model_path',
         'ai_news_outro',
     ];
@@ -60,6 +62,10 @@ final class PutAction implements SingleActionInterface
             if (array_key_exists($field, $body)) {
                 $backendConfig->$field = $body[$field];
             }
+        }
+
+        if (!$backendConfig->ai_news_top_of_hour && !$backendConfig->ai_news_bottom_of_hour) {
+            $backendConfig->ai_news_top_of_hour = true;
         }
 
         $station->backend_config = $backendConfig;

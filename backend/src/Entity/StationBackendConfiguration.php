@@ -325,6 +325,16 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public bool $ai_news_top_of_hour = true {
+        set (bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    #[OA\Property]
+    public bool $ai_news_bottom_of_hour = false {
+        set (bool|string|null $value) => Types::bool($value, false, true);
+    }
+
+    #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
     }
