@@ -1,71 +1,130 @@
 # Deployment Guide
 
-## Before Every Release
+## Purpose
 
-Update `STABLE_VERSION` in [backend/src/Version.php](backend/src/Version.php):
+Use this checklist to promote any release branch through the custom AzuraCast release flow safely.
+
+Before you start, choose these values for the deployment:
+- source branch: the branch you want to release, for example `feature/my-change`
+- deploy branch: a temporary branch created from `origin/dev`, for example `deploy/my-change`
+- release version: the next valid `STABLE_VERSION`, for example `0.25.2`
+
+## Release Flow
+
+### 1. Merge the source branch into the current `dev` release line
+
+If `dev` has moved since the last deployment, start from the latest remote `dev` and merge the source branch into a fresh deploy branch.
+
+```bash
+git fetch origin --tags
+git checkout -b <deploy-branch> origin/dev
+git merge --no-ff <source-branch>
+```
+
+If there are conflicts, prefer the newer release-line fixes already present on `dev` unless the source branch intentionally replaces them.
+
+### 2. Bump the release version
+
+Update `STABLE_VERSION` in `backend/src/Version.php`.
 
 ```php
-public const STABLE_VERSION = '0.24.1'; // match the release tag without "v"
+public const STABLE_VERSION = '<release-version>';
 ```
 
----
+Version rules:
+- patch: bug fixes only, for example `0.25.1` -> `0.25.2`
+- minor: new user-facing features, for example `0.25.0` -> `0.26.0`
+- major: breaking changes
 
-## Release Process
+Then commit the bump:
 
-### 1. Commit and push to `dev`
 ```bash
 git add backend/src/Version.php
-git commit -m "chore: bump version to 0.24.1"
-git push origin dev
+git commit -m "chore: bump version to <release-version>"
 ```
 
-### 2. Create PR from `dev` → `main` on GitHub
-- Go to GitHub → Pull requests → New pull request
-- Base: `main` ← Compare: `dev`
-- Merge the PR
+### 3. Push the deploy branch and update `dev`
 
-### 3. Create a new Release on GitHub
-- Go to GitHub → Releases → Draft a new release
-- Tag: `v0.24.1` (must match `'v' . STABLE_VERSION`)
-- Target: `main`
-- Publish release
-
-The GitHub Action will automatically build and push the Docker image to GHCR tagged as `:v0.24.1`, `:stable`, and `:latest`.
-
-### 4. Update the production server
-Once the GitHub Action finishes, go to the AzuraCast Update page:
-
-`https://azura.eternityready.com/admin/updates`
-
-Click **"Check for Updates"** and then **"Update via Web"**.
-
----
-
-## Rollback
-
-### Quick rollback (image only)
-Before any update, tag the current image as backup:
 ```bash
-sudo docker tag azuracast-web:custom azuracast-web:backup
+git push -u origin <deploy-branch>
+git push origin <deploy-branch>:dev
 ```
 
-To rollback:
+### 4. Create and merge the `dev` -> `main` PR
+
+Open a pull request from `dev` to `main`, then merge it.
+
+GitHub CLI example:
+
 ```bash
-sudo docker tag azuracast-web:backup azuracast-web:custom
-sudo docker compose up -d
+gh pr create --base main --head dev --title "Release <release-version>"
+gh pr merge --merge
 ```
 
-### Full rollback (data + code)
-Restore from AzuraCast backup:
+### 5. Create the GitHub release
+
+Create a release tag from `main`. The tag must match `STABLE_VERSION` with a leading `v`.
+
 ```bash
-sudo docker compose exec web azuracast_cli azuracast:restore /var/azuracast/backups/backup-pre-vX.X.X.zip
+gh release create v<release-version> --target main --title "v<release-version>"
 ```
 
----
+### 6. Wait for GitHub Actions to finish
 
-## Version Naming
+Do not continue until the release tag workflow is green.
 
-Follow semver format `vMAJOR.MINOR.PATCH`:
-- Bug fixes → increment PATCH (`v0.24.0` → `v0.24.1`)
-- New features → increment MINOR (`v0.24.0` → `v0.25.0`)
-- Breaking changes → increment MAJOR (`v0.24.0` → `v1.0.0`)
+Check recent runs:
+
+```bash
+gh run list --limit 5
+gh run view <run-id>
+```
+
+### 7. Trigger the production web update
+
+After the release workflow is green:
+- go to `https://azura.eternityready.com/admin/updates`
+- click `Check for Updates`
+- click `Update via Web`
+
+## Post-Deploy Verification
+
+### Public/app checks
+- confirm the site loads
+- confirm admin login works
+- confirm the new feature is visible and usable
+
+### Server/container checks
+
+```bash
+ssh jeremiah@67.225.188.121
+sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+sudo docker compose -f /var/azuracast/docker-compose.yml ps
+```
+
+### Verify deployed version inside the container
+
+```bash
+ssh jeremiah@67.225.188.121 "sudo docker compose -f /var/azuracast/docker-compose.yml exec -T web php -r 'require \"/var/azuracast/www/vendor/autoload.php\"; require \"/var/azuracast/www/backend/src/Version.php\"; echo App\\Version::STABLE_VERSION, PHP_EOL;'"
+```
+
+### Check deployed commit metadata
+
+```bash
+ssh jeremiah@67.225.188.121 "sudo docker compose -f /var/azuracast/docker-compose.yml exec -T web sh -lc '[ -f /var/azuracast/www/.version ] && cat /var/azuracast/www/.version'"
+```
+
+## Notes From The `0.25.0` Deployment
+
+- production updated successfully to `0.25.0`
+- live container version check returned `0.25.0`
+- deployed `.version` matched release commit `e83ba97`
+- the web updater restarted the `azuracast` container successfully
+- some runtime warnings existed in logs, but there was no fatal deployment failure
+
+## Recommended Safety Checks Before Re-Deploying A Branch
+
+- compare the source branch with current `origin/dev` before merging
+- review `backend/src/Controller/Api/Admin/Updates/GetUpdatesAction.php` for release/update logic drift
+- review `util/docker/stations/setup/liquidsoap.sh` if upstream changed again
+- confirm the intended next version number is still correct

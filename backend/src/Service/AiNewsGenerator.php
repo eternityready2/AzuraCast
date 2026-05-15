@@ -338,30 +338,45 @@ final class AiNewsGenerator
         $reporterName = null !== $reporterName ? trim($reporterName) : null;
         if (!empty($reporterName)) {
             $lines[] = sprintf('This is %s.', $reporterName);
-            $lines[] = '';
+            $this->appendPauseBreak($lines, 2);
         }
 
         $lines[] = $intro;
-        $lines[] = '';
+        $this->appendPauseBreak($lines, 2);
 
-        foreach ($headlines as $i => $item) {
-            $num = $i + 1;
-            $line = sprintf('%d. %s.', $num, $item['title']);
+        $headlineCount = count($headlines);
+        foreach ($headlines as $index => $item) {
+            $line = rtrim($item['title'], ".!? ") . '.';
 
             if ('' !== $item['description']) {
                 $line .= ' ' . $this->truncateAtSentenceEnd($item['description']);
             }
 
             $lines[] = $line;
+
+            if ($index < ($headlineCount - 1)) {
+                $this->appendPauseBreak($lines, 1);
+            }
         }
 
         $outro = null !== $outro ? trim($outro) : null;
         if (!empty($outro)) {
-            $lines[] = '';
+            $this->appendPauseBreak($lines, 2);
             $lines[] = $outro;
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Add paragraph separators to encourage short natural pauses in TTS output.
+     */
+    private function appendPauseBreak(array &$lines, int $extraBlankLines = 1): void
+    {
+        $blankLines = max(1, $extraBlankLines);
+        for ($i = 0; $i < $blankLines; $i++) {
+            $lines[] = '';
+        }
     }
 
     private function truncateAtSentenceEnd(string $description): string
@@ -428,6 +443,7 @@ final class AiNewsGenerator
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
+                '-af', 'adelay=2000:all=true,apad=pad_dur=2',
                 '-c:a', 'libmp3lame',
                 '-b:a', '128k',
                 $tmpMp3,
