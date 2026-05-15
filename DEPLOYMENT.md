@@ -2,33 +2,37 @@
 
 ## Purpose
 
-This branch (`feature/hourly-ai-newscaster`) is intended to be deployed again later.
-Use this checklist to promote the branch through the custom AzuraCast release flow safely.
+Use this checklist to promote any release branch through the custom AzuraCast release flow safely.
+
+Before you start, choose these values for the deployment:
+- source branch: the branch you want to release, for example `feature/my-change`
+- deploy branch: a temporary branch created from `origin/dev`, for example `deploy/my-change`
+- release version: the next valid `STABLE_VERSION`, for example `0.25.2`
 
 ## Release Flow
 
-### 1. Merge this branch into the current `dev` release line
+### 1. Merge the source branch into the current `dev` release line
 
-If `dev` has moved since the last deployment, start from the latest remote `dev` and merge this branch into a fresh deploy branch.
+If `dev` has moved since the last deployment, start from the latest remote `dev` and merge the source branch into a fresh deploy branch.
 
 ```bash
 git fetch origin --tags
-git checkout -b deploy/hourly-ai-newscaster origin/dev
-git merge --no-ff feature/hourly-ai-newscaster
+git checkout -b <deploy-branch> origin/dev
+git merge --no-ff <source-branch>
 ```
 
-If there are conflicts, prefer the newer release-line fixes already present on `dev` unless this branch intentionally replaces them.
+If there are conflicts, prefer the newer release-line fixes already present on `dev` unless the source branch intentionally replaces them.
 
 ### 2. Bump the release version
 
 Update `STABLE_VERSION` in `backend/src/Version.php`.
 
 ```php
-public const STABLE_VERSION = '0.25.1';
+public const STABLE_VERSION = '<release-version>';
 ```
 
 Version rules:
-- patch: bug fixes only, for example `0.25.0` -> `0.25.1`
+- patch: bug fixes only, for example `0.25.1` -> `0.25.2`
 - minor: new user-facing features, for example `0.25.0` -> `0.26.0`
 - major: breaking changes
 
@@ -36,14 +40,14 @@ Then commit the bump:
 
 ```bash
 git add backend/src/Version.php
-git commit -m "chore: bump version to 0.25.1"
+git commit -m "chore: bump version to <release-version>"
 ```
 
 ### 3. Push the deploy branch and update `dev`
 
 ```bash
-git push -u origin deploy/hourly-ai-newscaster
-git push origin deploy/hourly-ai-newscaster:dev
+git push -u origin <deploy-branch>
+git push origin <deploy-branch>:dev
 ```
 
 ### 4. Create and merge the `dev` -> `main` PR
@@ -53,7 +57,7 @@ Open a pull request from `dev` to `main`, then merge it.
 GitHub CLI example:
 
 ```bash
-gh pr create --base main --head dev --title "Release 0.25.1"
+gh pr create --base main --head dev --title "Release <release-version>"
 gh pr merge --merge
 ```
 
@@ -62,7 +66,7 @@ gh pr merge --merge
 Create a release tag from `main`. The tag must match `STABLE_VERSION` with a leading `v`.
 
 ```bash
-gh release create v0.25.1 --target main --title "v0.25.1"
+gh release create v<release-version> --target main --title "v<release-version>"
 ```
 
 ### 6. Wait for GitHub Actions to finish
@@ -118,9 +122,9 @@ ssh jeremiah@67.225.188.121 "sudo docker compose -f /var/azuracast/docker-compos
 - the web updater restarted the `azuracast` container successfully
 - some runtime warnings existed in logs, but there was no fatal deployment failure
 
-## Recommended Safety Checks Before Re-Deploying This Branch
+## Recommended Safety Checks Before Re-Deploying A Branch
 
-- compare this branch with current `origin/dev` before merging
+- compare the source branch with current `origin/dev` before merging
 - review `backend/src/Controller/Api/Admin/Updates/GetUpdatesAction.php` for release/update logic drift
 - review `util/docker/stations/setup/liquidsoap.sh` if upstream changed again
 - confirm the intended next version number is still correct
