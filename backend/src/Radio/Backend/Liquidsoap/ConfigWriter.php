@@ -500,6 +500,13 @@ final class ConfigWriter implements EventSubscriberInterface
             $station->getRadioTempDir() . '/news_bulletin.mp3'
         );
 
+        $newsBulletinAnnotations = self::annotateArray([
+            'azuracast_ai_news' => true,
+        ]);
+        $newsBulletinRequest = self::toRawString(
+            'annotate:' . $newsBulletinAnnotations . ':' . $station->getRadioTempDir() . '/news_bulletin.mp3'
+        );
+
         $scheduleMinutes = [];
 
         if ($backendConfig->ai_news_top_of_hour ?? true) {
@@ -514,15 +521,15 @@ final class ConfigWriter implements EventSubscriberInterface
             $scheduleMinutes[] = 0;
         }
 
-        $cronMinutes = implode(',', $scheduleMinutes);
-
+        $newsBulletinQueueName = 'requests';
         $event->appendBlock(
             <<<LIQ
             news_bulletin_path = {$bulletinPath}
+            news_bulletin_request = {$newsBulletinRequest}
             def queue_news_bulletin() =
-              requests.push(request.create(news_bulletin_path))
+              requests.push(request.create(news_bulletin_request))
             end
-            cron.add("{$cronMinutes} * * * *", {queue_news_bulletin()})
+            thread.when(predicate.activates({00m}), queue_news_bulletin)
             LIQ
         );
     }
