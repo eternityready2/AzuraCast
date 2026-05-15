@@ -521,8 +521,6 @@ final class ConfigWriter implements EventSubscriberInterface
             $scheduleMinutes[] = 0;
         }
 
-        $cronMinutes = '0,5,10,15,20,25,30,35,40,45,50,55';
-
         $newsBulletinQueueName = 'requests';
         $event->appendBlock(
             <<<LIQ
@@ -531,7 +529,7 @@ final class ConfigWriter implements EventSubscriberInterface
             def queue_news_bulletin() =
               requests.push(request.create(news_bulletin_request))
             end
-            cron.add("{$cronMinutes} * * * *", {queue_news_bulletin()})
+            thread.when(predicate.activates({00m}), queue_news_bulletin)
             LIQ
         );
     }
