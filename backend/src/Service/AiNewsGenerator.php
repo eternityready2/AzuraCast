@@ -151,7 +151,7 @@ final class AiNewsGenerator
                 sprintf('AI news generation failed for station "%s": %s', $station->name, $e->getMessage())
             );
 
-            if ('error' !== $station->backend_config->ai_news_last_generation_status) {
+            if ('error' !== $station->ai_news_last_generation_status) {
                 $this->persistStatus($station, 'error', $e->getMessage(), null);
             }
 
@@ -963,14 +963,12 @@ final class AiNewsGenerator
 
     private function persistStatus(Station $station, string $status, ?string $error, ?array $metadata = null): void
     {
-        $backendConfig = $station->backend_config;
-        $backendConfig->ai_news_last_generation_status = $status;
-        $backendConfig->ai_news_last_generation_time = gmdate('Y-m-d\TH:i:s\Z');
-        $backendConfig->ai_news_last_error = $error;
+        $station->ai_news_last_generation_status = $status;
+        $station->ai_news_last_generation_time = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $station->ai_news_last_error = $error;
         if (null !== $metadata) {
-            $backendConfig->ai_news_latest_bulletin = $metadata;
+            $station->ai_news_latest_bulletin = $metadata;
         }
-        $station->backend_config = $backendConfig;
 
         $this->em->persist($station);
         $this->em->flush();
