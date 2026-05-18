@@ -324,6 +324,27 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set => Types::stringOrNull($value, true);
     }
 
+    /** @var int[] */
+    #[OA\Property(
+        description: 'Array of ISO-8601 days (1 for Monday, 7 for Sunday)'
+    )]
+    public array $ai_news_active_days = [] {
+        set (mixed $value) {
+            $days = array_map(
+                static fn(mixed $day): int => (int)$day,
+                Types::array($value)
+            );
+
+            $days = array_values(array_unique(array_filter(
+                $days,
+                static fn(int $day): bool => $day >= 1 && $day <= 7
+            )));
+            sort($days);
+
+            $this->ai_news_active_days = $days;
+        }
+    }
+
     #[OA\Property]
     public bool $ai_news_top_of_hour = true {
         set (bool|string|null $value) => Types::bool($value, true, true);
