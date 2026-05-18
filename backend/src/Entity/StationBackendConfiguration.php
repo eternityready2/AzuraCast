@@ -365,28 +365,6 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set => Types::stringOrNull($value, true);
     }
 
-    #[OA\Property]
-    public ?string $ai_news_last_generation_status = null {
-        set => Types::stringOrNull($value, true);
-    }
-
-    #[OA\Property]
-    public ?string $ai_news_last_generation_time = null {
-        set => Types::stringOrNull($value, true);
-    }
-
-    #[OA\Property]
-    public ?string $ai_news_last_error = null {
-        set => Types::stringOrNull($value, true);
-    }
-
-    #[OA\Property(
-        description: 'Latest bulletin metadata (structured)',
-        type: 'object',
-        additionalProperties: true
-    )]
-    public ?array $ai_news_latest_bulletin = null;
-
     /*
      * Liquidsoap Custom Configuration Sections
      */
