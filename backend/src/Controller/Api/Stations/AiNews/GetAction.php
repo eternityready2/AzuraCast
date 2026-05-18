@@ -54,9 +54,9 @@ final class GetAction implements SingleActionInterface
             'ai_news_bottom_of_hour' => $backendConfig->ai_news_bottom_of_hour,
             'ai_news_voice_model_path' => $backendConfig->ai_news_voice_model_path,
             'ai_news_outro' => $backendConfig->ai_news_outro,
-            'ai_news_last_generation_status' => $backendConfig->ai_news_last_generation_status,
-            'ai_news_last_generation_time' => $backendConfig->ai_news_last_generation_time,
-            'ai_news_last_error' => $backendConfig->ai_news_last_error,
+            'ai_news_last_generation_status' => $station->ai_news_last_generation_status,
+            'ai_news_last_generation_time' => $station->ai_news_last_generation_time?->format('Y-m-d\TH:i:s\Z'),
+            'ai_news_last_error' => $station->ai_news_last_error,
             'dashboard' => $this->buildDashboardPayload($station),
             'voice_options' => AiNewsGenerator::AVAILABLE_VOICE_MODELS,
         ]);
@@ -67,8 +67,8 @@ final class GetAction implements SingleActionInterface
         $backendConfig = $station->backend_config;
         $bulletinPath = $station->getRadioTempDir() . '/' . AiNewsGenerator::OUTPUT_FILENAME;
         $fileExists = file_exists($bulletinPath);
-        $latestBulletin = is_array($backendConfig->ai_news_latest_bulletin)
-            ? $backendConfig->ai_news_latest_bulletin
+        $latestBulletin = is_array($station->ai_news_latest_bulletin)
+            ? $station->ai_news_latest_bulletin
             : [];
 
         $fileInfo = null;
