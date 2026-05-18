@@ -75,9 +75,13 @@ final class AiNewsGenerator
             return true;
         }
 
-        if (!$force && !$this->isWithinActiveHours($backendConfig->ai_news_active_hours, $station)) {
+        if (!$force && !$this->isWithinActiveSchedule(
+            $backendConfig->ai_news_active_hours,
+            $backendConfig->ai_news_active_days,
+            $station
+        )) {
             $this->logger->debug(
-                sprintf('Outside active hours window for station "%s".', $station->name)
+                sprintf('Outside active AI news schedule for station "%s".', $station->name)
             );
             return true;
         }
@@ -150,19 +154,37 @@ final class AiNewsGenerator
     }
 
     /**
+     * Check whether the current station-local time falls within the configured schedule.
+     *
+     * Hours formats: "HH:MM-HH:MM" (e.g. "06:00-22:00", UI default) or "H-H" (e.g. "6-22", legacy).
+     * Days use ISO weekdays 1=Mon .. 7=Sun. Empty days means every day.
+     * Supports overnight hour ranges. Null/empty hours means always active.
+     */
+    private function isWithinActiveSchedule(?string $activeHours, array $activeDays, Station $station): bool
+    {
+        $now = new DateTimeImmutable('now', $station->getTimezoneObject());
+        $activeDays = $this->normalizeActiveDays($activeDays);
+
+        if ([] !== $activeDays && !in_array((int) $now->format('N'), $activeDays, true)) {
+            return false;
+        }
+
+        return $this->isWithinActiveHours($activeHours, $now);
+    }
+
+    /**
      * Check whether the current station-local time falls within the configured window.
      *
      * Formats: "HH:MM-HH:MM" (e.g. "06:00-22:00", UI default) or "H-H" (e.g. "6-22", legacy).
      * Supports overnight ranges. Null/empty means always active.
      */
-    private function isWithinActiveHours(?string $activeHours, Station $station): bool
+    private function isWithinActiveHours(?string $activeHours, DateTimeImmutable $now): bool
     {
         if (null === $activeHours || '' === trim($activeHours)) {
             return true;
         }
 
         $activeHours = trim($activeHours);
-        $now = new DateTimeImmutable('now', $station->getTimezoneObject());
         $currentHour = (int) $now->format('G');
         $currentMinute = (int) $now->format('i');
 
@@ -189,6 +211,22 @@ final class AiNewsGenerator
         }
 
         return true;
+    }
+
+    /** @return int[] */
+    private function normalizeActiveDays(array $activeDays): array
+    {
+        $normalizedDays = array_map(
+            static fn(mixed $day): int => (int) $day,
+            $activeDays
+        );
+        $normalizedDays = array_values(array_unique(array_filter(
+            $normalizedDays,
+            static fn(int $day): bool => $day >= 1 && $day <= 7
+        )));
+        sort($normalizedDays);
+
+        return $normalizedDays;
     }
 
     /**
