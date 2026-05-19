@@ -42,8 +42,21 @@
             <table class="table table-sm table-bordered mb-0">
                 <thead>
                     <tr>
+                        <th
+                            class="text-uppercase small text-center"
+                            style="width: 70px;"
+                        >
+                            {{ $gettext('Order') }}
+                        </th>
                         <th class="text-uppercase small">{{ $gettext('Type or Category') }}</th>
                         <th class="text-uppercase small">{{ $gettext('Algorithm') }}</th>
+                        <th class="text-uppercase small">{{ $gettext('Pin to Playlist') }}</th>
+                        <th
+                            class="text-uppercase small text-center"
+                            style="width: 110px;"
+                        >
+                            {{ $gettext('Duration (s)') }}
+                        </th>
                         <th
                             class="text-uppercase small text-center"
                             style="width: 60px;"
@@ -55,7 +68,7 @@
                 <tbody>
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="3"
+                            colspan="6"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -65,6 +78,28 @@
                         v-for="(entry, index) in entries"
                         :key="index"
                     >
+                        <td class="text-center">
+                            <div class="btn-group btn-group-sm">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :disabled="index === 0"
+                                    :title="$gettext('Move up')"
+                                    @click="moveEntry(index, -1)"
+                                >
+                                    &#x25B2;
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :disabled="index === entries.length - 1"
+                                    :title="$gettext('Move down')"
+                                    @click="moveEntry(index, 1)"
+                                >
+                                    &#x25BC;
+                                </button>
+                            </div>
+                        </td>
                         <td>
                             <select
                                 v-model="entry.slot_value"
@@ -103,6 +138,31 @@
                                 <option value="most_recent_album">{{ $gettext('Most Recent Album') }}</option>
                                 <option value="most_recent_artist">{{ $gettext('Most Recent Artist') }}</option>
                             </select>
+                        </td>
+                        <td>
+                            <select
+                                v-model="entry.playlist_id"
+                                class="form-select form-select-sm"
+                            >
+                                <option :value="null">{{ $gettext('(none)') }}</option>
+                                <option
+                                    v-for="pl in playlists"
+                                    :key="pl.id"
+                                    :value="pl.id"
+                                >
+                                    {{ pl.name }}
+                                </option>
+                            </select>
+                        </td>
+                        <td>
+                            <input
+                                v-model="entry.duration_seconds"
+                                type="number"
+                                min="0"
+                                step="1"
+                                class="form-control form-control-sm text-center"
+                                :placeholder="$gettext('auto')"
+                            />
                         </td>
                         <td class="text-center">
                             <button
@@ -171,11 +231,12 @@ import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
 
 interface ClockWheelEntry {
-    slot_value: string;  // "type:music" | "type:talk" | ... | "cat:5"
+    slot_value: string;
     algorithm: string;
+    playlist_id: number | null;
+    duration_seconds: number | string | null;
 }
 
-/** Convert a raw slot from the API (type + category_id) to a combined slot_value. */
 function slotToValue(slot: {type?: string | null; category_id?: number | null}): string {
     if (slot.category_id != null) {
         return 'cat:' + slot.category_id;
@@ -183,12 +244,22 @@ function slotToValue(slot: {type?: string | null; category_id?: number | null}):
     return 'type:' + (slot.type ?? 'music');
 }
 
-/** Convert a slot_value back to { type, category_id } for the API payload. */
 function valueToSlot(slot_value: string): {type: string | null; category_id: number | null} {
     if (slot_value.startsWith('cat:')) {
         return {type: null, category_id: parseInt(slot_value.slice(4), 10)};
     }
     return {type: slot_value.replace('type:', ''), category_id: null};
+}
+
+function normaliseDuration(value: number | string | null | undefined): number | null {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+        return null;
+    }
+    return Math.round(num);
 }
 
 const props = defineProps<BaseEditModalProps>();
@@ -200,14 +271,35 @@ const {$gettext} = useTranslate();
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
+
 const categories = ref<{id: number; name: string}[]>([]);
+const playlists = ref<{id: number; name: string}[]>([]);
 
 onMounted(async () => {
     try {
-        const resp = await axios.get(getStationApiUrl('/media-categories').value);
-        categories.value = resp.data?.rows ?? resp.data ?? [];
+        const [catsResp, plResp] = await Promise.all([
+            axios.get(getStationApiUrl('/media-categories').value),
+            axios.get(getStationApiUrl('/playlists').value),
+        ]);
+
+        const catsRaw = catsResp.data?.rows ?? catsResp.data ?? [];
+        categories.value = Array.isArray(catsRaw)
+            ? catsRaw.map((c: Record<string, unknown>) => ({
+                id: c.id as number,
+                name: c.name as string,
+            }))
+            : [];
+
+        const plRaw = plResp.data?.rows ?? plResp.data ?? [];
+        playlists.value = Array.isArray(plRaw)
+            ? plRaw.map((p: Record<string, unknown>) => ({
+                id: p.id as number,
+                name: p.name as string,
+            }))
+            : [];
     } catch {
         categories.value = [];
+        playlists.value = [];
     }
 });
 
@@ -227,11 +319,25 @@ const {r$} = useAppRegle(form, {
 });
 
 const addEntry = () => {
-    entries.push({slot_value: 'type:music', algorithm: 'random'});
+    entries.push({
+        slot_value: 'type:music',
+        algorithm: 'random',
+        playlist_id: null,
+        duration_seconds: null,
+    });
 };
 
 const removeEntry = (index: number) => {
     entries.splice(index, 1);
+};
+
+const moveEntry = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= entries.length) {
+        return;
+    }
+    const [moved] = entries.splice(index, 1);
+    entries.splice(target, 0, moved);
 };
 
 const resetForm = () => {
@@ -242,16 +348,30 @@ const resetForm = () => {
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, data);
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {type?: string | null; category_id?: number | null; algorithm?: string}[]).map(
-            (s) => ({slot_value: slotToValue(s), algorithm: s.algorithm ?? 'random'})
-        );
+        const converted = (data.slots as {
+            type?: string | null;
+            category_id?: number | null;
+            algorithm?: string;
+            playlist_id?: number | null;
+            duration_seconds?: number | null;
+        }[]).map((s) => ({
+            slot_value: slotToValue(s),
+            algorithm: s.algorithm ?? 'random',
+            playlist_id: s.playlist_id ?? null,
+            duration_seconds: s.duration_seconds ?? null,
+        }));
         entries.splice(0, entries.length, ...converted);
     }
 };
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({...valueToSlot(e.slot_value), algorithm: e.algorithm}));
+    const slots = entries.map((e) => ({
+        ...valueToSlot(e.slot_value),
+        algorithm: e.algorithm,
+        playlist_id: e.playlist_id ?? null,
+        duration_seconds: normaliseDuration(e.duration_seconds),
+    }));
     return {valid, data: {...form.value, slots}};
 };
 

@@ -8,6 +8,7 @@ use App\Entity\Attributes\Auditable;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use App\Entity\Interfaces\StationAwareInterface;
 use App\Entity\StationSchedule;
+use DateTimeImmutable;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
@@ -153,6 +154,34 @@ final class StationClockWheel implements
         )
     ]
     public private(set) Collection $schedule_items;
+
+    // ------------------------------------------------------------------
+    // Slot advancement state
+    // ------------------------------------------------------------------
+
+    /**
+     * Zero-based index of the slot the scheduler most recently advanced to.
+     * NULL means the wheel has never produced a track yet (or was reset).
+     * Used by ClockWheelScheduler to walk the wheel in order instead of
+     * always picking slot 0 on every BuildQueue tick.
+     */
+    #[
+        OA\Property(nullable: true, example: 2),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $last_slot_index = null;
+
+    /**
+     * Wall-clock timestamp of the last slot advancement.
+     * The scheduler resets the position to slot 0 whenever this value is
+     * older than the start of the current hour, so each hour begins cleanly
+     * at the top of the wheel.
+     */
+    #[
+        OA\Property(nullable: true),
+        ORM\Column(type: 'datetime', nullable: true)
+    ]
+    public ?DateTimeImmutable $last_slot_advanced_at = null;
 
     public function __construct(Station $station)
     {
