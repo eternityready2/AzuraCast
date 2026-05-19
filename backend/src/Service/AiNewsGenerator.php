@@ -861,7 +861,10 @@ final class AiNewsGenerator
             $summary = $this->normalizeHtmlText($summaryNode->textContent ?? '');
         }
 
-        if ($summary === '' && '' !== $href) {
+        $shouldFetchArticleContent = '' !== $href
+            && ($summary === '' || !$this->isUsableSummary($summary) || $summary === $title);
+
+        if ($shouldFetchArticleContent) {
             $summary = $this->extractArticleContentByUrl($href);
         }
 
@@ -895,7 +898,22 @@ final class AiNewsGenerator
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $text = preg_replace('/\s+/u', ' ', trim($text)) ?? trim($text);
 
-        return $text;
+        return $this->stripNewsLeadIn($text);
+    }
+
+    private function stripNewsLeadIn(string $text): string
+    {
+        $patterns = [
+            '/^by\s+emmitt\s+barry,\s+worthy\s+news\s+washington\s+d\.c\.\s+bureau\s+chief\s*/iu',
+            '/^\(Worthy News\)\s*[–—-]\s*/u',
+            '/^[A-Z][A-Z\s.()\-]+\(Worthy News\)\s+[–—-]\s+/u',
+        ];
+
+        foreach ($patterns as $pattern) {
+            $text = preg_replace($pattern, '', $text, 1) ?? $text;
+        }
+
+        return trim($text, " \t\n\r\0\x0B-–—");
     }
 
     private function isUsableHeadline(string $title): bool
@@ -1017,7 +1035,7 @@ final class AiNewsGenerator
             return $description;
         }
 
-        $softLimit = 240;
+        $softLimit = 420;
         $selected = '';
 
         foreach ($sentences as $index => $sentence) {
