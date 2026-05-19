@@ -14,6 +14,7 @@ tmp/cache/*---*
 
 # Local development files.
 /.claude/
+/.gitnexus/
 /backend/config/routes.dev.php
 /env.ini
 /app/env.ini
