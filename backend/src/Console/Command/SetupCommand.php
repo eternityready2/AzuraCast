@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Command;
 
+use App\Container\EntityManagerAwareTrait;
 use App\Container\EnvironmentAwareTrait;
 use App\Container\SettingsAwareTrait;
 use App\Entity\Repository\StorageLocationRepository;
@@ -20,6 +21,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class SetupCommand extends CommandAbstract
 {
+    use EntityManagerAwareTrait;
     use EnvironmentAwareTrait;
     use SettingsAwareTrait;
 
@@ -77,6 +79,22 @@ final class SetupCommand extends CommandAbstract
         $io->section(__('Reload System Data'));
 
         $this->runCommand($output, 'cache:clear');
+
+        // Reset Doctrine connection state after migrations. Sub-commands share the same
+        // EntityManager instance, so the connection's transaction nesting level can be
+        // out of sync with MySQL after migrations complete, causing SAVEPOINT errors on
+        // the next flush. Roll back all active transactions to reset the nesting counter,
+        // then close so the next query reconnects with a clean connection.
+        $conn = $this->em->getConnection();
+        while ($conn->isTransactionActive()) {
+            try {
+                $conn->rollBack();
+            } catch (\Throwable) {
+                $conn->close();
+                break;
+            }
+        }
+        $this->em->clear();
 
         // Ensure default storage locations exist.
         $this->storageLocationRepo->createDefaultStorageLocations();
