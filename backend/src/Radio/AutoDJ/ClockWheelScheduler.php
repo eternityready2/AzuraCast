@@ -6,38 +6,38 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Api\StationPlaylistQueue;
+use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Repository\StationQueueRepository;
-use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\ClockWheel\HourTimeline;
+use App\Radio\AutoDJ\ClockWheel\TimelinePlan;
 use DateTimeImmutable;
+use DateTimeInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
-/**
- * Intercepts the AutoDJ queue building process to inject Clock Wheel playback.
- *
- * When a StationClockWheelEvent is active at the expected play time, this
- * subscriber fires BEFORE the normal QueueBuilder and resolves the next song
- * from the wheel's ordered slots, bypassing normal playlist rotation entirely.
- */
 final class ClockWheelScheduler implements EventSubscriberInterface
 {
     use LoggerAwareTrait;
     use EntityManagerAwareTrait;
 
+    private const float WINDOW_BUFFER_SECONDS = 5.0;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly DuplicatePrevention $duplicatePrevention,
+        private readonly ScheduleConflictChecker $conflictChecker,
+        private readonly HourTimeline $timeline,
     ) {
     }
 
     public static function getSubscribedEvents(): array
     {
         return [
-            // Priority 3 — runs after requests (5) but before normal QueueBuilder (0)
             BuildQueue::class => [
                 ['buildFromClockWheel', 3],
             ],
@@ -46,7 +46,6 @@ final class ClockWheelScheduler implements EventSubscriberInterface
 
     public function buildFromClockWheel(BuildQueue $event): void
     {
-        // If the event already has a next song (e.g. from a request), skip.
         if (!empty($event->getNextSongs())) {
             return;
         }
@@ -54,18 +53,39 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         $station = $event->getStation();
         $expectedPlayTime = $event->getExpectedPlayTime();
 
-        $activeEvent = $this->findActiveClockWheelSchedule($station->id, $expectedPlayTime);
-
-        if (null === $activeEvent) {
+        $activeSchedule = $this->findActiveClockWheelSchedule($station->id, $expectedPlayTime);
+        if ($activeSchedule === null) {
             return;
         }
 
-        $wheel = $activeEvent->clock_wheel;
+        if ($this->conflictChecker->isNonWheelScheduleActiveAt($station, $expectedPlayTime)) {
+            $this->logger->debug('Clock Wheel deferring to non-wheel schedule.', [
+                'clock_wheel_id' => $activeSchedule->clock_wheel->id,
+                'schedule_id'    => $activeSchedule->id,
+            ]);
+            return;
+        }
 
-        $this->logger->info(
-            sprintf('Clock Wheel "%s" is active. Overriding normal AutoDJ queue.', $wheel->name),
-            ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
-        );
+        $wheel = $activeSchedule->clock_wheel;
+
+        $plan = $this->timeline->planNext($wheel, $expectedPlayTime);
+        if ($plan === null) {
+            $this->logger->info('Clock Wheel hour complete, falling through.', [
+                'clock_wheel_id' => $wheel->id,
+                'schedule_id'    => $activeSchedule->id,
+            ]);
+            return;
+        }
+
+        $this->logger->info('Clock Wheel timeline selected slot.', [
+            'clock_wheel_id'        => $wheel->id,
+            'schedule_id'           => $activeSchedule->id,
+            'slot_id'               => $plan->slot->id ?? null,
+            'slot_position_seconds' => $plan->slot->position_seconds,
+            'slot_order'            => $plan->slot->slot_order,
+            'current_t'             => $plan->currentT,
+            'available_seconds'     => $plan->availableSeconds,
+        ]);
 
         $recentHistory = $this->queueRepo->getRecentlyPlayedByTimeRange(
             $station,
@@ -73,37 +93,32 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             $station->backend_config->duplicate_prevention_time_range
         );
 
-        $nextSong = $this->resolveNextSongFromWheel($wheel, $recentHistory, $expectedPlayTime);
-
-        if (null !== $nextSong) {
-            $set = $event->setNextSongs($nextSong);
-
-            if ($set) {
-                $this->em->flush();
-                $this->logger->info(
-                    'Clock Wheel resolved next song.',
-                    ['next_song' => (string)$event]
-                );
-            }
-        } else {
-            $this->logger->warning(
-                sprintf('Clock Wheel "%s" could not resolve a playable track. Falling through to normal AutoDJ.', $wheel->name)
-            );
+        $queue = $this->resolveSlot($plan, $recentHistory);
+        if ($queue === null) {
+            $this->logger->warning('Clock Wheel slot produced no playable track.', [
+                'clock_wheel_id'    => $wheel->id,
+                'slot_id'           => $plan->slot->id ?? null,
+                'available_seconds' => $plan->availableSeconds,
+            ]);
+            return;
         }
+
+        if (!$event->setNextSongs($queue)) {
+            return;
+        }
+
+        $this->em->flush();
+
+        $this->logger->info('Clock Wheel resolved next song.', [
+            'next_song'             => (string)$event,
+            'slot_position_seconds' => $plan->slot->position_seconds,
+            'available_seconds'     => $plan->availableSeconds,
+        ]);
     }
 
-    // ------------------------------------------------------------------
-    // Private helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Find a StationSchedule that links to an active Clock Wheel for the given station and time.
-     */
     private function findActiveClockWheelSchedule(int $stationId, DateTimeImmutable $now): ?StationSchedule
     {
-        // AzuraCast time-code: HHMM as integer (e.g. 09:30 → 930)
         $timeCode = (int)$now->format('G') * 100 + (int)$now->format('i');
-        // ISO 8601 weekday: 1=Mon … 7=Sun
         $weekday = (int)$now->format('N');
 
         /** @var StationSchedule[] $schedules */
@@ -121,7 +136,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
 
         foreach ($schedules as $schedule) {
             $days = $schedule->days;
-            if (empty($days) || in_array($weekday, $days, true)) {
+            if ($days === [] || in_array($weekday, $days, true)) {
                 return $schedule;
             }
         }
@@ -129,106 +144,51 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         return null;
     }
 
-    /**
-     * Walk through the wheel's slots in order and return the first resolvable track.
-     */
-    private function resolveNextSongFromWheel(
-        StationClockWheel $wheel,
-        array $recentHistory,
-        DateTimeImmutable $expectedPlayTime
-    ): ?StationQueue {
-        $slots = $wheel->slots->toArray();
-
-        // Sort slots by slot_order ascending
-        usort($slots, static fn(StationClockWheelSlot $a, StationClockWheelSlot $b) => $a->slot_order <=> $b->slot_order);
-
-        foreach ($slots as $slot) {
-            $queue = $this->resolveSlot($slot, $recentHistory, $expectedPlayTime);
-            if (null !== $queue) {
-                return $queue;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Resolve a single slot to a StationQueue entry.
-     * Queries station_media directly by type, so no playlist assignment is needed.
-     */
-    private function resolveSlot(
-        StationClockWheelSlot $slot,
-        array $recentHistory,
-        DateTimeImmutable $expectedPlayTime
-    ): ?StationQueue {
+    private function resolveSlot(TimelinePlan $plan, array $recentHistory): ?StationQueue
+    {
+        $slot = $plan->slot;
         $station = $slot->clock_wheel->station;
-        $type = $slot->type;
-        $categoryId = $slot->category_id;
 
-        // Must have at least one filter.
-        if ($type === null && $categoryId === null) {
-            $this->logger->warning('Clock Wheel slot has neither type nor category set — skipping.');
+        $candidates = $slot->playlist !== null
+            ? $this->fetchCandidatesByPlaylist($slot)
+            : $this->fetchCandidatesByTypeOrCategory($slot, $station->id);
+
+        if ($candidates === []) {
+            $this->logger->warning('Clock Wheel slot has no candidate media.', [
+                'slot_id'            => $slot->id ?? null,
+                'pinned_playlist_id' => $slot->playlist?->id,
+                'type'               => $slot->type?->value,
+                'category_id'        => $slot->category_id,
+                'position_seconds'   => $slot->position_seconds,
+            ]);
             return null;
         }
 
-        // Build DQL dynamically: filter by type and/or category.
-        $dql = 'SELECT m FROM App\Entity\StationMedia m
-             JOIN m.storage_location sl
-             JOIN sl.stations st
-             WHERE st.id = :stationId';
-
-        $params = ['stationId' => $station->id];
-
-        if ($type !== null) {
-            $dql .= ' AND m.type = :type';
-            $params['type'] = $type;
-        }
-
-        if ($categoryId !== null) {
-            $dql .= ' AND m.category_id = :categoryId';
-            $params['categoryId'] = $categoryId;
-        }
-
-        // Fetch all media matching the slot filters from this station's storage locations.
-        /** @var StationMedia[] $candidates */
-        $candidates = $this->em->createQuery($dql)
-            ->setParameters($params)
-            ->getResult();
-
-        if (empty($candidates)) {
-            $this->logger->warning(
-                sprintf(
-                    'Clock Wheel slot: no media found with type "%s"%s for station %d.',
-                    $type?->value ?? '(any)',
-                    $categoryId !== null ? sprintf(' and category_id %d', $categoryId) : '',
-                    $station->id
-                )
-            );
+        $candidates = $this->filterToWindow($candidates, $slot, $plan->availableSeconds);
+        if ($candidates === []) {
             return null;
         }
 
-        // Build proper StationPlaylistQueue objects so duplicate prevention can match
-        // on song_id, artist, and title — not just media_id.
-        $mediaQueue = [];
-        foreach ($candidates as $m) {
-            $q = new \App\Entity\Api\StationPlaylistQueue();
-            $q->media_id = $m->id;
-            $q->spm_id = 0;
-            $q->song_id = $m->song_id;
-            $q->artist = $m->artist ?? '';
-            $q->title = $m->title ?? '';
-            $mediaQueue[] = $q;
-        }
+        $mediaQueue = array_map(
+            static function (StationMedia $m): StationPlaylistQueue {
+                $q = new StationPlaylistQueue();
+                $q->media_id = $m->id;
+                $q->spm_id   = 0;
+                $q->song_id  = $m->song_id;
+                $q->artist   = $m->artist ?? '';
+                $q->title    = $m->title  ?? '';
+                return $q;
+            },
+            $candidates
+        );
 
-        // Apply the slot's algorithm to order candidates before duplicate prevention.
-        $algorithm = $slot->algorithm ?? \App\Entity\Enums\ClockWheelSlotAlgorithms::Random;
+        $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
         $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
 
-        // Apply duplicate prevention.
         $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
             ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
 
-        if (null === $validTrack) {
+        if ($validTrack === null) {
             return null;
         }
 
@@ -244,72 +204,124 @@ final class ClockWheelScheduler implements EventSubscriberInterface
     }
 
     /**
-     * Orders $mediaQueue according to the given algorithm.
-     *
-     * - Random:           shuffle (fair random selection)
-     * - OldestTrack:      track least recently played (or never played) comes first
-     * - OldestAlbum:      tracks from the album least recently played come first
-     * - OldestArtist:     tracks from the artist least recently played come first
-     * - MostRecentAlbum:  tracks from the album most recently played come first
-     * - MostRecentArtist: tracks from the artist most recently played come first
-     *
-     * @param \App\Entity\Api\StationPlaylistQueue[] $mediaQueue
+     * @param StationMedia[] $candidates
+     * @return StationMedia[]
+     */
+    private function filterToWindow(array $candidates, StationClockWheelSlot $slot, int $availableSeconds): array
+    {
+        $cap = (float)$availableSeconds + self::WINDOW_BUFFER_SECONDS;
+        $cap = ($slot->duration_seconds !== null && $slot->duration_seconds > 0)
+            ? min($cap, (float)$slot->duration_seconds)
+            : $cap;
+
+        $fits = array_values(array_filter(
+            $candidates,
+            static fn(StationMedia $m): bool => $m->length > 0 && $m->length <= $cap
+        ));
+
+        if ($fits !== []) {
+            return $fits;
+        }
+
+        $sorted = $candidates;
+        usort($sorted, static fn(StationMedia $a, StationMedia $b): int => $a->length <=> $b->length);
+
+        $this->logger->info('Clock Wheel slot falling back to shortest track (none fit window).', [
+            'slot_id'           => $slot->id ?? null,
+            'window_cap_secs'   => $cap,
+            'chosen_length_sec' => $sorted[0]->length ?? null,
+        ]);
+
+        return [$sorted[0]];
+    }
+
+    /** @return StationMedia[] */
+    private function fetchCandidatesByPlaylist(StationClockWheelSlot $slot): array
+    {
+        return $this->em->createQuery(
+            'SELECT m FROM App\Entity\StationMedia m
+             JOIN m.playlists pm
+             WHERE pm.playlist = :playlist'
+        )
+            ->setParameter('playlist', $slot->playlist)
+            ->getResult();
+    }
+
+    /** @return StationMedia[] */
+    private function fetchCandidatesByTypeOrCategory(StationClockWheelSlot $slot, int $stationId): array
+    {
+        $type = $slot->type;
+        $categoryId = $slot->category_id;
+
+        if ($type === null && $categoryId === null) {
+            return [];
+        }
+
+        $dql = 'SELECT m FROM App\Entity\StationMedia m
+                JOIN m.storage_location sl
+                JOIN sl.stations st
+                WHERE st.id = :stationId';
+        $params = ['stationId' => $stationId];
+
+        if ($type !== null) {
+            $dql .= ' AND m.type = :type';
+            $params['type'] = $type;
+        }
+        if ($categoryId !== null) {
+            $dql .= ' AND m.category_id = :categoryId';
+            $params['categoryId'] = $categoryId;
+        }
+
+        return $this->em->createQuery($dql)->setParameters($params)->getResult();
+    }
+
+    /**
+     * @param StationPlaylistQueue[] $mediaQueue
      * @param StationMedia[] $candidates
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
-     * @return \App\Entity\Api\StationPlaylistQueue[]
+     * @return StationPlaylistQueue[]
      */
     private function applyAlgorithm(
         array $mediaQueue,
         array $candidates,
-        \App\Entity\Enums\ClockWheelSlotAlgorithms $algorithm,
+        ClockWheelSlotAlgorithms $algorithm,
         array $recentHistory
     ): array {
-        if ($algorithm === \App\Entity\Enums\ClockWheelSlotAlgorithms::Random) {
+        if ($algorithm === ClockWheelSlotAlgorithms::Random) {
             shuffle($mediaQueue);
             return $mediaQueue;
         }
 
-        // Build song_id → timestamp_played (unix int) from history.
-        // Lower timestamp = older play. 0 = never played (treat as oldest).
-        $histTimestamp = []; // song_id → int
-        $histArtist = [];    // song_id → string
+        $histTimestamp = [];
+        $histArtist = [];
         foreach ($recentHistory as $h) {
             $songId = $h['song_id'];
             $ts = $h['timestamp_played'];
-            if ($ts instanceof \DateTimeInterface) {
-                $ts = $ts->getTimestamp();
-            }
-            $ts = (int)$ts;
+            $ts = $ts instanceof DateTimeInterface ? $ts->getTimestamp() : (int)$ts;
             if (!isset($histTimestamp[$songId]) || $ts > $histTimestamp[$songId]) {
                 $histTimestamp[$songId] = $ts;
             }
             $histArtist[$songId] = $h['artist'] ?? '';
         }
 
-        // OldestTrack: sort by last-played timestamp ASC; never-played (0) comes first.
-        if ($algorithm === \App\Entity\Enums\ClockWheelSlotAlgorithms::OldestTrack) {
-            usort($mediaQueue, static function (
-                \App\Entity\Api\StationPlaylistQueue $a,
-                \App\Entity\Api\StationPlaylistQueue $b
-            ) use ($histTimestamp): int {
-                $tsA = $histTimestamp[$a->song_id] ?? 0;
-                $tsB = $histTimestamp[$b->song_id] ?? 0;
-                return $tsA <=> $tsB; // 0 (never played) first, then oldest timestamp
-            });
+        if ($algorithm === ClockWheelSlotAlgorithms::OldestTrack) {
+            usort(
+                $mediaQueue,
+                static fn(StationPlaylistQueue $a, StationPlaylistQueue $b): int
+                    => ($histTimestamp[$a->song_id] ?? 0) <=> ($histTimestamp[$b->song_id] ?? 0)
+            );
             return $mediaQueue;
         }
 
-        // Album / Artist algorithms — group candidates, sort groups by recency.
         $isAlbum = in_array($algorithm, [
-            \App\Entity\Enums\ClockWheelSlotAlgorithms::OldestAlbum,
-            \App\Entity\Enums\ClockWheelSlotAlgorithms::MostRecentAlbum,
+            ClockWheelSlotAlgorithms::OldestAlbum,
+            ClockWheelSlotAlgorithms::MostRecentAlbum,
         ], true);
         $isOldest = in_array($algorithm, [
-            \App\Entity\Enums\ClockWheelSlotAlgorithms::OldestAlbum,
-            \App\Entity\Enums\ClockWheelSlotAlgorithms::OldestArtist,
+            ClockWheelSlotAlgorithms::OldestAlbum,
+            ClockWheelSlotAlgorithms::OldestArtist,
         ], true);
 
-        // Index candidates by id and song_id for lookups.
         $candidatesById = [];
         $candidatesBySongId = [];
         foreach ($candidates as $m) {
@@ -317,30 +329,23 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             $candidatesBySongId[$m->song_id] = $m;
         }
 
-        // Determine the grouping key (album or artist) for each queue entry.
-        $getGroupKey = static function (\App\Entity\Api\StationPlaylistQueue $q) use ($candidatesById, $isAlbum): string {
-            $m = $candidatesById[$q->media_id] ?? null;
-            if ($m === null) {
-                return '';
-            }
-            return strtolower(trim((string)($isAlbum ? ($m->album ?? '') : ($m->artist ?? ''))));
-        };
+        $getGroupKey = static fn(StationPlaylistQueue $q): string
+            => strtolower(trim((string)(
+                ($m = $candidatesById[$q->media_id] ?? null)
+                    ? ($isAlbum ? ($m->album ?? '') : ($m->artist ?? ''))
+                    : ''
+            )));
 
-        // Group queue entries by album/artist key.
-        $groups = []; // groupKey → StationPlaylistQueue[]
+        $groups = [];
         foreach ($mediaQueue as $q) {
             $groups[$getGroupKey($q)][] = $q;
         }
 
-        // Determine the most-recent play timestamp for each group.
-        // A group's recency = highest timestamp of any history entry belonging to that group.
-        // Groups with no history get 0 (= never played = oldest).
         $groupLastPlayed = array_fill_keys(array_keys($groups), 0);
 
         if ($isAlbum) {
-            // For album-based grouping, look up album for history entries via DB when not in candidates.
             $histSongIds = array_keys($histTimestamp);
-            $histAlbum = []; // song_id → album key
+            $histAlbum = [];
 
             foreach ($histSongIds as $songId) {
                 if (isset($candidatesBySongId[$songId])) {
@@ -349,7 +354,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             }
 
             $missingSongIds = array_diff($histSongIds, array_keys($histAlbum));
-            if (!empty($missingSongIds)) {
+            if ($missingSongIds !== []) {
                 $rows = $this->em->createQuery(
                     'SELECT m.song_id, m.album FROM App\Entity\StationMedia m WHERE m.song_id IN (:ids)'
                 )->setParameter('ids', array_values($missingSongIds))->getArrayResult();
@@ -361,7 +366,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             foreach ($histSongIds as $songId) {
                 $albumKey = $histAlbum[$songId] ?? '';
                 if (!array_key_exists($albumKey, $groupLastPlayed)) {
-                    continue; // history entry belongs to an album not in candidates
+                    continue;
                 }
                 $ts = $histTimestamp[$songId];
                 if ($ts > $groupLastPlayed[$albumKey]) {
@@ -369,7 +374,6 @@ final class ClockWheelScheduler implements EventSubscriberInterface
                 }
             }
         } else {
-            // Artist-based grouping: history already has artist field.
             foreach ($histTimestamp as $songId => $ts) {
                 $artistKey = strtolower(trim((string)($histArtist[$songId] ?? '')));
                 if (!array_key_exists($artistKey, $groupLastPlayed)) {
@@ -381,25 +385,20 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             }
         }
 
-        // Sort group keys: oldest (lowest timestamp) first for OldestAlbum/Artist,
-        // most recent (highest timestamp) first for MostRecentAlbum/Artist.
-        // Shuffle first so ties between equal-timestamp groups are broken randomly.
         $groupKeys = array_keys($groups);
         shuffle($groupKeys);
-        usort($groupKeys, static function (string $a, string $b) use ($groupLastPlayed, $isOldest): int {
-            $tsA = $groupLastPlayed[$a];
-            $tsB = $groupLastPlayed[$b];
-            return $isOldest ? ($tsA <=> $tsB) : ($tsB <=> $tsA);
-        });
+        usort(
+            $groupKeys,
+            static fn(string $a, string $b): int => $isOldest
+                ? $groupLastPlayed[$a] <=> $groupLastPlayed[$b]
+                : $groupLastPlayed[$b] <=> $groupLastPlayed[$a]
+        );
 
-        // Flatten into final ordered queue; shuffle within each group for track variety.
         $sorted = [];
         foreach ($groupKeys as $key) {
             $groupItems = $groups[$key];
             shuffle($groupItems);
-            foreach ($groupItems as $q) {
-                $sorted[] = $q;
-            }
+            array_push($sorted, ...$groupItems);
         }
 
         return $sorted;
