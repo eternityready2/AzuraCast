@@ -572,6 +572,8 @@ final class ClockWheelsController extends AbstractScheduledEntityController
                 ? (int)$durRaw
                 : null;
 
+            $slot->is_rigid = !empty($datum['is_rigid']);
+
             $wheel->addSlot($slot);
             $this->em->persist($slot);
         }
