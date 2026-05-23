@@ -83,6 +83,7 @@
                 id="edit_form_duration"
                 class="col-md-4"
                 :label="$gettext('Duration')"
+                :description="$gettext('Hours:Minutes')"
             >
                 <div class="input-group">
                     <input
