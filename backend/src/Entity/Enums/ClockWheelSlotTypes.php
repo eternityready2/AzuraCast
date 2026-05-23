@@ -49,4 +49,20 @@ enum ClockWheelSlotTypes: string
             self::Ad    => 'Ad',
         };
     }
+
+    /** @return array{min:int, max:int}|null */
+    public function suggestedDurationSeconds(): ?array
+    {
+        return match($this) {
+            self::Id    => ['min' => 5,  'max' => 30],
+            self::Promo => ['min' => 30, 'max' => 60],
+            self::Ad    => ['min' => 30, 'max' => 60],
+            default     => null,
+        };
+    }
+
+    public function hasFixedDuration(): bool
+    {
+        return $this->suggestedDurationSeconds() !== null;
+    }
 }
