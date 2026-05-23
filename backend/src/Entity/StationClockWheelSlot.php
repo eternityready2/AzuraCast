@@ -36,11 +36,11 @@ use Symfony\Component\Validator\Constraints as Assert;
  *   Defaults to Random, which is the safest choice for live broadcast because
  *   it cannot get "stuck" on a single track if the playlist runs short.
  *
- * - `slot_order` (smallint, default 0): absolute position of this slot within
- *   the wheel. The generator reads slots in ascending slot_order, so the first
- *   slot that runs at the top of the hour has order=0. Using a plain integer
- *   (not a sequence with gaps) keeps re-ordering straightforward: the API just
- *   accepts the full ordered list and writes new order values.
+ * - `slot_order` (smallint, default 0): tie-breaker when two slots share the
+ *   same `position_seconds`.
+ *
+ * - `position_seconds` (smallint unsigned, default 0, range 0..3599): the
+ *   second-of-hour anchor used by the HourTimeline engine.
  *
  * - `duration_seconds` (nullable smallint): the intended length of this slot in
  *   seconds. NULL means "no hard limit — play one track and move on". When set,
@@ -128,15 +128,18 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     // Scheduling fields
     // ------------------------------------------------------------------
 
-    /**
-     * Zero-based position of this slot in the wheel.
-     * The Liquidsoap generator iterates slots in ascending order of this value.
-     */
     #[
         OA\Property(example: 0),
         ORM\Column(type: 'smallint')
     ]
     public int $slot_order = 0;
+
+    #[
+        OA\Property(example: 1800),
+        ORM\Column(type: 'smallint', options: ['unsigned' => true, 'default' => 0]),
+        Assert\Range(min: 0, max: 3599)
+    ]
+    public int $position_seconds = 0;
 
     /**
      * Soft duration cap in seconds.
