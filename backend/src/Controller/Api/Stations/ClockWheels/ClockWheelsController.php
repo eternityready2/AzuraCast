@@ -495,6 +495,24 @@ final class ClockWheelsController extends AbstractScheduledEntityController
     {
         $wheel->slots->clear();
 
+        $hasExplicitPositions = false;
+        $slotCount = 0;
+        foreach ($slotsData as $datum) {
+            if (!is_array($datum)) {
+                continue;
+            }
+            $slotCount++;
+            if (
+                !$hasExplicitPositions
+                && array_key_exists('position_seconds', $datum)
+                && is_numeric($datum['position_seconds'])
+                && (int)$datum['position_seconds'] > 0
+            ) {
+                $hasExplicitPositions = true;
+            }
+        }
+
+        $autoSpacing = $slotCount > 0 ? (int)floor(3600 / $slotCount) : 300;
         $order = 0;
         foreach ($slotsData as $datum) {
             if (!is_array($datum)) {
@@ -503,6 +521,10 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
             $slot = new StationClockWheelSlot($wheel);
             $slot->slot_order = $order++;
+
+            $slot->position_seconds = $hasExplicitPositions
+                ? max(0, min(3599, (int)($datum['position_seconds'] ?? 0)))
+                : min(3599, $slot->slot_order * $autoSpacing);
 
             // Resolve category_id first — a category slot has no type.
             $categoryId = array_key_exists('category_id', $datum) && is_numeric($datum['category_id'])
