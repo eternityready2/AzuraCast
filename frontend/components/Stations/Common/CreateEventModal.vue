@@ -145,10 +145,10 @@
                 <div class="form-check">
                     <input
                         id="scheduling_flexible"
-                        v-model="scheduleRow.loop_once"
+                        v-model="schedulingMode"
                         class="form-check-input"
                         type="radio"
-                        :value="false"
+                        value="flexible"
                     >
                     <label class="form-check-label" for="scheduling_flexible">
                         {{ $gettext('Flexible') }}
@@ -156,11 +156,23 @@
                 </div>
                 <div class="form-check">
                     <input
-                        id="scheduling_loop_once"
-                        v-model="scheduleRow.loop_once"
+                        id="scheduling_strict"
+                        v-model="schedulingMode"
                         class="form-check-input"
                         type="radio"
-                        :value="true"
+                        value="strict"
+                    >
+                    <label class="form-check-label" for="scheduling_strict">
+                        {{ $gettext('Strict') }}
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input
+                        id="scheduling_loop_once"
+                        v-model="schedulingMode"
+                        class="form-check-input"
+                        type="radio"
+                        value="loop_once"
                     >
                     <label class="form-check-label" for="scheduling_loop_once">
                         {{ $gettext('Loop Once') }}
@@ -350,6 +362,8 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 
+const schedulingMode = ref<'flexible' | 'strict' | 'loop_once'>('flexible');
+
 // Schedule row state - matches PlaylistScheduleRow interface
 const scheduleRow = ref<PlaylistScheduleRow>(createScheduleItemDefaults());
 
@@ -390,6 +404,14 @@ watch(currentEntityOptions, (opts) => {
         form.value.entity_id = opts[0].id;
     }
 }, {immediate: true});
+
+watch(
+    schedulingMode,
+    (mode) => {
+        scheduleRow.value.loop_once = mode !== 'flexible';
+    },
+    {immediate: true}
+);
 
 // Regle validation for schedule row
 const isMonthlyDatePattern = computed(
@@ -510,6 +532,7 @@ const recurrenceEndTypeOptions = [
 
 const clearForm = () => {
     form.value = blankForm();
+    schedulingMode.value = 'flexible';
     scheduleRow.value = createScheduleItemDefaults();
     error.value = null;
 };
