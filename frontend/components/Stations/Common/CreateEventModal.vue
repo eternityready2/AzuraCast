@@ -142,31 +142,33 @@
                 class="col-md-4"
                 :label="$gettext('Scheduling')"
             >
-                <div class="form-check">
-                    <input
-                        id="scheduling_flexible"
-                        v-model="schedulingMode"
-                        class="form-check-input"
-                        type="radio"
-                        value="flexible"
-                    >
-                    <label class="form-check-label" for="scheduling_flexible">
-                        {{ $gettext('Flexible') }}
-                    </label>
+                <div class="d-flex flex-wrap gap-3">
+                    <div class="form-check mb-0">
+                        <input
+                            id="scheduling_flexible"
+                            v-model="schedulingMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="flexible"
+                        >
+                        <label class="form-check-label" for="scheduling_flexible">
+                            {{ $gettext('Flexible') }}
+                        </label>
+                    </div>
+                    <div class="form-check mb-0">
+                        <input
+                            id="scheduling_strict"
+                            v-model="schedulingMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="strict"
+                        >
+                        <label class="form-check-label" for="scheduling_strict">
+                            {{ $gettext('Strict') }}
+                        </label>
+                    </div>
                 </div>
-                <div class="form-check">
-                    <input
-                        id="scheduling_strict"
-                        v-model="schedulingMode"
-                        class="form-check-input"
-                        type="radio"
-                        value="strict"
-                    >
-                    <label class="form-check-label" for="scheduling_strict">
-                        {{ $gettext('Strict') }}
-                    </label>
-                </div>
-                <div class="form-check">
+                <div class="form-check mt-2">
                     <input
                         id="scheduling_loop_once"
                         v-model="schedulingMode"

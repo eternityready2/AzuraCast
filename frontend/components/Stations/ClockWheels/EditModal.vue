@@ -17,7 +17,6 @@
                 :remove-entry="removeEntry"
                 @update:color="form.color = $event"
             />
-            <FormSchedule v-model:schedule-items="scheduleItems" />
         </tabs>
 
         <template
@@ -62,7 +61,6 @@ import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
 import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
-import FormSchedule from '~/components/Stations/ClockWheels/Form/Schedule.vue';
 import type {ClockWheelScheduleRow} from '~/components/Stations/ClockWheels/Form/ScheduleRow.vue';
 import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
 
