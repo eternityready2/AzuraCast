@@ -58,7 +58,7 @@ onMounted(() => {
 
     picker = new TimepickerUI(inputRef.value, {
         clock: {
-            type: '24h',
+            type: '12h',
             currentTime: false,
         },
         ui: {
@@ -74,9 +74,13 @@ onMounted(() => {
         callbacks: {
             onConfirm: (data) => {
                 if (data.hour !== undefined && data.minutes !== undefined) {
-                    const hh = parseInt(data.hour, 10);
+                    let hh = parseInt(data.hour, 10);
                     const mm = parseInt(data.minutes, 10);
                     if (!isNaN(hh) && !isNaN(mm)) {
+                        // Convert 12h to 24h
+                        const isPM = data.type === 'pm';
+                        if (isPM && hh !== 12) hh += 12;
+                        if (!isPM && hh === 12) hh = 0; // midnight
                         emit('update:modelValue', hh * 100 + mm);
                     }
                 }
