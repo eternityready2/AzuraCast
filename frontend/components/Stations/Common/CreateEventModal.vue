@@ -55,10 +55,15 @@
                 :description="$gettext('To play once per day, set the start and end times to the same value.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <playlist-time
+                    <vue-date-picker
                         :id="id"
-                        v-model="model.$model"
+                        v-model="startTimeDate"
+                        time-picker
+                        is24
+                        auto-apply
                         :class="fieldClass"
+                        :teleport="true"
+                        :dark="isDark"
                     />
                 </template>
             </form-group-field>
@@ -71,10 +76,15 @@
                 :description="$gettext('If the end time is before the start time, the playlist will play overnight.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <playlist-time
+                    <vue-date-picker
                         :id="id"
-                        v-model="model.$model"
+                        v-model="endTimeDate"
+                        time-picker
+                        is24
+                        auto-apply
                         :class="fieldClass"
+                        :teleport="true"
+                        :dark="isDark"
                     />
                 </template>
             </form-group-field>
@@ -301,7 +311,7 @@
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
-import PlaylistTime from '~/components/Common/TimeCode.vue';
+import {VueDatePicker} from '@vuepic/vue-datepicker';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupMultiCheck from '~/components/Form/FormGroupMultiCheck.vue';
@@ -315,6 +325,7 @@ import {useTranslate} from '~/vendor/gettext';
 import {useAxios} from '~/vendor/axios';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
+import {useTheme} from '~/functions/theme.ts';
 import {
     type PlaylistScheduleRow,
     createScheduleItemDefaults,
@@ -324,6 +335,7 @@ const {$gettext} = useTranslate();
 const {axios} = useAxios();
 const {getStationApiUrl} = useApiRouter();
 const {notifySuccess} = useNotify();
+const {isDark} = useTheme();
 
 const emit = defineEmits<{
     relist: [];
@@ -380,11 +392,44 @@ const durationMinutes = ref(0);
 // Recurring toggle
 const isRecurring = ref(false);
 
+// Convert between HHMM number and time-picker object {hours, minutes}
+const startTimeDate = computed({
+    get(): {hours: number; minutes: number} | null {
+        const t = scheduleRow.value.start_time;
+        if (t === null || t === undefined) return null;
+        return {
+            hours: Math.floor(t / 100),
+            minutes: t % 100
+        };
+    },
+    set(val: {hours: number; minutes: number} | null) {
+        if (val !== null) {
+            scheduleRow.value.start_time = val.hours * 100 + val.minutes;
+        }
+    }
+});
+
+const endTimeDate = computed({
+    get(): {hours: number; minutes: number} | null {
+        const t = scheduleRow.value.end_time;
+        if (t === null || t === undefined) return null;
+        return {
+            hours: Math.floor(t / 100),
+            minutes: t % 100
+        };
+    },
+    set(val: {hours: number; minutes: number} | null) {
+        if (val !== null) {
+            scheduleRow.value.end_time = val.hours * 100 + val.minutes;
+        }
+    }
+});
+
 // Update end_time from duration inputs
 const updateDuration = () => {
-    const startTime = scheduleRow.value.start_time;
-    const startHours = Math.floor(startTime / 100);
-    const startMinutes = startTime % 100;
+    if (!startTimeDate.value) return;
+    const startHours = startTimeDate.value.hours;
+    const startMinutes = startTimeDate.value.minutes;
     const durationTotalMinutes = durationHours.value * 60 + durationMinutes.value;
     let endTotalMinutes = startHours * 60 + startMinutes + durationTotalMinutes;
     endTotalMinutes = endTotalMinutes % (24 * 60);
