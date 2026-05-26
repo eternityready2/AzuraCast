@@ -9,19 +9,17 @@
         </div>
 
         <div class="mb-4">
-            <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
+            <label
+                class="form-label fw-semibold"
+                for="color"
+            >{{ $gettext('Color') }} *</label>
             <div>
-                <div
-                    class="color-swatch-input"
-                    :style="{ backgroundColor: color.value }"
-                    style="width: 3rem; height: 3rem; border: 2px solid #555; border-radius: 6px;"
-                />
                 <input
                     id="color"
+                    v-model="form.color"
                     type="color"
-                    class="form-control form-control-color d-none"
-                    style="width: 3rem; height: 3rem; padding: 0.15rem;"
-                    @input="color.value = ($event.target as HTMLInputElement).value"
+                    class="form-control form-control-color"
+                    style="width: 3rem; height: 3rem; padding: 0.15rem; border: 2px solid #555; border-radius: 6px; cursor: pointer; background: none;"
                 >
             </div>
         </div>
@@ -277,13 +275,6 @@ const props = defineProps<{
     onEntriesReordered: () => void;
     onEntriesChanged: () => void;
 }>();
-
-const color = computed({
-    get: () => props.form.color,
-    set: (v: string) => {
-        props.form.color = v;
-    },
-});
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
