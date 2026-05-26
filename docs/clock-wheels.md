@@ -118,8 +118,9 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
   - File: `frontend/components/Stations/Common/CreateEventModal.vue`
 
 ### Tests (partial)
-- A small unit test was added as a placeholder around date range overlap behavior.
-  - File: `tests/Unit/ScheduleConflictDateRangeTest.php`
+- Date range overlap helper: `tests/Unit/ScheduleConflictDateRangeTest.php`
+- Clock wheel schedule activation (overnight, play-once, window boundaries): `tests/Unit/ClockWheelScheduleActivationTest.php`
+- Clock wheel API (CRUD, must-schedule, overlap rejection, slots, schedule feed): `tests/Functional/Api_Stations_ClockWheelsCest.php`
 
 ## Known limitations / gaps (to address next)
 
@@ -138,12 +139,7 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
 
 ### 1) Fix and harden current changes
 - Run PHP lint/format/static analysis in the container CI environment (`phpcs`, `phpstan`).
-- Add at least one functional/API test:
-  - create wheel
-  - PUT slots with `position_seconds`
-  - attach schedule item
-  - confirm schedule feed includes `edit_url`
-  - confirm overlap save is rejected
+- API/schedule tests added (see Tests section above); run `composer run codeception` in Docker to verify.
 
 ### 2) Improve conflict checker correctness
 - Add a dedicated test suite for:

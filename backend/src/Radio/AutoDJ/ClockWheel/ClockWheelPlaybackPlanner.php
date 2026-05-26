@@ -301,7 +301,18 @@ final class ClockWheelPlaybackPlanner
                     $a->getCalculatedLength() <=> $b->getCalculatedLength()
             );
 
-            return [$candidates[0]];
+            $shortest = $candidates[0];
+            $this->logger->warning(
+                'Clock Wheel: no track fits the available window; using shortest music/talk candidate.',
+                [
+                    'available_seconds' => $maxDuration,
+                    'media_id' => $shortest->id,
+                    'effective_length' => $shortest->getCalculatedLength(),
+                    'slot_type' => $slot->type?->value,
+                ]
+            );
+
+            return [$shortest];
         }
 
         return [];
