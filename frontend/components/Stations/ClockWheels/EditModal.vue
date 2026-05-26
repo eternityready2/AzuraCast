@@ -61,8 +61,6 @@ import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
 import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
-import type {ClockWheelScheduleRow} from '~/components/Stations/ClockWheels/Form/ScheduleRow.vue';
-import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
 
 interface ClockWheelEntry {
     slot_value: string;  // "type:music" | "type:talk" | ... | "cat:5"
@@ -100,7 +98,6 @@ const blankForm = {
 
 const form = ref({...blankForm});
 const entries = reactive<ClockWheelEntry[]>([]);
-const scheduleItems = ref<ClockWheelScheduleRow[]>([]);
 
 const {r$} = useAppRegle(form, {
     name: {required},
@@ -119,7 +116,6 @@ const removeEntry = (index: number) => {
 const resetForm = () => {
     form.value = {...blankForm};
     entries.splice(0, entries.length);
-    scheduleItems.value.splice(0, scheduleItems.value.length);
 };
 
 const populateForm = (data: Record<string, unknown>) => {
@@ -130,54 +126,12 @@ const populateForm = (data: Record<string, unknown>) => {
         );
         entries.splice(0, entries.length, ...converted);
     }
-    if (Array.isArray(data.schedule_items)) {
-        scheduleItems.value.splice(0, scheduleItems.value.length, ...(data.schedule_items as ClockWheelScheduleRow[]).map((item: Record<string, unknown>) => {
-            const endType = item.recurrence_end_type ?? 'never';
-            const merged: Record<string, unknown> = {
-                ...item,
-                recurrence_type: item.recurrence_type ?? 'weekly',
-                recurrence_interval: item.recurrence_interval ?? 1,
-                recurrence_end_type: (endType === 'on_date' ? 'never' : endType) as string,
-                recurrence_end_after: endType === 'after' ? (item.recurrence_end_after ?? null) : null,
-                recurrence_end_date: null
-            };
-            if (endType === 'after') {
-                merged.end_date = null;
-            }
-            if (merged.recurrence_type === 'monthly' && merged.recurrence_monthly_pattern === 'day_of_week' && merged.recurrence_monthly_day_of_week != null && (!merged.days || (merged.days as number[]).length === 0)) {
-                merged.days = [Number(merged.recurrence_monthly_day_of_week)];
-            }
-            return merged;
-        }));
-    }
 };
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({...valueToSlot(e.slot_value), algorithm: e.algorithm}));
-    const schedule_items = scheduleItems.value.map((item) => {
-        const out = {...item};
-        out.recurrence_type = item.recurrence_type ?? 'weekly';
-        out.recurrence_interval = (item.recurrence_type === 'biweekly' ? 2 : Number(item.recurrence_interval)) || 1;
-        out.recurrence_end_type = item.recurrence_end_type ?? 'never';
-        out.recurrence_end_after = (item.recurrence_end_type === 'after' && item.recurrence_end_after != null)
-            ? Number(item.recurrence_end_after) : null;
-        out.recurrence_end_date = null;
-        if (item.recurrence_end_type === 'after') {
-            out.end_date = null;
-        }
-        const normalizedDays = normalizeStationScheduleDays(item.days);
-        if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'date') {
-            out.days = [];
-        } else {
-            out.days = normalizedDays;
-        }
-        if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'day_of_week' && normalizedDays.length > 0) {
-            out.recurrence_monthly_day_of_week = normalizedDays[0];
-        }
-        return out;
-    });
-    return {valid, data: {...form.value, slots, schedule_items}};
+    const slots = entries.map((e) => ({...valueToSlot(e.slot_value), algorithm: e.algorithm    }));
+    return {valid, data: {...form.value, slots}};
 };
 
 const langTitle = computed(() =>
