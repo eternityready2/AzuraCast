@@ -10,21 +10,12 @@
 
         <div class="mb-4">
             <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
-            <div class="d-flex align-items-center gap-2">
-                <div
-                    class="color-swatch-input"
-                    :style="{ backgroundColor: form.color }"
-                    style="width: 3rem; height: 3rem; border: 2px solid #555; border-radius: 6px; cursor: pointer;"
-                    @click="colorInput?.click()"
-                />
+            <div>
                 <input
                     id="color"
-                    ref="colorInput"
-                    :value="form.color"
+                    v-model="form.color"
                     type="color"
-                    class="form-control form-control-color d-none"
-                    style="width: 3rem; height: 3rem; padding: 0.15rem;"
-                    @input="onColorInput"
+                    style="width: 3rem; height: 3rem; padding: 0.15rem; border: 2px solid #555; border-radius: 6px; cursor: pointer; background: none;"
                 />
             </div>
         </div>
@@ -278,12 +269,6 @@ const props = defineProps<{
     onEntriesReordered: () => void;
     onEntriesChanged: () => void;
 }>();
-
-const colorInput = useTemplateRef<HTMLInputElement>('colorInput');
-
-const onColorInput = (event: Event) => {
-    props.form.color = (event.target as HTMLInputElement).value;
-};
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
