@@ -24,10 +24,7 @@ final class Version20260519120000 extends AbstractMigration
             'CREATE INDEX IF NOT EXISTS idx_scws_wheel_position
              ON station_clock_wheel_slots (clock_wheel_id, position_seconds, slot_order)'
         );
-    }
 
-    public function postUp(Schema $schema): void
-    {
         // Spread existing ordered slots ~5 minutes apart so legacy wheels keep working.
         $this->addSql(
             'UPDATE station_clock_wheel_slots
