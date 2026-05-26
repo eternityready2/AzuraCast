@@ -15,7 +15,10 @@
                 :entries="entries"
                 :add-entry="addEntry"
                 :remove-entry="removeEntry"
-                @update:color="form.color = $event"
+                :duplicate-entry="duplicateEntry"
+                :insert-entry-after="insertEntryAfter"
+                :on-entries-reordered="onEntriesReordered"
+                :on-entries-changed="onEntriesChanged"
             />
         </tabs>
 
@@ -61,10 +64,16 @@ import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
 import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
+import {
+    applyDragOrderToPositions,
+    sortClockWheelEntries,
+} from '~/functions/clockWheelPosition.ts';
 
 interface ClockWheelEntry {
-    slot_value: string;  // "type:music" | "type:talk" | ... | "cat:5"
+    slot_value: string;
     algorithm: string;
+    position_seconds: number;
+    duration_seconds: number | null;
 }
 
 /** Convert a raw slot from the API (type + category_id) to a combined slot_value. */
@@ -105,12 +114,78 @@ const {r$} = useAppRegle(form, {
     is_active: {},
 });
 
+const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
+    slot_value: 'type:music',
+    algorithm: 'random',
+    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
+    duration_seconds: null,
+});
+
 const addEntry = () => {
-    entries.push({slot_value: 'type:music', algorithm: 'random'});
+    sortClockWheelEntries(entries);
+    const lastPosition = entries.length > 0
+        ? entries[entries.length - 1].position_seconds + 300
+        : 0;
+    entries.push(defaultEntry(lastPosition));
+    sortClockWheelEntries(entries);
 };
 
 const removeEntry = (index: number) => {
     entries.splice(index, 1);
+};
+
+const duplicateEntry = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 60;
+    if (next && position >= next.position_seconds) {
+        position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+    }
+    if (!next) {
+        position = Math.min(3599, source.position_seconds + 300);
+    }
+
+    entries.push({
+        ...source,
+        position_seconds: position,
+    });
+    sortClockWheelEntries(entries);
+};
+
+const insertEntryAfter = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 300;
+    if (next) {
+        position = Math.min(position, next.position_seconds - 1);
+        if (position <= source.position_seconds) {
+            position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+        }
+    } else {
+        position = Math.min(3599, position);
+    }
+
+    entries.splice(index + 1, 0, defaultEntry(position));
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesReordered = () => {
+    applyDragOrderToPositions(entries);
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesChanged = () => {
+    sortClockWheelEntries(entries);
 };
 
 const resetForm = () => {
@@ -121,16 +196,33 @@ const resetForm = () => {
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, data);
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {type?: string | null; category_id?: number | null; algorithm?: string}[]).map(
-            (s) => ({slot_value: slotToValue(s), algorithm: s.algorithm ?? 'random'})
+        const converted = (data.slots as {
+            type?: string | null;
+            category_id?: number | null;
+            algorithm?: string;
+            position_seconds?: number;
+            duration_seconds?: number | null;
+        }[]).map(
+            (s) => ({
+                slot_value: slotToValue(s),
+                algorithm: s.algorithm ?? 'random',
+                position_seconds: s.position_seconds ?? 0,
+                duration_seconds: s.duration_seconds ?? null,
+            })
         );
         entries.splice(0, entries.length, ...converted);
+        sortClockWheelEntries(entries);
     }
 };
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({...valueToSlot(e.slot_value), algorithm: e.algorithm    }));
+    const slots = entries.map((e) => ({
+        ...valueToSlot(e.slot_value),
+        algorithm: e.algorithm,
+        position_seconds: e.position_seconds,
+        duration_seconds: e.duration_seconds,
+    }));
     return {valid, data: {...form.value, slots}};
 };
 
