@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\Schedule;
 
-use App\Entity\Repository\StationScheduleRepository;
+use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Entity\Enums\RecurrenceEndType;
 use App\Entity\Enums\RecurrenceMonthlyPattern;
 use App\Entity\Enums\RecurrenceType;
@@ -30,7 +30,7 @@ final class ScheduleConflictChecker
     private const int VALIDATION_WINDOW_DAYS = 90;
 
     public function __construct(
-        private readonly StationScheduleRepository $scheduleRepo,
+        private readonly ReloadableEntityManagerInterface $em,
         private readonly Scheduler $scheduler,
     ) {
     }
@@ -44,7 +44,7 @@ final class ScheduleConflictChecker
         StationPlaylist|StationStreamer|StationClockWheel $relation,
         array $items,
     ): void {
-        $existing = $this->scheduleRepo->getAllScheduledItemsForStation($station);
+        $existing = $this->getAllScheduledItemsForStation($station);
 
         $candidates = [];
         foreach ($items as $item) {
@@ -89,7 +89,7 @@ final class ScheduleConflictChecker
     ): bool {
         $tz = $station->getTimezoneObject();
 
-        foreach ($this->scheduleRepo->getAllScheduledItemsForStation($station) as $schedule) {
+        foreach ($this->getAllScheduledItemsForStation($station) as $schedule) {
             if ($schedule->clock_wheel !== null) {
                 continue;
             }
@@ -100,6 +100,26 @@ final class ScheduleConflictChecker
         }
 
         return false;
+    }
+
+    /**
+     * @return StationSchedule[]
+     */
+    private function getAllScheduledItemsForStation(Station $station): array
+    {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT ssc, sp, sst, scw
+                FROM App\Entity\StationSchedule ssc
+                LEFT JOIN ssc.playlist sp
+                LEFT JOIN ssc.streamer sst
+                LEFT JOIN ssc.clock_wheel scw
+                WHERE (sp.station = :station AND sp.is_jingle = 0 AND sp.is_enabled = 1)
+                OR (sst.station = :station AND sst.is_active = 1)
+                OR (scw.station = :station AND scw.is_active = 1)
+            DQL
+        )->setParameter('station', $station)
+            ->execute();
     }
 
     private function schedulesOverlap(

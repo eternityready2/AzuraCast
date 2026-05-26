@@ -10,7 +10,7 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
-use App\Entity\Repository\StationScheduleRepository;
+use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Exception\ValidationException;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\Schedule\ScheduleConflictChecker;
@@ -230,11 +230,14 @@ final class ScheduleConflictCheckerTest extends Unit
      */
     private function makeChecker(array $existing): ScheduleConflictChecker
     {
-        $repo = $this->createMock(StationScheduleRepository::class);
-        $repo->method('getAllScheduledItemsForStation')
-            ->willReturn($existing);
+        $query = $this->createMock(\Doctrine\ORM\Query::class);
+        $query->method('setParameter')->willReturnSelf();
+        $query->method('execute')->willReturn($existing);
 
-        return new ScheduleConflictChecker($repo, $this->scheduler);
+        $em = $this->createMock(ReloadableEntityManagerInterface::class);
+        $em->method('createQuery')->willReturn($query);
+
+        return new ScheduleConflictChecker($em, $this->scheduler);
     }
 
     private function makeClockWheel(int $id): StationClockWheel
