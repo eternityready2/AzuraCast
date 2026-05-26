@@ -13,18 +13,19 @@
             <div class="d-flex align-items-center gap-2">
                 <div
                     class="color-swatch-input"
-                    :style="{ backgroundColor: color.value }"
+                    :style="{ backgroundColor: form.color }"
                     style="width: 3rem; height: 3rem; border: 2px solid #555; border-radius: 6px; cursor: pointer;"
                     @click="colorInput?.click()"
                 />
                 <input
                     id="color"
                     ref="colorInput"
+                    :value="form.color"
                     type="color"
                     class="form-control form-control-color d-none"
                     style="width: 3rem; height: 3rem; padding: 0.15rem;"
-                    @input="color.value = ($event.target as HTMLInputElement).value"
-                >
+                    @input="onColorInput"
+                />
             </div>
         </div>
 
@@ -244,9 +245,7 @@
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import Tab from '~/components/Common/Tab.vue';
-import IconIcAdd from '~icons/ic/baseline-add';
-import IconIcCopy from '~icons/ic/baseline-content-copy';
-import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
+import {ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
@@ -282,12 +281,9 @@ const props = defineProps<{
 
 const colorInput = useTemplateRef<HTMLInputElement>('colorInput');
 
-const color = computed({
-    get: () => props.form.color,
-    set: (v: string) => {
-        props.form.color = v;
-    },
-});
+const onColorInput = (event: Event) => {
+    props.form.color = (event.target as HTMLInputElement).value;
+};
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
