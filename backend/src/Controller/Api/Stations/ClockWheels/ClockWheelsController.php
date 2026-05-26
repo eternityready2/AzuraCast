@@ -382,6 +382,12 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         }
         $return['slots'] = $slotsOut;
 
+        $scheduleOut = [];
+        foreach ($this->scheduleRepo->findByRelation($record) as $scheduleItem) {
+            $scheduleOut[] = $this->toArray($scheduleItem);
+        }
+        $return['schedule_items'] = $scheduleOut;
+
         $router = $request->getRouter();
         $isInternal = $request->isInternal();
 

@@ -8,7 +8,7 @@
             />
         </div>
 
-        <div class="mb-4">
+        <div class="mb-3">
             <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
             <div>
                 <input
@@ -18,6 +18,18 @@
                     style="width: 3rem; height: 3rem; padding: 0.15rem; border: 2px solid #555; border-radius: 6px; cursor: pointer; background: none;"
                 />
             </div>
+        </div>
+
+        <form-group-checkbox
+            id="is_active"
+            class="mb-3"
+            :field="r$.is_active"
+            :label="$gettext('Active')"
+            :description="$gettext('Inactive wheels are saved but do not run on-air until scheduled on the station Schedule page.')"
+        />
+
+        <div class="alert alert-info py-2 mb-4">
+            {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
         </div>
 
         <div class="mb-1">
@@ -235,6 +247,7 @@
 
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
+import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
 import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';

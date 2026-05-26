@@ -55,9 +55,9 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
      * @before setupComplete
      * @before login
      */
-    public function activeClockWheelRequiresSchedule(FunctionalTester $I): void
+    public function activeClockWheelMayExistWithoutSchedule(FunctionalTester $I): void
     {
-        $I->wantTo('Reject an active clock wheel with no schedule items (must-schedule).');
+        $I->wantTo('Allow an active clock wheel with no schedule items (scheduling is done on the station calendar).');
 
         $station = $this->getTestStation();
         $baseUrl = '/api/station/' . $station->id . '/clock-wheels';
@@ -68,8 +68,11 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
             'is_active' => true,
         ]);
 
-        $I->seeResponseCodeIs(400);
-        $I->seeResponseContains('scheduled time');
+        $I->seeResponseCodeIs(200);
+        $I->seeResponseContainsJson([
+            'name' => 'Unscheduled Active Wheel',
+            'is_active' => true,
+        ]);
     }
 
     /**
