@@ -15,6 +15,10 @@
                 :entries="entries"
                 :add-entry="addEntry"
                 :remove-entry="removeEntry"
+                :duplicate-entry="duplicateEntry"
+                :insert-entry-after="insertEntryAfter"
+                :on-entries-reordered="onEntriesReordered"
+                :on-entries-changed="onEntriesChanged"
             />
             <FormSchedule v-model:schedule-items="scheduleItems" />
         </tabs>
@@ -64,6 +68,10 @@ import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entri
 import FormSchedule from '~/components/Stations/ClockWheels/Form/Schedule.vue';
 import type {PlaylistScheduleRow} from '~/components/Stations/Common/scheduleItemDefaults.ts';
 import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
+import {
+    applyDragOrderToPositions,
+    sortClockWheelEntries,
+} from '~/functions/clockWheelPosition.ts';
 
 interface ClockWheelEntry {
     slot_value: string;
@@ -111,20 +119,78 @@ const {r$} = useAppRegle(form, {
     is_active: {},
 });
 
+const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
+    slot_value: 'type:music',
+    algorithm: 'random',
+    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
+    duration_seconds: null,
+});
+
 const addEntry = () => {
+    sortClockWheelEntries(entries);
     const lastPosition = entries.length > 0
         ? entries[entries.length - 1].position_seconds + 300
         : 0;
-    entries.push({
-        slot_value: 'type:music',
-        algorithm: 'random',
-        position_seconds: Math.min(3599, lastPosition),
-        duration_seconds: null,
-    });
+    entries.push(defaultEntry(lastPosition));
+    sortClockWheelEntries(entries);
 };
 
 const removeEntry = (index: number) => {
     entries.splice(index, 1);
+};
+
+const duplicateEntry = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 60;
+    if (next && position >= next.position_seconds) {
+        position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+    }
+    if (!next) {
+        position = Math.min(3599, source.position_seconds + 300);
+    }
+
+    entries.push({
+        ...source,
+        position_seconds: position,
+    });
+    sortClockWheelEntries(entries);
+};
+
+const insertEntryAfter = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 300;
+    if (next) {
+        position = Math.min(position, next.position_seconds - 1);
+        if (position <= source.position_seconds) {
+            position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+        }
+    } else {
+        position = Math.min(3599, position);
+    }
+
+    entries.splice(index + 1, 0, defaultEntry(position));
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesReordered = () => {
+    applyDragOrderToPositions(entries);
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesChanged = () => {
+    sortClockWheelEntries(entries);
 };
 
 const resetForm = () => {
@@ -151,6 +217,7 @@ const populateForm = (data: Record<string, unknown>) => {
             })
         );
         entries.splice(0, entries.length, ...converted);
+        sortClockWheelEntries(entries);
     }
     if (Array.isArray(data.schedule_items)) {
         scheduleItems.value.splice(0, scheduleItems.value.length, ...(data.schedule_items as PlaylistScheduleRow[]).map((item: Record<string, unknown>) => {

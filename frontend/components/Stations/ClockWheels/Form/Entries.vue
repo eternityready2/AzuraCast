@@ -8,52 +8,100 @@
             />
         </div>
 
-        <!-- Color swatch -->
         <div class="mb-4">
             <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
-        <div>
-            <div
-                class="color-swatch-input"
-                :style="{ backgroundColor: color.value }"
-                style="width: 3rem; height: 3rem; border: 2px solid #555; border-radius: 6px;"
-            />
-            <input
-                id="color"
-                type="color"
-                class="form-control form-control-color d-none"
-                style="width: 3rem; height: 3rem; padding: 0.15rem;"
-                @input="color.value = ($event.target as HTMLInputElement).value"
-            />
-        </div>
+            <div>
+                <div
+                    class="color-swatch-input"
+                    :style="{ backgroundColor: color.value }"
+                    style="width: 3rem; height: 3rem; border: 2px solid #555; border-radius: 6px;"
+                />
+                <input
+                    id="color"
+                    type="color"
+                    class="form-control form-control-color d-none"
+                    style="width: 3rem; height: 3rem; padding: 0.15rem;"
+                    @input="color.value = ($event.target as HTMLInputElement).value"
+                >
+            </div>
         </div>
 
-        <!-- Entries section -->
         <div class="mb-1">
             <div class="d-flex align-items-center justify-content-between mb-2">
                 <span class="fw-semibold">
                     {{ $gettext('Clockwheel entries') }} ({{ entries.length }})
                 </span>
+                <small class="text-muted">
+                    {{ $gettext('Drag to reorder; times stay on the hour unless you edit them.') }}
+                </small>
             </div>
 
-            <table class="table table-sm table-bordered mb-0">
+            <div
+                v-if="entries.length > 0"
+                class="clock-wheel-timeline mb-3"
+                role="img"
+                :aria-label="$gettext('Hour timeline showing anchor positions')"
+            >
+                <div class="clock-wheel-timeline__track">
+                    <span class="clock-wheel-timeline__label clock-wheel-timeline__label--start">0:00</span>
+                    <span class="clock-wheel-timeline__label clock-wheel-timeline__label--end">59:59</span>
+                    <button
+                        v-for="(entry, index) in sortedEntries"
+                        :key="'marker-' + index"
+                        type="button"
+                        class="clock-wheel-timeline__marker"
+                        :style="{ left: timelinePercent(entry.position_seconds) + '%' }"
+                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry.slot_value)"
+                        @click="focusRow(entries.indexOf(entry))"
+                    />
+                </div>
+            </div>
+
+            <div
+                v-if="timelineWarnings.length > 0"
+                class="alert alert-warning py-2 small mb-2"
+            >
+                <ul class="mb-0 ps-3">
+                    <li
+                        v-for="(warn, wi) in timelineWarnings"
+                        :key="wi"
+                    >
+                        {{ formatPosition(entries[warn.index]?.position_seconds ?? 0) }}: {{ warn.message }}
+                    </li>
+                </ul>
+            </div>
+
+            <table class="table table-sm table-bordered mb-0 clock-wheel-entries-table">
                 <thead>
                     <tr>
-                        <th class="text-uppercase small">{{ $gettext('Position (m:s)') }}</th>
-                        <th class="text-uppercase small">{{ $gettext('Type or Category') }}</th>
-                        <th class="text-uppercase small">{{ $gettext('Algorithm') }}</th>
-                        <th class="text-uppercase small">{{ $gettext('Max sec') }}</th>
+                        <th
+                            class="text-uppercase small"
+                            style="width: 2rem;"
+                        />
+                        <th class="text-uppercase small">
+                            {{ $gettext('Position (m:s)') }}
+                        </th>
+                        <th class="text-uppercase small">
+                            {{ $gettext('Type or Category') }}
+                        </th>
+                        <th class="text-uppercase small">
+                            {{ $gettext('Algorithm') }}
+                        </th>
+                        <th class="text-uppercase small">
+                            {{ $gettext('Max sec') }}
+                        </th>
                         <th
                             class="text-uppercase small text-center"
-                            style="width: 60px;"
+                            style="width: 7rem;"
                         >
-                            {{ $gettext('Del') }}
+                            {{ $gettext('Actions') }}
                         </th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="5"
+                            colspan="6"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -61,8 +109,13 @@
                     </tr>
                     <tr
                         v-for="(entry, index) in entries"
-                        :key="index"
+                        :key="rowKey(entry, index)"
+                        :class="{ 'table-warning': rowHasWarning(index) }"
+                        :data-entry-index="index"
                     >
+                        <td class="text-center align-middle drag-handle text-muted">
+                            ⋮⋮
+                        </td>
                         <td>
                             <input
                                 :value="formatPosition(entry.position_seconds)"
@@ -78,11 +131,21 @@
                                 class="form-select form-select-sm"
                             >
                                 <optgroup :label="$gettext('Types')">
-                                    <option value="type:music">{{ $gettext('Music (music and copyrighted material)') }}</option>
-                                    <option value="type:talk">{{ $gettext('Talk (sermons, speeches, and live recordings)') }}</option>
-                                    <option value="type:id">{{ $gettext('ID (station identification such as sweepers and jingles)') }}</option>
-                                    <option value="type:promo">{{ $gettext('Promo (station promotion that is not considered an ID)') }}</option>
-                                    <option value="type:ad">{{ $gettext('Ad (advert replacement files)') }}</option>
+                                    <option value="type:music">
+                                        {{ $gettext('Music (music and copyrighted material)') }}
+                                    </option>
+                                    <option value="type:talk">
+                                        {{ $gettext('Talk (sermons, speeches, and live recordings)') }}
+                                    </option>
+                                    <option value="type:id">
+                                        {{ $gettext('ID (station identification such as sweepers and jingles)') }}
+                                    </option>
+                                    <option value="type:promo">
+                                        {{ $gettext('Promo (station promotion that is not considered an ID)') }}
+                                    </option>
+                                    <option value="type:ad">
+                                        {{ $gettext('Ad (advert replacement files)') }}
+                                    </option>
                                 </optgroup>
                                 <optgroup
                                     v-if="categories.length > 0"
@@ -103,12 +166,24 @@
                                 v-model="entry.algorithm"
                                 class="form-select form-select-sm"
                             >
-                                <option value="random">{{ $gettext('Random') }}</option>
-                                <option value="oldest_album">{{ $gettext('Oldest Album') }}</option>
-                                <option value="oldest_artist">{{ $gettext('Oldest Artist') }}</option>
-                                <option value="oldest_track">{{ $gettext('Oldest Track') }}</option>
-                                <option value="most_recent_album">{{ $gettext('Most Recent Album') }}</option>
-                                <option value="most_recent_artist">{{ $gettext('Most Recent Artist') }}</option>
+                                <option value="random">
+                                    {{ $gettext('Random') }}
+                                </option>
+                                <option value="oldest_album">
+                                    {{ $gettext('Oldest Album') }}
+                                </option>
+                                <option value="oldest_artist">
+                                    {{ $gettext('Oldest Artist') }}
+                                </option>
+                                <option value="oldest_track">
+                                    {{ $gettext('Oldest Track') }}
+                                </option>
+                                <option value="most_recent_album">
+                                    {{ $gettext('Most Recent Album') }}
+                                </option>
+                                <option value="most_recent_artist">
+                                    {{ $gettext('Most Recent Artist') }}
+                                </option>
                             </select>
                         </td>
                         <td>
@@ -121,14 +196,33 @@
                                 :placeholder="$gettext('Auto')"
                             >
                         </td>
-                        <td class="text-center">
-                            <button
-                                type="button"
-                                class="btn btn-sm btn-danger"
-                                @click="props.removeEntry(index)"
-                            >
-                                &times;
-                            </button>
+                        <td class="text-center align-middle">
+                            <div class="btn-group btn-group-sm">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="$gettext('Insert entry after this anchor')"
+                                    @click="props.insertEntryAfter(index)"
+                                >
+                                    <icon-ic-add />
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="$gettext('Duplicate this entry')"
+                                    @click="props.duplicateEntry(index)"
+                                >
+                                    <icon-ic-copy />
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-danger"
+                                    :title="$gettext('Delete')"
+                                    @click="props.removeEntry(index)"
+                                >
+                                    &times;
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
@@ -148,30 +242,47 @@
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, ref} from 'vue';
+import IconIcAdd from '~icons/ic/baseline-add';
+import IconIcCopy from '~icons/ic/baseline-content-copy';
+import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
+import {useDraggable} from 'vue-draggable-plus';
+import {
+    formatClockWheelPosition,
+    getClockWheelTimelineWarnings,
+    parseClockWheelPosition,
+    slotValueShortLabel,
+    timelinePercent,
+} from '~/functions/clockWheelPosition.ts';
 
 const {$gettext} = useTranslate();
+
+export interface ClockWheelEntryRow {
+    slot_value: string;
+    algorithm: string;
+    position_seconds: number;
+    duration_seconds: number | null;
+}
 
 const props = defineProps<{
     form: {name: string; color: string; is_active: boolean};
     r$: {name: {required: unknown}; color: object; is_active: object};
-    entries: {
-        slot_value: string;
-        algorithm: string;
-        position_seconds: number;
-        duration_seconds: number | null;
-    }[];
+    entries: ClockWheelEntryRow[];
     addEntry: () => void;
     removeEntry: (index: number) => void;
+    duplicateEntry: (index: number) => void;
+    insertEntryAfter: (index: number) => void;
+    onEntriesReordered: () => void;
+    onEntriesChanged: () => void;
 }>();
 
-/** Two-way binding to form.color without mutating props directly */
 const color = computed({
     get: () => props.form.color,
-    set: (v: string) => { props.form.color = v; },
+    set: (v: string) => {
+        props.form.color = v;
+    },
 });
 
 const {getStationApiUrl} = useApiRouter();
@@ -179,35 +290,116 @@ const {axios} = useAxios();
 const categories = ref<{id: number; name: string}[]>([]);
 
 void axios.get(getStationApiUrl('/media-categories').value).then(
-    (resp) => { categories.value = resp.data?.rows ?? resp.data ?? []; },
-    () => { categories.value = []; }
+    (resp) => {
+        categories.value = resp.data?.rows ?? resp.data ?? [];
+    },
+    () => {
+        categories.value = [];
+    }
 );
 
-const formatPosition = (totalSeconds: number): string => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins}:${String(secs).padStart(2, '0')}`;
-};
+const sortedEntries = computed(() =>
+    [...props.entries].sort((a, b) => a.position_seconds - b.position_seconds)
+);
 
-const parsePosition = (value: string): number => {
-    const parts = value.trim().split(':');
-    if (parts.length !== 2) {
-        return 0;
-    }
-    const mins = parseInt(parts[0], 10);
-    const secs = parseInt(parts[1], 10);
-    if (Number.isNaN(mins) || Number.isNaN(secs)) {
-        return 0;
-    }
-    return Math.min(3599, Math.max(0, mins * 60 + secs));
-};
+const timelineWarnings = computed(() =>
+    getClockWheelTimelineWarnings(props.entries, $gettext)
+);
 
-const onPositionChange = (
-    entry: {position_seconds: number},
-    event: Event
-) => {
+const $tbody = useTemplateRef('$tbody');
+
+onMounted(() => {
+    if ($tbody.value === null) {
+        return;
+    }
+
+    useDraggable($tbody, toRef(props, 'entries'), {
+        handle: '.drag-handle',
+        animation: 150,
+        onEnd() {
+            props.onEntriesReordered();
+        },
+    });
+});
+
+const formatPosition = formatClockWheelPosition;
+const slotLabel = (slotValue: string) => slotValueShortLabel(slotValue, categories.value);
+
+const rowKey = (entry: ClockWheelEntryRow, index: number) =>
+    `${index}-${entry.position_seconds}-${entry.slot_value}`;
+
+const rowHasWarning = (index: number) =>
+    timelineWarnings.value.some((w) => w.index === index);
+
+const onPositionChange = (entry: ClockWheelEntryRow, event: Event) => {
     const target = event.target as HTMLInputElement;
-    entry.position_seconds = parsePosition(target.value);
+    entry.position_seconds = parseClockWheelPosition(target.value);
     target.value = formatPosition(entry.position_seconds);
+    props.onEntriesChanged();
+};
+
+const focusRow = (index: number) => {
+    if (index < 0) {
+        return;
+    }
+    const row = $tbody.value?.querySelector(`tr[data-entry-index="${index}"]`);
+    row?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 };
 </script>
+
+<style lang="scss" scoped>
+.clock-wheel-timeline__track {
+    position: relative;
+    height: 2rem;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.375rem;
+}
+
+.clock-wheel-timeline__label {
+    position: absolute;
+    top: 100%;
+    font-size: 0.65rem;
+    color: var(--bs-secondary-color);
+    margin-top: 0.15rem;
+
+    &--start {
+        left: 0;
+    }
+
+    &--end {
+        right: 0;
+    }
+}
+
+.clock-wheel-timeline__marker {
+    position: absolute;
+    top: 50%;
+    width: 0.65rem;
+    height: 1.25rem;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 2px;
+    background: var(--bs-primary);
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    opacity: 0.85;
+
+    &:hover,
+    &:focus {
+        opacity: 1;
+        outline: 2px solid var(--bs-primary);
+        outline-offset: 2px;
+    }
+}
+
+.clock-wheel-entries-table.sortable,
+.clock-wheel-entries-table .drag-handle {
+    cursor: grab;
+}
+
+.clock-wheel-entries-table .drag-handle:active {
+    cursor: grabbing;
+}
+</style>

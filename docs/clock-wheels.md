@@ -155,9 +155,11 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
 - Per-slot minimum window before deferring (music/talk/short-form).
 - Unit tests: `tests/Unit/ClockWheelPlaybackPlannerTest.php`
 
-### 4) UX upgrade for fast edits
-- Add a lightweight “timeline list” editor first (sortable rows by time + quick duplicate/insert).
-- Then a visual wheel (drag/resize), still backed by `position_seconds`.
+### 4) UX upgrade for fast edits — **timeline list done**
+- Hour timeline bar with clickable anchors (`frontend/components/Stations/ClockWheels/Form/Entries.vue`).
+- Drag-to-reorder rows (preserves anchor times, reassigns to new order).
+- Duplicate / insert-after actions; overlap/gap warnings.
+- Optional later: full circular drag/resize wheel UI (same `position_seconds` backend).
 
 ## Operational validation (how to check it works)
 - Create a wheel with anchors:
