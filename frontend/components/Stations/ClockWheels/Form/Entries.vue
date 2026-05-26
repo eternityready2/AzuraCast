@@ -24,6 +24,7 @@
             </div>
         </div>
 
+        <!-- Entries section -->
         <div class="mb-1">
             <div class="d-flex align-items-center justify-content-between mb-2">
                 <span class="fw-semibold">
@@ -170,18 +171,14 @@
                                 <option value="oldest_album">
                                     {{ $gettext('Oldest Album') }}
                                 </option>
-                                <option value="oldest_artist">
-                                    {{ $gettext('Oldest Artist') }}
-                                </option>
-                                <option value="oldest_track">
-                                    {{ $gettext('Oldest Track') }}
-                                </option>
-                                <option value="most_recent_album">
-                                    {{ $gettext('Most Recent Album') }}
-                                </option>
-                                <option value="most_recent_artist">
-                                    {{ $gettext('Most Recent Artist') }}
-                                </option>
+                                        {{ $gettext('Oldest Track') }}
+                                    </option>
+                                    <option value="most_recent_album">
+                                        {{ $gettext('Most Recent Album') }}
+                                    </option>
+                                    <option value="most_recent_artist">
+                                        {{ $gettext('Most Recent Artist') }}
+                                    </option>
                             </select>
                         </td>
                         <td>
@@ -221,6 +218,7 @@
                                     &times;
                                 </button>
                             </div>
+                        </td>
                         </td>
                     </tr>
                 </tbody>
@@ -289,108 +287,4 @@ void axios.get(getStationApiUrl('/media-categories').value).then(
     }
 );
 
-const sortedEntries = computed(() =>
-    [...props.entries].sort((a, b) => a.position_seconds - b.position_seconds)
-);
-
-const timelineWarnings = computed(() =>
-    getClockWheelTimelineWarnings(props.entries, $gettext)
-);
-
-const $tbody = useTemplateRef('$tbody');
-
-onMounted(() => {
-    if ($tbody.value === null) {
-        return;
-    }
-
-    useDraggable($tbody, toRef(props, 'entries'), {
-        handle: '.drag-handle',
-        animation: 150,
-        onEnd() {
-            props.onEntriesReordered();
-        },
-    });
-});
-
-const formatPosition = formatClockWheelPosition;
-const slotLabel = (slotValue: string) => slotValueShortLabel(slotValue, categories.value);
-
-const rowKey = (entry: ClockWheelEntryRow, index: number) =>
-    `${index}-${entry.position_seconds}-${entry.slot_value}`;
-
-const rowHasWarning = (index: number) =>
-    timelineWarnings.value.some((w) => w.index === index);
-
-const onPositionChange = (entry: ClockWheelEntryRow, event: Event) => {
-    const target = event.target as HTMLInputElement;
-    entry.position_seconds = parseClockWheelPosition(target.value);
-    target.value = formatPosition(entry.position_seconds);
-    props.onEntriesChanged();
-};
-
-const focusRow = (index: number) => {
-    if (index < 0) {
-        return;
-    }
-    const row = $tbody.value?.querySelector(`tr[data-entry-index="${index}"]`);
-    row?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-};
-</script>
-
-<style lang="scss" scoped>
-.clock-wheel-timeline__track {
-    position: relative;
-    height: 2rem;
-    background: var(--bs-secondary-bg);
-    border: 1px solid var(--bs-border-color);
-    border-radius: 0.375rem;
-}
-
-.clock-wheel-timeline__label {
-    position: absolute;
-    top: 100%;
-    font-size: 0.65rem;
-    color: var(--bs-secondary-color);
-    margin-top: 0.15rem;
-
-    &--start {
-        left: 0;
-    }
-
-    &--end {
-        right: 0;
-    }
-}
-
-.clock-wheel-timeline__marker {
-    position: absolute;
-    top: 50%;
-    width: 0.65rem;
-    height: 1.25rem;
-    margin: 0;
-    padding: 0;
-    border: none;
-    border-radius: 2px;
-    background: var(--bs-primary);
-    transform: translate(-50%, -50%);
-    cursor: pointer;
-    opacity: 0.85;
-
-    &:hover,
-    &:focus {
-        opacity: 1;
-        outline: 2px solid var(--bs-primary);
-        outline-offset: 2px;
-    }
-}
-
-.clock-wheel-entries-table.sortable,
-.clock-wheel-entries-table .drag-handle {
-    cursor: grab;
-}
-
-.clock-wheel-entries-table .drag-handle:active {
-    cursor: grabbing;
-}
-</style>
+const sortedEntries

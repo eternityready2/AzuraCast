@@ -1,5 +1,12 @@
 .git
 .github
 .run
-/node_modules
-/vendor
+.idea
+.vscode
+node_modules
+vendor
+coverage
+.nyc_output
+.eslintcache
+.phpunit.result.cache
+web/static/vite_dist

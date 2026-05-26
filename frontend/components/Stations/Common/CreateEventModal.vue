@@ -55,8 +55,8 @@
                 :description="$gettext('To play once per day, set the start and end times to the same value.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <playlist-time
-                        :id="id"
+                    <circular-time-picker
+                        :input-id="id"
                         v-model="model.$model"
                         :class="fieldClass"
                     />
@@ -71,13 +71,42 @@
                 :description="$gettext('If the end time is before the start time, the playlist will play overnight.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <playlist-time
-                        :id="id"
+                    <circular-time-picker
+                        :input-id="id"
                         v-model="model.$model"
                         :class="fieldClass"
                     />
                 </template>
             </form-group-field>
+
+            <form-markup
+                id="edit_form_duration"
+                class="col-md-4"
+                :label="$gettext('Duration')"
+                :description="$gettext('Hours:Minutes')"
+            >
+                <div class="input-group">
+                    <input
+                        v-model.number="durationHours"
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        max="23"
+                        placeholder="HH"
+                        @change="updateDurationFromHours"
+                    >
+                    <span class="input-group-text">:</span>
+                    <input
+                        v-model.number="durationMinutes"
+                        type="number"
+                        class="form-control"
+                        min="0"
+                        max="59"
+                        placeholder="MM"
+                        @change="updateDurationFromMinutes"
+                    >
+                </div>
+            </form-markup>
 
             <form-markup
                 id="station_time_zone"
@@ -108,15 +137,70 @@
                 :input-attrs="{ disabled: scheduleRow.recurrence_end_type === 'after' }"
             />
 
-            <form-group-checkbox
-                id="edit_form_loop_once"
+            <form-markup
+                id="edit_form_scheduling"
                 class="col-md-4"
-                :field="r$.loop_once"
-                :label="$gettext('Loop Once')"
-                :description="$gettext('Only loop through playlist once.')"
-            />
+                :label="$gettext('Scheduling')"
+            >
+                <div class="d-flex flex-wrap gap-3">
+                    <div class="form-check mb-0">
+                        <input
+                            id="scheduling_flexible"
+                            v-model="schedulingMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="flexible"
+                        >
+                        <label class="form-check-label" for="scheduling_flexible">
+                            {{ $gettext('Flexible') }}
+                        </label>
+                    </div>
+                    <div class="form-check mb-0">
+                        <input
+                            id="scheduling_strict"
+                            v-model="schedulingMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="strict"
+                        >
+                        <label class="form-check-label" for="scheduling_strict">
+                            {{ $gettext('Strict') }}
+                        </label>
+                    </div>
+                </div>
+                <div class="form-check mt-2">
+                    <input
+                        id="scheduling_loop_once"
+                        v-model="schedulingMode"
+                        class="form-check-input"
+                        type="radio"
+                        value="loop_once"
+                    >
+                    <label class="form-check-label" for="scheduling_loop_once">
+                        {{ $gettext('Loop Once') }}
+                    </label>
+                </div>
+            </form-markup>
         </div>
 
+        <div class="mb-3">
+            <div class="form-check">
+                <input
+                    id="edit_form_is_recurring"
+                    v-model="isRecurring"
+                    class="form-check-input"
+                    type="checkbox"
+                >
+                <label class="form-check-label" for="edit_form_is_recurring">
+                    {{ $gettext('Recurring') }}
+                </label>
+            </div>
+            <small class="form-text text-muted">
+                {{ $gettext('Schedule this event on a recurring basis.') }}
+            </small>
+        </div>
+
+        <template v-if="isRecurring">
         <!-- Days of Week -->
         <form-group-multi-check
             id="edit_form_days"
@@ -211,12 +295,13 @@
                 :label="$gettext('Stop After (occurrences)')"
             />
         </div>
+    </template>
     </modal-form>
 </template>
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
-import PlaylistTime from '~/components/Common/TimeCode.vue';
+import CircularTimePicker from '~/components/Common/CircularTimePicker.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupMultiCheck from '~/components/Form/FormGroupMultiCheck.vue';
@@ -279,12 +364,37 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 
+const schedulingMode = ref<'flexible' | 'strict' | 'loop_once'>('flexible');
+
 // Schedule row state - matches PlaylistScheduleRow interface
 const scheduleRow = ref<PlaylistScheduleRow>(createScheduleItemDefaults());
 
 const loading = ref(false);
 const error = ref<string | null>(null);
 const $modal = useTemplateRef('$modal');
+
+// Duration state
+const durationHours = ref(1);
+const durationMinutes = ref(0);
+
+// Recurring toggle
+const isRecurring = ref(false);
+
+// Update end_time from duration inputs
+const updateDuration = () => {
+    const startTime = scheduleRow.value.start_time;
+    const startHours = Math.floor(startTime / 100);
+    const startMinutes = startTime % 100;
+    const durationTotalMinutes = durationHours.value * 60 + durationMinutes.value;
+    let endTotalMinutes = startHours * 60 + startMinutes + durationTotalMinutes;
+    endTotalMinutes = endTotalMinutes % (24 * 60);
+    const endHours = Math.floor(endTotalMinutes / 60);
+    const endMinutes = endTotalMinutes % 60;
+    scheduleRow.value.end_time = endHours * 100 + endMinutes;
+};
+
+const updateDurationFromHours = () => updateDuration();
+const updateDurationFromMinutes = () => updateDuration();
 
 const currentEntityOptions = computed(() =>
     form.value.source === 'playlist' ? playlists.value : clockWheels.value
@@ -296,6 +406,14 @@ watch(currentEntityOptions, (opts) => {
         form.value.entity_id = opts[0].id;
     }
 }, {immediate: true});
+
+watch(
+    schedulingMode,
+    (mode) => {
+        scheduleRow.value.loop_once = mode !== 'flexible';
+    },
+    {immediate: true}
+);
 
 // Regle validation for schedule row
 const isMonthlyDatePattern = computed(
@@ -416,6 +534,7 @@ const recurrenceEndTypeOptions = [
 
 const clearForm = () => {
     form.value = blankForm();
+    schedulingMode.value = 'flexible';
     scheduleRow.value = createScheduleItemDefaults();
     error.value = null;
 };
