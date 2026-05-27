@@ -116,8 +116,19 @@ final class ListAction implements SingleActionInterface
         ];
 
         if ($isSearch) {
-            $cacheKeyParts[] = 'search_' . rawurlencode($searchPhraseFull);
+            $cacheKeyParts[] = 'search_' . rawurlencode($searchPhraseFull ?? '');
         }
+
+        if ($hasMediaFilters) {
+            if (null !== $filterMediaType && '' !== $filterMediaType) {
+                $cacheKeyParts[] = 'mt_' . rawurlencode($filterMediaType);
+            }
+
+            if (null !== $filterMediaCategory && '' !== $filterMediaCategory) {
+                $cacheKeyParts[] = 'mc_' . rawurlencode((string)$filterMediaCategory);
+            }
+        }
+
         $cacheKey = implode('.', $cacheKeyParts);
 
         $flushCache = Types::bool($request->getParam('flushCache'), false, true);
