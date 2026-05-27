@@ -72,7 +72,6 @@ import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 interface ClockWheelEntry {
     type: MediaTypeValue;
-    category_id: number | null;
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
@@ -102,7 +101,6 @@ const {r$} = useAppRegle(form, {
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
     type: 'music',
-    category_id: null,
     algorithm: 'random',
     position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
     duration_seconds: null,
@@ -190,14 +188,12 @@ const populateForm = (data: Record<string, unknown>) => {
     if (Array.isArray(data.slots)) {
         const converted = (data.slots as {
             type?: string | null;
-            category_id?: number | null;
             algorithm?: string;
             position_seconds?: number;
             duration_seconds?: number | null;
         }[]).map(
             (s) => ({
                 type: normalizeSlotType(s.type),
-                category_id: s.category_id ?? null,
                 algorithm: s.algorithm ?? 'random',
                 position_seconds: s.position_seconds ?? 0,
                 duration_seconds: s.duration_seconds ?? null,
@@ -212,7 +208,7 @@ const validateForm = async () => {
     const {valid} = await r$.$validate();
     const slots = entries.map((e) => ({
         type: e.type,
-        category_id: e.category_id,
+        category_id: null,
         algorithm: e.algorithm,
         position_seconds: e.position_seconds,
         duration_seconds: e.duration_seconds,

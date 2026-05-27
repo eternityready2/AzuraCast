@@ -98,7 +98,11 @@ final class ListAction implements SingleActionInterface
         $currentDir = Types::string($request->getParam('currentDirectory'));
 
         $searchPhraseFull = Types::stringOrNull($request->getParam('searchPhrase'), true);
-        $isSearch = null !== $searchPhraseFull;
+        $filterMediaType = Types::stringOrNull($request->getParam('mediaType'), true);
+        $filterMediaCategory = $request->getParam('mediaCategory');
+        $hasMediaFilters = (null !== $filterMediaType && '' !== $filterMediaType)
+            || (null !== $filterMediaCategory && '' !== $filterMediaCategory);
+        $isSearch = null !== $searchPhraseFull || $hasMediaFilters;
 
         [$searchPhrase, $playlist, $special] = $this->parseSearchQuery(
             $station,
@@ -140,6 +144,8 @@ final class ListAction implements SingleActionInterface
                 ->andWhere('sm.path LIKE :path')
                 ->setParameter('storageLocation', $station->media_storage_location)
                 ->setParameter('path', $pathLike);
+
+            $this->applyMediaLibraryFilters($mediaQueryBuilder, $filterMediaType, $filterMediaCategory);
 
             $unprocessableMediaQuery = $this->em->createQuery(
                 <<<'DQL'
@@ -409,6 +415,34 @@ final class ListAction implements SingleActionInterface
     /**
      * @return array<string, ApiStationMedia>
      */
+    private function applyMediaLibraryFilters(
+        QueryBuilder $mediaQueryBuilder,
+        ?string $filterMediaType,
+        mixed $filterMediaCategory,
+    ): void {
+        if (null !== $filterMediaType && '' !== $filterMediaType) {
+            $mediaQueryBuilder
+                ->andWhere('sm.type = :filterMediaType')
+                ->setParameter('filterMediaType', $filterMediaType);
+        }
+
+        if (null === $filterMediaCategory || '' === $filterMediaCategory) {
+            return;
+        }
+
+        if ('none' === $filterMediaCategory) {
+            $mediaQueryBuilder->andWhere('sm.category_id IS NULL');
+
+            return;
+        }
+
+        if (is_numeric($filterMediaCategory)) {
+            $mediaQueryBuilder
+                ->andWhere('sm.category_id = :filterCategoryId')
+                ->setParameter('filterCategoryId', (int)$filterMediaCategory);
+        }
+    }
+
     private function processMediaInDir(
         Station $station,
         ?QueryBuilder $qb = null

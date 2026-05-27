@@ -90,21 +90,3 @@ export function getClockWheelTimelineWarnings(
     return warnings;
 }
 
-export interface ClockWheelSlotFilter {
-    type: string;
-    category_id: number | null;
-}
-
-export function entrySlotShortLabel(
-    entry: ClockWheelSlotFilter,
-    categories: {id: number; name: string}[],
-    formatType: (type: string) => string,
-): string {
-    const typeLabel = formatType(entry.type);
-    if (entry.category_id == null) {
-        return typeLabel;
-    }
-
-    const categoryName = categories.find((c) => c.id === entry.category_id)?.name;
-    return categoryName ? `${typeLabel} · ${categoryName}` : typeLabel;
-}

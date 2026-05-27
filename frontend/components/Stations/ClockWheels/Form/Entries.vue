@@ -88,9 +88,6 @@
                             {{ $gettext('Type') }}
                         </th>
                         <th class="text-uppercase small">
-                            {{ $gettext('Category') }}
-                        </th>
-                        <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
                         </th>
                         <th class="text-uppercase small">
@@ -107,7 +104,7 @@
                 <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="7"
+                            colspan="6"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -143,23 +140,6 @@
                                     :value="opt.value"
                                 >
                                     {{ opt.label }}
-                                </option>
-                            </select>
-                        </td>
-                        <td>
-                            <select
-                                v-model="entry.category_id"
-                                class="form-select form-select-sm"
-                            >
-                                <option :value="null">
-                                    {{ $gettext('— Any —') }}
-                                </option>
-                                <option
-                                    v-for="cat in categories"
-                                    :key="cat.id"
-                                    :value="cat.id"
-                                >
-                                    {{ cat.name }}
                                 </option>
                             </select>
                         </td>
@@ -245,16 +225,13 @@
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, ref, useTemplateRef} from 'vue';
+import {computed, onMounted, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
-import {useApiRouter} from '~/functions/useApiRouter.ts';
-import {useAxios} from '~/vendor/axios.ts';
 import {useDraggable} from 'vue-draggable-plus';
 import IconIcDelete from '~icons/ic/baseline-delete';
 import IconIcAdd from '~icons/ic/baseline-add';
 import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
-    entrySlotShortLabel,
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
     parseClockWheelPosition,
@@ -266,7 +243,6 @@ const {$gettext} = useTranslate();
 
 export interface ClockWheelEntryRow {
     type: MediaTypeValue;
-    category_id: number | null;
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
@@ -286,19 +262,7 @@ const props = defineProps<{
 // IMPORTANT: Use a v-model ref so drag-reorder can mutate the array.
 const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
 
-const {getStationApiUrl} = useApiRouter();
-const {axios} = useAxios();
-const categories = ref<{id: number; name: string}[]>([]);
 const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
-
-void axios.get(getStationApiUrl('/media-categories').value).then(
-    (resp) => {
-        categories.value = resp.data?.rows ?? resp.data ?? [];
-    },
-    () => {
-        categories.value = [];
-    }
-);
 
 const sortedEntries = computed(() =>
     [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
@@ -325,11 +289,10 @@ onMounted(() => {
 });
 
 const formatPosition = formatClockWheelPosition;
-const slotLabel = (entry: ClockWheelEntryRow) =>
-    entrySlotShortLabel(entry, categories.value, (type) => formatMediaType(type, $gettext));
+const slotLabel = (entry: ClockWheelEntryRow) => formatMediaType(entry.type, $gettext);
 
 const rowKey = (entry: ClockWheelEntryRow, index: number) =>
-    `${index}-${entry.position_seconds}-${entry.type}-${entry.category_id ?? ''}`;
+    `${index}-${entry.position_seconds}-${entry.type}`;
 
 const rowHasWarning = (index: number) =>
     timelineWarnings.value.some((w) => w.index === index);

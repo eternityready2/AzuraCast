@@ -52,6 +52,67 @@
                 @relist="onTriggerRelist"
             />
 
+            <div class="row g-2 mb-3 align-items-end">
+                <div class="col-md-4">
+                    <label
+                        class="form-label small mb-1"
+                        for="media_filter_type"
+                    >
+                        {{ $gettext('Type') }}
+                    </label>
+                    <select
+                        id="media_filter_type"
+                        v-model="filterType"
+                        class="form-select form-select-sm"
+                        @change="onMediaFiltersChange"
+                    >
+                        <option value="">
+                            {{ $gettext('All types') }}
+                        </option>
+                        <option
+                            v-for="opt in mediaTypeOptions"
+                            :key="opt.value"
+                            :value="opt.value"
+                        >
+                            {{ opt.label }}
+                        </option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label
+                        class="form-label small mb-1"
+                        for="media_filter_category"
+                    >
+                        {{ $gettext('Category') }}
+                    </label>
+                    <select
+                        id="media_filter_category"
+                        v-model="filterCategory"
+                        class="form-select form-select-sm"
+                        @change="onMediaFiltersChange"
+                    >
+                        <option value="">
+                            {{ $gettext('All categories') }}
+                        </option>
+                        <option value="none">
+                            {{ $gettext('No category') }}
+                        </option>
+                        <option
+                            v-for="cat in mediaCategories"
+                            :key="cat.id"
+                            :value="String(cat.id)"
+                        >
+                            {{ cat.name }}
+                        </option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <p class="small text-muted mb-0">
+                        {{ $gettext('Filter the list, then use Select All Rows to select matching files.') }}
+                    </p>
+                </div>
+            </div>
+
             <media-toolbar
                 :batch-url="batchUrl"
                 :selected-items="selectedItems"
@@ -268,7 +329,7 @@ import StationsCommonQuota from "~/components/Stations/Common/Quota.vue";
 import AlbumArt from "~/components/Common/AlbumArt.vue";
 import PlayButton from "~/components/Common/Audio/PlayButton.vue";
 import {useTranslate} from "~/vendor/gettext";
-import {computed, ref, useTemplateRef, watch} from "vue";
+import {computed, onMounted, ref, useTemplateRef, watch} from "vue";
 import {forEach, map, partition} from "es-toolkit/compat";
 import formatFileSize from "~/functions/formatFileSize";
 import InfoCard from "~/components/Common/InfoCard.vue";
@@ -290,7 +351,8 @@ import IconIcInsertDriveFile from "~icons/ic/baseline-insert-drive-file";
 import IconIcFolder from "~icons/ic/baseline-folder";
 import IconIcImage from "~icons/ic/baseline-image";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
-import {formatMediaType} from "~/functions/mediaTypes.ts";
+import {formatMediaType, getMediaTypeOptions} from "~/functions/mediaTypes.ts";
+import {useAxios} from "~/vendor/axios.ts";
 
 const props = defineProps<StationsVueFilesPropsRequired>();
 
@@ -350,16 +412,40 @@ const {$gettext} = useTranslate();
 
 const {formatTimestampAsDateTime} = useStationDateTimeFormatter();
 
+const filterType = ref('');
+const filterCategory = ref('');
+const mediaCategories = ref<{id: number; name: string}[]>([]);
+const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
+
+const {axios} = useAxios();
+
+onMounted(() => {
+    void axios.get(getStationApiUrl('/media-categories').value).then(
+        (resp) => {
+            mediaCategories.value = resp.data?.rows ?? resp.data ?? [];
+        },
+        () => {
+            mediaCategories.value = [];
+        }
+    );
+});
+
 const listItemProvider = useApiItemProvider<MediaRow>(
     listUrl,
     queryKeyWithStation(
-        [QueryKeys.StationMedia, 'files', currentDirectory]
+        [QueryKeys.StationMedia, 'files', currentDirectory, filterType, filterCategory]
     ),
     {
         staleTime: 2 * 60 * 1000
     },
     (config) => {
         config.params.currentDirectory = currentDirectory.value;
+        if (filterType.value) {
+            config.params.mediaType = filterType.value;
+        }
+        if (filterCategory.value !== '') {
+            config.params.mediaCategory = filterCategory.value;
+        }
         return config;
     }
 );
@@ -462,6 +548,10 @@ const filter = (newFilter: string) => {
 };
 
 const $quota = useTemplateRef('$quota');
+
+const onMediaFiltersChange = () => {
+    $dataTable.value?.relist();
+};
 
 const onTriggerRelist = () => {
     void listItemProvider.refresh(false);
