@@ -404,6 +404,7 @@ const blankForm = () => ({
 const form = ref(blankForm());
 
 const schedulingMode = ref<'flexible' | 'strict' | 'loop_once'>('flexible');
+const clockWheelScheduleMode = ref<'flexible' | 'strict'>('flexible');
 
 // Schedule row state - matches PlaylistScheduleRow interface
 const scheduleRow = ref<PlaylistScheduleRow>(createScheduleItemDefaults());
