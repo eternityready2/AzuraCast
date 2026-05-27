@@ -308,6 +308,7 @@ final class ClockWheelPlaybackPlanner
         }
 
         $queueEntry = StationQueue::fromMedia($station, $media);
+        $queueEntry->clock_wheel = $slot->clock_wheel;
         $this->em->persist($queueEntry);
 
         $this->logger->info('Clock Wheel resolved track.', [

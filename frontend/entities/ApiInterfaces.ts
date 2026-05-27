@@ -889,6 +889,11 @@ export interface ApiNowPlayingSongHistory {
    */
   playlist: string | null;
   /**
+   * Indicates the clock wheel that played the song, if available, or empty string if not.
+   * @example "Morning Drive"
+   */
+  clock_wheel: string | null;
+  /**
    * Indicates the current streamer that was connected, if available, or empty string if not.
    * @example "Test DJ"
    */
@@ -1028,6 +1033,11 @@ export interface ApiNowPlayingStationQueue {
    * @example "Top 100"
    */
   playlist: string | null;
+  /**
+   * Indicates the clock wheel that queued the song, if available, or empty string if not.
+   * @example "Morning Drive"
+   */
+  clock_wheel: string | null;
   /** Indicates whether the song is a listener request. */
   is_request: boolean;
   song: ApiSong;
@@ -1348,7 +1358,7 @@ export interface ApiStationSchedule {
    * The type of this schedule entry.
    * @example "playlist"
    */
-  type?: "playlist" | "streamer";
+  type?: "playlist" | "streamer" | "clock_wheel";
   /**
    * Either the playlist or streamer's display name.
    * @example "Example Schedule Entry"

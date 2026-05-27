@@ -104,6 +104,11 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
   - Adds `edit_url` to the clock wheel schedule events.
   - File: `backend/src/Controller/Api/Stations/ClockWheels/ClockWheelsController.php`
 
+### Playback metadata (station UI + API)
+- Queue rows and song history store `clock_wheel_id` when AutoDJ picks a track from a clock wheel.
+- Now Playing, Upcoming Queue, and Reports → Timeline show **Clock Wheel: {name}** in the source/metadata area (same pattern as playlist).
+- Station profile **Scheduled** panel lists upcoming clock wheel windows with type **Clock Wheel**.
+
 ### Frontend
 - **Unified Schedule page** that shows multiple sources (playlists + clock wheels).
   - File: `frontend/components/Stations/Schedule.vue`
