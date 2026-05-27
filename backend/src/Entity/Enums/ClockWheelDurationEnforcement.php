@@ -7,11 +7,13 @@ namespace App\Entity\Enums;
 use OpenApi\Attributes as OA;
 
 #[OA\Schema(type: 'string')]
+/**
+ * @deprecated No longer used for runtime behavior. PR8 uses PHP selection first; AutoDJ cue_out
+ *             applies automatically when {@see StationQueue::$clock_wheel_enforce_cap} is set.
+ */
 enum ClockWheelDurationEnforcement: string
 {
-    /** Track selection only; no playback cap via AutoDJ annotations. */
     case Php = 'php';
 
-    /** Apply cue_out caps through the standard AnnotateNextSong / Liquidsoap path. */
     case Annotate = 'annotate';
 }

@@ -298,16 +298,6 @@
                         :description="$gettext('This specifies the time range (in minutes) of the song history that the duplicate song prevention algorithm should take into account.')"
                     />
 
-                    <form-group-multi-check
-                        id="edit_form_backend_clock_wheel_duration_enforcement"
-                        class="col-md-6"
-                        :field="r$.backend_config.clock_wheel_duration_enforcement"
-                        :options="clockWheelDurationEnforcementOptions"
-                        stacked
-                        radio
-                        :label="$gettext('Clock Wheel Playback Enforcement')"
-                        :description="$gettext('Selection only uses track length when building the queue. Hard stop applies cue_out caps through AutoDJ (recommended for IDs/ads/promos).')"
-                    />
                 </div>
             </form-fieldset>
         </template>
@@ -371,17 +361,6 @@ const backendTypeOptions = computed<SimpleFormOptionInput>(() => {
         }
     ];
 });
-
-const clockWheelDurationEnforcementOptions = computed<SimpleFormOptionInput>(() => [
-    {
-        text: $gettext('Selection only (PHP)'),
-        value: 'php',
-    },
-    {
-        text: $gettext('Hard stop via AutoDJ (cue_out)'),
-        value: 'annotate',
-    },
-]);
 
 const crossfadeOptions = computed<SimpleFormOptionInput>(() => {
     return [

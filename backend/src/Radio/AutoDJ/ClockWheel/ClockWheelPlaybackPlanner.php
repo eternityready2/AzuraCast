@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\Api\StationPlaylistQueue;
-use App\Entity\Enums\ClockWheelDurationEnforcement;
 use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotTypes;
@@ -324,7 +323,8 @@ final class ClockWheelPlaybackPlanner
         $queueEntry->clock_wheel_enforce_cap = $this->shouldEnforcePlaybackCap(
             $slot,
             $scheduleMode,
-            $station
+            $media,
+            $maxDuration
         );
         $this->em->persist($queueEntry);
 
@@ -354,20 +354,24 @@ final class ClockWheelPlaybackPlanner
      *
      * @return StationMedia[]
      */
+    /**
+     * When true, AutoDJ applies a cue_out cap (Liquidsoap) as a fallback after PHP track selection.
+     */
     private function shouldEnforcePlaybackCap(
         StationClockWheelSlot $slot,
         ClockWheelScheduleMode $scheduleMode,
-        Station $station,
+        StationMedia $media,
+        float $maxDuration,
     ): bool {
-        if (ClockWheelDurationEnforcement::Annotate !== $station->backend_config->getClockWheelDurationEnforcementEnum()) {
-            return false;
-        }
-
         if (ClockWheelScheduleMode::Strict === $scheduleMode) {
             return true;
         }
 
-        return !$this->isFlexibleMusicSlot($slot);
+        if (!$this->isFlexibleMusicSlot($slot)) {
+            return true;
+        }
+
+        return $media->getCalculatedLength() > $maxDuration;
     }
 
     private function filterByDuration(

@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ\ClockWheel;
 
-use App\Entity\Enums\ClockWheelDurationEnforcement;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Applies clock-wheel playback caps via AutoDJ annotations (cue_out), when enabled on the station.
+ * Applies clock-wheel playback caps via AutoDJ annotations (cue_out) when the planner
+ * could not guarantee fit by track selection alone.
  */
 final class ClockWheelAnnotator implements EventSubscriberInterface
 {
@@ -34,11 +34,6 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         }
 
         if (null === $queue->clock_wheel || !$queue->clock_wheel_enforce_cap) {
-            return;
-        }
-
-        $station = $event->getStation();
-        if (ClockWheelDurationEnforcement::Annotate !== $station->backend_config->getClockWheelDurationEnforcementEnum()) {
             return;
         }
 

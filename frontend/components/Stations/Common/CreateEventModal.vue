@@ -170,7 +170,7 @@
                     </div>
                 </div>
                 <small class="form-text text-muted d-block mt-2">
-                    {{ $gettext('Strict requires station “Hard stop via AutoDJ” to cut playback at anchors. Flexible only hard-stops short slots (ID/promo/ad) when that mode is enabled.') }}
+                    {{ $gettext('Flexible prefers full songs when they fit; AutoDJ may cut at anchors only when selection cannot guarantee timing (short slots, strict mode, or no track fits the window).') }}
                 </small>
             </form-markup>
 
