@@ -2,7 +2,7 @@
     <modal-form
         ref="$modal"
         :loading="loading"
-        :title="$gettext('Create Event')"
+        :title="modalTitle"
         :error="error"
         :disable-save-button="!isFormValid"
         @submit="doSave"
@@ -319,6 +319,7 @@ import {
     type PlaylistScheduleRow,
     createScheduleItemDefaults,
 } from '~/components/Stations/Common/scheduleItemDefaults.ts';
+import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
 
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
@@ -534,6 +535,107 @@ const recurrenceEndTypeOptions = [
 
 const editingScheduleId = ref<number | null>(null);
 
+const modalTitle = computed(() =>
+    editingScheduleId.value !== null
+        ? $gettext('Edit Event')
+        : $gettext('Create Event')
+);
+
+const applyCalendarTimesToRow = (start: Date, end?: Date) => {
+    const startDate = start.toISOString().slice(0, 10);
+    const startH = start.getHours().toString().padStart(2, '0');
+    const startM = start.getMinutes().toString().padStart(2, '0');
+    scheduleRow.value.start_date = startDate;
+    scheduleRow.value.end_date = startDate;
+    scheduleRow.value.start_time = Number(`${startH}${startM}`);
+
+    if (end) {
+        const endH = end.getHours().toString().padStart(2, '0');
+        const endM = end.getMinutes().toString().padStart(2, '0');
+        scheduleRow.value.end_time = Number(`${endH}${endM}`);
+    }
+};
+
+const apiScheduleItemToRow = (item: Record<string, unknown>): PlaylistScheduleRow => {
+    const endType = (item.recurrence_end_type as string | undefined) ?? 'never';
+    const recurrenceType = item.recurrence_type as string | null | undefined;
+
+    const row: PlaylistScheduleRow = {
+        start_time: Number(item.start_time),
+        end_time: Number(item.end_time),
+        start_date: String(item.start_date ?? ''),
+        end_date: String(item.end_date ?? ''),
+        days: normalizeStationScheduleDays(item.days),
+        loop_once: Boolean(item.loop_once),
+        recurrence_type: recurrenceType ?? null,
+        recurrence_interval: Number(item.recurrence_interval ?? 1),
+        recurrence_monthly_pattern: (item.recurrence_monthly_pattern as string | null) ?? null,
+        recurrence_monthly_day: item.recurrence_monthly_day != null ? Number(item.recurrence_monthly_day) : null,
+        recurrence_monthly_week: item.recurrence_monthly_week != null ? Number(item.recurrence_monthly_week) : null,
+        recurrence_monthly_day_of_week: item.recurrence_monthly_day_of_week != null
+            ? Number(item.recurrence_monthly_day_of_week)
+            : null,
+        recurrence_end_type: endType === 'on_date' ? 'never' : endType,
+        recurrence_end_after: endType === 'after' && item.recurrence_end_after != null
+            ? Number(item.recurrence_end_after)
+            : null,
+        recurrence_end_date: null,
+    };
+
+    if (
+        row.recurrence_type === 'monthly'
+        && row.recurrence_monthly_pattern === 'day_of_week'
+        && row.recurrence_monthly_day_of_week != null
+        && row.days.length === 0
+    ) {
+        row.days = [row.recurrence_monthly_day_of_week];
+    }
+
+    return row;
+};
+
+const buildSchedulePayload = (
+    row: PlaylistScheduleRow,
+    scheduleId?: number
+): PlaylistScheduleRow & {id?: number} => {
+    const out: PlaylistScheduleRow & {id?: number} = {
+        ...row,
+        end_date: row.end_date || row.start_date,
+        recurrence_type: row.recurrence_type,
+        recurrence_interval: (row.recurrence_type === 'biweekly' ? 2 : Number(row.recurrence_interval)) || 1,
+        recurrence_end_type: row.recurrence_end_type ?? 'never',
+        recurrence_end_after: (row.recurrence_end_type === 'after' && row.recurrence_end_after != null)
+            ? Number(row.recurrence_end_after)
+            : null,
+        recurrence_end_date: null,
+    };
+
+    if (out.recurrence_end_type === 'after') {
+        out.end_date = '';
+    }
+
+    const normalizedDays = normalizeStationScheduleDays(row.days);
+    if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'date') {
+        out.days = [];
+    } else {
+        out.days = normalizedDays;
+    }
+
+    if (
+        out.recurrence_type === 'monthly'
+        && out.recurrence_monthly_pattern === 'day_of_week'
+        && normalizedDays.length > 0
+    ) {
+        out.recurrence_monthly_day_of_week = normalizedDays[0];
+    }
+
+    if (scheduleId !== undefined) {
+        out.id = scheduleId;
+    }
+
+    return out;
+};
+
 const clearForm = () => {
     form.value = blankForm();
     schedulingMode.value = 'flexible';
@@ -551,7 +653,7 @@ const open = () => {
     ($modal.value as any)?.show();
 };
 
-const openForEdit = (event: EventImpl) => {
+const openForEdit = async (event: EventImpl) => {
     clearForm();
 
     const editUrl = event.extendedProps.edit_url as string | undefined;
@@ -565,7 +667,6 @@ const openForEdit = (event: EventImpl) => {
         form.value.source = 'playlist';
     }
 
-    // Infer entity_id from edit_url (/playlist/{id} or /clock-wheel/{id})
     if (editUrl) {
         const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
         if (m?.[2]) {
@@ -573,29 +674,45 @@ const openForEdit = (event: EventImpl) => {
         }
     }
 
-    // Prefill the form from the current event time window.
-    const start = event.start;
-    const end = event.end ?? undefined;
-    if (start) {
-        const startDate = start.toISOString().slice(0, 10);
-        const startH = start.getHours().toString().padStart(2, '0');
-        const startM = start.getMinutes().toString().padStart(2, '0');
-        scheduleRow.value.start_date = startDate;
-        scheduleRow.value.end_date = startDate;
-        scheduleRow.value.start_time = Number(`${startH}${startM}`);
-    }
-    if (end) {
-        const endH = end.getHours().toString().padStart(2, '0');
-        const endM = end.getMinutes().toString().padStart(2, '0');
-        scheduleRow.value.end_time = Number(`${endH}${endM}`);
-    }
-
-    // Ensure the entity dropdown isn't empty if options are loaded.
     if (!form.value.entity_id && currentEntityOptions.value.length > 0) {
         form.value.entity_id = currentEntityOptions.value[0].id;
     }
 
     ($modal.value as any)?.show();
+
+    const start = event.start;
+    const end = event.end ?? undefined;
+
+    if (form.value.entity_id && editingScheduleId.value !== null) {
+        loading.value = true;
+        error.value = null;
+
+        try {
+            const entityType = form.value.source === 'playlist' ? 'playlist' : 'clock-wheel';
+            const entityApiUrl = getStationApiUrl(`/${entityType}/${form.value.entity_id}`).value;
+            const {data: entityData} = await axios.get(entityApiUrl);
+            const items = (entityData.schedule_items as Record<string, unknown>[] | undefined) ?? [];
+            const existing = items.find((row) => Number(row.id) === editingScheduleId.value);
+
+            if (existing) {
+                scheduleRow.value = apiScheduleItemToRow(existing);
+                isRecurring.value = existing.recurrence_type != null && existing.recurrence_type !== '';
+                schedulingMode.value = scheduleRow.value.loop_once ? 'loop_once' : 'flexible';
+            } else if (start) {
+                applyCalendarTimesToRow(start, end);
+            }
+        } catch (e: unknown) {
+            const err = e as {response?: {data?: {message?: string}}};
+            error.value = err?.response?.data?.message ?? $gettext('An error occurred.');
+            if (start) {
+                applyCalendarTimesToRow(start, end);
+            }
+        } finally {
+            loading.value = false;
+        }
+    } else if (start) {
+        applyCalendarTimesToRow(start, end);
+    }
 };
 
 const doSave = async () => {
@@ -613,32 +730,15 @@ const doSave = async () => {
         // Fetch current entity data
         const {data: entityData} = await axios.get(entityApiUrl);
 
-        // Use scheduleRow data directly - it already has all the fields in the correct format
-        const newScheduleItem: PlaylistScheduleRow & {id?: number} = {
-            start_time: scheduleRow.value.start_time,
-            end_time: scheduleRow.value.end_time,
-            start_date: scheduleRow.value.start_date,
-            end_date: scheduleRow.value.end_date || scheduleRow.value.start_date,
-            days: scheduleRow.value.days,
-            loop_once: scheduleRow.value.loop_once,
-            recurrence_type: scheduleRow.value.recurrence_type,
-            recurrence_interval: scheduleRow.value.recurrence_interval,
-            recurrence_monthly_pattern: scheduleRow.value.recurrence_monthly_pattern,
-            recurrence_monthly_day: scheduleRow.value.recurrence_monthly_day,
-            recurrence_monthly_week: scheduleRow.value.recurrence_monthly_week,
-            recurrence_monthly_day_of_week: scheduleRow.value.recurrence_monthly_day_of_week,
-            recurrence_end_type: scheduleRow.value.recurrence_end_type,
-            recurrence_end_after: scheduleRow.value.recurrence_end_after,
-            recurrence_end_date: scheduleRow.value.recurrence_end_date,
-        };
+        const newScheduleItem = buildSchedulePayload(
+            scheduleRow.value,
+            editingScheduleId.value ?? undefined
+        );
 
-        const {id: _id, links: _links, ...putData} = entityData as Record<string, unknown>;
-        const existingScheduleItems = (putData.schedule_items as unknown[]) ?? [];
+        const existingScheduleItems = (entityData.schedule_items as unknown[]) ?? [];
 
         let updatedScheduleItems: unknown[];
         if (editingScheduleId.value !== null) {
-            newScheduleItem.id = editingScheduleId.value;
-
             let replaced = false;
             updatedScheduleItems = existingScheduleItems.map((row: any) => {
                 if (row?.id === editingScheduleId.value) {
@@ -655,8 +755,9 @@ const doSave = async () => {
             updatedScheduleItems = [...existingScheduleItems, newScheduleItem];
         }
 
+        // Only send schedule_items — a full entity PUT includes relation arrays (e.g. podcasts)
+        // that the serializer cannot denormalize back into Doctrine collections.
         await axios.put(entityApiUrl, {
-            ...putData,
             schedule_items: updatedScheduleItems,
         });
 
