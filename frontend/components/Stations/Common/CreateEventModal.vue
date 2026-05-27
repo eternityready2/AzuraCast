@@ -138,6 +138,43 @@
             />
 
             <form-markup
+                v-if="isClockWheelSchedule"
+                id="edit_form_clock_wheel_scheduling"
+                class="col-md-4"
+                :label="$gettext('Clock Wheel Timing')"
+            >
+                <div class="d-flex flex-wrap gap-3">
+                    <div class="form-check mb-0">
+                        <input
+                            id="clock_wheel_scheduling_flexible"
+                            v-model="clockWheelScheduleMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="flexible"
+                        >
+                        <label class="form-check-label" for="clock_wheel_scheduling_flexible">
+                            {{ $gettext('Flexible') }}
+                        </label>
+                    </div>
+                    <div class="form-check mb-0">
+                        <input
+                            id="clock_wheel_scheduling_strict"
+                            v-model="clockWheelScheduleMode"
+                            class="form-check-input"
+                            type="radio"
+                            value="strict"
+                        >
+                        <label class="form-check-label" for="clock_wheel_scheduling_strict">
+                            {{ $gettext('Strict') }}
+                        </label>
+                    </div>
+                </div>
+                <small class="form-text text-muted d-block mt-2">
+                    {{ $gettext('Strict requires station “Hard stop via AutoDJ” to cut playback at anchors. Flexible only hard-stops short slots (ID/promo/ad) when that mode is enabled.') }}
+                </small>
+            </form-markup>
+
+            <form-markup
                 v-if="isPlaylistSchedule"
                 id="edit_form_scheduling"
                 class="col-md-4"
@@ -403,6 +440,7 @@ const currentEntityOptions = computed(() =>
 );
 
 const isPlaylistSchedule = computed(() => form.value.source === 'playlist');
+const isClockWheelSchedule = computed(() => form.value.source === 'clock_wheel');
 
 // Auto-select first entity whenever options change or source changes
 watch(currentEntityOptions, (opts) => {
@@ -423,10 +461,16 @@ watch(
     (source) => {
         if (source === 'clock_wheel') {
             scheduleRow.value.loop_once = false;
-            schedulingMode.value = 'flexible';
+            scheduleRow.value.clock_wheel_mode = clockWheelScheduleMode.value;
         }
     }
 );
+
+watch(clockWheelScheduleMode, (mode) => {
+    if (isClockWheelSchedule.value) {
+        scheduleRow.value.clock_wheel_mode = mode;
+    }
+});
 
 // Regle validation for schedule row
 const isMonthlyDatePattern = computed(
@@ -510,7 +554,7 @@ const onSourceChange = () => {
     form.value.entity_id = null;
     if (form.value.source === 'clock_wheel') {
         scheduleRow.value.loop_once = false;
-        schedulingMode.value = 'flexible';
+        clockWheelScheduleMode.value = scheduleRow.value.clock_wheel_mode ?? 'flexible';
     }
 };
 
@@ -583,6 +627,7 @@ const apiScheduleItemToRow = (item: Record<string, unknown>): PlaylistScheduleRo
         end_date: String(item.end_date ?? ''),
         days: normalizeStationScheduleDays(item.days),
         loop_once: Boolean(item.loop_once),
+        clock_wheel_mode: (item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible') as 'flexible' | 'strict',
         recurrence_type: recurrenceType ?? null,
         recurrence_interval: Number(item.recurrence_interval ?? 1),
         recurrence_monthly_pattern: (item.recurrence_monthly_pattern as string | null) ?? null,
@@ -655,6 +700,7 @@ const buildSchedulePayload = (
 const clearForm = () => {
     form.value = blankForm();
     schedulingMode.value = 'flexible';
+    clockWheelScheduleMode.value = 'flexible';
     scheduleRow.value = createScheduleItemDefaults();
     error.value = null;
     editingScheduleId.value = null;
@@ -715,6 +761,7 @@ const openForEdit = async (event: EventImpl) => {
                 isRecurring.value = existing.recurrence_type != null && existing.recurrence_type !== '';
                 if (form.value.source === 'clock_wheel') {
                     scheduleRow.value.loop_once = false;
+                    clockWheelScheduleMode.value = scheduleRow.value.clock_wheel_mode ?? 'flexible';
                 } else {
                     schedulingMode.value = scheduleRow.value.loop_once ? 'loop_once' : 'flexible';
                 }
@@ -756,6 +803,7 @@ const doSave = async () => {
         );
         if (form.value.source === 'clock_wheel') {
             newScheduleItem.loop_once = false;
+            newScheduleItem.clock_wheel_mode = scheduleRow.value.clock_wheel_mode ?? 'flexible';
         }
 
         const existingScheduleItems = (entityData.schedule_items as unknown[]) ?? [];

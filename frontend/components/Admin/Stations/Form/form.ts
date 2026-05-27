@@ -81,6 +81,7 @@ export const useAdminStationsForm = defineStore(
                 charset: 'UTF-8',
                 performance_mode: 'disabled',
                 duplicate_prevention_time_range: 120,
+                clock_wheel_duration_enforcement: 'php',
                 hls_enable_on_public_player: false,
                 hls_is_default: false,
                 hls_segment_length: 4,
@@ -181,6 +182,7 @@ export const useAdminStationsForm = defineStore(
                         fields.backend_config.charset,
                         fields.backend_config.performance_mode,
                         fields.backend_config.duplicate_prevention_time_range,
+                        fields.backend_config.clock_wheel_duration_enforcement,
                     ],
                     hlsTab: [
                         fields.enable_hls,

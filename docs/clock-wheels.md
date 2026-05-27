@@ -73,10 +73,15 @@ Goal: ensure reliability and prevent regressions.
 - Improve runtime fallback logging/metrics.
 - Verify Docker upgrade/migration flow for existing installs.
 
-### Phase 4 — Optional Liquidsoap-level strictness (only if needed)
-Goal: only if precision handoffs require it beyond AutoDJ queue planning.
-- Consider max-duration enforcement for **short** items (IDs/ads/promos) where appropriate.
-- Avoid hard cutting of music by default (professionalism requirement).
+### Phase 4 — Playback enforcement (implemented: PR8 v1)
+- **Station setting** (`backend_config.clock_wheel_duration_enforcement`):
+  - `php` (default): duration-aware **track selection** only.
+  - `annotate`: applies **`cue_out` caps** through the normal AutoDJ annotation path (Liquidsoap obeys these; no manual `ls_config` required).
+- **Per schedule row** (`clock_wheel_mode` on `station_schedules`, clock wheel events only):
+  - `flexible`: natural music/talk; hard cap (when `annotate`) only for short-form slots (ID/promo/ad or slot `duration_seconds`).
+  - `strict`: must fit the anchor window; no “shortest track overflow”; hard cap at anchor when `annotate` is enabled.
+- **Not used:** playlist `loop_once` on clock wheel schedules; no `loop_once` UI for clock wheels.
+- **Manual `ls_config` edits** are not required for PR8; use the station backend setting instead.
 
 ## What is implemented *right now* (in `Azura-Cast-Custom-GitRepo`)
 
@@ -119,8 +124,10 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
     - `frontend/components/Stations/ClockWheels/EditModal.vue`
     - `frontend/components/Stations/ClockWheels/Form/Entries.vue`
     - `frontend/components/Stations/ClockWheels/Form/Schedule.vue`
-- **Create Event modal** supports clock wheel events (playlist-only **Flexible / Strict / Loop Once** controls are hidden for clock wheels; `loop_once` is always saved as `false`).
+- **Create Event modal** supports clock wheel events with **Flexible / Strict** (`clock_wheel_mode`); playlist-only **Flexible / Strict / Loop Once** remain for playlists.
   - File: `frontend/components/Stations/Common/CreateEventModal.vue`
+- **Station backend** → Clock Wheel Playback Enforcement (`php` | `annotate`).
+  - Files: `StationBackendConfiguration.php`, `ClockWheelAnnotator.php`, `Admin/Stations/Form/BackendForm.vue`
 
 ### Tests (partial)
 - Date range overlap helper: `tests/Unit/ScheduleConflictDateRangeTest.php`

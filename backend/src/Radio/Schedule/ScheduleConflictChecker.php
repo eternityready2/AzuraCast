@@ -9,6 +9,7 @@ use App\Entity\Enums\RecurrenceEndType;
 use App\Entity\Enums\RecurrenceMonthlyPattern;
 use App\Entity\Enums\RecurrenceType;
 use App\Entity\Station;
+use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
@@ -214,6 +215,16 @@ final class ScheduleConflictChecker
         )));
 
         $record->loop_once = $item['loop_once'] ?? false;
+
+        if ($relation instanceof StationClockWheel) {
+            $record->loop_once = false;
+            $modeRaw = $item['clock_wheel_mode'] ?? ClockWheelScheduleMode::Flexible->value;
+            $record->clock_wheel_mode = is_string($modeRaw)
+                ? (ClockWheelScheduleMode::tryFrom($modeRaw) ?? ClockWheelScheduleMode::Flexible)
+                : ClockWheelScheduleMode::Flexible;
+        } else {
+            $record->clock_wheel_mode = null;
+        }
 
         $record->recurrence_type = isset($item['recurrence_type'])
             ? (is_string($item['recurrence_type']) ? RecurrenceType::tryFrom($item['recurrence_type']) : $item['recurrence_type'])

@@ -2250,6 +2250,8 @@ export interface StationBackendConfiguration {
   /** @format float */
   crossfade?: number;
   duplicate_prevention_time_range?: number;
+  /** Clock wheel: php = selection only; annotate = hard stop via cue_out. */
+  clock_wheel_duration_enforcement?: 'php' | 'annotate';
   performance_mode?: string;
   hls_segment_length?: number;
   hls_segments_in_playlist?: number;

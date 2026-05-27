@@ -7,6 +7,7 @@ namespace App\Entity\Repository;
 use App\Doctrine\Repository;
 use App\Entity\Api\StationSchedule as ApiStationSchedule;
 use App\Entity\ApiGenerator\ScheduleApiGenerator;
+use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\RecurrenceEndType;
 use App\Entity\Enums\RecurrenceMonthlyPattern;
 use App\Entity\Enums\RecurrenceType;
@@ -84,6 +85,16 @@ final class StationScheduleRepository extends Repository
                 static fn (int $d) => $d >= 1 && $d <= 7
             )));
             $record->loop_once = $item['loop_once'] ?? false;
+
+            if ($relation instanceof StationClockWheel) {
+                $record->loop_once = false;
+                $modeRaw = $item['clock_wheel_mode'] ?? ClockWheelScheduleMode::Flexible->value;
+                $record->clock_wheel_mode = is_string($modeRaw)
+                    ? (ClockWheelScheduleMode::tryFrom($modeRaw) ?? ClockWheelScheduleMode::Flexible)
+                    : ($modeRaw instanceof ClockWheelScheduleMode ? $modeRaw : ClockWheelScheduleMode::Flexible);
+            } else {
+                $record->clock_wheel_mode = null;
+            }
 
             $record->recurrence_type = isset($item['recurrence_type'])
                 ? (is_string($item['recurrence_type']) ? RecurrenceType::tryFrom($item['recurrence_type']) : $item['recurrence_type'])
