@@ -12,7 +12,7 @@
             <ClockWheelsFormEntries
                 :form="form"
                 :r$="r$"
-                :entries="entries"
+                v-model:entries="entries"
                 :add-entry="addEntry"
                 :remove-entry="removeEntry"
                 :duplicate-entry="duplicateEntry"

@@ -98,7 +98,7 @@
                         </th>
                         <th
                             class="text-uppercase small text-center"
-                            style="width: 7rem;"
+                            style="width: 9rem;"
                         >
                             {{ $gettext('Actions') }}
                         </th>
@@ -203,10 +203,10 @@
                             >
                         </td>
                         <td class="text-center align-middle">
-                            <div class="btn-group btn-group-sm">
+                            <div class="btn-group btn-group-sm w-100 justify-content-center">
                                 <button
                                     type="button"
-                                    class="btn btn-outline-secondary"
+                                    class="btn btn-outline-primary"
                                     :title="$gettext('Insert entry after this anchor')"
                                     @click="props.insertEntryAfter(index)"
                                 >
@@ -226,7 +226,7 @@
                                     :title="$gettext('Delete')"
                                     @click="props.removeEntry(index)"
                                 >
-                                    &times;
+                                    <icon-ic-delete />
                                 </button>
                             </div>
                         </td>
@@ -249,11 +249,12 @@
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
+import {computed, onMounted, ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
 import {useDraggable} from 'vue-draggable-plus';
+import IconIcDelete from '~icons/ic/baseline-delete';
 import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
@@ -274,7 +275,6 @@ export interface ClockWheelEntryRow {
 const props = defineProps<{
     form: {name: string; color: string; is_active: boolean};
     r$: {name: {required: unknown}; color: object; is_active: object};
-    entries: ClockWheelEntryRow[];
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;
@@ -282,6 +282,9 @@ const props = defineProps<{
     onEntriesReordered: () => void;
     onEntriesChanged: () => void;
 }>();
+
+// IMPORTANT: Use a v-model ref so drag-reorder can mutate the array.
+const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
@@ -297,11 +300,11 @@ void axios.get(getStationApiUrl('/media-categories').value).then(
 );
 
 const sortedEntries = computed(() =>
-    [...props.entries].sort((a, b) => a.position_seconds - b.position_seconds)
+    [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
 );
 
 const timelineWarnings = computed(() =>
-    getClockWheelTimelineWarnings(props.entries, $gettext)
+    getClockWheelTimelineWarnings(entries.value, $gettext)
 );
 
 const $tbody = useTemplateRef('$tbody');
@@ -311,7 +314,7 @@ onMounted(() => {
         return;
     }
 
-    useDraggable($tbody, toRef(props, 'entries'), {
+    useDraggable($tbody, entries, {
         handle: '.drag-handle',
         animation: 150,
         onEnd() {
