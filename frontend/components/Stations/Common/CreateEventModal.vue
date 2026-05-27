@@ -138,6 +138,7 @@
             />
 
             <form-markup
+                v-if="isPlaylistSchedule"
                 id="edit_form_scheduling"
                 class="col-md-4"
                 :label="$gettext('Scheduling')"
@@ -401,6 +402,8 @@ const currentEntityOptions = computed(() =>
     form.value.source === 'playlist' ? playlists.value : clockWheels.value
 );
 
+const isPlaylistSchedule = computed(() => form.value.source === 'playlist');
+
 // Auto-select first entity whenever options change or source changes
 watch(currentEntityOptions, (opts) => {
     if (opts.length > 0 && (form.value.entity_id === null || !opts.find(e => e.id === form.value.entity_id))) {
@@ -408,12 +411,21 @@ watch(currentEntityOptions, (opts) => {
     }
 }, {immediate: true});
 
+watch(schedulingMode, (mode) => {
+    if (!isPlaylistSchedule.value) {
+        return;
+    }
+    scheduleRow.value.loop_once = mode !== 'flexible';
+});
+
 watch(
-    schedulingMode,
-    (mode) => {
-        scheduleRow.value.loop_once = mode !== 'flexible';
-    },
-    {immediate: true}
+    () => form.value.source,
+    (source) => {
+        if (source === 'clock_wheel') {
+            scheduleRow.value.loop_once = false;
+            schedulingMode.value = 'flexible';
+        }
+    }
 );
 
 // Regle validation for schedule row
@@ -496,6 +508,10 @@ const isFormValid = computed(() =>
 
 const onSourceChange = () => {
     form.value.entity_id = null;
+    if (form.value.source === 'clock_wheel') {
+        scheduleRow.value.loop_once = false;
+        schedulingMode.value = 'flexible';
+    }
 };
 
 const dayOptions = [
@@ -697,7 +713,11 @@ const openForEdit = async (event: EventImpl) => {
             if (existing) {
                 scheduleRow.value = apiScheduleItemToRow(existing);
                 isRecurring.value = existing.recurrence_type != null && existing.recurrence_type !== '';
-                schedulingMode.value = scheduleRow.value.loop_once ? 'loop_once' : 'flexible';
+                if (form.value.source === 'clock_wheel') {
+                    scheduleRow.value.loop_once = false;
+                } else {
+                    schedulingMode.value = scheduleRow.value.loop_once ? 'loop_once' : 'flexible';
+                }
             } else if (start) {
                 applyCalendarTimesToRow(start, end);
             }
@@ -734,6 +754,9 @@ const doSave = async () => {
             scheduleRow.value,
             editingScheduleId.value ?? undefined
         );
+        if (form.value.source === 'clock_wheel') {
+            newScheduleItem.loop_once = false;
+        }
 
         const existingScheduleItems = (entityData.schedule_items as unknown[]) ?? [];
 

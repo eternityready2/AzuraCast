@@ -119,7 +119,7 @@ Goal: only if precision handoffs require it beyond AutoDJ queue planning.
     - `frontend/components/Stations/ClockWheels/EditModal.vue`
     - `frontend/components/Stations/ClockWheels/Form/Entries.vue`
     - `frontend/components/Stations/ClockWheels/Form/Schedule.vue`
-- **Create Event modal** supports clock wheel events.
+- **Create Event modal** supports clock wheel events (playlist-only **Flexible / Strict / Loop Once** controls are hidden for clock wheels; `loop_once` is always saved as `false`).
   - File: `frontend/components/Stations/Common/CreateEventModal.vue`
 
 ### Tests (partial)
