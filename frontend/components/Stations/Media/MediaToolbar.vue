@@ -10,7 +10,6 @@
 
             <select
                 id="bulk_media_type"
-                v-model="bulkTypeSelection"
                 class="form-select form-select-sm bulk-classify-select"
                 :disabled="!hasSelectedClassifyItems || classifyPending"
                 :title="$gettext('Set type on selected files')"
@@ -18,7 +17,9 @@
             >
                 <option
                     value=""
+                    selected
                     disabled
+                    hidden
                 >
                     {{ $gettext('Set type…') }}
                 </option>
@@ -33,7 +34,6 @@
 
             <select
                 id="bulk_media_category"
-                v-model="bulkCategorySelection"
                 class="form-select form-select-sm bulk-classify-select"
                 :disabled="!hasSelectedClassifyItems || classifyPending"
                 :title="$gettext('Set category on selected files')"
@@ -41,7 +41,9 @@
             >
                 <option
                     value=""
+                    selected
                     disabled
+                    hidden
                 >
                     {{ $gettext('Set category…') }}
                 </option>
@@ -269,7 +271,7 @@ import {useAxios} from "~/vendor/axios";
 import useHandleBatchResponse from "~/components/Stations/Media/useHandleBatchResponse.ts";
 import {useNotify} from "~/components/Common/Toasts/useNotify.ts";
 import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
-import {MediaInitialPlaylist, MediaSelectedItems} from "~/components/Stations/Media.vue";
+import type {MediaInitialPlaylist, MediaSelectedItems} from "~/components/Stations/Media.vue";
 import {ApiStationMediaPlaylist} from "~/entities/ApiInterfaces";
 import IconIcClearAll from "~icons/ic/baseline-clear-all";
 import IconIcDelete from "~icons/ic/baseline-delete";
@@ -294,6 +296,8 @@ const emit = defineEmits<{
     (e: 'create-directory'): void
 }>();
 
+const {$gettext} = useTranslate();
+
 const selectedItems = toRef(props, 'selectedItems');
 
 const hasSelectedItems = computed(() => {
@@ -312,14 +316,17 @@ const mediaTypeOptions = computed(() =>
     }))
 );
 
-const bulkTypeSelection = ref('');
-const bulkCategorySelection = ref('');
 const classifyPending = ref(false);
 
 const checkedPlaylists = ref<(number | string)[]>([]);
 const newPlaylist = ref('');
 
 watch(selectedItems, (items) => {
+    if (items.all.length === 0) {
+        checkedPlaylists.value = [];
+        return;
+    }
+
     // Get all playlists that are active on ALL selected items.
     const playlistsForItems = map(items.all, (item) => {
         const itemPlaylists = (item.dir?.playlists ?? item.media?.playlists ?? []) as Required<ApiStationMediaPlaylist>[];
@@ -345,7 +352,6 @@ watch(newPlaylist, (text: string) => {
     }
 });
 
-const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
 const {handleBatchResponse} = useHandleBatchResponse();
@@ -398,22 +404,28 @@ const applyClassify = async (payload: Record<string, unknown>) => {
     }
 };
 
-const onBulkTypeChange = async () => {
-    const type = bulkTypeSelection.value;
-    bulkTypeSelection.value = '';
+const resetBulkSelect = (select: HTMLSelectElement) => {
+    select.selectedIndex = 0;
+};
 
-    if (!type) {
+const onBulkTypeChange = async (event: Event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    const type = select.value;
+    resetBulkSelect(select);
+
+    if (!type || classifyPending.value) {
         return;
     }
 
     await applyClassify({media_type: type});
 };
 
-const onBulkCategoryChange = async () => {
-    const category = bulkCategorySelection.value;
-    bulkCategorySelection.value = '';
+const onBulkCategoryChange = async (event: Event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    const category = select.value;
+    resetBulkSelect(select);
 
-    if (!category) {
+    if (!category || classifyPending.value) {
         return;
     }
 
