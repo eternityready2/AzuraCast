@@ -8,7 +8,7 @@
             />
         </div>
 
-        <div class="mb-3">
+        <div class="mb-4">
             <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
             <div>
                 <input
@@ -29,7 +29,7 @@
         />
 
         <div class="alert alert-info py-2 mb-4">
-            {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
+            {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule -> Create Event to assign it.') }}
         </div>
 
         <div class="mb-1">
@@ -37,6 +37,9 @@
                 <span class="fw-semibold">
                     {{ $gettext('Clockwheel entries') }} ({{ entries.length }})
                 </span>
+                <small class="text-muted">
+                    {{ $gettext('Drag to reorder; times stay on the hour unless you edit them.') }}
+                </small>
             </div>
 
             <div
@@ -54,7 +57,7 @@
                         type="button"
                         class="clock-wheel-timeline__marker"
                         :style="{ left: timelinePercent(entry.position_seconds) + '%' }"
-                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry)"
+                        :title="formatPosition(entry.position_seconds) + ' - ' + slotLabel(entry.slot_value)"
                         @click="focusRow(entries.indexOf(entry))"
                     />
                 </div>
@@ -85,7 +88,7 @@
                             {{ $gettext('Position (m:s)') }}
                         </th>
                         <th class="text-uppercase small">
-                            {{ $gettext('Type') }}
+                            {{ $gettext('Type or Category') }}
                         </th>
                         <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
@@ -117,7 +120,7 @@
                         :data-entry-index="index"
                     >
                         <td class="text-center align-middle drag-handle text-muted">
-                            ⋮⋮
+                            ..
                         </td>
                         <td>
                             <input
@@ -130,17 +133,38 @@
                         </td>
                         <td>
                             <select
-                                v-model="entry.type"
+                                v-model="entry.slot_value"
                                 class="form-select form-select-sm"
-                                required
                             >
-                                <option
-                                    v-for="opt in mediaTypeOptions"
-                                    :key="opt.value"
-                                    :value="opt.value"
+                                <optgroup :label="$gettext('Types')">
+                                    <option value="type:music">
+                                        {{ $gettext('Music (music and copyrighted material)') }}
+                                    </option>
+                                    <option value="type:talk">
+                                        {{ $gettext('Talk (sermons, speeches, and live recordings)') }}
+                                    </option>
+                                    <option value="type:id">
+                                        {{ $gettext('ID (station identification such as sweepers and jingles)') }}
+                                    </option>
+                                    <option value="type:promo">
+                                        {{ $gettext('Promo (station promotion that is not considered an ID)') }}
+                                    </option>
+                                    <option value="type:ad">
+                                        {{ $gettext('Ad (advert replacement files)') }}
+                                    </option>
+                                </optgroup>
+                                <optgroup
+                                    v-if="categories.length > 0"
+                                    :label="$gettext('Categories')"
                                 >
-                                    {{ opt.label }}
-                                </option>
+                                    <option
+                                        v-for="cat in categories"
+                                        :key="cat.id"
+                                        :value="'cat:' + cat.id"
+                                    >
+                                        {{ cat.name }}
+                                    </option>
+                                </optgroup>
                             </select>
                         </td>
                         <td>
@@ -183,7 +207,7 @@
                                 <button
                                     type="button"
                                     class="btn btn-outline-primary cw-action-btn"
-                                    :title="$gettext('Insert after')"
+                                    :title="$gettext('Insert entry after this anchor')"
                                     @click="props.insertEntryAfter(index)"
                                 >
                                     <icon-ic-add />
@@ -191,7 +215,7 @@
                                 <button
                                     type="button"
                                     class="btn btn-outline-secondary cw-action-btn"
-                                    :title="$gettext('Duplicate')"
+                                    :title="$gettext('Duplicate this entry')"
                                     @click="props.duplicateEntry(index)"
                                 >
                                     <icon-ic-copy />
@@ -225,8 +249,10 @@
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, useTemplateRef} from 'vue';
+import {computed, onMounted, ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
+import {useApiRouter} from '~/functions/useApiRouter.ts';
+import {useAxios} from '~/vendor/axios.ts';
 import {useDraggable} from 'vue-draggable-plus';
 import IconIcDelete from '~icons/ic/baseline-delete';
 import IconIcAdd from '~icons/ic/baseline-add';
@@ -235,14 +261,14 @@ import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
     parseClockWheelPosition,
+    slotValueShortLabel,
     timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
-import {formatMediaType, getMediaTypeOptions, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 const {$gettext} = useTranslate();
 
 export interface ClockWheelEntryRow {
-    type: MediaTypeValue;
+    slot_value: string;
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
@@ -250,7 +276,7 @@ export interface ClockWheelEntryRow {
 
 const props = defineProps<{
     form: {name: string; color: string; is_active: boolean};
-    r$: {name: {required: unknown}; color: object; is_active: object};
+    r$: Record<string, any>;
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;
@@ -259,10 +285,20 @@ const props = defineProps<{
     onEntriesChanged: () => void;
 }>();
 
-// IMPORTANT: Use a v-model ref so drag-reorder can mutate the array.
 const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
 
-const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
+const {getStationApiUrl} = useApiRouter();
+const {axios} = useAxios();
+const categories = ref<{id: number; name: string}[]>([]);
+
+void axios.get(getStationApiUrl('/media-categories').value).then(
+    (resp) => {
+        categories.value = resp.data?.rows ?? resp.data ?? [];
+    },
+    () => {
+        categories.value = [];
+    }
+);
 
 const sortedEntries = computed(() =>
     [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
@@ -289,10 +325,10 @@ onMounted(() => {
 });
 
 const formatPosition = formatClockWheelPosition;
-const slotLabel = (entry: ClockWheelEntryRow) => formatMediaType(entry.type, $gettext);
+const slotLabel = (slotValue: string) => slotValueShortLabel(slotValue, categories.value);
 
 const rowKey = (entry: ClockWheelEntryRow, index: number) =>
-    `${index}-${entry.position_seconds}-${entry.type}`;
+    `${index}-${entry.position_seconds}-${entry.slot_value}`;
 
 const rowHasWarning = (index: number) =>
     timelineWarnings.value.some((w) => w.index === index);
