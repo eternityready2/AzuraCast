@@ -8,6 +8,98 @@
                 {{ $gettext('With selected:') }}
             </span>
 
+            <div class="btn-group btn-group-sm dropdown allow-focus">
+                <div class="dropdown">
+                    <button
+                        class="btn btn-sm btn-primary dropdown-toggle"
+                        type="button"
+                        data-bs-toggle="dropdown"
+                        data-bs-auto-close="outside"
+                        aria-expanded="false"
+                        :disabled="!hasSelectedFiles"
+                    >
+                        <icon-ic-label/>
+
+                        <span>
+                            {{ $gettext('Type & Category') }}
+                        </span>
+                        <span class="caret" />
+                    </button>
+                    <div
+                        class="dropdown-menu"
+                        style="min-width: 280px;"
+                    >
+                        <form
+                            class="px-4 py-3"
+                            @submit.prevent="applyClassification"
+                        >
+                            <div class="mb-3">
+                                <label
+                                    class="form-label small mb-1"
+                                    for="bulk_media_type"
+                                >
+                                    {{ $gettext('Type') }}
+                                </label>
+                                <select
+                                    id="bulk_media_type"
+                                    v-model="bulkType"
+                                    class="form-select form-select-sm"
+                                >
+                                    <option value="">
+                                        {{ $gettext('— No change —') }}
+                                    </option>
+                                    <option
+                                        v-for="opt in mediaTypeOptions"
+                                        :key="opt.value"
+                                        :value="opt.value"
+                                    >
+                                        {{ opt.label }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label
+                                    class="form-label small mb-1"
+                                    for="bulk_media_category"
+                                >
+                                    {{ $gettext('Category') }}
+                                </label>
+                                <select
+                                    id="bulk_media_category"
+                                    v-model="bulkCategory"
+                                    class="form-select form-select-sm"
+                                >
+                                    <option value="">
+                                        {{ $gettext('— No change —') }}
+                                    </option>
+                                    <option value="none">
+                                        {{ $gettext('No category') }}
+                                    </option>
+                                    <option
+                                        v-for="cat in mediaCategories"
+                                        :key="cat.id"
+                                        :value="String(cat.id)"
+                                    >
+                                        {{ cat.name }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div class="buttons">
+                                <button
+                                    class="btn btn-primary btn-sm"
+                                    type="submit"
+                                    :disabled="!canApplyClassification"
+                                >
+                                    {{ $gettext('Apply') }}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <div
                 class="btn-group btn-group-sm dropdown allow-focus"
             >
@@ -227,13 +319,16 @@ import IconIcDelete from "~icons/ic/baseline-delete";
 import IconIcFolder from "~icons/ic/baseline-folder";
 import IconIcMoreHoriz from "~icons/ic/baseline-more-horiz";
 import IconIcOpenWith from "~icons/ic/baseline-open-with";
+import IconIcLabel from "~icons/ic/baseline-label";
+import {getMediaTypeOptions} from "~/functions/mediaTypes.ts";
 
 const props = defineProps<{
     currentDirectory: string,
     selectedItems: MediaSelectedItems,
     playlists?: MediaInitialPlaylist[],
     batchUrl: string,
-    supportsImmediateQueue: boolean
+    supportsImmediateQueue: boolean,
+    mediaCategories?: {id: number; name: string}[],
 }>();
 
 const emit = defineEmits<{
@@ -248,6 +343,18 @@ const selectedItems = toRef(props, 'selectedItems');
 const hasSelectedItems = computed(() => {
     return selectedItems.value.all.length > 0;
 });
+
+const hasSelectedFiles = computed(() => selectedItems.value.files.length > 0);
+
+const mediaCategories = computed(() => props.mediaCategories ?? []);
+const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
+
+const bulkType = ref('');
+const bulkCategory = ref('');
+
+const canApplyClassification = computed(
+    () => hasSelectedFiles.value && (bulkType.value !== '' || bulkCategory.value !== '')
+);
 
 const checkedPlaylists = ref<(number | string)[]>([]);
 const newPlaylist = ref('');
@@ -289,13 +396,19 @@ const notifyNoFiles = () => {
     notifyError($gettext('No files selected.'));
 }
 
-const doBatch = async (action: string, successMessage: string, errorMessage: string) => {
+const doBatch = async (
+    action: string,
+    successMessage: string,
+    errorMessage: string,
+    extraPayload: Record<string, unknown> = {},
+) => {
     if (hasSelectedItems.value) {
         const {data} = await axios.put(props.batchUrl, {
             'do': action,
             'current_directory': props.currentDirectory,
             'files': selectedItems.value.files,
-            'dirs': selectedItems.value.directories
+            'dirs': selectedItems.value.directories,
+            ...extraPayload,
         });
 
         handleBatchResponse(data, successMessage, errorMessage);
@@ -303,6 +416,40 @@ const doBatch = async (action: string, successMessage: string, errorMessage: str
     } else {
         notifyNoFiles();
     }
+};
+
+const applyClassification = async () => {
+    if (!hasSelectedFiles.value) {
+        notifyNoFiles();
+        return;
+    }
+
+    if (!canApplyClassification.value) {
+        notifyError($gettext('Choose a type and/or category to apply.'));
+        return;
+    }
+
+    const payload: Record<string, unknown> = {};
+
+    if (bulkType.value !== '') {
+        payload.media_type = bulkType.value;
+    }
+
+    if (bulkCategory.value !== '') {
+        payload.category_id = bulkCategory.value === 'none'
+            ? null
+            : Number(bulkCategory.value);
+    }
+
+    await doBatch(
+        'classify',
+        $gettext('Updated type/category for files:'),
+        $gettext('Error updating files:'),
+        payload,
+    );
+
+    bulkType.value = '';
+    bulkCategory.value = '';
 };
 
 const doImmediateQueue = () => {

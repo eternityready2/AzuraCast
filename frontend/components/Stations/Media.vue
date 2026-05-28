@@ -119,6 +119,7 @@
                 :current-directory="currentDirectory"
                 :supports-immediate-queue="supportsImmediateQueue"
                 :playlists="playlists"
+                :media-categories="mediaCategories"
                 @add-playlist="onAddPlaylist"
                 @relist="onTriggerRelist"
                 @create-directory="createDirectory"
