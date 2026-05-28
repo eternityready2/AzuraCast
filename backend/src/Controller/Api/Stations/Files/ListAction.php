@@ -98,11 +98,7 @@ final class ListAction implements SingleActionInterface
         $currentDir = Types::string($request->getParam('currentDirectory'));
 
         $searchPhraseFull = Types::stringOrNull($request->getParam('searchPhrase'), true);
-        $filterMediaType = Types::stringOrNull($request->getParam('mediaType'), true);
-        $filterMediaCategory = $request->getParam('mediaCategory');
-        $hasMediaFilters = (null !== $filterMediaType && '' !== $filterMediaType)
-            || (null !== $filterMediaCategory && '' !== $filterMediaCategory);
-        $isSearch = null !== $searchPhraseFull || $hasMediaFilters;
+        $isSearch = null !== $searchPhraseFull;
 
         [$searchPhrase, $playlist, $special] = $this->parseSearchQuery(
             $station,
@@ -116,19 +112,8 @@ final class ListAction implements SingleActionInterface
         ];
 
         if ($isSearch) {
-            $cacheKeyParts[] = 'search_' . rawurlencode($searchPhraseFull ?? '');
+            $cacheKeyParts[] = 'search_' . rawurlencode($searchPhraseFull);
         }
-
-        if ($hasMediaFilters) {
-            if (null !== $filterMediaType && '' !== $filterMediaType) {
-                $cacheKeyParts[] = 'mt_' . rawurlencode($filterMediaType);
-            }
-
-            if (null !== $filterMediaCategory && '' !== $filterMediaCategory) {
-                $cacheKeyParts[] = 'mc_' . rawurlencode((string)$filterMediaCategory);
-            }
-        }
-
         $cacheKey = implode('.', $cacheKeyParts);
 
         $flushCache = Types::bool($request->getParam('flushCache'), false, true);
@@ -155,8 +140,6 @@ final class ListAction implements SingleActionInterface
                 ->andWhere('sm.path LIKE :path')
                 ->setParameter('storageLocation', $station->media_storage_location)
                 ->setParameter('path', $pathLike);
-
-            $this->applyMediaLibraryFilters($mediaQueryBuilder, $filterMediaType, $filterMediaCategory);
 
             $unprocessableMediaQuery = $this->em->createQuery(
                 <<<'DQL'
@@ -426,34 +409,6 @@ final class ListAction implements SingleActionInterface
     /**
      * @return array<string, ApiStationMedia>
      */
-    private function applyMediaLibraryFilters(
-        QueryBuilder $mediaQueryBuilder,
-        ?string $filterMediaType,
-        mixed $filterMediaCategory,
-    ): void {
-        if (null !== $filterMediaType && '' !== $filterMediaType) {
-            $mediaQueryBuilder
-                ->andWhere('sm.type = :filterMediaType')
-                ->setParameter('filterMediaType', $filterMediaType);
-        }
-
-        if (null === $filterMediaCategory || '' === $filterMediaCategory) {
-            return;
-        }
-
-        if ('none' === $filterMediaCategory) {
-            $mediaQueryBuilder->andWhere('sm.category_id IS NULL');
-
-            return;
-        }
-
-        if (is_numeric($filterMediaCategory)) {
-            $mediaQueryBuilder
-                ->andWhere('sm.category_id = :filterCategoryId')
-                ->setParameter('filterCategoryId', (int)$filterMediaCategory);
-        }
-    }
-
     private function processMediaInDir(
         Station $station,
         ?QueryBuilder $qb = null
@@ -461,8 +416,6 @@ final class ListAction implements SingleActionInterface
         if (null === $qb) {
             return [];
         }
-
-        $qb->leftJoin('sm.category', 'smc');
 
         $qb->select(
             'sm.id',
@@ -477,10 +430,7 @@ final class ListAction implements SingleActionInterface
             'sm.length',
             'sm.mtime',
             'sm.uploaded_at',
-            'sm.art_updated_at',
-            'sm.type',
-            'sm.category_id',
-            'smc.name AS category_name'
+            'sm.art_updated_at'
         );
 
         /** @var array<array{
@@ -496,10 +446,7 @@ final class ListAction implements SingleActionInterface
          *     length: string,
          *     mtime: int,
          *     uploaded_at: int,
-         *     art_updated_at: int,
-         *     type: string,
-         *     category_id: int|null,
-         *     category_name: string|null
+         *     art_updated_at: int
          * }> $mediaInDirRaw
          */
         $mediaInDirRaw = $qb->getQuery()->getScalarResult();

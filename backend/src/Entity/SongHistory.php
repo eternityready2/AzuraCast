@@ -56,14 +56,6 @@ final class SongHistory implements
     public private(set) ?int $streamer_id = null;
 
     #[ORM\ManyToOne]
-    #[ORM\JoinColumn(name: 'clock_wheel_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
-    public ?StationClockWheel $clock_wheel = null;
-
-    /* TODO Remove direct identifier access. */
-    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
-    public private(set) ?int $clock_wheel_id = null;
-
-    #[ORM\ManyToOne]
     #[ORM\JoinColumn(name: 'media_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
     public ?StationMedia $media = null {
         set {
@@ -228,7 +220,6 @@ final class SongHistory implements
         $sh->media = $queue->media;
         $sh->request = $queue->request;
         $sh->playlist = $queue->playlist;
-        $sh->clock_wheel = $queue->clock_wheel;
         $sh->duration = $queue->duration;
         $sh->updateVisibility();
 

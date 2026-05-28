@@ -350,7 +350,6 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
                 return [
                     'id'              => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
-                    'schedule_id'     => $scheduleItem->id,
                     'title'           => $wheel->name,
                     'backgroundColor' => $wheel->color,
                     'start'           => $dateRange->start->toIso8601String(),
@@ -382,12 +381,6 @@ final class ClockWheelsController extends AbstractScheduledEntityController
             $slotsOut[] = $this->toArray($slot);
         }
         $return['slots'] = $slotsOut;
-
-        $scheduleOut = [];
-        foreach ($this->scheduleRepo->findByRelation($record) as $scheduleItem) {
-            $scheduleOut[] = $this->toArray($scheduleItem);
-        }
-        $return['schedule_items'] = $scheduleOut;
 
         $router = $request->getRouter();
         $isInternal = $request->isInternal();
@@ -538,7 +531,7 @@ final class ClockWheelsController extends AbstractScheduledEntityController
                 ? min(3599, (int)$posRaw)
                 : 0;
 
-            // Resolve category_id first; a category-only slot has no media type.
+            // Resolve category_id first — a category slot has no type.
             $categoryId = array_key_exists('category_id', $datum) && is_numeric($datum['category_id'])
                 ? (int)$datum['category_id']
                 : null;
@@ -549,12 +542,12 @@ final class ClockWheelsController extends AbstractScheduledEntityController
                     $slot->category = $category;
                     $slot->type = null;
                 } else {
-                    $slot->category = null;
+                    // Fallback to music if category is invalid or from another station.
                     $slot->type = ClockWheelSlotTypes::Music;
                 }
             } else {
-                $slot->category = null;
-                $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null && $datum['type'] !== '')
+                // Use array_key_exists so null values don't fall back to 'music'.
+                $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null)
                     ? (string)$datum['type']
                     : 'music';
                 $slot->type = ClockWheelSlotTypes::tryFrom($typeRaw) ?? ClockWheelSlotTypes::Music;

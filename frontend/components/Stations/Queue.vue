@@ -63,9 +63,6 @@
                 <div v-else-if="row.item.playlist">
                     {{ $gettext('Playlist') }}: {{ row.item.playlist }}
                 </div>
-                <div v-else-if="row.item.clock_wheel">
-                    {{ $gettext('Clock Wheel') }}: {{ row.item.clock_wheel }}
-                </div>
             </template>
         </data-table>
     </card-page>

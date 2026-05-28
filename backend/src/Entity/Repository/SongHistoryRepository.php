@@ -41,11 +41,8 @@ final class SongHistoryRepository extends AbstractStationBasedRepository
 
         return $this->em->createQuery(
             <<<'DQL'
-                SELECT sh, sm, sp, st, scw FROM App\Entity\SongHistory sh
+                SELECT sh FROM App\Entity\SongHistory sh
                 LEFT JOIN sh.media sm
-                LEFT JOIN sh.playlist sp
-                LEFT JOIN sh.streamer st
-                LEFT JOIN sh.clock_wheel scw
                 WHERE sh.station = :station
                 AND sh.is_visible = 1
                 ORDER BY sh.id DESC

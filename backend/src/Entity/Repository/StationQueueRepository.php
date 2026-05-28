@@ -204,11 +204,10 @@ final class StationQueueRepository extends AbstractStationBasedRepository
     private function getBaseQuery(Station $station): QueryBuilder
     {
         return $this->em->createQueryBuilder()
-            ->select('sq, sm, sp, scw')
+            ->select('sq, sm, sp')
             ->from(StationQueue::class, 'sq')
             ->leftJoin('sq.media', 'sm')
             ->leftJoin('sq.playlist', 'sp')
-            ->leftJoin('sq.clock_wheel', 'scw')
             ->where('sq.station = :station')
             ->setParameter('station', $station);
     }

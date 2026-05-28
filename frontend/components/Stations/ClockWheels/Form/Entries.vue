@@ -20,18 +20,6 @@
             </div>
         </div>
 
-        <form-group-checkbox
-            id="is_active"
-            class="mb-3"
-            :field="r$.is_active"
-            :label="$gettext('Active')"
-            :description="$gettext('Inactive wheels are saved but do not run on-air until scheduled on the station Schedule page.')"
-        />
-
-        <div class="alert alert-info py-2 mb-4">
-            {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule -> Create Event to assign it.') }}
-        </div>
-
         <div class="mb-1">
             <div class="d-flex align-items-center justify-content-between mb-2">
                 <span class="fw-semibold">
@@ -57,7 +45,7 @@
                         type="button"
                         class="clock-wheel-timeline__marker"
                         :style="{ left: timelinePercent(entry.position_seconds) + '%' }"
-                        :title="formatPosition(entry.position_seconds) + ' - ' + slotLabel(entry.slot_value)"
+                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry.slot_value)"
                         @click="focusRow(entries.indexOf(entry))"
                     />
                 </div>
@@ -98,7 +86,7 @@
                         </th>
                         <th
                             class="text-uppercase small text-center"
-                            style="width: 9rem;"
+                            style="width: 7rem;"
                         >
                             {{ $gettext('Actions') }}
                         </th>
@@ -120,7 +108,7 @@
                         :data-entry-index="index"
                     >
                         <td class="text-center align-middle drag-handle text-muted">
-                            ..
+                            ⋮⋮
                         </td>
                         <td>
                             <input
@@ -203,10 +191,10 @@
                             >
                         </td>
                         <td class="text-center align-middle">
-                            <div class="btn-group btn-group-sm w-100 justify-content-center">
+                            <div class="btn-group btn-group-sm">
                                 <button
                                     type="button"
-                                    class="btn btn-outline-primary cw-action-btn"
+                                    class="btn btn-outline-secondary"
                                     :title="$gettext('Insert entry after this anchor')"
                                     @click="props.insertEntryAfter(index)"
                                 >
@@ -214,7 +202,7 @@
                                 </button>
                                 <button
                                     type="button"
-                                    class="btn btn-outline-secondary cw-action-btn"
+                                    class="btn btn-outline-secondary"
                                     :title="$gettext('Duplicate this entry')"
                                     @click="props.duplicateEntry(index)"
                                 >
@@ -222,11 +210,11 @@
                                 </button>
                                 <button
                                     type="button"
-                                    class="btn btn-outline-danger cw-action-btn"
+                                    class="btn btn-outline-danger"
                                     :title="$gettext('Delete')"
                                     @click="props.removeEntry(index)"
                                 >
-                                    <icon-ic-delete />
+                                    &times;
                                 </button>
                             </div>
                         </td>
@@ -247,16 +235,12 @@
 
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
-import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, ref, useTemplateRef} from 'vue';
+import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
 import {useDraggable} from 'vue-draggable-plus';
-import IconIcDelete from '~icons/ic/baseline-delete';
-import IconIcAdd from '~icons/ic/baseline-add';
-import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
@@ -276,7 +260,8 @@ export interface ClockWheelEntryRow {
 
 const props = defineProps<{
     form: {name: string; color: string; is_active: boolean};
-    r$: Record<string, any>;
+    r$: {name: {required: unknown}; color: object; is_active: object};
+    entries: ClockWheelEntryRow[];
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;
@@ -284,8 +269,6 @@ const props = defineProps<{
     onEntriesReordered: () => void;
     onEntriesChanged: () => void;
 }>();
-
-const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
 
 const {getStationApiUrl} = useApiRouter();
 const {axios} = useAxios();
@@ -301,11 +284,11 @@ void axios.get(getStationApiUrl('/media-categories').value).then(
 );
 
 const sortedEntries = computed(() =>
-    [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
+    [...props.entries].sort((a, b) => a.position_seconds - b.position_seconds)
 );
 
 const timelineWarnings = computed(() =>
-    getClockWheelTimelineWarnings(entries.value, $gettext)
+    getClockWheelTimelineWarnings(props.entries, $gettext)
 );
 
 const $tbody = useTemplateRef('$tbody');
@@ -315,7 +298,7 @@ onMounted(() => {
         return;
     }
 
-    useDraggable($tbody.value, entries, {
+    useDraggable($tbody, toRef(props, 'entries'), {
         handle: '.drag-handle',
         animation: 150,
         onEnd() {
@@ -403,14 +386,5 @@ const focusRow = (index: number) => {
 
 .clock-wheel-entries-table .drag-handle:active {
     cursor: grabbing;
-}
-
-.cw-action-btn {
-    width: 2.25rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
 }
 </style>

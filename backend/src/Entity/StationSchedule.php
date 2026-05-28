@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
-use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\RecurrenceEndType;
 use App\Entity\Enums\RecurrenceMonthlyPattern;
 use App\Entity\Enums\RecurrenceType;
@@ -121,16 +120,6 @@ final class StationSchedule implements IdentifiableEntityInterface
         ORM\Column
     ]
     public bool $loop_once = false;
-
-    /**
-     * Clock wheel calendar mode: flexible (default) or strict wall-clock alignment.
-     * Only used when clock_wheel is set; ignored for playlist/streamer schedules.
-     */
-    #[
-        OA\Property(example: 'flexible', nullable: true),
-        ORM\Column(type: 'string', length: 20, nullable: true, enumType: ClockWheelScheduleMode::class)
-    ]
-    public ?ClockWheelScheduleMode $clock_wheel_mode = null;
 
     /** Recurrence: weekly (default), biweekly, monthly, or custom interval in weeks */
     #[

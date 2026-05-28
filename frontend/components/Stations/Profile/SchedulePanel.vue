@@ -18,9 +18,6 @@
                                     <template v-if="row.type === 'playlist'">
                                         {{ $gettext('Playlist') }}
                                     </template>
-                                    <template v-else-if="row.type === 'clock_wheel'">
-                                        {{ $gettext('Clock Wheel') }}
-                                    </template>
                                     <template v-else>
                                         {{ $gettext('Streamer/DJ') }}
                                     </template>

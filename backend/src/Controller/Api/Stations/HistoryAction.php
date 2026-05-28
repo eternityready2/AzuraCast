@@ -89,12 +89,11 @@ final class HistoryAction implements SingleActionInterface
 
         $qb = $this->em->createQueryBuilder();
 
-        $qb->select('sh, sr, sp, ss, scw')
+        $qb->select('sh, sr, sp, ss')
             ->from(SongHistory::class, 'sh')
             ->leftJoin('sh.request', 'sr')
             ->leftJoin('sh.playlist', 'sp')
             ->leftJoin('sh.streamer', 'ss')
-            ->leftJoin('sh.clock_wheel', 'scw')
             ->where('sh.station = :station')
             ->andWhere('sh.timestamp_start >= :start AND sh.timestamp_start <= :end')
             ->andWhere('sh.listeners_start IS NOT NULL')

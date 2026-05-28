@@ -55,9 +55,9 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
      * @before setupComplete
      * @before login
      */
-    public function activeClockWheelMayExistWithoutSchedule(FunctionalTester $I): void
+    public function activeClockWheelRequiresSchedule(FunctionalTester $I): void
     {
-        $I->wantTo('Allow an active clock wheel with no schedule items (scheduling is done on the station calendar).');
+        $I->wantTo('Reject an active clock wheel with no schedule items (must-schedule).');
 
         $station = $this->getTestStation();
         $baseUrl = '/api/station/' . $station->id . '/clock-wheels';
@@ -68,11 +68,8 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
             'is_active' => true,
         ]);
 
-        $I->seeResponseCodeIs(200);
-        $I->seeResponseContainsJson([
-            'name' => 'Unscheduled Active Wheel',
-            'is_active' => true,
-        ]);
+        $I->seeResponseCodeIs(400);
+        $I->seeResponseContains('scheduled time');
     }
 
     /**
@@ -159,7 +156,6 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
             'slots' => [
                 [
                     'type' => 'promo',
-                    'category_id' => null,
                     'algorithm' => 'oldest_track',
                     'position_seconds' => 600,
                     'duration_seconds' => 45,
@@ -168,7 +164,7 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
         ]);
         $I->seeResponseCodeIs(200);
         $I->seeResponseContainsJson([
-            ['position_seconds' => 600, 'type' => 'promo', 'category_id' => null],
+            ['position_seconds' => 600, 'type' => 'promo'],
         ]);
 
         $I->sendGET(
