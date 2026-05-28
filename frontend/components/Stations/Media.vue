@@ -481,7 +481,7 @@ const filter = (newFilter: string) => {
 const $quota = useTemplateRef('$quota');
 
 const onTriggerRelist = () => {
-    void listItemProvider.refresh(true);
+    $dataTable.value?.relist();
 
     $quota.value?.update();
 };
