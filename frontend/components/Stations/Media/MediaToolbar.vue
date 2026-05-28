@@ -11,6 +11,7 @@
             <div class="btn-group btn-group-sm dropdown allow-focus">
                 <div class="dropdown">
                     <button
+                        ref="$classifyDropdown"
                         class="btn btn-sm btn-primary dropdown-toggle"
                         type="button"
                         data-bs-toggle="dropdown"
@@ -441,6 +442,8 @@ const applyClassification = async () => {
             : Number(bulkCategory.value);
     }
 
+    hideClassifyDropdown();
+
     await doBatch(
         'classify',
         $gettext('Updated type/category for files:'),
@@ -510,6 +513,13 @@ const doDelete = async () => {
 };
 
 const $playlistDropdown = useTemplateRef('$playlistDropdown');
+const $classifyDropdown = useTemplateRef('$classifyDropdown');
+
+const hideClassifyDropdown = () => {
+    if ($classifyDropdown.value) {
+        Dropdown.getInstance($classifyDropdown.value)?.hide();
+    }
+};
 
 const setPlaylists = async () => {
     if ($playlistDropdown.value) {
