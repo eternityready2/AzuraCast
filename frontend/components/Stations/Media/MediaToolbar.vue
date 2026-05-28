@@ -17,7 +17,7 @@
                         data-bs-toggle="dropdown"
                         data-bs-auto-close="outside"
                         aria-expanded="false"
-                        :disabled="!hasSelectedFiles"
+                        :disabled="!hasSelectedClassifyItems"
                     >
                         <icon-ic-label/>
 
@@ -345,7 +345,9 @@ const hasSelectedItems = computed(() => {
     return selectedItems.value.all.length > 0;
 });
 
-const hasSelectedFiles = computed(() => selectedItems.value.files.length > 0);
+const hasSelectedClassifyItems = computed(
+    () => selectedItems.value.files.length > 0 || selectedItems.value.directories.length > 0
+);
 
 const mediaCategories = computed(() => props.mediaCategories ?? []);
 const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
@@ -354,7 +356,7 @@ const bulkType = ref('');
 const bulkCategory = ref('');
 
 const canApplyClassification = computed(
-    () => hasSelectedFiles.value && (bulkType.value !== '' || bulkCategory.value !== '')
+    () => hasSelectedClassifyItems.value && (bulkType.value !== '' || bulkCategory.value !== '')
 );
 
 const checkedPlaylists = ref<(number | string)[]>([]);
@@ -420,7 +422,7 @@ const doBatch = async (
 };
 
 const applyClassification = async () => {
-    if (!hasSelectedFiles.value) {
+    if (!hasSelectedClassifyItems.value) {
         notifyNoFiles();
         return;
     }
