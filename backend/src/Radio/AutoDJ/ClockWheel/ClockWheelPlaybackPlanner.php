@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\Api\StationPlaylistQueue;
+use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotTypes;
+use App\Entity\StationSchedule;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
@@ -50,6 +52,7 @@ final class ClockWheelPlaybackPlanner
         StationClockWheel $wheel,
         array $recentHistory,
         DateTimeImmutable $expectedPlayTime,
+        StationSchedule $activeSchedule,
     ): ?StationQueue {
         $slots = $this->sortSlots($wheel->slots->toArray());
 
@@ -91,10 +94,14 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
 
+        $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
+
         return $this->resolveSlot(
             $activeSlot,
             $recentHistory,
-            $availableSeconds
+            $availableSeconds,
+            $scheduleMode,
+            $station
         );
     }
 
@@ -217,14 +224,15 @@ final class ClockWheelPlaybackPlanner
         StationClockWheelSlot $slot,
         array $recentHistory,
         int $availableSeconds,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
     ): ?StationQueue {
-        $station = $slot->clock_wheel->station;
         $type = $slot->type;
         $categoryId = $slot->category_id;
         $playlistId = $slot->playlist_id;
 
-        if ($type === null && $categoryId === null && ($playlistId === null || $playlistId === 0)) {
-            $this->logger->warning('Clock Wheel slot has no type, category, or playlist — skipping.');
+        if ($type === null) {
+            $this->logger->warning('Clock Wheel slot has no type — skipping.');
             return null;
         }
 
@@ -242,10 +250,8 @@ final class ClockWheelPlaybackPlanner
             $params['playlistId'] = $playlistId;
         }
 
-        if ($type !== null) {
-            $dql .= ' AND m.type = :type';
-            $params['type'] = $type;
-        }
+        $dql .= ' AND m.type = :type';
+        $params['type'] = $type->value;
 
         if ($categoryId !== null) {
             $dql .= ' AND m.category_id = :categoryId';
@@ -270,8 +276,9 @@ final class ClockWheelPlaybackPlanner
         }
 
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
+        $strictSchedule = ClockWheelScheduleMode::Strict === $scheduleMode;
 
-        $candidates = $this->filterByDuration($candidates, $maxDuration, $slot);
+        $candidates = $this->filterByDuration($candidates, $maxDuration, $slot, $strictSchedule);
 
         if ($candidates === []) {
             $this->logger->warning(
@@ -308,6 +315,15 @@ final class ClockWheelPlaybackPlanner
         }
 
         $queueEntry = StationQueue::fromMedia($station, $media);
+        $queueEntry->clock_wheel = $slot->clock_wheel;
+        $queueEntry->clock_wheel_max_play_seconds = (int)floor($maxDuration);
+        $queueEntry->clock_wheel_schedule_mode = $scheduleMode->value;
+        $queueEntry->clock_wheel_enforce_cap = $this->shouldEnforcePlaybackCap(
+            $slot,
+            $scheduleMode,
+            $media,
+            $maxDuration
+        );
         $this->em->persist($queueEntry);
 
         $this->logger->info('Clock Wheel resolved track.', [
@@ -315,6 +331,8 @@ final class ClockWheelPlaybackPlanner
             'title' => $media->title,
             'effective_length' => $media->getCalculatedLength(),
             'available_seconds' => $availableSeconds,
+            'clock_wheel_schedule_mode' => $scheduleMode->value,
+            'clock_wheel_enforce_cap' => $queueEntry->clock_wheel_enforce_cap,
         ]);
 
         return $queueEntry;
@@ -334,10 +352,31 @@ final class ClockWheelPlaybackPlanner
      *
      * @return StationMedia[]
      */
+    /**
+     * When true, AutoDJ applies a cue_out cap (Liquidsoap) as a fallback after PHP track selection.
+     */
+    private function shouldEnforcePlaybackCap(
+        StationClockWheelSlot $slot,
+        ClockWheelScheduleMode $scheduleMode,
+        StationMedia $media,
+        float $maxDuration,
+    ): bool {
+        if (ClockWheelScheduleMode::Strict === $scheduleMode) {
+            return true;
+        }
+
+        if (!$this->isFlexibleMusicSlot($slot)) {
+            return true;
+        }
+
+        return $media->getCalculatedLength() > $maxDuration;
+    }
+
     private function filterByDuration(
         array $candidates,
         float $maxDuration,
         StationClockWheelSlot $slot,
+        bool $strictSchedule,
     ): array {
         $fitting = array_values(array_filter(
             $candidates,
@@ -346,6 +385,10 @@ final class ClockWheelPlaybackPlanner
 
         if ($fitting !== []) {
             return $fitting;
+        }
+
+        if ($strictSchedule) {
+            return [];
         }
 
         if ($this->isFlexibleMusicSlot($slot)) {

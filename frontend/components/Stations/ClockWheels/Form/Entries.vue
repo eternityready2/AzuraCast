@@ -8,7 +8,7 @@
             />
         </div>
 
-        <div class="mb-4">
+        <div class="mb-3">
             <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
             <div>
                 <input
@@ -20,14 +20,23 @@
             </div>
         </div>
 
+        <form-group-checkbox
+            id="is_active"
+            class="mb-3"
+            :field="r$.is_active"
+            :label="$gettext('Active')"
+            :description="$gettext('Inactive wheels are saved but do not run on-air until scheduled on the station Schedule page.')"
+        />
+
+        <div class="alert alert-info py-2 mb-4">
+            {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
+        </div>
+
         <div class="mb-1">
             <div class="d-flex align-items-center justify-content-between mb-2">
                 <span class="fw-semibold">
                     {{ $gettext('Clockwheel entries') }} ({{ entries.length }})
                 </span>
-                <small class="text-muted">
-                    {{ $gettext('Drag to reorder; times stay on the hour unless you edit them.') }}
-                </small>
             </div>
 
             <div
@@ -45,7 +54,7 @@
                         type="button"
                         class="clock-wheel-timeline__marker"
                         :style="{ left: timelinePercent(entry.position_seconds) + '%' }"
-                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry.slot_value)"
+                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry)"
                         @click="focusRow(entries.indexOf(entry))"
                     />
                 </div>
@@ -76,7 +85,7 @@
                             {{ $gettext('Position (m:s)') }}
                         </th>
                         <th class="text-uppercase small">
-                            {{ $gettext('Type or Category') }}
+                            {{ $gettext('Type') }}
                         </th>
                         <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
@@ -86,7 +95,7 @@
                         </th>
                         <th
                             class="text-uppercase small text-center"
-                            style="width: 7rem;"
+                            style="width: 9rem;"
                         >
                             {{ $gettext('Actions') }}
                         </th>
@@ -121,38 +130,17 @@
                         </td>
                         <td>
                             <select
-                                v-model="entry.slot_value"
+                                v-model="entry.type"
                                 class="form-select form-select-sm"
+                                required
                             >
-                                <optgroup :label="$gettext('Types')">
-                                    <option value="type:music">
-                                        {{ $gettext('Music (music and copyrighted material)') }}
-                                    </option>
-                                    <option value="type:talk">
-                                        {{ $gettext('Talk (sermons, speeches, and live recordings)') }}
-                                    </option>
-                                    <option value="type:id">
-                                        {{ $gettext('ID (station identification such as sweepers and jingles)') }}
-                                    </option>
-                                    <option value="type:promo">
-                                        {{ $gettext('Promo (station promotion that is not considered an ID)') }}
-                                    </option>
-                                    <option value="type:ad">
-                                        {{ $gettext('Ad (advert replacement files)') }}
-                                    </option>
-                                </optgroup>
-                                <optgroup
-                                    v-if="categories.length > 0"
-                                    :label="$gettext('Categories')"
+                                <option
+                                    v-for="opt in mediaTypeOptions"
+                                    :key="opt.value"
+                                    :value="opt.value"
                                 >
-                                    <option
-                                        v-for="cat in categories"
-                                        :key="cat.id"
-                                        :value="'cat:' + cat.id"
-                                    >
-                                        {{ cat.name }}
-                                    </option>
-                                </optgroup>
+                                    {{ opt.label }}
+                                </option>
                             </select>
                         </td>
                         <td>
@@ -191,30 +179,30 @@
                             >
                         </td>
                         <td class="text-center align-middle">
-                            <div class="btn-group btn-group-sm">
+                            <div class="btn-group btn-group-sm w-100 justify-content-center">
                                 <button
                                     type="button"
-                                    class="btn btn-outline-secondary"
-                                    :title="$gettext('Insert entry after this anchor')"
+                                    class="btn btn-outline-primary cw-action-btn"
+                                    :title="$gettext('Insert after')"
                                     @click="props.insertEntryAfter(index)"
                                 >
                                     <icon-ic-add />
                                 </button>
                                 <button
                                     type="button"
-                                    class="btn btn-outline-secondary"
-                                    :title="$gettext('Duplicate this entry')"
+                                    class="btn btn-outline-secondary cw-action-btn"
+                                    :title="$gettext('Duplicate')"
                                     @click="props.duplicateEntry(index)"
                                 >
                                     <icon-ic-copy />
                                 </button>
                                 <button
                                     type="button"
-                                    class="btn btn-outline-danger"
+                                    class="btn btn-outline-danger cw-action-btn"
                                     :title="$gettext('Delete')"
                                     @click="props.removeEntry(index)"
                                 >
-                                    &times;
+                                    <icon-ic-delete />
                                 </button>
                             </div>
                         </td>
@@ -235,24 +223,26 @@
 
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
+import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, ref, toRef, useTemplateRef} from 'vue';
+import {computed, onMounted, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
-import {useApiRouter} from '~/functions/useApiRouter.ts';
-import {useAxios} from '~/vendor/axios.ts';
 import {useDraggable} from 'vue-draggable-plus';
+import IconIcDelete from '~icons/ic/baseline-delete';
+import IconIcAdd from '~icons/ic/baseline-add';
+import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
     parseClockWheelPosition,
-    slotValueShortLabel,
     timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
+import {formatMediaType, getMediaTypeOptions, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 const {$gettext} = useTranslate();
 
 export interface ClockWheelEntryRow {
-    slot_value: string;
+    type: MediaTypeValue;
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
@@ -261,7 +251,6 @@ export interface ClockWheelEntryRow {
 const props = defineProps<{
     form: {name: string; color: string; is_active: boolean};
     r$: {name: {required: unknown}; color: object; is_active: object};
-    entries: ClockWheelEntryRow[];
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;
@@ -270,25 +259,17 @@ const props = defineProps<{
     onEntriesChanged: () => void;
 }>();
 
-const {getStationApiUrl} = useApiRouter();
-const {axios} = useAxios();
-const categories = ref<{id: number; name: string}[]>([]);
+// IMPORTANT: Use a v-model ref so drag-reorder can mutate the array.
+const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
 
-void axios.get(getStationApiUrl('/media-categories').value).then(
-    (resp) => {
-        categories.value = resp.data?.rows ?? resp.data ?? [];
-    },
-    () => {
-        categories.value = [];
-    }
-);
+const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
 
 const sortedEntries = computed(() =>
-    [...props.entries].sort((a, b) => a.position_seconds - b.position_seconds)
+    [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
 );
 
 const timelineWarnings = computed(() =>
-    getClockWheelTimelineWarnings(props.entries, $gettext)
+    getClockWheelTimelineWarnings(entries.value, $gettext)
 );
 
 const $tbody = useTemplateRef('$tbody');
@@ -298,7 +279,7 @@ onMounted(() => {
         return;
     }
 
-    useDraggable($tbody, toRef(props, 'entries'), {
+    useDraggable($tbody.value, entries, {
         handle: '.drag-handle',
         animation: 150,
         onEnd() {
@@ -308,10 +289,10 @@ onMounted(() => {
 });
 
 const formatPosition = formatClockWheelPosition;
-const slotLabel = (slotValue: string) => slotValueShortLabel(slotValue, categories.value);
+const slotLabel = (entry: ClockWheelEntryRow) => formatMediaType(entry.type, $gettext);
 
 const rowKey = (entry: ClockWheelEntryRow, index: number) =>
-    `${index}-${entry.position_seconds}-${entry.slot_value}`;
+    `${index}-${entry.position_seconds}-${entry.type}`;
 
 const rowHasWarning = (index: number) =>
     timelineWarnings.value.some((w) => w.index === index);
@@ -386,5 +367,14 @@ const focusRow = (index: number) => {
 
 .clock-wheel-entries-table .drag-handle:active {
     cursor: grabbing;
+}
+
+.cw-action-btn {
+    width: 2.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
 }
 </style>

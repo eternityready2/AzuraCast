@@ -12,7 +12,7 @@
             <ClockWheelsFormEntries
                 :form="form"
                 :r$="r$"
-                :entries="entries"
+                v-model:entries="entries"
                 :add-entry="addEntry"
                 :remove-entry="removeEntry"
                 :duplicate-entry="duplicateEntry"
@@ -68,28 +68,13 @@ import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
 } from '~/functions/clockWheelPosition.ts';
+import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 interface ClockWheelEntry {
-    slot_value: string;
+    type: MediaTypeValue;
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
-}
-
-/** Convert a raw slot from the API (type + category_id) to a combined slot_value. */
-function slotToValue(slot: {type?: string | null; category_id?: number | null}): string {
-    if (slot.category_id != null) {
-        return 'cat:' + slot.category_id;
-    }
-    return 'type:' + (slot.type ?? 'music');
-}
-
-/** Convert a slot_value back to { type, category_id } for the API payload. */
-function valueToSlot(slot_value: string): {type: string | null; category_id: number | null} {
-    if (slot_value.startsWith('cat:')) {
-        return {type: null, category_id: parseInt(slot_value.slice(4), 10)};
-    }
-    return {type: slot_value.replace('type:', ''), category_id: null};
 }
 
 const props = defineProps<BaseEditModalProps>();
@@ -115,7 +100,7 @@ const {r$} = useAppRegle(form, {
 });
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
-    slot_value: 'type:music',
+    type: 'music',
     algorithm: 'random',
     position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
     duration_seconds: null,
@@ -193,18 +178,22 @@ const resetForm = () => {
     entries.splice(0, entries.length);
 };
 
+const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
+    const allowed: MediaTypeValue[] = ['music', 'talk', 'id', 'promo', 'ad'];
+    return allowed.includes(type as MediaTypeValue) ? (type as MediaTypeValue) : 'music';
+};
+
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, data);
     if (Array.isArray(data.slots)) {
         const converted = (data.slots as {
             type?: string | null;
-            category_id?: number | null;
             algorithm?: string;
             position_seconds?: number;
             duration_seconds?: number | null;
         }[]).map(
             (s) => ({
-                slot_value: slotToValue(s),
+                type: normalizeSlotType(s.type),
                 algorithm: s.algorithm ?? 'random',
                 position_seconds: s.position_seconds ?? 0,
                 duration_seconds: s.duration_seconds ?? null,
@@ -218,7 +207,8 @@ const populateForm = (data: Record<string, unknown>) => {
 const validateForm = async () => {
     const {valid} = await r$.$validate();
     const slots = entries.map((e) => ({
-        ...valueToSlot(e.slot_value),
+        type: e.type,
+        category_id: null,
         algorithm: e.algorithm,
         position_seconds: e.position_seconds,
         duration_seconds: e.duration_seconds,
