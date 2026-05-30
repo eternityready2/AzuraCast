@@ -55,4 +55,7 @@ frontend/
 
 ## TESTING
 - There is no first-party JS test suite in this repo today.
-- Minimum verification for frontend work is usually `npm run lint`, `npm run tsc`, and if relevant `npm run build`.
+- Prefer the smallest verification scope that proves your change. For localized frontend edits, run lint or other checks against the touched file(s) first instead of `npm run lint` or `npm run tsc` for the whole project.
+- Avoid whole-project lint/typecheck runs for single-file or narrow feature work unless the user explicitly asks for them, the change is cross-cutting, or you are preparing a final pre-merge/full-verification pass.
+- When broader verification is needed, explain why the wider scope is justified and note that repo-wide `lint`/`tsc` can fail on unrelated pre-existing issues.
+- Minimum verification for frontend work is usually scoped lint/build evidence for the touched area, and if relevant a targeted browser/manual check; reserve `npm run lint`, `npm run tsc`, and `npm run build` for broader changes or explicit requests.

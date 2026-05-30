@@ -8,123 +8,19 @@
         @submit="doSubmit"
         @hidden="clearContents"
     >
-        <!-- Title -->
-        <div class="mb-3">
-            <form-group-field
-                id="name"
-                :field="r$.name"
-                :label="$gettext('Title')"
+        <tabs>
+            <ClockWheelsFormEntries
+                :form="form"
+                :r$="r$"
+                v-model:entries="entries"
+                :add-entry="addEntry"
+                :remove-entry="removeEntry"
+                :duplicate-entry="duplicateEntry"
+                :insert-entry-after="insertEntryAfter"
+                :on-entries-reordered="onEntriesReordered"
+                :on-entries-changed="onEntriesChanged"
             />
-        </div>
-
-        <!-- Color swatch -->
-        <div class="mb-4">
-            <label class="form-label fw-semibold">{{ $gettext('Color') }} *</label>
-            <div>
-                <input
-                    id="color"
-                    v-model="form.color"
-                    type="color"
-                    class="color-swatch-input"
-                    style="width: 3rem; height: 3rem; padding: 0.15rem; border: 2px solid #555; border-radius: 6px; cursor: pointer; background: none;"
-                />
-            </div>
-        </div>
-
-        <!-- Entries section -->
-        <div class="mb-1">
-            <div class="d-flex align-items-center justify-content-between mb-2">
-                <span class="fw-semibold">
-                    {{ $gettext('Clockwheel entries') }} ({{ entries.length }})
-                </span>
-            </div>
-
-            <table class="table table-sm table-bordered mb-0">
-                <thead>
-                    <tr>
-                        <th class="text-uppercase small">{{ $gettext('Type or Category') }}</th>
-                        <th class="text-uppercase small">{{ $gettext('Algorithm') }}</th>
-                        <th
-                            class="text-uppercase small text-center"
-                            style="width: 60px;"
-                        >
-                            {{ $gettext('Del') }}
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-if="entries.length === 0">
-                        <td
-                            colspan="3"
-                            class="text-center text-muted py-3"
-                        >
-                            {{ $gettext('No Clockwheel Entries found.') }}
-                        </td>
-                    </tr>
-                    <tr
-                        v-for="(entry, index) in entries"
-                        :key="index"
-                    >
-                        <td>
-                            <select
-                                v-model="entry.slot_value"
-                                class="form-select form-select-sm"
-                            >
-                                <optgroup :label="$gettext('Types')">
-                                    <option value="type:music">{{ $gettext('Music (music and copyrighted material)') }}</option>
-                                    <option value="type:talk">{{ $gettext('Talk (sermons, speeches, and live recordings)') }}</option>
-                                    <option value="type:id">{{ $gettext('ID (station identification such as sweepers and jingles)') }}</option>
-                                    <option value="type:promo">{{ $gettext('Promo (station promotion that is not considered an ID)') }}</option>
-                                    <option value="type:ad">{{ $gettext('Ad (advert replacement files)') }}</option>
-                                </optgroup>
-                                <optgroup
-                                    v-if="categories.length > 0"
-                                    :label="$gettext('Categories')"
-                                >
-                                    <option
-                                        v-for="cat in categories"
-                                        :key="cat.id"
-                                        :value="'cat:' + cat.id"
-                                    >
-                                        {{ cat.name }}
-                                    </option>
-                                </optgroup>
-                            </select>
-                        </td>
-                        <td>
-                            <select
-                                v-model="entry.algorithm"
-                                class="form-select form-select-sm"
-                            >
-                                <option value="random">{{ $gettext('Random') }}</option>
-                                <option value="oldest_album">{{ $gettext('Oldest Album') }}</option>
-                                <option value="oldest_artist">{{ $gettext('Oldest Artist') }}</option>
-                                <option value="oldest_track">{{ $gettext('Oldest Track') }}</option>
-                                <option value="most_recent_album">{{ $gettext('Most Recent Album') }}</option>
-                                <option value="most_recent_artist">{{ $gettext('Most Recent Artist') }}</option>
-                            </select>
-                        </td>
-                        <td class="text-center">
-                            <button
-                                type="button"
-                                class="btn btn-sm btn-danger"
-                                @click="removeEntry(index)"
-                            >
-                                &times;
-                            </button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <button
-                type="button"
-                class="btn btn-secondary w-100 mt-2"
-                @click="addEntry"
-            >
-                {{ $gettext('Add Clockwheel Entry') }}
-            </button>
-        </div>
+        </tabs>
 
         <template
             v-if="isEditMode"
@@ -158,37 +54,27 @@
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
-import FormGroupField from '~/components/Form/FormGroupField.vue';
+import Tabs from '~/components/Common/Tabs.vue';
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from '~/functions/useBaseEditModal';
-import {computed, onMounted, reactive, ref, useTemplateRef} from 'vue';
+import {computed, reactive, ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAppRegle} from '~/vendor/regle.ts';
 import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
-import {useApiRouter} from '~/functions/useApiRouter.ts';
-import {useAxios} from '~/vendor/axios.ts';
+import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
+import {
+    applyDragOrderToPositions,
+    sortClockWheelEntries,
+} from '~/functions/clockWheelPosition.ts';
+import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 interface ClockWheelEntry {
-    slot_value: string;  // "type:music" | "type:talk" | ... | "cat:5"
+    type: MediaTypeValue;
     algorithm: string;
-}
-
-/** Convert a raw slot from the API (type + category_id) to a combined slot_value. */
-function slotToValue(slot: {type?: string | null; category_id?: number | null}): string {
-    if (slot.category_id != null) {
-        return 'cat:' + slot.category_id;
-    }
-    return 'type:' + (slot.type ?? 'music');
-}
-
-/** Convert a slot_value back to { type, category_id } for the API payload. */
-function valueToSlot(slot_value: string): {type: string | null; category_id: number | null} {
-    if (slot_value.startsWith('cat:')) {
-        return {type: null, category_id: parseInt(slot_value.slice(4), 10)};
-    }
-    return {type: slot_value.replace('type:', ''), category_id: null};
+    position_seconds: number;
+    duration_seconds: number | null;
 }
 
 const props = defineProps<BaseEditModalProps>();
@@ -197,19 +83,6 @@ const emit = defineEmits<BaseEditModalEmits>();
 const $modal = useTemplateRef('$modal');
 const {notifySuccess} = useNotify();
 const {$gettext} = useTranslate();
-
-const {getStationApiUrl} = useApiRouter();
-const {axios} = useAxios();
-const categories = ref<{id: number; name: string}[]>([]);
-
-onMounted(async () => {
-    try {
-        const resp = await axios.get(getStationApiUrl('/media-categories').value);
-        categories.value = resp.data?.rows ?? resp.data ?? [];
-    } catch {
-        categories.value = [];
-    }
-});
 
 const blankForm = {
     name: '',
@@ -226,12 +99,78 @@ const {r$} = useAppRegle(form, {
     is_active: {},
 });
 
+const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
+    type: 'music',
+    algorithm: 'random',
+    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
+    duration_seconds: null,
+});
+
 const addEntry = () => {
-    entries.push({slot_value: 'type:music', algorithm: 'random'});
+    sortClockWheelEntries(entries);
+    const lastPosition = entries.length > 0
+        ? entries[entries.length - 1].position_seconds + 300
+        : 0;
+    entries.push(defaultEntry(lastPosition));
+    sortClockWheelEntries(entries);
 };
 
 const removeEntry = (index: number) => {
     entries.splice(index, 1);
+};
+
+const duplicateEntry = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 60;
+    if (next && position >= next.position_seconds) {
+        position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+    }
+    if (!next) {
+        position = Math.min(3599, source.position_seconds + 300);
+    }
+
+    entries.push({
+        ...source,
+        position_seconds: position,
+    });
+    sortClockWheelEntries(entries);
+};
+
+const insertEntryAfter = (index: number) => {
+    const source = entries[index];
+    if (!source) {
+        return;
+    }
+
+    sortClockWheelEntries(entries);
+    const next = entries[index + 1];
+    let position = source.position_seconds + 300;
+    if (next) {
+        position = Math.min(position, next.position_seconds - 1);
+        if (position <= source.position_seconds) {
+            position = Math.floor((source.position_seconds + next.position_seconds) / 2);
+        }
+    } else {
+        position = Math.min(3599, position);
+    }
+
+    entries.splice(index + 1, 0, defaultEntry(position));
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesReordered = () => {
+    applyDragOrderToPositions(entries);
+    sortClockWheelEntries(entries);
+};
+
+const onEntriesChanged = () => {
+    sortClockWheelEntries(entries);
 };
 
 const resetForm = () => {
@@ -239,19 +178,41 @@ const resetForm = () => {
     entries.splice(0, entries.length);
 };
 
+const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
+    const allowed: MediaTypeValue[] = ['music', 'talk', 'id', 'promo', 'ad'];
+    return allowed.includes(type as MediaTypeValue) ? (type as MediaTypeValue) : 'music';
+};
+
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, data);
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {type?: string | null; category_id?: number | null; algorithm?: string}[]).map(
-            (s) => ({slot_value: slotToValue(s), algorithm: s.algorithm ?? 'random'})
+        const converted = (data.slots as {
+            type?: string | null;
+            algorithm?: string;
+            position_seconds?: number;
+            duration_seconds?: number | null;
+        }[]).map(
+            (s) => ({
+                type: normalizeSlotType(s.type),
+                algorithm: s.algorithm ?? 'random',
+                position_seconds: s.position_seconds ?? 0,
+                duration_seconds: s.duration_seconds ?? null,
+            })
         );
         entries.splice(0, entries.length, ...converted);
+        sortClockWheelEntries(entries);
     }
 };
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({...valueToSlot(e.slot_value), algorithm: e.algorithm}));
+    const slots = entries.map((e) => ({
+        type: e.type,
+        category_id: null,
+        algorithm: e.algorithm,
+        position_seconds: e.position_seconds,
+        duration_seconds: e.duration_seconds,
+    }));
     return {valid, data: {...form.value, slots}};
 };
 
@@ -279,6 +240,8 @@ const {
     {
         onSubmitSuccess: () => {
             notifySuccess($gettext('Clock Wheel saved.'));
+            emit('relist');
+            close();
         },
     }
 );
@@ -293,7 +256,7 @@ const {doDelete} = useConfirmAndDelete(
 const doDeleteFromModal = () => {
     if (editUrl.value) {
         $modal.value?.hide();
-        doDelete(editUrl.value);
+        void doDelete(editUrl.value);
     }
 };
 

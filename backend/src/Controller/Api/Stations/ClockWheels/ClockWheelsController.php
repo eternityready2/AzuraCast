@@ -340,20 +340,25 @@ final class ClockWheelsController extends AbstractScheduledEntityController
             $request,
             $response,
             $scheduleItems,
-            static function (
+            function (
                 Station $station,
                 StationSchedule $scheduleItem,
                 DateRange $dateRange
-            ) {
+            ) use ($request) {
                 /** @var StationClockWheel $wheel */
                 $wheel = $scheduleItem->clock_wheel;
 
                 return [
                     'id'              => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
+                    'schedule_id'     => $scheduleItem->id,
                     'title'           => $wheel->name,
                     'backgroundColor' => $wheel->color,
                     'start'           => $dateRange->start->toIso8601String(),
                     'end'             => $dateRange->end->toIso8601String(),
+                    'edit_url'        => $request->getRouter()->named(
+                        'api:stations:clock-wheel',
+                        ['station_id' => $station->id, 'id' => $wheel->id]
+                    ),
                 ];
             }
         );
@@ -377,6 +382,12 @@ final class ClockWheelsController extends AbstractScheduledEntityController
             $slotsOut[] = $this->toArray($slot);
         }
         $return['slots'] = $slotsOut;
+
+        $scheduleOut = [];
+        foreach ($this->scheduleRepo->findByRelation($record) as $scheduleItem) {
+            $scheduleOut[] = $this->toArray($scheduleItem);
+        }
+        $return['schedule_items'] = $scheduleOut;
 
         $router = $request->getRouter();
         $isInternal = $request->isInternal();
@@ -495,16 +506,43 @@ final class ClockWheelsController extends AbstractScheduledEntityController
     {
         $wheel->slots->clear();
 
-        $order = 0;
+        $normalized = [];
         foreach ($slotsData as $datum) {
             if (!is_array($datum)) {
                 continue;
             }
+            $normalized[] = $datum;
+        }
 
+        usort(
+            $normalized,
+            static function (array $a, array $b): int {
+                $posA = isset($a['position_seconds']) && is_numeric($a['position_seconds'])
+                    ? (int)$a['position_seconds']
+                    : 0;
+                $posB = isset($b['position_seconds']) && is_numeric($b['position_seconds'])
+                    ? (int)$b['position_seconds']
+                    : 0;
+
+                return $posA <=> $posB;
+            }
+        );
+
+        $order = 0;
+        foreach ($normalized as $datum) {
             $slot = new StationClockWheelSlot($wheel);
             $slot->slot_order = $order++;
 
-            // Resolve category_id first — a category slot has no type.
+            $posRaw = $datum['position_seconds'] ?? null;
+            $slot->position_seconds = (is_numeric($posRaw) && (int)$posRaw >= 0)
+                ? min(3599, (int)$posRaw)
+                : 0;
+
+            $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null && $datum['type'] !== '')
+                ? (string)$datum['type']
+                : 'music';
+            $slot->type = ClockWheelSlotTypes::tryFrom($typeRaw) ?? ClockWheelSlotTypes::Music;
+
             $categoryId = array_key_exists('category_id', $datum) && is_numeric($datum['category_id'])
                 ? (int)$datum['category_id']
                 : null;
@@ -513,17 +551,11 @@ final class ClockWheelsController extends AbstractScheduledEntityController
                 $category = $this->em->find(StationMediaCategory::class, $categoryId);
                 if ($category !== null && $category->station->id === $wheel->station->id) {
                     $slot->category = $category;
-                    $slot->type = null;
                 } else {
-                    // Fallback to music if category is invalid or from another station.
-                    $slot->type = ClockWheelSlotTypes::Music;
+                    $slot->category = null;
                 }
             } else {
-                // Use array_key_exists so null values don't fall back to 'music'.
-                $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null)
-                    ? (string)$datum['type']
-                    : 'music';
-                $slot->type = ClockWheelSlotTypes::tryFrom($typeRaw) ?? ClockWheelSlotTypes::Music;
+                $slot->category = null;
             }
 
             $algoRaw = isset($datum['algorithm']) ? (string)$datum['algorithm'] : 'random';

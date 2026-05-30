@@ -79,6 +79,11 @@ make up
 make test
 ```
 
+## VERIFICATION GUIDANCE
+- Prefer the narrowest command that verifies the files or feature you changed.
+- Avoid repo-wide `npm run lint` / `npm run tsc` for isolated frontend edits unless the user explicitly requests full-project verification, the change is cross-cutting, or you are doing a deliberate final integration pass.
+- If you do run broad verification, call out whether failures are pre-existing and unrelated to the touched area.
+
 ## NOTES
 - Large files cluster in `backend/src/Sync/Task`, `backend/src/Radio`, `backend/src/Entity`, and `frontend/components/Stations`.
 - `backend/bin/console` uses a Docker-oriented autoload path; prefer running it inside the containerized environment.

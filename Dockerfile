@@ -145,13 +145,17 @@ USER azuracast
 
 WORKDIR /var/azuracast/www
 
-COPY --chown=azuracast:azuracast . .
-
-RUN composer install --no-ansi --no-interaction \
+COPY --chown=azuracast:azuracast composer.json composer.lock ./
+RUN --mount=type=cache,target=/tmp/composer-cache,uid=1000,gid=1000 \
+    COMPOSER_CACHE_DIR=/tmp/composer-cache composer install --no-ansi --no-interaction \
     && composer clear-cache
 
-RUN npm ci --include=dev \
+COPY --chown=azuracast:azuracast package.json package-lock.json ./
+RUN --mount=type=cache,target=/home/azuracast/.npm \
+    npm ci --include=dev \
     && npm cache clean --force
+
+COPY --chown=azuracast:azuracast . .
 
 USER root
 
@@ -168,8 +172,10 @@ CMD ["--no-main-command"]
 #
 FROM node:20-slim AS frontend-build
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
-RUN npm ci && npm run build
+RUN npm run build
 
 #
 # Final Production Image
