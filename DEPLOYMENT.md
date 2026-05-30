@@ -11,6 +11,22 @@ Before you start, choose these values for the deployment:
 
 ## Release Flow
 
+### 0. Back up the production database
+
+Always create a database backup before starting the release flow.
+
+```bash
+ssh jeremiah@67.225.188.121 "sudo docker compose -f /var/azuracast/docker-compose.yml exec -T web sh -c 'mariadb-dump -u azuracast -pKpWY7dkZhHpF azuracast > /var/azuracast/backups/pre-release-\$(date +%Y%m%d-%H%M%S).sql && echo DONE'"
+```
+
+Verify the backup landed and is non-zero:
+
+```bash
+ssh jeremiah@67.225.188.121 "sudo docker compose -f /var/azuracast/docker-compose.yml exec -T web sh -c 'ls -lh /var/azuracast/backups/'"
+```
+
+Do not proceed until you see a non-zero `.sql` file in the output.
+
 ### 1. Merge the source branch into the current `dev` release line
 
 If `dev` has moved since the last deployment, start from the latest remote `dev` and merge the source branch into a fresh deploy branch.
@@ -98,6 +114,22 @@ Use this flow when you want to deploy the current `dev` line to the test server 
 - source checkout on server: `/root/Azura-Cast-Custom`
 - live compose directory on server: `/var/azuracast`
 - live container name: `azuracast`
+
+### 0. Back up the test server database
+
+Always create a database backup before starting the test server deployment.
+
+```bash
+ssh root@23.95.254.206 "docker compose -f /var/azuracast/docker-compose.yml exec -T web sh -c 'mariadb-dump -u azuracast -p\$MYSQL_PASSWORD azuracast > /var/azuracast/backups/pre-deploy-\$(date +%Y%m%d-%H%M%S).sql && echo DONE'"
+```
+
+Verify the backup landed and is non-zero:
+
+```bash
+ssh root@23.95.254.206 "docker compose -f /var/azuracast/docker-compose.yml exec -T web sh -c 'ls -lh /var/azuracast/backups/'"
+```
+
+Do not proceed until you see a non-zero `.sql` file in the output.
 
 ### 1. Merge your feature branch into `dev`
 
