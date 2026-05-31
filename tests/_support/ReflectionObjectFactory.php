@@ -23,7 +23,7 @@ final class ReflectionObjectFactory
     public static function create(string $className, array $properties): object
     {
         $ref = new ReflectionClass($className);
-        $instance = $ref->newWithoutConstructor();
+        $instance = $ref->newInstanceWithoutConstructor();
 
         foreach ($properties as $name => $value) {
             $property = $ref->getProperty($name);
