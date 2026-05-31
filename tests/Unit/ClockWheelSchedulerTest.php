@@ -21,6 +21,8 @@ use App\Tests\Module;
 use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
 use DateTimeImmutable;
+use Mockery;
+use Mockery\MockInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use Psr\Log\LoggerInterface;
 use ReflectionProperty;
@@ -31,7 +33,9 @@ final class ClockWheelSchedulerTest extends Unit
 
     private Station $station;
 
-    /** @var StationScheduleRepository&MockObject */
+    private Module $testsModule;
+
+    /** @var StationScheduleRepository&MockInterface */
     private StationScheduleRepository $scheduleRepo;
 
     /** @var ScheduleConflictChecker&MockObject */
@@ -47,6 +51,7 @@ final class ClockWheelSchedulerTest extends Unit
 
     protected function _inject(Module $testsModule): void
     {
+        $this->testsModule = $testsModule;
         $this->scheduler = $testsModule->container->get(Scheduler::class);
     }
 
@@ -57,7 +62,8 @@ final class ClockWheelSchedulerTest extends Unit
         $this->station->short_name = 'scheduler_test';
         $this->station->timezone = 'UTC';
 
-        $this->scheduleRepo = $this->createMock(StationScheduleRepository::class);
+        $realScheduleRepo = $this->testsModule->container->get(StationScheduleRepository::class);
+        $this->scheduleRepo = Mockery::mock($realScheduleRepo);
         $this->conflictChecker = $this->createMock(ScheduleConflictChecker::class);
         $this->planner = $this->createMock(ClockWheelPlaybackPlanner::class);
         $this->queueRepo = $this->createMock(StationQueueRepository::class);
@@ -77,6 +83,11 @@ final class ClockWheelSchedulerTest extends Unit
         $this->clockWheelScheduler->setLogger($this->createMock(LoggerInterface::class));
 
         $this->queueRepo->method('getRecentlyPlayedByTimeRange')->willReturn([]);
+    }
+
+    protected function _after(): void
+    {
+        Mockery::close();
     }
 
     public function testSkipsWhenNextSongsAlreadySet(): void
@@ -109,7 +120,7 @@ final class ClockWheelSchedulerTest extends Unit
         $event = $this->makeEvent($this->activePlayTime());
 
         $this->conflictChecker->method('hasNonClockWheelScheduleActive')->willReturn(false);
-        $this->scheduleRepo->method('getAllScheduledItemsForStation')->willReturn([]);
+        $this->scheduleRepo->allows('getAllScheduledItemsForStation')->andReturn([]);
         $this->planner->expects(self::never())->method('resolveNextQueueEntry');
 
         $this->clockWheelScheduler->buildFromClockWheel($event);
@@ -124,7 +135,7 @@ final class ClockWheelSchedulerTest extends Unit
         $schedule = $this->makeWheelSchedule($wheel);
 
         $this->conflictChecker->method('hasNonClockWheelScheduleActive')->willReturn(false);
-        $this->scheduleRepo->method('getAllScheduledItemsForStation')->willReturn([$schedule]);
+        $this->scheduleRepo->allows('getAllScheduledItemsForStation')->andReturn([$schedule]);
         $this->planner->expects(self::never())->method('resolveNextQueueEntry');
 
         $this->clockWheelScheduler->buildFromClockWheel($event);
@@ -141,7 +152,7 @@ final class ClockWheelSchedulerTest extends Unit
         $resolved = new StationQueue($this->station, Song::createFromText('ID Artist - Sweeper'));
 
         $this->conflictChecker->method('hasNonClockWheelScheduleActive')->willReturn(false);
-        $this->scheduleRepo->method('getAllScheduledItemsForStation')->willReturn([$schedule]);
+        $this->scheduleRepo->allows('getAllScheduledItemsForStation')->andReturn([$schedule]);
         $this->planner->expects(self::once())
             ->method('resolveNextQueueEntry')
             ->with($wheel, [], $playTime, $schedule)
@@ -161,7 +172,7 @@ final class ClockWheelSchedulerTest extends Unit
         $schedule = $this->makeWheelSchedule($wheel);
 
         $this->conflictChecker->method('hasNonClockWheelScheduleActive')->willReturn(false);
-        $this->scheduleRepo->method('getAllScheduledItemsForStation')->willReturn([$schedule]);
+        $this->scheduleRepo->allows('getAllScheduledItemsForStation')->andReturn([$schedule]);
         $this->planner->method('resolveNextQueueEntry')->willReturn(null);
 
         $this->clockWheelScheduler->buildFromClockWheel($event);

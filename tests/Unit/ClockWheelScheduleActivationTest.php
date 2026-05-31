@@ -33,7 +33,7 @@ final class ClockWheelScheduleActivationTest extends Unit
 
     public function testActiveDuringScheduledWindow(): void
     {
-        $schedule = $this->makeSchedule(900, 1700, ['2026-01-01'], ['2026-12-31'], [1, 2, 3, 4, 5]);
+        $schedule = $this->makeSchedule(900, 1700, '2026-01-01', '2026-12-31', [1, 2, 3, 4, 5]);
 
         $now = CarbonImmutable::parse('2026-05-26 10:00:00', 'UTC');
 
@@ -44,7 +44,7 @@ final class ClockWheelScheduleActivationTest extends Unit
 
     public function testInactiveOutsideScheduledWindow(): void
     {
-        $schedule = $this->makeSchedule(900, 1700, ['2026-01-01'], ['2026-12-31'], [1, 2, 3, 4, 5]);
+        $schedule = $this->makeSchedule(900, 1700, '2026-01-01', '2026-12-31', [1, 2, 3, 4, 5]);
 
         $now = CarbonImmutable::parse('2026-05-26 20:00:00', 'UTC');
 
@@ -55,7 +55,7 @@ final class ClockWheelScheduleActivationTest extends Unit
 
     public function testOvernightScheduleActiveAfterMidnight(): void
     {
-        $schedule = $this->makeSchedule(2200, 600, ['2026-01-01'], ['2026-12-31'], [1, 2, 3, 4, 5, 6, 7]);
+        $schedule = $this->makeSchedule(2200, 600, '2026-01-01', '2026-12-31', [1, 2, 3, 4, 5, 6, 7]);
 
         $now = CarbonImmutable::parse('2026-05-27 02:00:00', 'UTC');
 
@@ -66,7 +66,7 @@ final class ClockWheelScheduleActivationTest extends Unit
 
     public function testPlayOnceWindowAtSameStartAndEndTime(): void
     {
-        $schedule = $this->makeSchedule(1000, 1000, ['2026-05-26'], ['2026-05-26'], [2]);
+        $schedule = $this->makeSchedule(1000, 1000, '2026-05-26', '2026-05-26', [2]);
 
         $now = CarbonImmutable::parse('2026-05-26 10:05:00', 'UTC');
 

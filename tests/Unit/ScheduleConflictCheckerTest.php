@@ -80,7 +80,7 @@ final class ScheduleConflictCheckerTest extends Unit
 
         $this->checker->assertBatchHasNoConflicts($wheel->station, $wheel, [
             $this->weeklyItem(900, 1000, $range, [1, 2, 3, 4, 5, 6, 7]),
-            $this->weeklyItem(1000, 1100, $range, [1, 2, 3, 4, 5, 6, 7]),
+            $this->weeklyItem(1001, 1100, $range, [1, 2, 3, 4, 5, 6, 7]),
         ]);
 
         self::assertTrue(true);
@@ -243,6 +243,7 @@ final class ScheduleConflictCheckerTest extends Unit
     private function makeClockWheel(int $id): StationClockWheel
     {
         $wheel = new StationClockWheel($this->station);
+        $wheel->name = 'Test Wheel ' . $id;
         $this->setEntityId($wheel, $id);
 
         return $wheel;

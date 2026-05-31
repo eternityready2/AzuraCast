@@ -42,7 +42,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $this->station->name = 'Planner Test';
         $this->station->short_name = 'planner_test';
         $this->station->timezone = 'UTC';
-        $this->station->createMediaStorageLocation();
+        $this->station->ensureDirectoriesExist();
 
         $this->queueRepo = $this->createMock(StationQueueRepository::class);
         $this->planner = $this->makePlanner();
