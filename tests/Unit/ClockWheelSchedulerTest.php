@@ -182,7 +182,7 @@ final class ClockWheelSchedulerTest extends Unit
             $this->clockWheelScheduler->buildFromClockWheel($event);
 
             self::assertCount(1, $event->getNextSongs());
-            self::assertSame($wheel->id, $event->getNextSongs()[0]->clock_wheel_id);
+            self::assertSame($wheel, $event->getNextSongs()[0]->clock_wheel);
         } finally {
             $this->removeStation($station);
         }

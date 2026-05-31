@@ -90,6 +90,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $media->length = 20.0;
         $media->mtime = time();
         $media->uploaded_at = time();
+        $media->updateMetaFields();
         $this->setEntityId($media, 42);
 
         $query = $this->createMock(Query::class);
