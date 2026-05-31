@@ -155,6 +155,96 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         self::assertSame(self::hourSeconds() - 1, $seconds);
     }
 
+    public function testShortFormSlotUsesShortestCandidateWhenWindowIsTooSmall(): void
+    {
+        $long = $this->makeMedia(1, 240.0);
+        $short = $this->makeMedia(2, 15.0);
+
+        $filtered = $this->invokeFilterByDuration(
+            [$long, $short],
+            18.0,
+            ClockWheelSlotTypes::Promo,
+            strictSchedule: false,
+        );
+
+        self::assertCount(1, $filtered);
+        self::assertSame(2, $filtered[0]->id);
+    }
+
+    public function testShortFormSlotReturnsEmptyUnderStrictScheduleWhenNothingFits(): void
+    {
+        $media = $this->makeMedia(1, 240.0);
+
+        $filtered = $this->invokeFilterByDuration(
+            [$media],
+            18.0,
+            ClockWheelSlotTypes::Id,
+            strictSchedule: true,
+        );
+
+        self::assertSame([], $filtered);
+    }
+
+    public function testShouldEnforceCapForStrictSchedule(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Music);
+        $media = $this->makeMedia(1, 180.0);
+
+        self::assertTrue(
+            $this->invokeShouldEnforcePlaybackCap(
+                $slot,
+                ClockWheelScheduleMode::Strict,
+                $media,
+                300.0,
+            )
+        );
+    }
+
+    public function testShouldEnforceCapForShortFormSlot(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Promo);
+        $media = $this->makeMedia(1, 20.0);
+
+        self::assertTrue(
+            $this->invokeShouldEnforcePlaybackCap(
+                $slot,
+                ClockWheelScheduleMode::Flexible,
+                $media,
+                300.0,
+            )
+        );
+    }
+
+    public function testShouldNotEnforceCapWhenFlexibleMusicFits(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Music);
+        $media = $this->makeMedia(1, 200.0);
+
+        self::assertFalse(
+            $this->invokeShouldEnforcePlaybackCap(
+                $slot,
+                ClockWheelScheduleMode::Flexible,
+                $media,
+                300.0,
+            )
+        );
+    }
+
+    public function testShouldEnforceCapWhenFlexibleMusicOverflows(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Music);
+        $media = $this->makeMedia(1, 400.0);
+
+        self::assertTrue(
+            $this->invokeShouldEnforcePlaybackCap(
+                $slot,
+                ClockWheelScheduleMode::Flexible,
+                $media,
+                300.0,
+            )
+        );
+    }
+
     public function testActiveSlotSelectionUsesPositionWithinHour(): void
     {
         $wheel = new StationClockWheel($this->station);
@@ -224,6 +314,60 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             $this->createMock(DuplicatePrevention::class),
             $this->createMock(LoggerInterface::class),
         );
+    }
+
+    /**
+     * @param StationMedia[] $candidates
+     *
+     * @return StationMedia[]
+     */
+    private function invokeFilterByDuration(
+        array $candidates,
+        float $maxDuration,
+        ClockWheelSlotTypes $type,
+        bool $strictSchedule,
+    ): array {
+        $wheel = new StationClockWheel($this->station);
+        $slot = new StationClockWheelSlot($wheel);
+        $slot->type = $type;
+
+        $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'filterByDuration');
+
+        return $method->invoke($this->planner, $candidates, $maxDuration, $slot, $strictSchedule);
+    }
+
+    private function invokeShouldEnforcePlaybackCap(
+        StationClockWheelSlot $slot,
+        ClockWheelScheduleMode $scheduleMode,
+        StationMedia $media,
+        float $maxDuration,
+    ): bool {
+        $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'shouldEnforcePlaybackCap');
+
+        return (bool)$method->invoke($this->planner, $slot, $scheduleMode, $media, $maxDuration);
+    }
+
+    private function makeSlot(ClockWheelSlotTypes $type): StationClockWheelSlot
+    {
+        $wheel = new StationClockWheel($this->station);
+        $slot = new StationClockWheelSlot($wheel);
+        $slot->type = $type;
+
+        return $slot;
+    }
+
+    private function makeMedia(int $id, float $length): StationMedia
+    {
+        $media = new StationMedia($this->station->media_storage_location, '/track_' . $id . '.mp3');
+        $media->title = 'Track ' . $id;
+        $media->artist = 'Artist';
+        $media->type = 'music';
+        $media->length = $length;
+        $media->mtime = time();
+        $media->uploaded_at = time();
+        $this->setEntityId($media, $id);
+
+        return $media;
     }
 
     private function setEntityId(object $entity, int $id): void

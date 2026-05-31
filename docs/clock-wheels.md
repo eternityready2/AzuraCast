@@ -95,6 +95,57 @@ Two automatic layers — **no operator toggle** between “PHP only” and Liqui
 
 **Not used:** playlist `loop_once` on clock wheel schedules; no `loop_once` UI for clock wheels.
 
+### PR8 Phase 2 — playback paths, monitoring, and deferred liq work
+
+#### How audio reaches the listener
+
+Clock wheels are **not** generated in Liquidsoap config. Playback is always orchestrated in PHP, then delivered to Liquidsoap through the normal AutoDJ API.
+
+```text
+BuildQueue (sync) → ClockWheelScheduler → ClockWheelPlaybackPlanner → station_queue
+Liquidsoap nextsong → AnnotateNextSong (asAutoDj) → ClockWheelAnnotator (cue_out when capped)
+```
+
+| Path | Clock wheel metadata | PR8 duration cap |
+|------|----------------------|------------------|
+| **AutoDJ queue → `nextsong`** (designed path) | Yes (`clock_wheel_id` on queue/history) | Yes — `clock_wheel_enforce_cap` + `autocue_cue_out` |
+| **Liquidsoap fallback** when queue is empty (`autodj_fallback`, `standard_playlists`, `playlist_default`) | No | No |
+| **Static playlist `.m3u`** (`PlaylistFileWriter`, `asAutoDj: false`) | No | No |
+
+The overview **Now** badge reflects the **schedule** only. Confirm the **Upcoming Queue** lists wheel rows and Liquidsoap `nextsong` returns **200** during the window.
+
+#### Short-form slots near the next anchor (implemented)
+
+When an ID / promo / ad slot has **less time left than any file length** (e.g. 18 seconds until the next anchor, 4-minute promo on disk), the planner now behaves like flexible music overflow:
+
+- Picks the **shortest** candidate of the correct type.
+- Sets **`clock_wheel_enforce_cap`** so `ClockWheelAnnotator` applies **`cue_out`** at the anchor.
+- Under **strict** schedule mode, if nothing fits and strict rules apply, the slot may still return no track (no overflow).
+
+#### Production monitoring (recommended)
+
+Watch during active wheel windows:
+
+| Signal | Meaning |
+|--------|---------|
+| `Clock Wheel "…" is active` in `app_nowplaying-*.log` | Scheduler engaged |
+| `Clock Wheel resolved track` | Planner queued a wheel row |
+| `Queue builder error` / `SQLSTATE` | Queue build failed — fix before relying on wheel |
+| Liquidsoap `Queue is empty!` on every `nextsong` | No queue rows — likely fallback to default playlist |
+| `Switch to standard_playlists` / `playlist_default` in LS logs | On-air from static rotation, not AutoDJ wheel |
+| Feedback with only `playlist_id`, no wheel in queue UI | Fallback or normal AutoDJ, not wheel |
+
+Log files (inside container): `/var/azuracast/www_tmp/app_nowplaying-YYYY-MM-DD.log`, station Liquidsoap logs under `/var/azuracast/stations/`.
+
+#### Deferred (optional — not required for launch)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| **`ConfigWriter` `max_duration`** for clock wheels | **Not implemented** | Entity doc mentions a future liq generator; there is no clock-wheel block in `.liq` today. PR8 uses PHP `cue_out` on the AutoDJ path instead. Rule if added later: only when `duration_seconds` is set on the slot; never on flexible music. |
+| **`PlaylistFileWriter` clock-wheel-aware** | **Not needed** for the designed path | Only relevant if you must cap tracks played from static `.m3u` during a wheel window. |
+| **Block Liquidsoap fallback during wheel** | **Not implemented** | Would need liq/config changes to prefer empty air over default playlist when queue is empty. |
+| **Planner drift vs wall clock** | **Known edge** | Rebuild interval and metadata length can shift anchor adherence slightly. |
+
 ## What is implemented *right now* (in `Azura-Cast-Custom-GitRepo`)
 
 ### Backend
@@ -147,6 +198,8 @@ Two automatic layers — **no operator toggle** between “PHP only” and Liqui
 - Planner anchor math + media query by `storage_location` (regression for invalid `sl.stations` DQL): `tests/Unit/ClockWheelPlaybackPlannerTest.php`
 - Clock wheel schedule activation (overnight, play-once, window boundaries): `tests/Unit/ClockWheelScheduleActivationTest.php`
 - AutoDJ `ClockWheelScheduler` (skip/active/resolve/fall-through): `tests/Unit/ClockWheelSchedulerTest.php`
+- PR8 `ClockWheelAnnotator` (`cue_out` caps): `tests/Unit/ClockWheelAnnotatorTest.php`
+- PR8 planner caps and short-form overflow: `tests/Unit/ClockWheelPlaybackPlannerTest.php` (`shouldEnforcePlaybackCap`, `filterByDuration`)
 - Clock wheel API (CRUD, overlap rejection, slots, schedule feed): `tests/Functional/Api_Stations_ClockWheelsCest.php`
 - Manual dev script only (not CI): `util/test_clock_wheels.sh`
 
@@ -159,7 +212,7 @@ Two automatic layers — **no operator toggle** between “PHP only” and Liqui
 - **Front-end typed schedule row import**: the clock wheel edit modal currently reuses the playlist schedule row type.
   - This is fine for now but should be cleaned up for long-term maintainability.
 - **CI** does not run Codeception on PRs yet (image build only); run `composer run codeception` locally or in Docker before release.
-- **Still light coverage:** PR8 `ClockWheelAnnotator`, `hasNonClockWheelScheduleActive` runtime path, frontend timeline UI (no JS test suite).
+- **Still light coverage:** `hasNonClockWheelScheduleActive` runtime integration, Liquidsoap fallback paths, frontend timeline UI (no JS test suite).
 
 ## Required next steps (recommended order)
 
@@ -193,11 +246,15 @@ Two automatic layers — **no operator toggle** between “PHP only” and Liqui
   - 20:00 Ad
   - 35:00 Promo
   - 50:00 ID
+- Set **Type** on media files (ID / promo / ad / music) on the Music Files page.
+- Schedule the wheel on **Schedule → Create Event** (not only “Active” on the wheel form).
 - Schedule it for a station window where nothing else is scheduled.
-- Watch the queue build logs:
+- Confirm **Upcoming Queue** shows wheel rows during the window.
+- Watch `app_nowplaying-*.log` (see **PR8 Phase 2 — production monitoring** above):
   - “Clock Wheel … is active”
   - “Clock Wheel slot selection … seconds_into_hour … available_seconds …”
   - “Clock Wheel resolved track … effective_length …”
+  - No repeating `Queue builder error` or Liquidsoap `Queue is empty!`
 - Create an overlapping playlist schedule in the same window:
   - verify the save is **blocked**
   - and/or at runtime the wheel is **skipped** and normal AutoDJ runs
