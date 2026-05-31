@@ -21,7 +21,6 @@ use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
 use DateTimeImmutable;
 use DateTimeZone;
-use Doctrine\ORM\AbstractQuery;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query;
 use Psr\Log\LoggerInterface;
@@ -42,19 +41,19 @@ final class ClockWheelPlaybackPlannerTest extends Unit
 
     protected function _before(): void
     {
-        $this->station = new Station();
-        $this->station->name = 'Planner Test';
-        $this->station->short_name = 'planner_test_' . substr(uniqid('', true), -8);
-        $this->station->timezone = 'UTC';
-        $this->station->ensureDirectoriesExist();
-
+        $this->station = $this->persistStation($this->testsModule->em);
         $this->planner = $this->makePlanner();
+    }
+
+    protected function _after(): void
+    {
+        $this->removeStation($this->testsModule->em, $this->station);
     }
 
     public function testResolveSlotMediaQueryUsesStationStorageLocation(): void
     {
         $capturedDql = null;
-        $query = $this->createMock(AbstractQuery::class);
+        $query = $this->createMock(Query::class);
         $query->method('setParameters')->willReturnSelf();
         $query->method('getResult')->willReturn([]);
 
@@ -93,7 +92,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $media->uploaded_at = time();
         $this->setEntityId($media, 42);
 
-        $query = $this->createMock(AbstractQuery::class);
+        $query = $this->createMock(Query::class);
         $query->method('setParameters')->willReturnSelf();
         $query->method('getResult')->willReturn([$media]);
 
@@ -133,8 +132,8 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $queued = new StationQueue($station, Song::createFromText('Artist - Test'));
         $queued->timestamp_played = CarbonImmutable::parse('2026-05-26 09:50:00', 'UTC');
         $queued->duration = 600.0;
-        $queued->sent_to_autodj = 0;
-        $queued->is_played = 0;
+        $queued->sent_to_autodj = false;
+        $queued->is_played = false;
         $queued->timestamp_cued = CarbonImmutable::parse('2026-05-26 09:49:00', 'UTC');
         $em->persist($queued);
         $em->flush();

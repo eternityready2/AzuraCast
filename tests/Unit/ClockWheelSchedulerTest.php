@@ -39,10 +39,21 @@ final class ClockWheelSchedulerTest extends Unit
 
     protected function _before(): void
     {
+        if (!$this->em->isOpen()) {
+            $this->em->open();
+        }
+
         $this->station = new Station();
         $this->station->name = 'Scheduler Test';
         $this->station->short_name = 'scheduler_test';
         $this->station->timezone = 'UTC';
+    }
+
+    protected function _after(): void
+    {
+        if (!$this->em->isOpen()) {
+            $this->em->open();
+        }
     }
 
     public function testSkipsWhenNextSongsAlreadySet(): void
@@ -89,11 +100,16 @@ final class ClockWheelSchedulerTest extends Unit
 
     public function testSkipsWhenNoClockWheelScheduleIsActive(): void
     {
-        $event = $this->makeEvent($this->activePlayTime());
+        $station = $this->persistStation();
 
-        $this->clockWheelScheduler->buildFromClockWheel($event);
+        try {
+            $event = $this->makeEventForStation($station, $this->activePlayTime());
+            $this->clockWheelScheduler->buildFromClockWheel($event);
 
-        self::assertSame([], $event->getNextSongs());
+            self::assertSame([], $event->getNextSongs());
+        } finally {
+            $this->removeStation($station);
+        }
     }
 
     public function testSkipsWhenWheelIsInactive(): void
@@ -146,6 +162,7 @@ final class ClockWheelSchedulerTest extends Unit
         $media->length = 10.0;
         $media->mtime = time();
         $media->uploaded_at = time();
+        $media->updateMetaFields();
 
         $schedule = new StationSchedule($wheel);
         $schedule->start_time = 900;
@@ -238,6 +255,10 @@ final class ClockWheelSchedulerTest extends Unit
 
     private function removeStation(Station $station): void
     {
+        if (!$this->em->isOpen()) {
+            $this->em->open();
+        }
+
         $this->em->createQuery('DELETE FROM App\Entity\StationQueue sq WHERE sq.station = :station')
             ->setParameter('station', $station)
             ->execute();
