@@ -69,8 +69,7 @@ class StationPlaylistTest extends Unit
 
     public function testOncePerXMinutesPlaylist()
     {
-        /** @var Station $station */
-        $station = Mockery::mock(Station::class);
+        $station = $this->makeStation();
 
         $playlist = new StationPlaylist($station);
         $playlist->name = 'Test Playlist';

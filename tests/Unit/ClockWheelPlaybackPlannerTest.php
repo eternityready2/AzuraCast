@@ -82,7 +82,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $planner = new ClockWheelPlaybackPlanner(
             $em,
             $this->queueRepo,
-            $this->createMock(DuplicatePrevention::class),
+            $this->testsModule->container->get(DuplicatePrevention::class),
             $this->createMock(LoggerInterface::class),
         );
 
@@ -119,8 +119,9 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $em->method('find')->with(StationMedia::class, 42)->willReturn($media);
         $em->expects(self::once())->method('persist')->with(self::isInstanceOf(StationQueue::class));
 
-        $duplicatePrevention = $this->createMock(DuplicatePrevention::class);
-        $duplicatePrevention->method('preventDuplicates')->willReturnCallback(
+        $realDuplicatePrevention = $this->testsModule->container->get(DuplicatePrevention::class);
+        $duplicatePrevention = Mockery::mock($realDuplicatePrevention);
+        $duplicatePrevention->allows('preventDuplicates')->andReturnUsing(
             static function (array $eligibleTracks): ?StationPlaylistQueue {
                 return $eligibleTracks[0] ?? null;
             }
@@ -326,7 +327,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         return new ClockWheelPlaybackPlanner(
             $this->createMock(EntityManagerInterface::class),
             $this->queueRepo,
-            $this->createMock(DuplicatePrevention::class),
+            $this->testsModule->container->get(DuplicatePrevention::class),
             $this->createMock(LoggerInterface::class),
         );
     }
