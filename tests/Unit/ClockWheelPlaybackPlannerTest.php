@@ -17,6 +17,7 @@ use App\Entity\Song;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Tests\Module;
+use App\Tests\Support\ReflectionObjectFactory;
 use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
 use Mockery;
@@ -79,12 +80,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             }
         );
 
-        $planner = new ClockWheelPlaybackPlanner(
-            $em,
-            $this->queueRepo,
-            $this->testsModule->container->get(DuplicatePrevention::class),
-            $this->createMock(LoggerInterface::class),
-        );
+        $planner = $this->makePlanner($em);
 
         $wheel = new StationClockWheel($this->station);
         $slot = new StationClockWheelSlot($wheel);
@@ -127,12 +123,12 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             }
         );
 
-        $planner = new ClockWheelPlaybackPlanner(
-            $em,
-            $this->queueRepo,
-            $duplicatePrevention,
-            $this->createMock(LoggerInterface::class),
-        );
+        $planner = ReflectionObjectFactory::create(ClockWheelPlaybackPlanner::class, [
+            'em' => $em,
+            'queueRepo' => $this->queueRepo,
+            'duplicatePrevention' => $duplicatePrevention,
+            'logger' => $this->createMock(LoggerInterface::class),
+        ]);
 
         $wheel = new StationClockWheel($this->station);
         $slot = new StationClockWheelSlot($wheel);
@@ -322,14 +318,14 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         );
     }
 
-    private function makePlanner(): ClockWheelPlaybackPlanner
+    private function makePlanner(?EntityManagerInterface $em = null): ClockWheelPlaybackPlanner
     {
-        return new ClockWheelPlaybackPlanner(
-            $this->createMock(EntityManagerInterface::class),
-            $this->queueRepo,
-            $this->testsModule->container->get(DuplicatePrevention::class),
-            $this->createMock(LoggerInterface::class),
-        );
+        return ReflectionObjectFactory::create(ClockWheelPlaybackPlanner::class, [
+            'em' => $em ?? $this->createMock(EntityManagerInterface::class),
+            'queueRepo' => $this->queueRepo,
+            'duplicatePrevention' => $this->testsModule->container->get(DuplicatePrevention::class),
+            'logger' => $this->createMock(LoggerInterface::class),
+        ]);
     }
 
     /**

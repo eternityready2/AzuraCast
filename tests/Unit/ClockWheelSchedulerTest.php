@@ -18,6 +18,7 @@ use App\Radio\AutoDJ\ClockWheelScheduler;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\Schedule\ScheduleConflictChecker;
 use App\Tests\Module;
+use App\Tests\Support\ReflectionObjectFactory;
 use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
 use DateTimeImmutable;
@@ -64,16 +65,19 @@ final class ClockWheelSchedulerTest extends Unit
         $this->queueRepo = Mockery::mock($realQueueRepo);
         $this->queueRepo->allows('getRecentlyPlayedByTimeRange')->andReturn([]);
 
-        $this->conflictChecker = $this->createMock(ScheduleConflictChecker::class);
-        $this->planner = $this->createMock(ClockWheelPlaybackPlanner::class);
+        $realConflictChecker = $this->testsModule->container->get(ScheduleConflictChecker::class);
+        $this->conflictChecker = Mockery::mock($realConflictChecker);
 
-        $this->clockWheelScheduler = new ClockWheelScheduler(
-            $this->queueRepo,
-            $this->scheduleRepo,
-            $this->scheduler,
-            $this->planner,
-            $this->conflictChecker,
-        );
+        $realPlanner = $this->testsModule->container->get(ClockWheelPlaybackPlanner::class);
+        $this->planner = Mockery::mock($realPlanner);
+
+        $this->clockWheelScheduler = ReflectionObjectFactory::create(ClockWheelScheduler::class, [
+            'queueRepo' => $this->queueRepo,
+            'scheduleRepo' => $this->scheduleRepo,
+            'scheduler' => $this->scheduler,
+            'planner' => $this->planner,
+            'conflictChecker' => $this->conflictChecker,
+        ]);
 
         $em = $this->createMock(ReloadableEntityManagerInterface::class);
         $em->expects(self::any())->method('flush');
