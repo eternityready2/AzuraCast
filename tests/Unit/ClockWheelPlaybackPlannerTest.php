@@ -113,7 +113,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
 
         self::assertInstanceOf(StationQueue::class, $queueEntry);
         self::assertSame($wheel, $queueEntry->clock_wheel);
-        self::assertSame(42, $queueEntry->media_id);
+        self::assertSame($media, $queueEntry->media);
     }
 
     public function testPlannedSecondsUsesMinuteAndSecondNotHourOfDay(): void
