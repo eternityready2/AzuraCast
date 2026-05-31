@@ -236,11 +236,9 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
 
-        $params = ['stationId' => $station->id];
+        $params = ['storageLocation' => $station->media_storage_location];
         $dql = 'SELECT m FROM App\Entity\StationMedia m
-             JOIN m.storage_location sl
-             JOIN sl.stations st
-             WHERE st.id = :stationId';
+             WHERE m.storage_location = :storageLocation';
 
         if ($playlistId !== null && $playlistId > 0) {
             $dql .= ' AND EXISTS (
@@ -348,11 +346,6 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
-     * @param StationMedia[] $candidates
-     *
-     * @return StationMedia[]
-     */
-    /**
      * When true, AutoDJ applies a cue_out cap (Liquidsoap) as a fallback after PHP track selection.
      */
     private function shouldEnforcePlaybackCap(
@@ -391,28 +384,32 @@ final class ClockWheelPlaybackPlanner
             return [];
         }
 
-        if ($this->isFlexibleMusicSlot($slot)) {
-            usort(
-                $candidates,
-                static fn (StationMedia $a, StationMedia $b): int =>
-                    $a->getCalculatedLength() <=> $b->getCalculatedLength()
-            );
-
-            $shortest = $candidates[0];
-            $this->logger->warning(
-                'Clock Wheel: no track fits the available window; using shortest music/talk candidate.',
-                [
-                    'available_seconds' => $maxDuration,
-                    'media_id' => $shortest->id,
-                    'effective_length' => $shortest->getCalculatedLength(),
-                    'slot_type' => $slot->type?->value,
-                ]
-            );
-
-            return [$shortest];
+        if ($candidates === []) {
+            return [];
         }
 
-        return [];
+        usort(
+            $candidates,
+            static fn (StationMedia $a, StationMedia $b): int =>
+                $a->getCalculatedLength() <=> $b->getCalculatedLength()
+        );
+
+        $shortest = $candidates[0];
+        $logKey = $this->isFlexibleMusicSlot($slot)
+            ? 'Clock Wheel: no track fits the available window; using shortest music/talk candidate.'
+            : 'Clock Wheel: no short-form track fits the available window; using shortest candidate with playback cap.';
+
+        $this->logger->warning(
+            $logKey,
+            [
+                'available_seconds' => $maxDuration,
+                'media_id' => $shortest->id,
+                'effective_length' => $shortest->getCalculatedLength(),
+                'slot_type' => $slot->type?->value,
+            ]
+        );
+
+        return [$shortest];
     }
 
     /**

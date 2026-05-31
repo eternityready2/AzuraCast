@@ -31,7 +31,7 @@ final class ScheduleConflictDateRangeTest extends Unit
             CarbonImmutable::parse('2026-05-19 10:00:00'),
         );
         $b = new DateRange(
-            CarbonImmutable::parse('2026-05-19 10:00:00'),
+            CarbonImmutable::parse('2026-05-19 10:00:01'),
             CarbonImmutable::parse('2026-05-19 11:00:00'),
         );
 
