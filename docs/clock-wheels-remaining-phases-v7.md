@@ -169,6 +169,8 @@ LIMIT 20;
 
 ## PR12 — Preview simulator + analytics dashboard
 
+**Status: Done (on `dev` after clean reset)**
+
 **Goal:**
 
 - `GET .../preview` — next-hour projection (titles, drift, separation/burn warnings).

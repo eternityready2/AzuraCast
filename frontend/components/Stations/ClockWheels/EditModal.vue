@@ -88,6 +88,7 @@ const blankForm = {
     name: '',
     color: '#e87722',
     is_active: true,
+    fill_strategy: 'conservative',
 };
 
 const form = ref({...blankForm});
@@ -97,6 +98,7 @@ const {r$} = useAppRegle(form, {
     name: {required},
     color: {},
     is_active: {},
+    fill_strategy: {},
 });
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({

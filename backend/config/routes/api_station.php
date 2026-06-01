@@ -786,6 +786,16 @@ return static function (RouteCollectorProxy $group) {
                                         '/slots',
                                         Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':putSlotsAction'
                                     );
+
+                                    $group->get(
+                                        '/preview',
+                                        Controller\Api\Stations\ClockWheels\PreviewAction::class
+                                    )->setName('api:stations:clock-wheel:preview');
+
+                                    $group->get(
+                                        '/analytics',
+                                        Controller\Api\Stations\ClockWheels\AnalyticsAction::class
+                                    )->setName('api:stations:clock-wheel:analytics');
                                 }
                             );
 

@@ -32,6 +32,29 @@
                     :fields="fields"
                     :provider="listItemProvider"
                 >
+                    <template #cell(actions)="{ item }">
+                        <div
+                            class="btn-group btn-group-sm"
+                            @click.stop
+                        >
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary"
+                                :title="$gettext('Next hour preview')"
+                                @click="openPreview(item)"
+                            >
+                                {{ $gettext('Preview') }}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary"
+                                :title="$gettext('Audit analytics')"
+                                @click="openAnalytics(item)"
+                            >
+                                {{ $gettext('Analytics') }}
+                            </button>
+                        </div>
+                    </template>
                     <template #cell(name)="{ item }">
                         <div
                             class="d-flex align-items-center gap-3 clock-wheel-row"
@@ -58,6 +81,9 @@
         :create-url="listUrl"
         @relist="relist"
     />
+
+    <preview-modal ref="$previewModal" />
+    <analytics-modal ref="$analyticsModal" />
 </template>
 
 <script setup lang="ts">
@@ -70,6 +96,8 @@ import {useApiItemProvider} from '~/functions/dataTable/useApiItemProvider.ts';
 import {QueryKeys, queryKeyWithStation} from '~/entities/Queries.ts';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import EditModal from '~/components/Stations/ClockWheels/EditModal.vue';
+import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
+import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue';
 import IconBiChevronRight from '~icons/bi/chevron-right';
 
 const {getStationApiUrl} = useApiRouter();
@@ -77,7 +105,14 @@ const listUrl = getStationApiUrl('/clock-wheels');
 
 const {$gettext} = useTranslate();
 
-const fields: DataTableField[] = [
+type ClockWheelRow = {
+    id: number;
+    name: string;
+    links: {self: string};
+};
+
+const fields: DataTableField<ClockWheelRow>[] = [
+    {key: 'actions', label: $gettext('Actions'), sortable: false},
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
 ];
 
@@ -91,8 +126,20 @@ const relist = () => {
 };
 
 const $editModal = useTemplateRef('$editModal');
+const $previewModal = useTemplateRef('$previewModal');
+const $analyticsModal = useTemplateRef('$analyticsModal');
 
 const {doCreate, doEdit} = useHasEditModal($editModal);
+
+const openPreview = (item: ClockWheelRow) => {
+    const url = getStationApiUrl(`/clock-wheel/${item.id}/preview`).value;
+    void $previewModal.value?.open(item.name, url);
+};
+
+const openAnalytics = (item: ClockWheelRow) => {
+    const url = getStationApiUrl(`/clock-wheel/${item.id}/analytics`).value;
+    void $analyticsModal.value?.open(item.name, url);
+};
 </script>
 
 <style scoped>

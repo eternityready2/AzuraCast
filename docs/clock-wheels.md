@@ -368,7 +368,7 @@ Full breakdown: **`docs/clock-wheels-remaining-phases-v7.md`** (from `docs/Azura
 | PR9 | Separation rules + burn rate in planner |
 | PR10 | Daypart templates / inheritance |
 | PR11 | **Done** — `clock_wheel_events` audit table + planner/scheduler hooks |
-| PR12 | Preview API + analytics + `fill_strategy` |
+| PR12 | **Done** — `/clock-wheel/{id}/preview`, `/analytics`, fill strategy UI |
 | PR13 | `is_emergency` schedule override (optional) |
 
 ### Remaining gaps (honest)

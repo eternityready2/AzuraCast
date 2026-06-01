@@ -28,6 +28,15 @@
             :description="$gettext('Inactive wheels are saved but do not run on-air until scheduled on the station Schedule page.')"
         />
 
+        <form-group-select
+            id="fill_strategy"
+            class="mb-3"
+            :field="r$.fill_strategy"
+            :label="$gettext('Fill strategy')"
+            :description="$gettext('Conservative skips tight windows in preview; aggressive picks the shortest fitting track.')"
+            :options="fillStrategyOptions"
+        />
+
         <div class="alert alert-info py-2 mb-4">
             {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
         </div>
@@ -224,6 +233,7 @@
 <script setup lang="ts">
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
+import FormGroupSelect from '~/components/Form/FormGroupSelect.vue';
 import Tab from '~/components/Common/Tab.vue';
 import {computed, onMounted, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
@@ -248,9 +258,14 @@ export interface ClockWheelEntryRow {
     duration_seconds: number | null;
 }
 
+const fillStrategyOptions = computed(() => [
+    {value: 'conservative', text: $gettext('Conservative (defer tight windows)')},
+    {value: 'aggressive', text: $gettext('Aggressive (shortest fit)')},
+]);
+
 const props = defineProps<{
-    form: {name: string; color: string; is_active: boolean};
-    r$: {name: {required: unknown}; color: object; is_active: object};
+    form: {name: string; color: string; is_active: boolean; fill_strategy: string};
+    r$: {name: {required: unknown}; color: object; is_active: object; fill_strategy: object};
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;

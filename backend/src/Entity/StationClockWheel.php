@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Entity\Enums\ClockWheelFillStrategy;
 use App\Entity\Attributes\Auditable;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use App\Entity\Interfaces\StationAwareInterface;
@@ -116,6 +117,15 @@ final class StationClockWheel implements
         ORM\Column
     ]
     public bool $is_active = true;
+
+    /**
+     * Preview / fill behaviour for tight anchor windows (PR12).
+     */
+    #[
+        OA\Property(example: 'conservative'),
+        ORM\Column(length: 20, enumType: ClockWheelFillStrategy::class)
+    ]
+    public ClockWheelFillStrategy $fill_strategy = ClockWheelFillStrategy::Conservative;
 
     // ------------------------------------------------------------------
     // Slots collection
