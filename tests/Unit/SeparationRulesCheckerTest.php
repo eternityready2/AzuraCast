@@ -74,10 +74,8 @@ final class SeparationRulesCheckerTest extends Unit
 
     public function testBurnRateDeprioritizesHotTracks(): void
     {
-        $hot = $this->makeMedia(1, 'Hot', 'Artist');
-        $hot->song_id = 'hot-song';
-        $fresh = $this->makeMedia(2, 'Fresh', 'Artist');
-        $fresh->song_id = 'fresh-song';
+        $hot = $this->makeMedia(1, 'Hot Track', 'Artist');
+        $fresh = $this->makeMedia(2, 'Fresh Track', 'Artist');
 
         $settings = new ClockWheelSeparationSettings(
             enabled: false,
@@ -86,15 +84,15 @@ final class SeparationRulesCheckerTest extends Unit
 
         $history = [
             [
-                'song_id' => 'hot-song',
-                'title' => 'Hot',
-                'artist' => 'Artist',
+                'song_id' => $hot->song_id,
+                'title' => $hot->title,
+                'artist' => $hot->artist,
                 'timestamp_played' => time() - 3600,
             ],
             [
-                'song_id' => 'hot-song',
-                'title' => 'Hot',
-                'artist' => 'Artist',
+                'song_id' => $hot->song_id,
+                'title' => $hot->title,
+                'artist' => $hot->artist,
                 'timestamp_played' => time() - 7200,
             ],
         ];
