@@ -32,7 +32,7 @@ See `docs/clock-wheels.md` for operational detail, tests, and monitoring.
 | PR5 preview endpoint | **Not found** in routes — no `/clock-wheel/.../preview` |
 | PR11 `clock_wheel_events` | **Implemented** — `clock_wheel_events` table + `ClockWheelEventLogger` hooks |
 | PR9 `SeparationRulesChecker` | **Implemented** — per-wheel artist/title windows + burn-rate deprioritization |
-| PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Not implemented** |
+| PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Done (MVP)** |
 | PR13 `is_emergency` | **Done** |
 
 **Architectural rule from PDF:** Do not change PR1–PR8 core behavior (fit-to-window, calendar authority, AutoDJ fallback). New work **extends** on top.
@@ -113,7 +113,7 @@ Live hand in station TZ; now playing shows track + artist; current hour shows qu
 
 ## PR9 — Separation rules + burn rate protection
 
-**Status: Done (MVP)** — artist/title time windows, burn-rate deprioritization, relaxation cascade, audit flags. Category/tempo/gender/decade and daypart overrides deferred to PR10.
+**Status: Done (MVP)** — artist/title time windows, burn-rate deprioritization, relaxation cascade, audit flags. **Daypart-level overrides** on `StationClockDaypart` when `separation_override_enabled` (PR10).
 
 **Goal:** `App\Radio\AutoDJ\SeparationRulesChecker` — artist/title/category/tempo/gender/decade separation + playlist burn rate; daypart overrides (ties to PR10); relaxation cascade with logging.
 
@@ -129,11 +129,25 @@ Live hand in station TZ; now playing shows track + artist; current hour shows qu
 
 ## PR10 — Daypart clock inheritance
 
+**Status: Done (MVP)**
+
 **Goal:** `ClockTemplate`, `ClockInstance`, `Daypart` entities — edit one template, propagate to hours; instance overrides; daypart auto-generates hour instances.
 
-**Largest remaining schema/UI effort.** Independent of planner math but changes how wheels are authored.
+**Implemented:**
 
-**Migrations:** New tables + FKs to `station`, `station_clock_wheels` (or replace direct wheel-per-hour model — design carefully to avoid breaking existing `StationClockWheel` API).
+| Piece | Location |
+|-------|----------|
+| Migration | `Version20260601120000` — templates, template slots, dayparts, wheel FKs |
+| Migration | `Version20260602120000` — daypart separation override columns |
+| Entities | `StationClockWheelTemplate`, `StationClockWheelTemplateSlot`, `StationClockDaypart` |
+| Wheel links | `template_id`, `daypart_id`, `hour_of_day`, `inherits_template_slots` on `StationClockWheel` |
+| Services | `ClockWheelSlotWriter`, `ClockWheelInheritanceService` |
+| Separation | `ClockWheelSeparationSettings::resolveForWheel()` — daypart wins when `separation_override_enabled` |
+| API | `/clock-wheel-templates`, `/clock-dayparts`, `POST .../clock-daypart/{id}/sync` |
+| UI | `ClockWheels.vue` tabs; `DaypartEditModal` override separation section |
+| Tests | `ClockWheelInheritanceServiceTest.php`, `ClockWheelSeparationSettingsTest.php` |
+
+**Behaviour:** Editing template slots propagates to wheels with `inherits_template_slots = true`. Saving a daypart syncs hourly wheels (`{Daypart} HH:00`). Direct wheel slot edits clear inheritance. **Daypart separation override:** when `separation_override_enabled`, planner/scheduler use daypart artist/title/burn settings instead of each wheel's. Planner/scheduler still use `StationClockWheel` + slots.
 
 ---
 

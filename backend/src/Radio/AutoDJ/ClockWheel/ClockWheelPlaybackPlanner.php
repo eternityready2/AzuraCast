@@ -322,7 +322,7 @@ final class ClockWheelPlaybackPlanner
 
         $candidates = $this->filterByDuration($candidates, $maxDuration, $slot, $strictSchedule);
 
-        $separationSettings = ClockWheelSeparationSettings::fromWheel($wheel);
+        $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
         $separationResult = $this->separationChecker->apply(
             $candidates,
             $recentHistory,

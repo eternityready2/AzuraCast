@@ -192,6 +192,46 @@ final class StationClockWheel implements
     ]
     public private(set) Collection $schedule_items;
 
+    /** Source template when this wheel inherits slot layout (PR10). */
+    #[
+        OA\Property(example: 1, nullable: true),
+        ORM\ManyToOne(targetEntity: StationClockWheelTemplate::class, inversedBy: 'wheels'),
+        ORM\JoinColumn(name: 'template_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationClockWheelTemplate $template = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $template_id = null;
+
+    /** Daypart that generated this hourly instance, if any. */
+    #[
+        OA\Property(example: 1, nullable: true),
+        ORM\ManyToOne(targetEntity: StationClockDaypart::class, inversedBy: 'wheels'),
+        ORM\JoinColumn(name: 'daypart_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationClockDaypart $daypart = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $daypart_id = null;
+
+    /** Hour label (0–23) for daypart-generated instances. */
+    #[
+        OA\Property(example: 9, nullable: true),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 23)
+    ]
+    public ?int $hour_of_day = null;
+
+    /**
+     * When true, slot changes on the linked template are copied to this wheel.
+     * Cleared when an operator edits this wheel's slots directly.
+     */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $inherits_template_slots = false;
+
     public function __construct(Station $station)
     {
         $this->station         = $station;

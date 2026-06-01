@@ -119,7 +119,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
         );
 
-        $separationSettings = ClockWheelSeparationSettings::fromWheel($wheel);
+        $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
         $historyMinutes = $station->backend_config->duplicate_prevention_time_range;
         if ($separationSettings->enabled || $separationSettings->burnRateMaxPlays24h !== null) {
             $historyMinutes = max($historyMinutes, $separationSettings->historyLookbackMinutes());

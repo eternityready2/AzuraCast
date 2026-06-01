@@ -7,7 +7,7 @@ namespace App\Radio\AutoDJ\ClockWheel;
 use App\Entity\StationClockWheel;
 
 /**
- * Per-wheel separation and burn-rate limits (PR9).
+ * Per-wheel separation and burn-rate limits (PR9), with optional daypart overrides (PR10).
  */
 final class ClockWheelSeparationSettings
 {
@@ -17,6 +17,24 @@ final class ClockWheelSeparationSettings
         public int $titleMinutes = 90,
         public ?int $burnRateMaxPlays24h = null,
     ) {
+    }
+
+    /**
+     * Resolve effective settings: daypart override wins when enabled on the wheel's daypart.
+     */
+    public static function resolveForWheel(StationClockWheel $wheel): self
+    {
+        $daypart = $wheel->daypart;
+        if ($daypart !== null && $daypart->separation_override_enabled) {
+            return new self(
+                enabled: $daypart->separation_enabled,
+                artistMinutes: max(1, $daypart->separation_artist_minutes ?? 45),
+                titleMinutes: max(1, $daypart->separation_title_minutes ?? 90),
+                burnRateMaxPlays24h: $daypart->burn_rate_max_plays_24h,
+            );
+        }
+
+        return self::fromWheel($wheel);
     }
 
     public static function fromWheel(StationClockWheel $wheel): self

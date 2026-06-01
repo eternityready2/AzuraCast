@@ -366,7 +366,7 @@ Full breakdown: **`docs/clock-wheels-remaining-phases-v7.md`** (from `docs/Azura
 |----|---------|
 | PR7 | **Done (MVP)** — Schedule → Live Clock Wheel tab (`queue` + now playing + `/schedule`) |
 | PR9 | **Done (MVP)** — `SeparationRulesChecker` + wheel settings UI |
-| PR10 | Daypart templates / inheritance |
+| PR10 | **Done (MVP)** — templates, dayparts, hourly sync, daypart separation overrides |
 | PR11 | **Done** — `clock_wheel_events` audit table + planner/scheduler hooks |
 | PR12 | **Done** — `/clock-wheel/{id}/preview`, `/analytics`, fill strategy UI |
 | PR13 | `is_emergency` schedule override — done |

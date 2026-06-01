@@ -7,19 +7,16 @@ namespace App\Controller\Api\Stations\ClockWheels;
 use App\Controller\Api\Stations\AbstractScheduledEntityController;
 use App\Entity\Api\Error;
 use App\Entity\Api\Status;
-use App\Entity\Enums\ClockWheelSlotAlgorithms;
-use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
-use App\Entity\StationMediaCategory;
-use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Exception\ValidationException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelSlotWriter;
 use App\Radio\AutoDJ\Scheduler;
 use App\Utilities\DateRange;
 use InvalidArgumentException;
@@ -224,6 +221,7 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         Scheduler $scheduler,
         Serializer $serializer,
         ValidatorInterface $validator,
+        private readonly ClockWheelSlotWriter $slotWriter,
     ) {
         parent::__construct($scheduleRepo, $scheduler, $serializer, $validator);
     }
@@ -504,86 +502,6 @@ final class ClockWheelsController extends AbstractScheduledEntityController
      */
     private function replaceSlots(StationClockWheel $wheel, array $slotsData): void
     {
-        $wheel->slots->clear();
-
-        $normalized = [];
-        foreach ($slotsData as $datum) {
-            if (!is_array($datum)) {
-                continue;
-            }
-            $normalized[] = $datum;
-        }
-
-        usort(
-            $normalized,
-            static function (array $a, array $b): int {
-                $posA = isset($a['position_seconds']) && is_numeric($a['position_seconds'])
-                    ? (int)$a['position_seconds']
-                    : 0;
-                $posB = isset($b['position_seconds']) && is_numeric($b['position_seconds'])
-                    ? (int)$b['position_seconds']
-                    : 0;
-
-                return $posA <=> $posB;
-            }
-        );
-
-        $order = 0;
-        foreach ($normalized as $datum) {
-            $slot = new StationClockWheelSlot($wheel);
-            $slot->slot_order = $order++;
-
-            $posRaw = $datum['position_seconds'] ?? null;
-            $slot->position_seconds = (is_numeric($posRaw) && (int)$posRaw >= 0)
-                ? min(3599, (int)$posRaw)
-                : 0;
-
-            $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null && $datum['type'] !== '')
-                ? (string)$datum['type']
-                : 'music';
-            $slot->type = ClockWheelSlotTypes::tryFrom($typeRaw) ?? ClockWheelSlotTypes::Music;
-
-            $categoryId = array_key_exists('category_id', $datum) && is_numeric($datum['category_id'])
-                ? (int)$datum['category_id']
-                : null;
-
-            if ($categoryId !== null) {
-                $category = $this->em->find(StationMediaCategory::class, $categoryId);
-                if ($category !== null && $category->station->id === $wheel->station->id) {
-                    $slot->category = $category;
-                } else {
-                    $slot->category = null;
-                }
-            } else {
-                $slot->category = null;
-            }
-
-            $algoRaw = isset($datum['algorithm']) ? (string)$datum['algorithm'] : 'random';
-            $slot->algorithm = ClockWheelSlotAlgorithms::tryFrom($algoRaw) ?? ClockWheelSlotAlgorithms::Random;
-
-            // Optional playlist pin — must belong to the same station.
-            $playlistId = isset($datum['playlist_id']) && is_numeric($datum['playlist_id'])
-                ? (int)$datum['playlist_id']
-                : null;
-
-            if ($playlistId !== null && $playlistId > 0) {
-                $playlist = $this->em->find(StationPlaylist::class, $playlistId);
-
-                if ($playlist !== null && $playlist->station->id === $wheel->station->id) {
-                    $slot->playlist = $playlist;
-                }
-                // Playlist not found or from another station → slot becomes
-                // type-based (null pin). Content still airs from the type pool.
-            }
-
-            // Duration cap in seconds. NULL means "play one full track".
-            $durRaw = $datum['duration_seconds'] ?? null;
-            $slot->duration_seconds = (is_numeric($durRaw) && (int)$durRaw > 0)
-                ? (int)$durRaw
-                : null;
-
-            $wheel->addSlot($slot);
-            $this->em->persist($slot);
-        }
+        $this->slotWriter->replaceWheelSlots($wheel, $slotsData, true);
     }
 }

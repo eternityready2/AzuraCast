@@ -21,6 +21,7 @@
         </div>
 
         <form-group-checkbox
+            v-if="!isTemplate"
             id="is_active"
             class="mb-3"
             :field="r$.is_active"
@@ -29,6 +30,7 @@
         />
 
         <form-group-select
+            v-if="!isTemplate"
             id="fill_strategy"
             class="mb-3"
             :field="r$.fill_strategy"
@@ -38,6 +40,7 @@
         />
 
         <form-group-checkbox
+            v-if="!isTemplate"
             id="separation_enabled"
             class="mb-3"
             :field="r$.separation_enabled"
@@ -46,7 +49,7 @@
         />
 
         <div
-            v-if="form.separation_enabled"
+            v-if="!isTemplate && form.separation_enabled"
             class="row mb-3"
         >
             <div class="col-md-4">
@@ -302,26 +305,27 @@ const fillStrategyOptions = computed(() => [
     {value: 'aggressive', text: $gettext('Aggressive (shortest fit)')},
 ]);
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+    variant?: 'wheel' | 'template';
     form: {
         name: string;
         color: string;
-        is_active: boolean;
-        fill_strategy: string;
-        separation_enabled: boolean;
-        separation_artist_minutes: number;
-        separation_title_minutes: number;
-        burn_rate_max_plays_24h: number | null;
+        is_active?: boolean;
+        fill_strategy?: string;
+        separation_enabled?: boolean;
+        separation_artist_minutes?: number;
+        separation_title_minutes?: number;
+        burn_rate_max_plays_24h?: number | null;
     };
     r$: {
         name: {required: unknown};
         color: object;
-        is_active: object;
-        fill_strategy: object;
-        separation_enabled: object;
-        separation_artist_minutes: object;
-        separation_title_minutes: object;
-        burn_rate_max_plays_24h: object;
+        is_active?: object;
+        fill_strategy?: object;
+        separation_enabled?: object;
+        separation_artist_minutes?: object;
+        separation_title_minutes?: object;
+        burn_rate_max_plays_24h?: object;
     };
     addEntry: () => void;
     removeEntry: (index: number) => void;
@@ -329,7 +333,11 @@ const props = defineProps<{
     insertEntryAfter: (index: number) => void;
     onEntriesReordered: () => void;
     onEntriesChanged: () => void;
-}>();
+}>(), {
+    variant: 'wheel',
+});
+
+const isTemplate = computed(() => props.variant === 'template');
 
 // IMPORTANT: Use a v-model ref so drag-reorder can mutate the array.
 const entries = defineModel<ClockWheelEntryRow[]>('entries', {required: true});
