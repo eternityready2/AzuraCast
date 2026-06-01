@@ -36,9 +36,20 @@ final class ClockWheelEventLoggerTest extends Unit
     protected function _after(): void
     {
         $em = $this->testsModule->em;
+        if (!$em->isOpen()) {
+            $em->open();
+        }
+
         $em->createQuery('DELETE FROM App\Entity\ClockWheelEvent e WHERE e.station = :station')
             ->setParameter('station', $this->station)
             ->execute();
+        $em->createQuery('DELETE FROM App\Entity\StationClockWheel w WHERE w.station = :station')
+            ->setParameter('station', $this->station)
+            ->execute();
+        $em->createQuery('DELETE FROM App\Entity\StationMedia m WHERE m.storage_location = :sl')
+            ->setParameter('sl', $this->station->media_storage_location)
+            ->execute();
+
         $em->remove($this->station);
         $em->remove($this->station->media_storage_location);
         $em->remove($this->station->recordings_storage_location);
@@ -67,6 +78,7 @@ final class ClockWheelEventLoggerTest extends Unit
         $media->length = 180.0;
         $media->mtime = time();
         $media->uploaded_at = time();
+        $media->updateMetaFields();
         $em->persist($media);
         $em->flush();
 

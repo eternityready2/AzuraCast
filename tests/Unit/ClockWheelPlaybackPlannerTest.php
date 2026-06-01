@@ -401,7 +401,14 @@ final class ClockWheelPlaybackPlannerTest extends Unit
 
     private function removeStation(ReloadableEntityManagerInterface $em, Station $station): void
     {
+        if (!$em->isOpen()) {
+            $em->open();
+        }
+
         $em->createQuery('DELETE FROM App\Entity\StationQueue sq WHERE sq.station = :station')
+            ->setParameter('station', $station)
+            ->execute();
+        $em->createQuery('DELETE FROM App\Entity\ClockWheelEvent e WHERE e.station = :station')
             ->setParameter('station', $station)
             ->execute();
 

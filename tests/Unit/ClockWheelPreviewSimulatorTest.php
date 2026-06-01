@@ -116,6 +116,10 @@ final class ClockWheelPreviewSimulatorTest extends Unit
 
     private function removeStation(\App\Doctrine\ReloadableEntityManagerInterface $em, Station $station): void
     {
+        if (!$em->isOpen()) {
+            $em->open();
+        }
+
         $em->remove($station);
         $em->remove($station->media_storage_location);
         $em->remove($station->recordings_storage_location);
