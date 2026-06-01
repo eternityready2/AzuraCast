@@ -33,7 +33,7 @@ See `docs/clock-wheels.md` for operational detail, tests, and monitoring.
 | PR11 `clock_wheel_events` | **Implemented** — `clock_wheel_events` table + `ClockWheelEventLogger` hooks |
 | PR9 `SeparationRulesChecker` | **Implemented** — per-wheel artist/title windows + burn-rate deprioritization |
 | PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Not implemented** |
-| PR13 `is_emergency` | **Not implemented** |
+| PR13 `is_emergency` | **Done** |
 
 **Architectural rule from PDF:** Do not change PR1–PR8 core behavior (fit-to-window, calendar authority, AutoDJ fallback). New work **extends** on top.
 

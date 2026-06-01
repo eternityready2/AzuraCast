@@ -5,6 +5,8 @@ export interface PlaylistScheduleRow {
     end_date: string,
     days: number[],
     loop_once: boolean,
+    /** When true, this window overrides clock wheel AutoDJ. */
+    is_emergency?: boolean,
     /** Clock wheel schedule only: flexible | strict (not loop_once). */
     clock_wheel_mode?: 'flexible' | 'strict',
     recurrence_type: string | null,
@@ -34,6 +36,7 @@ export function createScheduleItemDefaults(): PlaylistScheduleRow {
         end_date: '',
         days: [],
         loop_once: false,
+        is_emergency: false,
         clock_wheel_mode: 'flexible',
         recurrence_type: null,
         recurrence_interval: 1,

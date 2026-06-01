@@ -59,6 +59,24 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         $station = $event->getStation();
         $expectedPlayTime = $event->getExpectedPlayTime();
 
+        if ($this->conflictChecker->hasEmergencyScheduleActive($station, $expectedPlayTime)) {
+            $activeEvent = $this->findActiveClockWheelSchedule($station, $expectedPlayTime);
+
+            $this->logger->debug(
+                'Clock Wheel skipped: emergency schedule is active.'
+            );
+            $this->eventLogger->recordFallback(
+                $station,
+                $activeEvent?->clock_wheel,
+                null,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::EmergencyOverride,
+            );
+            $this->em->flush();
+
+            return;
+        }
+
         if ($this->conflictChecker->hasNonClockWheelScheduleActive($station, $expectedPlayTime)) {
             $this->logger->debug(
                 'Clock Wheel skipped: another scheduled playlist or streamer is active.'

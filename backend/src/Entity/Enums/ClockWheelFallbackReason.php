@@ -10,6 +10,7 @@ namespace App\Entity\Enums;
 enum ClockWheelFallbackReason: string
 {
     case ScheduleConflict = 'schedule_conflict';
+    case EmergencyOverride = 'emergency_override';
     case WheelInactive = 'wheel_inactive';
     case NoSlots = 'no_slots';
     case DeferredInsufficientWindow = 'deferred_insufficient_window';

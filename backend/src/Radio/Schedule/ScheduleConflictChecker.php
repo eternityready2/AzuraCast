@@ -82,6 +82,28 @@ final class ScheduleConflictChecker
     }
 
     /**
+     * Returns true when an emergency-flagged schedule is active (clock wheel must defer).
+     */
+    public function hasEmergencyScheduleActive(
+        Station $station,
+        DateTimeImmutable $now,
+    ): bool {
+        $tz = $station->getTimezoneObject();
+
+        foreach ($this->getAllScheduledItemsForStation($station) as $schedule) {
+            if (!$schedule->is_emergency) {
+                continue;
+            }
+
+            if ($this->scheduler->shouldSchedulePlayNow($schedule, $tz, $now)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Returns true when a playlist or streamer schedule is active (clock wheel must defer).
      */
     public function hasNonClockWheelScheduleActive(
@@ -215,6 +237,7 @@ final class ScheduleConflictChecker
         )));
 
         $record->loop_once = $item['loop_once'] ?? false;
+        $record->is_emergency = (bool)($item['is_emergency'] ?? false);
 
         if ($relation instanceof StationClockWheel) {
             $record->loop_once = false;

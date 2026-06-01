@@ -15,6 +15,8 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
 use App\Entity\Song;
+use App\Entity\ClockWheelEvent;
+use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Event\Radio\BuildQueue;
 use App\Radio\AutoDJ\ClockWheelScheduler;
@@ -65,6 +67,67 @@ final class ClockWheelSchedulerTest extends Unit
         $this->clockWheelScheduler->buildFromClockWheel($event);
 
         self::assertCount(1, $event->getNextSongs());
+    }
+
+    public function testSkipsWhenEmergencyPlaylistIsActive(): void
+    {
+        $station = $this->persistStation();
+
+        $wheel = new StationClockWheel($station);
+        $wheel->name = 'Morning Wheel';
+        $wheel->is_active = true;
+
+        $wheelSchedule = new StationSchedule($wheel);
+        $wheelSchedule->start_time = 900;
+        $wheelSchedule->end_time = 1700;
+        $wheelSchedule->start_date = '2026-01-01';
+        $wheelSchedule->end_date = '2026-12-31';
+        $wheelSchedule->days = [1, 2, 3, 4, 5, 6, 7];
+
+        $playlist = new StationPlaylist($station);
+        $playlist->name = 'Emergency News';
+        $playlist->source = PlaylistSources::Songs;
+        $playlist->type = PlaylistTypes::Standard;
+        $playlist->is_enabled = true;
+
+        $emergencySchedule = new StationSchedule($playlist);
+        $emergencySchedule->is_emergency = true;
+        $emergencySchedule->start_time = 900;
+        $emergencySchedule->end_time = 1700;
+        $emergencySchedule->start_date = '2026-01-01';
+        $emergencySchedule->end_date = '2026-12-31';
+        $emergencySchedule->days = [1, 2, 3, 4, 5, 6, 7];
+
+        $this->em->persist($wheel);
+        $this->em->persist($wheelSchedule);
+        $this->em->persist($playlist);
+        $this->em->persist($emergencySchedule);
+        $this->em->flush();
+
+        try {
+            $event = $this->makeEventForStation($station, $this->activePlayTime());
+            $this->clockWheelScheduler->buildFromClockWheel($event);
+
+            self::assertSame([], $event->getNextSongs());
+
+            $fallback = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT e FROM App\Entity\ClockWheelEvent e
+                    WHERE e.station = :station
+                    AND e.fallback_reason = :reason
+                    ORDER BY e.id DESC
+                DQL
+            )
+                ->setParameter('station', $station)
+                ->setParameter('reason', ClockWheelFallbackReason::EmergencyOverride)
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            self::assertInstanceOf(ClockWheelEvent::class, $fallback);
+            self::assertSame($wheel->id, $fallback->clock_wheel?->id);
+        } finally {
+            $this->removeStation($station);
+        }
     }
 
     public function testSkipsWhenAnotherPlaylistOrStreamerScheduleIsActive(): void
@@ -260,6 +323,10 @@ final class ClockWheelSchedulerTest extends Unit
         }
 
         $this->em->createQuery('DELETE FROM App\Entity\StationQueue sq WHERE sq.station = :station')
+            ->setParameter('station', $station)
+            ->execute();
+
+        $this->em->createQuery('DELETE FROM App\Entity\ClockWheelEvent e WHERE e.station = :station')
             ->setParameter('station', $station)
             ->execute();
 

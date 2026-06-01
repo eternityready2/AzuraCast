@@ -45,6 +45,26 @@
             </select>
         </div>
 
+        <div
+            v-if="form.source === 'playlist'"
+            class="mb-3"
+        >
+            <div class="form-check">
+                <input
+                    id="edit_form_is_emergency"
+                    v-model="scheduleRow.is_emergency"
+                    class="form-check-input"
+                    type="checkbox"
+                >
+                <label class="form-check-label" for="edit_form_is_emergency">
+                    {{ $gettext('Emergency override') }}
+                </label>
+            </div>
+            <small class="form-text text-warning">
+                {{ $gettext('While this schedule is active, clock wheel AutoDJ will not run. Use for breaking news or other must-play windows.') }}
+            </small>
+        </div>
+
         <!-- Schedule Row - Time section -->
         <div class="row g-3 mb-3">
             <form-group-field
@@ -463,6 +483,7 @@ watch(
         if (source === 'clock_wheel') {
             scheduleRow.value.loop_once = false;
             scheduleRow.value.clock_wheel_mode = clockWheelScheduleMode.value;
+            scheduleRow.value.is_emergency = false;
         }
     }
 );
@@ -628,6 +649,7 @@ const apiScheduleItemToRow = (item: Record<string, unknown>): PlaylistScheduleRo
         end_date: String(item.end_date ?? ''),
         days: normalizeStationScheduleDays(item.days),
         loop_once: Boolean(item.loop_once),
+        is_emergency: Boolean(item.is_emergency),
         clock_wheel_mode: (item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible') as 'flexible' | 'strict',
         recurrence_type: recurrenceType ?? null,
         recurrence_interval: Number(item.recurrence_interval ?? 1),

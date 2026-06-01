@@ -225,6 +225,41 @@ final class ScheduleConflictCheckerTest extends Unit
         self::assertTrue(true);
     }
 
+    public function testHasEmergencyScheduleActiveWhenFlaggedEntryIsPlaying(): void
+    {
+        $playlist = $this->makePlaylist(1);
+        $schedule = new StationSchedule($playlist);
+        $schedule->is_emergency = true;
+        $schedule->start_time = 900;
+        $schedule->end_time = 1700;
+        $schedule->start_date = '2026-01-01';
+        $schedule->end_date = '2026-12-31';
+        $schedule->days = [1, 2, 3, 4, 5, 6, 7];
+
+        $this->checker = $this->makeChecker([$schedule]);
+
+        $now = CarbonImmutable::parse('2026-05-26 10:00:00', 'UTC');
+
+        self::assertTrue($this->checker->hasEmergencyScheduleActive($this->station, $now));
+    }
+
+    public function testHasEmergencyScheduleActiveIsFalseWithoutEmergencyFlag(): void
+    {
+        $playlist = $this->makePlaylist(1);
+        $schedule = new StationSchedule($playlist);
+        $schedule->start_time = 900;
+        $schedule->end_time = 1700;
+        $schedule->start_date = '2026-01-01';
+        $schedule->end_date = '2026-12-31';
+        $schedule->days = [1, 2, 3, 4, 5, 6, 7];
+
+        $this->checker = $this->makeChecker([$schedule]);
+
+        $now = CarbonImmutable::parse('2026-05-26 10:00:00', 'UTC');
+
+        self::assertFalse($this->checker->hasEmergencyScheduleActive($this->station, $now));
+    }
+
     /**
      * @param StationSchedule[] $existing
      */
