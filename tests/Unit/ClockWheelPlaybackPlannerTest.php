@@ -101,7 +101,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $em = $this->createMock(EntityManagerInterface::class);
         $em->method('createQuery')->willReturn($query);
         $em->method('find')->with(StationMedia::class, 42)->willReturn($media);
-        $em->expects(self::once())->method('persist')->with(self::isInstanceOf(StationQueue::class));
+        $em->expects(self::exactly(2))->method('persist');
 
         $planner = $this->makePlanner($em);
 

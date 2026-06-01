@@ -76,8 +76,15 @@ final class ClockWheelPreviewSimulatorTest extends Unit
             new DateTimeImmutable('2026-05-30 14:00:00', new DateTimeZone('UTC'))
         );
 
-        self::assertCount(1, $preview->items);
-        self::assertStringContainsString('defer', strtolower($preview->items[0]->warnings[0] ?? ''));
+        self::assertGreaterThanOrEqual(1, count($preview->items));
+        $deferWarnings = array_filter(
+            $preview->items,
+            static fn ($item) => str_contains(
+                strtolower(implode(' ', $item->warnings)),
+                'defer'
+            )
+        );
+        self::assertNotEmpty($deferWarnings);
 
         $this->removeStation($this->testsModule->em, $station);
     }

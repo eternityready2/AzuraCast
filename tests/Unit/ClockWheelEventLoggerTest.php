@@ -91,9 +91,12 @@ final class ClockWheelEventLoggerTest extends Unit
 
         $event = $rows[0];
         self::assertSame(ClockWheelEventKind::TrackQueued, $event->event_kind);
-        self::assertSame($wheel->id, $event->clock_wheel_id);
-        self::assertSame($slot->id, $event->slot_id);
-        self::assertSame($media->id, $event->media_id);
+        self::assertNotNull($event->clock_wheel);
+        self::assertSame($wheel->id, $event->clock_wheel->id);
+        self::assertNotNull($event->slot);
+        self::assertSame($slot->id, $event->slot->id);
+        self::assertNotNull($event->media);
+        self::assertSame($media->id, $event->media->id);
         self::assertSame('music', $event->anchor_type);
         self::assertSame(65, $event->drift_seconds);
         self::assertFalse($event->separation_relaxed);
