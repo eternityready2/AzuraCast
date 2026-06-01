@@ -29,11 +29,19 @@ final class SeparationRulesChecker
         ClockWheelSeparationSettings $settings,
         DateTimeImmutable $expectedPlayTime,
     ): SeparationFilterResult {
-        if (!$settings->enabled || $candidates === []) {
+        if ($candidates === []) {
             return new SeparationFilterResult($candidates);
         }
 
         $burnResult = $this->deprioritizeBurnRate($candidates, $recentHistory, $settings, $expectedPlayTime);
+        $candidates = $burnResult['candidates'];
+
+        if (!$settings->enabled) {
+            return new SeparationFilterResult(
+                $candidates,
+                burnRateWarning: $burnResult['warning'],
+            );
+        }
 
         $strict = $this->filterByArtistAndTitle(
             $burnResult['candidates'],
