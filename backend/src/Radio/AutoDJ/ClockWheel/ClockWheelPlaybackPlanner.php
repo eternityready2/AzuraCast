@@ -42,6 +42,7 @@ final class ClockWheelPlaybackPlanner
         private readonly EntityManagerInterface $em,
         private readonly StationQueueRepository $queueRepo,
         private readonly DuplicatePrevention $duplicatePrevention,
+        private readonly SeparationRulesChecker $separationChecker,
         private readonly ClockWheelEventLogger $eventLogger,
         private readonly LoggerInterface $logger,
     ) {
@@ -321,6 +322,15 @@ final class ClockWheelPlaybackPlanner
 
         $candidates = $this->filterByDuration($candidates, $maxDuration, $slot, $strictSchedule);
 
+        $separationSettings = ClockWheelSeparationSettings::fromWheel($wheel);
+        $separationResult = $this->separationChecker->apply(
+            $candidates,
+            $recentHistory,
+            $separationSettings,
+            $expectedPlayTime,
+        );
+        $candidates = $separationResult->candidates;
+
         if ($candidates === []) {
             $this->logger->warning(
                 'Clock Wheel slot: no media fits the available window.',
@@ -401,6 +411,8 @@ final class ClockWheelPlaybackPlanner
             $media,
             $expectedPlayTime,
             $secondsIntoHour,
+            $separationResult->separationRelaxed,
+            $separationResult->burnRateWarning,
         );
 
         $this->logger->info('Clock Wheel resolved track.', [

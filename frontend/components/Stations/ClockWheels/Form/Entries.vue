@@ -37,6 +37,45 @@
             :options="fillStrategyOptions"
         />
 
+        <form-group-checkbox
+            id="separation_enabled"
+            class="mb-3"
+            :field="r$.separation_enabled"
+            :label="$gettext('Enable separation rules')"
+            :description="$gettext('Apply artist/title time windows and optional burn-rate limits when queueing from this wheel.')"
+        />
+
+        <div
+            v-if="form.separation_enabled"
+            class="row mb-3"
+        >
+            <div class="col-md-4">
+                <form-group-field
+                    id="separation_artist_minutes"
+                    :field="r$.separation_artist_minutes"
+                    :label="$gettext('Artist separation (min)')"
+                    type="number"
+                />
+            </div>
+            <div class="col-md-4">
+                <form-group-field
+                    id="separation_title_minutes"
+                    :field="r$.separation_title_minutes"
+                    :label="$gettext('Title separation (min)')"
+                    type="number"
+                />
+            </div>
+            <div class="col-md-4">
+                <form-group-field
+                    id="burn_rate_max_plays_24h"
+                    :field="r$.burn_rate_max_plays_24h"
+                    :label="$gettext('Max plays / 24h')"
+                    type="number"
+                    :description="$gettext('Leave empty to disable burn-rate deprioritization.')"
+                />
+            </div>
+        </div>
+
         <div class="alert alert-info py-2 mb-4">
             {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
         </div>
@@ -264,8 +303,26 @@ const fillStrategyOptions = computed(() => [
 ]);
 
 const props = defineProps<{
-    form: {name: string; color: string; is_active: boolean; fill_strategy: string};
-    r$: {name: {required: unknown}; color: object; is_active: object; fill_strategy: object};
+    form: {
+        name: string;
+        color: string;
+        is_active: boolean;
+        fill_strategy: string;
+        separation_enabled: boolean;
+        separation_artist_minutes: number;
+        separation_title_minutes: number;
+        burn_rate_max_plays_24h: number | null;
+    };
+    r$: {
+        name: {required: unknown};
+        color: object;
+        is_active: object;
+        fill_strategy: object;
+        separation_enabled: object;
+        separation_artist_minutes: object;
+        separation_title_minutes: object;
+        burn_rate_max_plays_24h: object;
+    };
     addEntry: () => void;
     removeEntry: (index: number) => void;
     duplicateEntry: (index: number) => void;

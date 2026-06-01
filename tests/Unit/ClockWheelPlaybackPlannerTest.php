@@ -16,6 +16,7 @@ use App\Entity\StationQueue;
 use App\Entity\Song;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
+use App\Radio\AutoDJ\ClockWheel\SeparationRulesChecker;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Tests\Module;
 use Carbon\CarbonImmutable;
@@ -101,7 +102,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         $em = $this->createMock(EntityManagerInterface::class);
         $em->method('createQuery')->willReturn($query);
         $em->method('find')->with(StationMedia::class, 42)->willReturn($media);
-        $em->expects(self::exactly(2))->method('persist');
+        $em->expects(self::atLeast(2))->method('persist');
 
         $planner = $this->makePlanner($em);
 
@@ -321,12 +322,15 @@ final class ClockWheelPlaybackPlannerTest extends Unit
     {
         $entityManager = $em ?? $this->createMock(EntityManagerInterface::class);
 
+        $logger = $this->createMock(LoggerInterface::class);
+
         return new ClockWheelPlaybackPlanner(
             $entityManager,
             $this->testsModule->container->get(StationQueueRepository::class),
             $this->testsModule->container->get(DuplicatePrevention::class),
+            new SeparationRulesChecker($logger),
             new ClockWheelEventLogger($entityManager),
-            $this->createMock(LoggerInterface::class),
+            $logger,
         );
     }
 

@@ -89,6 +89,10 @@ const blankForm = {
     color: '#e87722',
     is_active: true,
     fill_strategy: 'conservative',
+    separation_enabled: false,
+    separation_artist_minutes: 45,
+    separation_title_minutes: 90,
+    burn_rate_max_plays_24h: null as number | null,
 };
 
 const form = ref({...blankForm});
@@ -99,6 +103,10 @@ const {r$} = useAppRegle(form, {
     color: {},
     is_active: {},
     fill_strategy: {},
+    separation_enabled: {},
+    separation_artist_minutes: {},
+    separation_title_minutes: {},
+    burn_rate_max_plays_24h: {},
 });
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({

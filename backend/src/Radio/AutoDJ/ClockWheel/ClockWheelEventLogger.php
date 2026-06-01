@@ -31,6 +31,8 @@ final class ClockWheelEventLogger
         StationMedia $media,
         DateTimeImmutable $expectedPlayAt,
         int $secondsIntoHour,
+        bool $separationRelaxed = false,
+        bool $burnRateWarning = false,
     ): void {
         $event = $this->createBase($station, ClockWheelEventKind::TrackQueued, $expectedPlayAt);
         $event->clock_wheel = $wheel;
@@ -38,6 +40,8 @@ final class ClockWheelEventLogger
         $event->media = $media;
         $event->anchor_type = $slot->type?->value;
         $event->drift_seconds = $this->computeDriftSeconds($secondsIntoHour, $slot->position_seconds);
+        $event->separation_relaxed = $separationRelaxed;
+        $event->burn_rate_warning = $burnRateWarning;
 
         $this->em->persist($event);
     }

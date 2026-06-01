@@ -31,7 +31,7 @@ See `docs/clock-wheels.md` for operational detail, tests, and monitoring.
 | PR7 “zero backend changes” | **Partially true** — tab can use existing queue/nowplaying/schedule APIs; PDF also references **`GET .../preview`** and **`clock_wheel_events`** which **do not exist yet** (PR12 / PR11) |
 | PR5 preview endpoint | **Not found** in routes — no `/clock-wheel/.../preview` |
 | PR11 `clock_wheel_events` | **Implemented** — `clock_wheel_events` table + `ClockWheelEventLogger` hooks |
-| PR9 `SeparationRulesChecker` | **Not implemented** (duplicate prevention exists globally, not wheel-specific separation/burn rate) |
+| PR9 `SeparationRulesChecker` | **Implemented** — per-wheel artist/title windows + burn-rate deprioritization |
 | PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Not implemented** |
 | PR13 `is_emergency` | **Not implemented** |
 
@@ -67,8 +67,8 @@ PR11 ──► PR12   (audit table before analytics/preview)
 
 1. **PR7 (MVP)** — Done.
 2. **PR11** — Done (`clock_wheel_events` + logger hooks).
-3. **PR9** — Extends `ClockWheelPlaybackPlanner` candidate filtering.
-4. **PR12** — Preview endpoint + analytics UI (depends on PR11).
+3. **PR9** — Done.
+4. **PR12** — Done.
 5. **PR10** — Largest product surface (templates/dayparts); can start DB/API in parallel with PR9 if staffed.
 6. **PR13** — Quick win when needed for ops.
 
@@ -112,6 +112,8 @@ Live hand in station TZ; now playing shows track + artist; current hour shows qu
 ---
 
 ## PR9 — Separation rules + burn rate protection
+
+**Status: Done (MVP)** — artist/title time windows, burn-rate deprioritization, relaxation cascade, audit flags. Category/tempo/gender/decade and daypart overrides deferred to PR10.
 
 **Goal:** `App\Radio\AutoDJ\SeparationRulesChecker` — artist/title/category/tempo/gender/decade separation + playlist burn rate; daypart overrides (ties to PR10); relaxation cascade with logging.
 

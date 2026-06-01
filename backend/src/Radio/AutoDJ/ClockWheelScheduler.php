@@ -14,6 +14,7 @@ use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
 use App\Radio\Schedule\ScheduleConflictChecker;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -100,10 +101,16 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
         );
 
+        $separationSettings = ClockWheelSeparationSettings::fromWheel($wheel);
+        $historyMinutes = $station->backend_config->duplicate_prevention_time_range;
+        if ($separationSettings->enabled) {
+            $historyMinutes = max($historyMinutes, $separationSettings->historyLookbackMinutes());
+        }
+
         $recentHistory = $this->queueRepo->getRecentlyPlayedByTimeRange(
             $station,
             $expectedPlayTime,
-            $station->backend_config->duplicate_prevention_time_range
+            $historyMinutes
         );
 
         $nextSong = $this->planner->resolveNextQueueEntry($wheel, $recentHistory, $expectedPlayTime, $activeEvent);

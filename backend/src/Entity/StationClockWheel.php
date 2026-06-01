@@ -127,6 +127,34 @@ final class StationClockWheel implements
     ]
     public ClockWheelFillStrategy $fill_strategy = ClockWheelFillStrategy::Conservative;
 
+    /** Enable time-window artist/title separation for this wheel (PR9). */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $separation_enabled = false;
+
+    #[
+        OA\Property(example: 45),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_artist_minutes = 45;
+
+    #[
+        OA\Property(example: 90),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_title_minutes = 90;
+
+    /**
+     * Max plays per song_id in 24h before deprioritization; null disables burn protection.
+     */
+    #[
+        OA\Property(example: 3),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $burn_rate_max_plays_24h = null;
+
     // ------------------------------------------------------------------
     // Slots collection
     // ------------------------------------------------------------------

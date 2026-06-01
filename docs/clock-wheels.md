@@ -354,7 +354,7 @@ AutoDJ and the clock wheel scheduler append rows when they queue, defer, or fall
 | `event_kind` | `track_queued`, `deferred`, `fallback` |
 | `fallback_reason` | e.g. `schedule_conflict`, `no_media_candidates`, `deferred_insufficient_window` |
 | `drift_seconds` | Seconds into the hour minus slot `position_seconds` at decision time |
-| `separation_relaxed` / `burn_rate_warning` | Reserved for PR9 (currently always false) |
+| `separation_relaxed` / `burn_rate_warning` | Set by PR9 when rules relax or burn limit is exceeded |
 
 Migration: `Version20260529120000`. Retention helper: `ClockWheelEventRepository::deleteOlderThan()` (30 days default; not wired to cron yet).
 
@@ -365,7 +365,7 @@ Full breakdown: **`docs/clock-wheels-remaining-phases-v7.md`** (from `docs/Azura
 | PR | Summary |
 |----|---------|
 | PR7 | **Done (MVP)** — Schedule → Live Clock Wheel tab (`queue` + now playing + `/schedule`) |
-| PR9 | Separation rules + burn rate in planner |
+| PR9 | **Done (MVP)** — `SeparationRulesChecker` + wheel settings UI |
 | PR10 | Daypart templates / inheritance |
 | PR11 | **Done** — `clock_wheel_events` audit table + planner/scheduler hooks |
 | PR12 | **Done** — `/clock-wheel/{id}/preview`, `/analytics`, fill strategy UI |
