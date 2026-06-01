@@ -319,11 +319,13 @@ final class ClockWheelPlaybackPlannerTest extends Unit
 
     private function makePlanner(?EntityManagerInterface $em = null): ClockWheelPlaybackPlanner
     {
+        $entityManager = $em ?? $this->createMock(EntityManagerInterface::class);
+
         return new ClockWheelPlaybackPlanner(
-            $em ?? $this->createMock(EntityManagerInterface::class),
+            $entityManager,
             $this->testsModule->container->get(StationQueueRepository::class),
             $this->testsModule->container->get(DuplicatePrevention::class),
-            $this->createMock(ClockWheelEventLogger::class),
+            new ClockWheelEventLogger($entityManager),
             $this->createMock(LoggerInterface::class),
         );
     }

@@ -15,6 +15,7 @@ use Codeception\Test\Unit;
 use DateTimeImmutable;
 use DateTimeZone;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Query;
 
 final class ClockWheelPreviewSimulatorTest extends Unit
 {
@@ -61,29 +62,13 @@ final class ClockWheelPreviewSimulatorTest extends Unit
         $wheel->addSlot($slotA);
         $wheel->addSlot($slotB);
 
+        $query = $this->createMock(Query::class);
+        $query->method('setParameters')->willReturnSelf();
+        $query->method('setMaxResults')->willReturnSelf();
+        $query->method('getResult')->willReturn([]);
+
         $em = $this->createMock(EntityManagerInterface::class);
-        $em->method('createQuery')->willReturnCallback(
-            static function () {
-                $query = new class {
-                    public function setParameters(): self
-                    {
-                        return $this;
-                    }
-
-                    public function setMaxResults(): self
-                    {
-                        return $this;
-                    }
-
-                    public function getResult(): array
-                    {
-                        return [];
-                    }
-                };
-
-                return $query;
-            }
-        );
+        $em->method('createQuery')->willReturn($query);
 
         $simulator = new ClockWheelPreviewSimulator($em);
         $preview = $simulator->simulateHour(

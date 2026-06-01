@@ -4,31 +4,27 @@ declare(strict_types=1);
 
 namespace App\Entity\Repository;
 
+use App\Doctrine\Repository;
 use App\Entity\ClockWheelEvent;
 use App\Entity\Enums\ClockWheelEventKind;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use DateTimeImmutable;
-use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
-use Doctrine\Persistence\ManagerRegistry;
 
 /**
- * @extends ServiceEntityRepository<ClockWheelEvent>
+ * @extends Repository<ClockWheelEvent>
  */
-final class ClockWheelEventRepository extends ServiceEntityRepository
+final class ClockWheelEventRepository extends Repository
 {
     public const int DEFAULT_RETENTION_DAYS = 30;
 
-    public function __construct(ManagerRegistry $registry)
-    {
-        parent::__construct($registry, ClockWheelEvent::class);
-    }
+    protected string $entityClass = ClockWheelEvent::class;
 
     public function deleteOlderThan(Station $station, int $days = self::DEFAULT_RETENTION_DAYS): int
     {
-        $cutoff = new \DateTimeImmutable('-' . $days . ' days', $station->getTimezoneObject());
+        $cutoff = new DateTimeImmutable('-' . $days . ' days', $station->getTimezoneObject());
 
-        return (int)$this->getEntityManager()->createQuery(
+        return (int)$this->em->createQuery(
             <<<'DQL'
                 DELETE FROM App\Entity\ClockWheelEvent e
                 WHERE e.station = :station AND e.event_timestamp < :cutoff
@@ -51,9 +47,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
      */
     public function getAnalyticsSummary(StationClockWheel $wheel, DateTimeImmutable $since): array
     {
-        $em = $this->getEntityManager();
-
-        $tracksQueued = (int)$em->createQuery(
+        $tracksQueued = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -64,7 +58,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->setParameter('kind', ClockWheelEventKind::TrackQueued)
             ->getSingleScalarResult();
 
-        $deferred = (int)$em->createQuery(
+        $deferred = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -75,7 +69,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->setParameter('kind', ClockWheelEventKind::Deferred)
             ->getSingleScalarResult();
 
-        $fallbacks = (int)$em->createQuery(
+        $fallbacks = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -86,7 +80,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->setParameter('kind', ClockWheelEventKind::Fallback)
             ->getSingleScalarResult();
 
-        $avgDrift = $em->createQuery(
+        $avgDrift = $this->em->createQuery(
             <<<'DQL'
                 SELECT AVG(ABS(e.drift_seconds)) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -97,7 +91,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->setParameter('kind', ClockWheelEventKind::TrackQueued)
             ->getSingleScalarResult();
 
-        $separationRelaxed = (int)$em->createQuery(
+        $separationRelaxed = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -107,7 +101,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->setParameter('since', $since)
             ->getSingleScalarResult();
 
-        $burnRateWarning = (int)$em->createQuery(
+        $burnRateWarning = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel AND e.event_timestamp >= :since
@@ -118,7 +112,7 @@ final class ClockWheelEventRepository extends ServiceEntityRepository
             ->getSingleScalarResult();
 
         /** @var array<array{reason: string|null, cnt: string}> $reasonRows */
-        $reasonRows = $em->createQuery(
+        $reasonRows = $this->em->createQuery(
             <<<'DQL'
                 SELECT e.fallback_reason AS reason, COUNT(e.id) AS cnt
                 FROM App\Entity\ClockWheelEvent e

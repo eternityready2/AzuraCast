@@ -18,7 +18,7 @@ use Doctrine\ORM\Mapping as ORM;
  * calendar; schedule authority remains {@see StationSchedule}.
  */
 #[
-    ORM\Entity(repositoryClass: Repository\ClockWheelEventRepository::class),
+    ORM\Entity,
     ORM\Table(name: 'clock_wheel_events'),
     ORM\Index(name: 'idx_cwe_station_timestamp', columns: ['station_id', 'event_timestamp']),
     ORM\Index(name: 'idx_cwe_wheel_timestamp', columns: ['clock_wheel_id', 'event_timestamp']),
