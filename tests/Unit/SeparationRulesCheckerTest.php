@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Unit;
 
+use App\Entity\Enums\StorageLocationAdapters;
+use App\Entity\Enums\StorageLocationTypes;
 use App\Entity\StationMedia;
 use App\Entity\StorageLocation;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
@@ -110,7 +112,7 @@ final class SeparationRulesCheckerTest extends Unit
 
     private function makeMedia(int $id, string $title, string $artist): StationMedia
     {
-        $storage = new StorageLocation();
+        $storage = new StorageLocation(StorageLocationTypes::StationMedia, StorageLocationAdapters::Local);
         $media = new StationMedia($storage, '/track_' . $id . '.mp3');
         $media->title = $title;
         $media->artist = $artist;
