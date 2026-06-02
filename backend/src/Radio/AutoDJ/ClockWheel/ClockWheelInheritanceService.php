@@ -50,6 +50,8 @@ final class ClockWheelInheritanceService
 
             $this->slotWriter->copyTemplateSlotsToWheel($template, $wheel);
         }
+
+        $this->em->flush();
     }
 
     /**
@@ -67,12 +69,13 @@ final class ClockWheelInheritanceService
         foreach ($targetHours as $hour) {
             $wheel = $this->findOrCreateDaypartWheel($daypart, $hour);
             $this->applyDaypartMetadata($daypart, $template, $wheel, $hour);
+            $this->em->persist($wheel);
+            $this->ensureWheelPersisted($wheel);
 
             if ($wheel->inherits_template_slots) {
                 $this->slotWriter->copyTemplateSlotsToWheel($template, $wheel);
             }
 
-            $this->em->persist($wheel);
             $synced[] = $wheel;
         }
 
@@ -80,6 +83,16 @@ final class ClockWheelInheritanceService
         $this->em->flush();
 
         return $synced;
+    }
+
+    /**
+     * Wheel slots require a persisted parent row (clock_wheel_id FK).
+     */
+    private function ensureWheelPersisted(StationClockWheel $wheel): void
+    {
+        if ($this->em->getUnitOfWork()->isScheduledForInsert($wheel)) {
+            $this->em->flush();
+        }
     }
 
     private function findOrCreateDaypartWheel(StationClockDaypart $daypart, int $hour): StationClockWheel

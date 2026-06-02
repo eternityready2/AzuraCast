@@ -28,6 +28,14 @@ final class ClockWheelInheritanceServiceTest extends Unit
         $this->service = $testsModule->container->get(ClockWheelInheritanceService::class);
     }
 
+    protected function _after(): void
+    {
+        $em = $this->testsModule->em;
+        if (!$em->isOpen()) {
+            $em->open();
+        }
+    }
+
     public function testSyncDaypartCreatesHourlyWheels(): void
     {
         $em = $this->testsModule->em;
@@ -62,7 +70,8 @@ final class ClockWheelInheritanceServiceTest extends Unit
 
             foreach ($wheels as $wheel) {
                 self::assertTrue($wheel->inherits_template_slots);
-                self::assertSame($template->id, $wheel->template_id);
+                self::assertNotNull($wheel->template);
+                self::assertSame($template->id, $wheel->template->id);
                 self::assertCount(1, $wheel->slots);
             }
         } finally {
@@ -137,7 +146,8 @@ final class ClockWheelInheritanceServiceTest extends Unit
 
             self::assertCount(1, $wheels);
             $wheel = $wheels[0];
-            self::assertSame($daypart->id, $wheel->daypart_id);
+            self::assertNotNull($wheel->daypart);
+            self::assertSame($daypart->id, $wheel->daypart->id);
 
             $settings = ClockWheelSeparationSettings::resolveForWheel($wheel);
             self::assertTrue($settings->enabled);
@@ -201,19 +211,30 @@ final class ClockWheelInheritanceServiceTest extends Unit
             $em->open();
         }
 
+        $stationId = $station->id;
+        $mediaStorageId = $station->media_storage_location->id;
+        $recordingsStorageId = $station->recordings_storage_location->id;
+        $podcastsStorageId = $station->podcasts_storage_location->id;
+
+        // Drop failed/pending unit-of-work state so cleanup DQL does not fight orphan inserts.
+        $em->clear();
+
+        $stationRef = $em->getReference(Station::class, $stationId);
+
         $em->createQuery('DELETE FROM App\Entity\StationClockWheel w WHERE w.station = :station')
-            ->setParameter('station', $station)
+            ->setParameter('station', $stationRef)
             ->execute();
         $em->createQuery('DELETE FROM App\Entity\StationClockDaypart d WHERE d.station = :station')
-            ->setParameter('station', $station)
+            ->setParameter('station', $stationRef)
             ->execute();
         $em->createQuery('DELETE FROM App\Entity\StationClockWheelTemplate t WHERE t.station = :station')
-            ->setParameter('station', $station)
+            ->setParameter('station', $stationRef)
             ->execute();
-        $em->remove($station);
-        $em->remove($station->media_storage_location);
-        $em->remove($station->recordings_storage_location);
-        $em->remove($station->podcasts_storage_location);
+
+        $em->remove($em->getReference(Station::class, $stationId));
+        $em->remove($em->getReference(\App\Entity\StorageLocation::class, $mediaStorageId));
+        $em->remove($em->getReference(\App\Entity\StorageLocation::class, $recordingsStorageId));
+        $em->remove($em->getReference(\App\Entity\StorageLocation::class, $podcastsStorageId));
         $em->flush();
         $em->clear();
     }
