@@ -15,6 +15,7 @@ use App\Radio\AutoDJ\ClockWheel\ClockWheelInheritanceService;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
@@ -144,5 +145,59 @@ final class ClockWheelTemplatesController extends AbstractStationApiCrudControll
         }
 
         return $response->withJson($savedSlots);
+    }
+
+    protected function viewRecord(object $record, ServerRequest $request): mixed
+    {
+        assert($record instanceof StationClockWheelTemplate);
+
+        $return = $this->toArray($record);
+
+        $slotsOut = [];
+        foreach ($record->slots as $slot) {
+            $slotsOut[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['template'],
+                ]
+            );
+        }
+        $return['slots'] = $slotsOut;
+
+        $router = $request->getRouter();
+        $isInternal = $request->isInternal();
+
+        $return['links'] = [
+            'self' => $router->fromHere(
+                routeName: $this->resourceRouteName,
+                routeParams: ['id' => $record->id],
+                absolute: !$isInternal
+            ),
+            'slots' => $router->fromHere(
+                routeName: 'api:stations:clock-wheel-template',
+                routeParams: ['id' => $record->id],
+                absolute: !$isInternal
+            ) . '/slots',
+        ];
+
+        return $return;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     *
+     * @return array<mixed>
+     */
+    protected function toArray(object $record, array $context = []): array
+    {
+        return parent::toArray(
+            $record,
+            array_merge(
+                $context,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['slots', 'dayparts', 'wheels'],
+                ]
+            )
+        );
     }
 }

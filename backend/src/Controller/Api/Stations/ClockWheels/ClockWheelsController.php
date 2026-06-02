@@ -22,6 +22,7 @@ use App\Utilities\DateRange;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
@@ -377,13 +378,23 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         // ORM OrderBy annotation on the collection.
         $slotsOut = [];
         foreach ($record->slots as $slot) {
-            $slotsOut[] = $this->toArray($slot);
+            $slotsOut[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel'],
+                ]
+            );
         }
         $return['slots'] = $slotsOut;
 
         $scheduleOut = [];
         foreach ($this->scheduleRepo->findByRelation($record) as $scheduleItem) {
-            $scheduleOut[] = $this->toArray($scheduleItem);
+            $scheduleOut[] = $this->toArray(
+                $scheduleItem,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel', 'playlist', 'streamer'],
+                ]
+            );
         }
         $return['schedule_items'] = $scheduleOut;
 
@@ -404,6 +415,29 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         ];
 
         return $return;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     *
+     * @return array<mixed>
+     */
+    protected function toArray(object $record, array $context = []): array
+    {
+        return parent::toArray(
+            $record,
+            array_merge(
+                $context,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => [
+                        'slots',
+                        'schedule_items',
+                        'template',
+                        'daypart',
+                    ],
+                ]
+            )
+        );
     }
 
     // ------------------------------------------------------------------

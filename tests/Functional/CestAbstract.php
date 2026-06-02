@@ -21,6 +21,8 @@ use App\Environment;
 use App\Media\MediaProcessor;
 use App\Security\SplitToken;
 use App\Tests\Module;
+use Codeception\Test\Cest;
+use Exception;
 use FunctionalTester;
 use Psr\Container\ContainerInterface;
 use RuntimeException;
@@ -44,6 +46,8 @@ abstract class CestAbstract
 
     private ?Station $test_station = null;
 
+    private bool $test_failed = false;
+
     protected function _inject(Module $testsModule): void
     {
         $this->di = $testsModule->container;
@@ -54,28 +58,30 @@ abstract class CestAbstract
         $this->environment = $this->di->get(Environment::class);
     }
 
+    public function _failed(FunctionalTester $I, Cest $test, Exception $fail): void
+    {
+        $this->test_failed = true;
+    }
+
     public function _after(FunctionalTester $I): void
     {
-        $this->em->clear();
+        if (!$this->test_failed && null !== $this->test_station) {
+            // Delete via Doctrine so _after cleanup never overwrites the last HTTP
+            // response body (Codeception failure artifacts use that response).
+            $stationId = $this->test_station->id;
+            $this->em->clear();
 
-        if (null !== $this->test_station) {
-            // If the test just failed, preserve the last API response body/artifacts.
-            // (Codeception stores the most recent response; deleting the station via API
-            // would overwrite it with the delete response.)
-            $lastCode = null;
-            if (method_exists($I, 'grabHttpCode')) {
-                /** @var int $lastCode */
-                $lastCode = $I->grabHttpCode();
+            $station = $this->em->find(Station::class, $stationId);
+            if ($station instanceof Station) {
+                $this->em->remove($station);
+                $this->em->flush();
             }
-            if (is_int($lastCode) && $lastCode >= 400) {
-                $this->test_station = null;
-                return;
-            }
-
-            $I->sendDelete('/api/admin/station/' . $this->test_station->id);
-
+        } else {
             $this->em->clear();
         }
+
+        $this->test_station = null;
+        $this->test_failed = false;
     }
 
     protected function setupIncomplete(FunctionalTester $I): void
@@ -124,7 +130,6 @@ abstract class CestAbstract
         // Create API key
         $key = SplitToken::generate();
 
-        $apiKey = new ApiKey($user, $key);
         $apiKey = new ApiKey($user, $key, 'Test Suite');
 
         $this->em->persist($apiKey);
