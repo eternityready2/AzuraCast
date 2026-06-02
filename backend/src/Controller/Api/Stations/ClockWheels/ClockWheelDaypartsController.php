@@ -41,6 +41,8 @@ final class ClockWheelDaypartsController extends AbstractStationApiCrudControlle
 {
     protected string $entityClass = StationClockDaypart::class;
 
+    protected string $resourceRouteName = 'api:stations:clock-daypart';
+
     public function __construct(
         Serializer $serializer,
         ValidatorInterface $validator,

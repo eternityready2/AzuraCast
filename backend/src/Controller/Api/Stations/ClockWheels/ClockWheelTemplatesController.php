@@ -55,6 +55,8 @@ final class ClockWheelTemplatesController extends AbstractStationApiCrudControll
 {
     protected string $entityClass = StationClockWheelTemplate::class;
 
+    protected string $resourceRouteName = 'api:stations:clock-wheel-template';
+
     public function __construct(
         Serializer $serializer,
         ValidatorInterface $validator,
