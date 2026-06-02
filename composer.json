@@ -119,6 +119,7 @@
     "codeception/module-asserts": "^3.2",
     "codeception/module-cli": "^2.0.1",
     "codeception/module-doctrine": "^3.2",
+    "codeception/module-doctrine2": "^3.2",
     "codeception/module-phpbrowser": "dev-master",
     "codeception/module-rest": "^3.4.1",
     "filp/whoops": "^2.18.4",
