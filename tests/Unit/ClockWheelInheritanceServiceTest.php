@@ -168,6 +168,7 @@ final class ClockWheelInheritanceServiceTest extends Unit
         $template->name = 'Shared';
 
         $wheel = new StationClockWheel($station);
+        $wheel->name = 'Instance';
         $wheel->template = $template;
         $wheel->inherits_template_slots = true;
 

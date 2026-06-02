@@ -262,6 +262,7 @@ final class StationClockWheel implements
 
     public function __toString(): string
     {
-        return $this->name;
+        // AuditLog stringifies entities on flush; tests may persist before name is set.
+        return isset($this->name) ? $this->name : 'Station Clock Wheel';
     }
 }

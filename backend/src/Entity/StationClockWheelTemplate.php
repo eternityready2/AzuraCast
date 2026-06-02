@@ -111,6 +111,6 @@ final class StationClockWheelTemplate implements
 
     public function __toString(): string
     {
-        return $this->name;
+        return isset($this->name) ? $this->name : 'Clock Wheel Template';
     }
 }
