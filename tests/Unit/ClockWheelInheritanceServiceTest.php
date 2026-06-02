@@ -79,6 +79,34 @@ final class ClockWheelInheritanceServiceTest extends Unit
         }
     }
 
+    public function testSaveTemplateSlotsOnNewTemplateBeforeFlush(): void
+    {
+        $em = $this->testsModule->em;
+        $station = $this->persistStation($em);
+
+        $template = new StationClockWheelTemplate($station);
+        $template->name = 'Web Create Template';
+        $template->color = '#aabbcc';
+
+        $em->persist($template);
+
+        try {
+            $this->service->saveTemplateSlotsAndPropagate($template, [
+                [
+                    'type' => 'music',
+                    'position_seconds' => 0,
+                    'algorithm' => 'random',
+                ],
+            ]);
+
+            self::assertGreaterThan(0, $template->id);
+            self::assertCount(1, $template->slots);
+            self::assertSame(0, $template->slots->getValues()[0]->position_seconds);
+        } finally {
+            $this->cleanupStation($em, $station);
+        }
+    }
+
     public function testTemplateSlotUpdatePropagatesToInheritingWheel(): void
     {
         $em = $this->testsModule->em;

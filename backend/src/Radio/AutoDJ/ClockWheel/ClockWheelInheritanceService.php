@@ -27,12 +27,15 @@ final class ClockWheelInheritanceService
         StationClockWheelTemplate $template,
         array $slotsData,
     ): void {
+        $this->ensureTemplatePersisted($template);
         $this->slotWriter->replaceTemplateSlots($template, $slotsData);
         $this->propagateTemplateToWheels($template);
     }
 
     public function propagateTemplateToWheels(StationClockWheelTemplate $template): void
     {
+        $this->ensureTemplatePersisted($template);
+
         $wheels = $this->em->createQuery(
             <<<'DQL'
                 SELECT w
@@ -83,6 +86,20 @@ final class ClockWheelInheritanceService
         $this->em->flush();
 
         return $synced;
+    }
+
+    /**
+     * Template rows and DQL :template binding require a persisted identifier.
+     */
+    private function ensureTemplatePersisted(StationClockWheelTemplate $template): void
+    {
+        if (!$this->em->contains($template)) {
+            $this->em->persist($template);
+        }
+
+        if ($this->em->getUnitOfWork()->isScheduledForInsert($template)) {
+            $this->em->flush();
+        }
     }
 
     /**
