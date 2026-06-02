@@ -223,6 +223,7 @@ import DaypartEditModal from '~/components/Stations/ClockWheels/DaypartEditModal
 import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
 import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue';
 import IconBiChevronRight from '~icons/bi/chevron-right';
+import {formatClockWheelHourLabel} from '~/functions/clockWheelHourOptions.ts';
 
 const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/clock-wheels');
@@ -311,7 +312,7 @@ const {doCreate, doEdit} = useHasEditModal($editModal);
 const {doCreate: doCreateTemplate, doEdit: doEditTemplate} = useHasEditModal($templateEditModal);
 const {doCreate: doCreateDaypart, doEdit: doEditDaypart} = useHasEditModal($daypartEditModal);
 
-const formatHour = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
+const formatHour = (hour: number) => formatClockWheelHourLabel(hour);
 
 const openPreview = (item: ClockWheelRow) => {
     const url = getStationApiUrl(`/clock-wheel/${item.id}/preview`).value;

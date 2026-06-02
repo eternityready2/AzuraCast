@@ -74,6 +74,8 @@ final class ClockWheelDaypartsController extends AbstractStationApiCrudControlle
             unset($data['template_id']);
         }
 
+        $data = $this->normalizeDaypartPayload($data);
+
         /** @var StationClockDaypart $daypart */
         $daypart = $this->fromArray($data, $record, $context);
 
@@ -130,5 +132,41 @@ final class ClockWheelDaypartsController extends AbstractStationApiCrudControlle
         }
 
         return $template;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function normalizeDaypartPayload(array $data): array
+    {
+        foreach (['start_hour', 'end_hour'] as $key) {
+            if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
+                $data[$key] = (int) $data[$key];
+            }
+        }
+
+        foreach (
+            [
+                'separation_artist_minutes',
+                'separation_title_minutes',
+                'burn_rate_max_plays_24h',
+            ] as $key
+        ) {
+            if (!array_key_exists($key, $data) || $data[$key] === '' || $data[$key] === null) {
+                continue;
+            }
+
+            $data[$key] = (int) $data[$key];
+        }
+
+        foreach (['is_active', 'separation_override_enabled', 'separation_enabled'] as $key) {
+            if (array_key_exists($key, $data)) {
+                $data[$key] = filter_var($data[$key], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        return $data;
     }
 }

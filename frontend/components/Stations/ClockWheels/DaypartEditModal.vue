@@ -25,24 +25,20 @@
         />
 
         <div class="row mb-3">
-            <form-group-field
+            <form-group-select
                 id="daypart_start_hour"
                 class="col-md-6"
                 :field="r$.start_hour"
                 :label="$gettext('Start hour')"
-                type="number"
-                min="0"
-                max="23"
+                :options="hourOptions"
             />
-            <form-group-field
+            <form-group-select
                 id="daypart_end_hour"
                 class="col-md-6"
                 :field="r$.end_hour"
                 :label="$gettext('End hour')"
-                type="number"
-                min="0"
-                max="23"
-                :description="$gettext('Inclusive. End before start spans overnight.')"
+                :options="hourOptions"
+                :description="hourRangeHint"
             />
         </div>
 
@@ -171,6 +167,45 @@ const {axios} = useAxios();
 
 const templateOptions = ref<{value: number; text: string}[]>([]);
 
+const hourOptions = computed(() =>
+    buildClockWheelHourOptions((hour) => {
+        if (hour === 0) {
+            return $gettext('12:00 AM (midnight)');
+        }
+        if (hour === 12) {
+            return $gettext('12:00 PM (noon)');
+        }
+        if (hour < 12) {
+            return $gettext('%{time} AM', {time: `${hour}:00`});
+        }
+        return $gettext('%{time} PM', {time: `${hour - 12}:00`});
+    })
+);
+
+const hourRangeHint = computed(() => {
+    const start = Number(form.value.start_hour);
+    const end = Number(form.value.end_hour);
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+        return $gettext('Inclusive end hour. If end is before start, the range spans overnight.');
+    }
+
+    const count = countHoursInDaypartRange(start, end);
+    const overnight =
+        end < start
+            ? ' ' + $gettext('(overnight span)')
+            : '';
+
+    return $gettext(
+        'Generates %{count} hourly clock wheels from %{start} through %{end}%{overnight}.',
+        {
+            count: String(count),
+            start: formatClockWheelHourLabel(start),
+            end: formatClockWheelHourLabel(end),
+            overnight,
+        }
+    );
+});
+
 onMounted(async () => {
     const {data} = await axios.get(props.templatesUrl);
     templateOptions.value = (data as Array<{id: number; name: string}>).map((t) => ({
@@ -228,11 +263,32 @@ const populateForm = (data: Record<string, unknown>) => {
     });
 };
 
+/** Inclusive hour count; end before start = overnight span. */
+function countHoursInDaypartRange(startHour: number, endHour: number): number {
+    let count = 0;
+    let hour = startHour;
+
+    while (true) {
+        count++;
+        if (hour === endHour) {
+            break;
+        }
+        hour = (hour + 1) % 24;
+        if (count > 24) {
+            break;
+        }
+    }
+
+    return count;
+}
+
 const validateForm = async () => {
     const {valid} = await r$.$validate();
     const payload = {
         ...form.value,
-        template_id: form.value.template_id,
+        template_id: form.value.template_id != null ? Number(form.value.template_id) : null,
+        start_hour: Number(form.value.start_hour),
+        end_hour: Number(form.value.end_hour),
         color: form.value.color || null,
         separation_override_enabled: form.value.separation_override_enabled,
         separation_enabled: form.value.separation_override_enabled
