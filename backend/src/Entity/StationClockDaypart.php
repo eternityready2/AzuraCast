@@ -145,6 +145,12 @@ final class StationClockDaypart implements
         $this->station = $station;
     }
 
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+        $this->template_id = $this->template->id;
+    }
+
     public function __toString(): string
     {
         return isset($this->name) ? $this->name : 'Clock Daypart';

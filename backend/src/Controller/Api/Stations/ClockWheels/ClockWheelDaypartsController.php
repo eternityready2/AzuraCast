@@ -85,6 +85,8 @@ final class ClockWheelDaypartsController extends AbstractStationApiCrudControlle
         $this->em->persist($daypart);
         $this->em->flush();
 
+        $daypart->syncReadOnlyForeignKeys();
+
         $this->inheritanceService->syncDaypart($daypart);
 
         return $daypart;

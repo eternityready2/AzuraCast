@@ -306,10 +306,9 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         $this->em->flush();
 
-        // Refresh slot entities so the read-only category_id column reflects
-        // the persisted FK value (Doctrine doesn't back-fill it in memory).
+        $wheel->syncReadOnlyForeignKeys();
         foreach ($wheel->slots as $slot) {
-            $this->em->refresh($slot);
+            $slot->syncReadOnlyForeignKeys();
         }
 
         return $wheel;
@@ -511,8 +510,13 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         $savedSlots = [];
         foreach ($record->slots as $slot) {
-            $this->em->refresh($slot);
-            $savedSlots[] = $this->toArray($slot);
+            $slot->syncReadOnlyForeignKeys();
+            $savedSlots[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel'],
+                ]
+            );
         }
 
         return $response->withJson($savedSlots);

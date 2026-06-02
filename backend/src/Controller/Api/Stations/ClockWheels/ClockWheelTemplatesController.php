@@ -91,8 +91,9 @@ final class ClockWheelTemplatesController extends AbstractStationApiCrudControll
 
         $this->em->flush();
 
+        $template->syncReadOnlyForeignKeys();
         foreach ($template->slots as $slot) {
-            $this->em->refresh($slot);
+            $slot->syncReadOnlyForeignKeys();
         }
 
         return $template;
@@ -140,8 +141,13 @@ final class ClockWheelTemplatesController extends AbstractStationApiCrudControll
 
         $savedSlots = [];
         foreach ($record->slots as $slot) {
-            $this->em->refresh($slot);
-            $savedSlots[] = $this->toArray($slot);
+            $slot->syncReadOnlyForeignKeys();
+            $savedSlots[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['template'],
+                ]
+            );
         }
 
         return $response->withJson($savedSlots);

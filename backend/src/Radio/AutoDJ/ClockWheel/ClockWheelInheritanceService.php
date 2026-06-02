@@ -85,6 +85,13 @@ final class ClockWheelInheritanceService
         $this->removeOrphanDaypartWheels($daypart, $targetHours);
         $this->em->flush();
 
+        foreach ($synced as $wheel) {
+            $wheel->syncReadOnlyForeignKeys();
+            foreach ($wheel->slots as $slot) {
+                $slot->syncReadOnlyForeignKeys();
+            }
+        }
+
         return $synced;
     }
 

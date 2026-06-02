@@ -109,6 +109,14 @@ final class StationClockWheelTemplate implements
         }
     }
 
+    /**
+     * Back-fill insertable=false mirror columns after flush (serializer reads them on create).
+     */
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+    }
+
     public function __toString(): string
     {
         return isset($this->name) ? $this->name : 'Clock Wheel Template';

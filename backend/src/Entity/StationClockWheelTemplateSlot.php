@@ -83,4 +83,11 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
     {
         $this->template = $template;
     }
+
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->template_id = $this->template->id;
+        $this->playlist_id = $this->playlist?->id;
+        $this->category_id = $this->category?->id;
+    }
 }

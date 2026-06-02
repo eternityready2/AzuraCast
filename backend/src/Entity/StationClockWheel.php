@@ -256,6 +256,13 @@ final class StationClockWheel implements
         $this->slots->removeElement($slot);
     }
 
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+        $this->template_id = $this->template?->id;
+        $this->daypart_id = $this->daypart?->id;
+    }
+
     // ------------------------------------------------------------------
     // Stringable
     // ------------------------------------------------------------------
