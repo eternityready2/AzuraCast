@@ -59,6 +59,19 @@ abstract class CestAbstract
         $this->em->clear();
 
         if (null !== $this->test_station) {
+            // If the test just failed, preserve the last API response body/artifacts.
+            // (Codeception stores the most recent response; deleting the station via API
+            // would overwrite it with the delete response.)
+            $lastCode = null;
+            if (method_exists($I, 'grabHttpCode')) {
+                /** @var int $lastCode */
+                $lastCode = $I->grabHttpCode();
+            }
+            if (is_int($lastCode) && $lastCode >= 400) {
+                $this->test_station = null;
+                return;
+            }
+
             $I->sendDelete('/api/admin/station/' . $this->test_station->id);
 
             $this->em->clear();
