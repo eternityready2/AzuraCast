@@ -112,7 +112,7 @@ abstract class CestAbstract
         $key = SplitToken::generate();
 
         $apiKey = new ApiKey($user, $key);
-        $apiKey->comment = 'Test Suite';
+        $apiKey = new ApiKey($user, $key, 'Test Suite');
 
         $this->em->persist($apiKey);
         $this->em->flush();
