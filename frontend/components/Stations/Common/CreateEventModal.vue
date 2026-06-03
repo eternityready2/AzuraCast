@@ -34,6 +34,7 @@
                 v-model="form.entity_id"
                 class="form-select"
                 :disabled="currentEntityOptions.length === 0"
+                @change="onEntityChange"
             >
                 <option
                     v-for="e in currentEntityOptions"
@@ -378,6 +379,7 @@ import {
     createScheduleItemDefaults,
 } from '~/components/Stations/Common/scheduleItemDefaults.ts';
 import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
+import {scheduleTimeWindowForHourOfDay} from '~/functions/amPmTime.ts';
 
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
@@ -394,8 +396,13 @@ interface EntityOption {
     self_url: string;
 }
 
+interface ClockWheelOption extends EntityOption {
+    /** Set on daypart-generated hourly wheels (0–23). */
+    hour_of_day: number | null;
+}
+
 const playlists = ref<EntityOption[]>([]);
-const clockWheels = ref<EntityOption[]>([]);
+const clockWheels = ref<ClockWheelOption[]>([]);
 
 onMounted(async () => {
     const [plResp, cwResp] = await Promise.all([
@@ -413,6 +420,7 @@ onMounted(async () => {
         id: cw.id as number,
         name: cw.name as string,
         self_url: (cw.links as Record<string, string>).self,
+        hour_of_day: cw.hour_of_day != null ? Number(cw.hour_of_day) : null,
     }));
 });
 
@@ -456,6 +464,29 @@ const updateDuration = () => {
 const updateDurationFromHours = () => updateDuration();
 const updateDurationFromMinutes = () => updateDuration();
 
+const applyClockWheelHourToSchedule = (entityId: number | null) => {
+    if (entityId == null) {
+        return;
+    }
+
+    const wheel = clockWheels.value.find((w) => w.id === entityId);
+    if (wheel?.hour_of_day == null) {
+        return;
+    }
+
+    const {start_time, end_time} = scheduleTimeWindowForHourOfDay(wheel.hour_of_day);
+    scheduleRow.value.start_time = start_time;
+    scheduleRow.value.end_time = end_time;
+    durationHours.value = 1;
+    durationMinutes.value = 0;
+};
+
+const onEntityChange = () => {
+    if (isClockWheelSchedule.value) {
+        applyClockWheelHourToSchedule(form.value.entity_id);
+    }
+};
+
 const currentEntityOptions = computed(() =>
     form.value.source === 'playlist' ? playlists.value : clockWheels.value
 );
@@ -469,6 +500,22 @@ watch(currentEntityOptions, (opts) => {
         form.value.entity_id = opts[0].id;
     }
 }, {immediate: true});
+
+watch(
+    () => form.value.entity_id,
+    (entityId, previousId) => {
+        if (!isClockWheelSchedule.value || entityId == null) {
+            return;
+        }
+
+        // Editing an existing event: only adjust times when the user picks another wheel.
+        if (editingScheduleId.value !== null && previousId == null) {
+            return;
+        }
+
+        applyClockWheelHourToSchedule(entityId);
+    }
+);
 
 watch(schedulingMode, (mode) => {
     if (!isPlaylistSchedule.value) {

@@ -23,6 +23,22 @@ export function formatHourOfDayToAmPm(hourOfDay: number): string {
     return formatPartsToAmPm(hour24, 0);
 }
 
+/**
+ * Schedule window for a daypart hourly wheel: one hour starting at :00.
+ * Returns AzuraCast HHMM values (e.g. 9 → 900–1000, 23 → 2300–0).
+ */
+export function scheduleTimeWindowForHourOfDay(hourOfDay: number): {
+    start_time: number;
+    end_time: number;
+} {
+    const hour = Math.min(23, Math.max(0, Math.trunc(hourOfDay)));
+
+    return {
+        start_time: hour * 100,
+        end_time: ((hour + 1) % 24) * 100,
+    };
+}
+
 export function formatPartsToAmPm(hour24: number, minutes: number): string {
     const mins = Math.min(59, Math.max(0, Math.trunc(minutes)));
     let hour12 = Math.trunc(hour24) % 24;
