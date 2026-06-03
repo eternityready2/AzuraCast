@@ -72,13 +72,13 @@
                 class="col-md-4"
                 :field="r$.start_time"
                 :label="$gettext('Start Time')"
-                :description="$gettext('To play once per day, set the start and end times to the same value.')"
+                :description="$gettext('Type a time like 9:30 AM. To play once per day, set start and end to the same value.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <circular-time-picker
+                    <am-pm-time-input
                         :input-id="id"
                         v-model="model.$model"
-                        :class="fieldClass"
+                        :field-class="fieldClass"
                     />
                 </template>
             </form-group-field>
@@ -88,13 +88,13 @@
                 class="col-md-4"
                 :field="r$.end_time"
                 :label="$gettext('End Time')"
-                :description="$gettext('If the end time is before the start time, the playlist will play overnight.')"
+                :description="$gettext('Type a time like 5:00 PM. If end is before start, the event plays overnight.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <circular-time-picker
+                    <am-pm-time-input
                         :input-id="id"
                         v-model="model.$model"
-                        :class="fieldClass"
+                        :field-class="fieldClass"
                     />
                 </template>
             </form-group-field>
@@ -359,7 +359,7 @@
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
-import CircularTimePicker from '~/components/Common/CircularTimePicker.vue';
+import AmPmTimeInput from '~/components/Common/AmPmTimeInput.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupMultiCheck from '~/components/Form/FormGroupMultiCheck.vue';

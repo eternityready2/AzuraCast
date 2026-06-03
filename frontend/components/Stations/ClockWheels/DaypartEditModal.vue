@@ -25,21 +25,38 @@
         />
 
         <div class="row mb-3">
-            <form-group-select
+            <form-group-field
                 id="daypart_start_hour"
                 class="col-md-6"
                 :field="r$.start_hour"
                 :label="$gettext('Start hour')"
-                :options="hourOptions"
-            />
-            <form-group-select
+                :description="$gettext('Whole hours only, e.g. 6:00 AM')"
+            >
+                <template #default="{id, model, fieldClass}">
+                    <am-pm-time-input
+                        :input-id="id"
+                        v-model="model.$model"
+                        mode="hour"
+                        :field-class="fieldClass"
+                    />
+                </template>
+            </form-group-field>
+            <form-group-field
                 id="daypart_end_hour"
                 class="col-md-6"
                 :field="r$.end_hour"
                 :label="$gettext('End hour')"
-                :options="hourOptions"
                 :description="hourRangeHint"
-            />
+            >
+                <template #default="{id, model, fieldClass}">
+                    <am-pm-time-input
+                        :input-id="id"
+                        v-model="model.$model"
+                        mode="hour"
+                        :field-class="fieldClass"
+                    />
+                </template>
+            </form-group-field>
         </div>
 
         <div class="mb-3">
@@ -145,6 +162,7 @@ import ModalForm from '~/components/Common/ModalForm.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupSelect from '~/components/Form/FormGroupSelect.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
+import AmPmTimeInput from '~/components/Common/AmPmTimeInput.vue';
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from '~/functions/useBaseEditModal';
 import {computed, onMounted, ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
@@ -154,6 +172,7 @@ import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
 import {useAxios} from '~/vendor/axios';
+import {formatHourOfDayToAmPm} from '~/functions/amPmTime.ts';
 
 const props = defineProps<BaseEditModalProps & {
     templatesUrl: string;
@@ -166,21 +185,6 @@ const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
 const templateOptions = ref<{value: number; text: string}[]>([]);
-
-const hourOptions = computed(() =>
-    buildClockWheelHourOptions((hour) => {
-        if (hour === 0) {
-            return $gettext('12:00 AM (midnight)');
-        }
-        if (hour === 12) {
-            return $gettext('12:00 PM (noon)');
-        }
-        if (hour < 12) {
-            return $gettext('%{time} AM', {time: `${hour}:00`});
-        }
-        return $gettext('%{time} PM', {time: `${hour - 12}:00`});
-    })
-);
 
 const hourRangeHint = computed(() => {
     const start = Number(form.value.start_hour);
@@ -199,8 +203,8 @@ const hourRangeHint = computed(() => {
         'Generates %{count} hourly clock wheels from %{start} through %{end}%{overnight}.',
         {
             count: String(count),
-            start: formatClockWheelHourLabel(start),
-            end: formatClockWheelHourLabel(end),
+            start: formatHourOfDayToAmPm(start),
+            end: formatHourOfDayToAmPm(end),
             overnight,
         }
     );
