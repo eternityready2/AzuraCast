@@ -105,3 +105,150 @@ export function parseHourOfDayFromAmPm(text: string, requireWholeHour = true): n
 
     return parsed.hour;
 }
+
+export type AmPmFormatState = {
+    /** Normalized display string shown in the input. */
+    display: string;
+    /** Parsed value when display is complete and valid. */
+    parsed: number | null;
+    /** True when hour, minutes (:00 for whole-hour), and AM/PM are all set. */
+    complete: boolean;
+};
+
+function clampHour12(hour12: number): number {
+    if (hour12 < 1) {
+        return 1;
+    }
+    if (hour12 > 12) {
+        return 12;
+    }
+
+    return hour12;
+}
+
+function splitDigitsToHourMinute(digits: string): {hour12: number; minutes: number} {
+    const d = digits.slice(0, 4);
+
+    if (d.length === 0) {
+        return {hour12: 0, minutes: 0};
+    }
+
+    if (d.length === 1) {
+        return {hour12: clampHour12(parseInt(d, 10)), minutes: 0};
+    }
+
+    if (d.length === 2) {
+        const n = parseInt(d, 10);
+        if (n > 12) {
+            return {
+                hour12: clampHour12(parseInt(d[0], 10)),
+                minutes: Math.min(59, parseInt(d[1], 10) * 10),
+            };
+        }
+
+        return {hour12: clampHour12(n), minutes: 0};
+    }
+
+    if (d.length === 3) {
+        return {
+            hour12: clampHour12(parseInt(d[0], 10)),
+            minutes: Math.min(59, parseInt(d.slice(1), 10)),
+        };
+    }
+
+    const hh = parseInt(d.slice(0, 2), 10);
+    const mm = parseInt(d.slice(2), 10);
+
+    if (hh > 12) {
+        return {
+            hour12: clampHour12(parseInt(d[0], 10)),
+            minutes: Math.min(59, parseInt(d.slice(1, 3), 10)),
+        };
+    }
+
+    return {hour12: clampHour12(hh), minutes: Math.min(59, mm)};
+}
+
+function detectPeriodFromCleaned(cleaned: string): 'AM' | 'PM' | null {
+    if (/\bP\b|PM/.test(cleaned)) {
+        return 'PM';
+    }
+    if (/\bA\b|AM/.test(cleaned)) {
+        return 'AM';
+    }
+
+    return null;
+}
+
+/**
+ * Auto-formats while typing: strips junk, inserts ":", caps digits, appends AM/PM.
+ * Typing "930a" becomes "9:30 AM"; "09:0000" cannot be entered (max 4 digits).
+ */
+export function formatAmPmTimeAsYouType(
+    raw: string,
+    wholeHourOnly: boolean,
+): AmPmFormatState {
+    const cleaned = raw.toUpperCase().replace(/[^0-9APM:\s]/g, '');
+    const digits = cleaned.replace(/\D/g, '').slice(0, wholeHourOnly ? 2 : 4);
+    const period = detectPeriodFromCleaned(cleaned);
+
+    if (digits.length === 0 && period === null) {
+        return {display: '', parsed: null, complete: false};
+    }
+
+    const {hour12, minutes} = splitDigitsToHourMinute(digits);
+    const mins = wholeHourOnly ? 0 : minutes;
+
+    let display = '';
+    if (digits.length === 0) {
+        display = '';
+    } else if (wholeHourOnly) {
+        display = period !== null || digits.length >= 2 || hour12 > 9
+            ? `${hour12}:00`
+            : `${hour12}`;
+    } else if (mins === 0) {
+        display = digits.length >= 2 || hour12 > 9
+            ? `${hour12}:00`
+            : `${hour12}`;
+    } else {
+        display = `${hour12}:${String(mins).padStart(2, '0')}`;
+    }
+
+    if (period !== null) {
+        display = display ? `${display} ${period}` : period;
+    }
+
+    const complete = digits.length > 0
+        && period !== null
+        && (wholeHourOnly ? digits.length >= 1 : digits.length >= 3);
+
+    let parsed: number | null = null;
+    if (complete && period !== null) {
+        const tryText = `${hour12}:${String(mins).padStart(2, '0')} ${period}`;
+        parsed = wholeHourOnly
+            ? parseHourOfDayFromAmPm(tryText, true)
+            : parseTimeCodeFromAmPm(tryText);
+    }
+
+    return {display, parsed, complete};
+}
+
+/** Suggested values for native autocomplete (datalist). */
+export function buildAmPmTimeSuggestions(wholeHourOnly: boolean): string[] {
+    const suggestions: string[] = [];
+
+    if (wholeHourOnly) {
+        for (let h = 0; h < 24; h++) {
+            suggestions.push(formatHourOfDayToAmPm(h));
+        }
+        return suggestions;
+    }
+
+    for (let hour24 = 0; hour24 < 24; hour24++) {
+        for (let m = 0; m < 60; m += 15) {
+            suggestions.push(formatPartsToAmPm(hour24, m));
+        }
+    }
+
+    return suggestions;
+}
