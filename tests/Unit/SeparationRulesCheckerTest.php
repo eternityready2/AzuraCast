@@ -56,6 +56,35 @@ final class SeparationRulesCheckerTest extends Unit
         self::assertSame(2, $result->candidates[0]->id);
     }
 
+    public function testBlocksSameCategoryWithinWindowWhenSlotPinsCategory(): void
+    {
+        $categoryBlocked = $this->makeMedia(1, 'Song A', 'Artist A');
+        $this->setMediaCategoryId($categoryBlocked, 7);
+        $allowed = $this->makeMedia(2, 'Song B', 'Artist B');
+        $this->setMediaCategoryId($allowed, 8);
+
+        $settings = new ClockWheelSeparationSettings(enabled: true, artistMinutes: 60, titleMinutes: 120);
+
+        $result = $this->checker->apply(
+            [$categoryBlocked, $allowed],
+            [
+                [
+                    'song_id' => 'x',
+                    'timestamp_played' => (new DateTimeImmutable('2026-05-31 11:55:00', new \DateTimeZone('UTC')))->getTimestamp(),
+                    'title' => 'Other',
+                    'artist' => 'Other',
+                    'category_id' => 7,
+                ],
+            ],
+            $settings,
+            new DateTimeImmutable('2026-05-31 12:00:00', new \DateTimeZone('UTC')),
+            7,
+        );
+
+        self::assertCount(1, $result->candidates);
+        self::assertSame(8, $result->candidates[0]->category_id);
+    }
+
     public function testRelaxesWhenStrictFilterEmpty(): void
     {
         $only = $this->makeMedia(1, 'New Song', 'Blocked Artist');
@@ -106,6 +135,12 @@ final class SeparationRulesCheckerTest extends Unit
 
         self::assertSame(2, $result->candidates[0]->id);
         self::assertTrue($result->burnRateWarning);
+    }
+
+    private function setMediaCategoryId(StationMedia $media, int $categoryId): void
+    {
+        $ref = new \ReflectionProperty($media, 'category_id');
+        $ref->setValue($media, $categoryId);
     }
 
     private function makeMedia(int $id, string $title, string $artist): StationMedia

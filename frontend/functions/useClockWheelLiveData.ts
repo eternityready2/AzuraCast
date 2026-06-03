@@ -39,6 +39,24 @@ export interface ClockWheelDetail {
 
 export type QueueRow = ApiNowPlayingStationQueue & ApiStationQueueDetailed;
 
+export interface ClockWheelPreviewItem {
+    position_seconds: number;
+    position_label: string;
+    slot_type: string;
+    title: string | null;
+    artist: string | null;
+    duration_seconds: number | null;
+    drift_seconds: number;
+    warnings: string[];
+}
+
+export interface ClockWheelPreviewResponse {
+    hour_start: string;
+    hour_start_timestamp: number;
+    items: ClockWheelPreviewItem[];
+    warnings: string[];
+}
+
 function songLabel(row: QueueRow): string {
     if (row.autodj_custom_uri) {
         return row.autodj_custom_uri;
@@ -139,6 +157,38 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
 
     const activeWheel = computed(() => wheelDetailQuery.data.value ?? null);
 
+    const currentHourIso = computed(() => now().startOf('hour').toISO());
+
+    const previewQuery = useQuery({
+        queryKey: computed(() =>
+            queryKeyWithStation(
+                [QueryKeys.StationPlaylists, 'clock_wheel_live_preview', activeWheelMeta.value?.id, currentHourIso.value],
+            )
+        ),
+        queryFn: async ({signal}) => {
+            const meta = activeWheelMeta.value;
+            if (!meta) {
+                return null;
+            }
+            const previewBase = meta.links.self.replace(/\/?$/, '') + '/preview';
+            const {data} = await axios.get<ClockWheelPreviewResponse>(previewBase, {
+                signal,
+                params: {hour: currentHourIso.value},
+            });
+            return data;
+        },
+        enabled: computed(() => queryEnabled.value && activeWheelMeta.value !== null),
+        refetchInterval: POLL_MS,
+    });
+
+    const previewByPosition = computed(() => {
+        const map = new Map<number, ClockWheelPreviewItem>();
+        for (const item of previewQuery.data.value?.items ?? []) {
+            map.set(item.position_seconds, item);
+        }
+        return map;
+    });
+
     const secondsIntoHour = computed(() => {
         const dt = now();
         return dt.minute * 60 + dt.second;
@@ -170,9 +220,19 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
             (a, b) => a.position_seconds - b.position_seconds
         );
         const tracks = wheelQueueRows.value;
-        return slots.map((slot, index) => ({
+        return slots.map((slot, index) => {
+            const previewItem = previewByPosition.value.get(slot.position_seconds);
+            const projectedLabel = previewItem?.title
+                ? previewItem.artist
+                    ? `${previewItem.title} — ${previewItem.artist}`
+                    : previewItem.title
+                : null;
+
+            return {
             slot,
             trackLabel: tracks[index] ? songLabel(tracks[index]) : null,
+            projectedLabel,
+            previewWarnings: previewItem?.warnings ?? [],
             isPast: slot.position_seconds <= secondsIntoHour.value,
             isCurrent: (() => {
                 const next = slots[index + 1];
@@ -180,7 +240,8 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
                 const end = next?.position_seconds ?? 3600;
                 return secondsIntoHour.value >= start && secondsIntoHour.value < end;
             })(),
-        }));
+        };
+        });
     });
 
     const conflictMessage = computed(() => {
@@ -211,12 +272,16 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
             scheduleQuery.isPending.value
             || wheelsQuery.isPending.value
             || (activeWheelMeta.value !== null && wheelDetailQuery.isPending.value)
+            || (activeWheelMeta.value !== null && previewQuery.isPending.value)
     );
+
+    const hourPreview = computed(() => previewQuery.data.value ?? null);
 
     return {
         stationData,
         activeWheel,
         activeClockWheelEvent,
+        hourPreview,
         slotsWithTracks,
         wheelQueueRows,
         secondsIntoHour,

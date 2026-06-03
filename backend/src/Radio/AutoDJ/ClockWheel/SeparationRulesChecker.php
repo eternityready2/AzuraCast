@@ -28,6 +28,7 @@ final class SeparationRulesChecker
         array $recentHistory,
         ClockWheelSeparationSettings $settings,
         DateTimeImmutable $expectedPlayTime,
+        ?int $slotCategoryId = null,
     ): SeparationFilterResult {
         if ($candidates === []) {
             return new SeparationFilterResult($candidates);
@@ -50,6 +51,7 @@ final class SeparationRulesChecker
             $expectedPlayTime,
             enforceArtist: true,
             enforceTitle: true,
+            slotCategoryId: $slotCategoryId,
         );
 
         if ($strict !== []) {
@@ -68,6 +70,7 @@ final class SeparationRulesChecker
             $expectedPlayTime,
             enforceArtist: true,
             enforceTitle: false,
+            slotCategoryId: $slotCategoryId,
         );
 
         if ($titleRelaxed !== []) {
@@ -152,6 +155,7 @@ final class SeparationRulesChecker
         DateTimeImmutable $expectedPlayTime,
         bool $enforceArtist,
         bool $enforceTitle,
+        ?int $slotCategoryId = null,
     ): array {
         $artistHistory = $enforceArtist
             ? $this->filterHistoryByMinutes($recentHistory, $settings->artistMinutes, $expectedPlayTime)
@@ -162,6 +166,11 @@ final class SeparationRulesChecker
 
         $blockedArtists = $this->collectArtistKeys($artistHistory);
         $blockedTitles = $this->collectTitleKeys($titleHistory);
+        $blockedCategories = ($slotCategoryId !== null && $slotCategoryId > 0)
+            ? $this->collectCategoryIds(
+                $this->filterHistoryByMinutes($recentHistory, $settings->artistMinutes, $expectedPlayTime)
+            )
+            : [];
 
         $filtered = [];
 
@@ -174,10 +183,37 @@ final class SeparationRulesChecker
                 continue;
             }
 
+            if (
+                $slotCategoryId !== null
+                && $slotCategoryId > 0
+                && $media->category_id !== null
+                && isset($blockedCategories[$media->category_id])
+            ) {
+                continue;
+            }
+
             $filtered[] = $media;
         }
 
         return $filtered;
+    }
+
+    /**
+     * @param array<array{category_id?: int|null}> $history
+     *
+     * @return array<int, int>
+     */
+    private function collectCategoryIds(array $history): array
+    {
+        $categories = [];
+        foreach ($history as $row) {
+            $id = isset($row['category_id']) ? (int)$row['category_id'] : 0;
+            if ($id > 0) {
+                $categories[$id] = $id;
+            }
+        }
+
+        return $categories;
     }
 
     /**

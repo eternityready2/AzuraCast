@@ -88,6 +88,10 @@ const {$gettext} = useTranslate();
 const blankForm = {
     name: '',
     color: '#e87722',
+    separation_enabled: false,
+    separation_artist_minutes: 45,
+    separation_title_minutes: 90,
+    burn_rate_max_plays_24h: null as number | null,
 };
 
 const form = ref({...blankForm});
@@ -96,6 +100,10 @@ const entries = reactive<ClockWheelEntry[]>([]);
 const {r$} = useAppRegle(form, {
     name: {required},
     color: {},
+    separation_enabled: {},
+    separation_artist_minutes: {},
+    separation_title_minutes: {},
+    burn_rate_max_plays_24h: {},
 });
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
@@ -156,7 +164,15 @@ const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
 };
 
 const populateForm = (data: Record<string, unknown>) => {
-    form.value = mergeExisting(form.value, data);
+    form.value = mergeExisting(form.value, {
+        ...data,
+        separation_enabled: Boolean(data.separation_enabled),
+        separation_artist_minutes: Number(data.separation_artist_minutes ?? 45),
+        separation_title_minutes: Number(data.separation_title_minutes ?? 90),
+        burn_rate_max_plays_24h: data.burn_rate_max_plays_24h != null
+            ? Number(data.burn_rate_max_plays_24h)
+            : null,
+    });
     if (Array.isArray(data.slots)) {
         const converted = (data.slots as {
             type?: string | null;

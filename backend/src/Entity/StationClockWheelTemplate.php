@@ -58,6 +58,31 @@ final class StationClockWheelTemplate implements
     ]
     public string $color = '#e87722';
 
+    /** Default separation for wheels linked to this template when the wheel has no rules enabled (PR9). */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $separation_enabled = false;
+
+    #[
+        OA\Property(example: 45),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_artist_minutes = 45;
+
+    #[
+        OA\Property(example: 90),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_title_minutes = 90;
+
+    #[
+        OA\Property(example: 3),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $burn_rate_max_plays_24h = null;
+
     #[
         ORM\OneToMany(
             targetEntity: StationClockWheelTemplateSlot::class,

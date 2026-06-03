@@ -125,7 +125,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             $historyMinutes = max($historyMinutes, $separationSettings->historyLookbackMinutes());
         }
 
-        $recentHistory = $this->queueRepo->getRecentlyPlayedByTimeRange(
+        $recentHistory = $this->queueRepo->getRecentlyPlayedWithCategoryByTimeRange(
             $station,
             $expectedPlayTime,
             $historyMinutes

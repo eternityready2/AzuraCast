@@ -29,10 +29,10 @@ See `docs/clock-wheels.md` for operational detail, tests, and monitoring.
 | PR1–PR6 complete | **Mostly true** — tests exist; PR1 `position_seconds` restored by `Version20260519120000` (see client thread) |
 | PR8 complete | **True** |
 | PR7 “zero backend changes” | **Partially true** — tab can use existing queue/nowplaying/schedule APIs; PDF also references **`GET .../preview`** and **`clock_wheel_events`** which **do not exist yet** (PR12 / PR11) |
-| PR5 preview endpoint | **Not found** in routes — no `/clock-wheel/.../preview` |
+| PR5 preview endpoint | **Done** — `GET .../clock-wheel/{id}/preview` (PR12) |
 | PR11 `clock_wheel_events` | **Implemented** — `clock_wheel_events` table + `ClockWheelEventLogger` hooks |
 | PR9 `SeparationRulesChecker` | **Implemented** — per-wheel artist/title windows + burn-rate deprioritization |
-| PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Done (MVP)** |
+| PR10 `ClockTemplate` / `ClockInstance` / `Daypart` | **Done** |
 | PR13 `is_emergency` | **Done** |
 
 **Architectural rule from PDF:** Do not change PR1–PR8 core behavior (fit-to-window, calendar authority, AutoDJ fallback). New work **extends** on top.
@@ -45,10 +45,10 @@ See `docs/clock-wheels.md` for operational detail, tests, and monitoring.
 |----|------|----------|------|---------|----------|
 | **7** | Schedule page — Live Clock Wheel tab | High | Medium | None required for MVP | New tab on `Schedule.vue` |
 | **9** | Separation rules + burn rate | High | Medium | `SeparationRulesChecker` + planner hook | Config UI (wheel/template later) |
-| **10** | Daypart clock inheritance | High | Medium | New entities + migrations + APIs | Templates / dayparts / instances UI |
+| **10** | Daypart clock inheritance | High | Medium | **Done** | Templates / dayparts / wheel link + schedule UX |
 | **11** | Audit event database | High | Small | **Done** — `clock_wheel_events` + `ClockWheelEventLogger` | — |
 | **12** | Preview simulator + analytics | Medium | Medium | Preview API + metrics queries | Dashboard + fill_strategy |
-| **13** | Emergency override (optional) | Optional | Small | `is_emergency` on `StationSchedule` | Checkbox in `CreateEventModal` |
+| **13** | Emergency override (optional) | Optional | Small | **Done** | Checkbox in `CreateEventModal` |
 
 ---
 
@@ -69,8 +69,8 @@ PR11 ──► PR12   (audit table before analytics/preview)
 2. **PR11** — Done (`clock_wheel_events` + logger hooks).
 3. **PR9** — Done.
 4. **PR12** — Done.
-5. **PR10** — Largest product surface (templates/dayparts); can start DB/API in parallel with PR9 if staffed.
-6. **PR13** — Quick win when needed for ops.
+5. **PR10** — **Done** (templates, dayparts, inheritance, operator polish — see PR10 section).
+6. **PR13** — **Done**.
 
 ---
 
@@ -88,13 +88,19 @@ PR11 ──► PR12   (audit table before analytics/preview)
 | Wheel detail + slots | `GET .../clock-wheel/{id}`, slots sub-resource |
 | Active wheel on schedule | Compare current time to schedule feed + `Scheduler` rules (client-side or reuse schedule JSON) |
 
-### PDF dependencies not in repo yet
+### Beyond MVP (implemented)
 
-| PDF reference | Workaround for PR7 MVP |
-|---------------|-------------------------|
-| `GET .../preview` (PR5/PR12) | Show **queued** `StationQueue` rows for the hour; label “planned” vs “projected” |
-| `clock_wheel_events` (PR11) | Omit “pre-generated audit” list until PR11; use queue only |
-| Conflict from PR2 | Derive from schedule feed overlaps or dedicated conflict endpoint if added later |
+| Enhancement | Location |
+|-------------|----------|
+| **Current-hour preview** | Live tab calls `GET .../clock-wheel/{id}/preview?hour=` (station hour) — **Projected** column next to **Queued** |
+| Conflict heads-up | Schedule feed `is_now` + playlist/streamer overlap warning |
+
+### Optional later
+
+| PDF reference | Notes |
+|---------------|--------|
+| `clock_wheel_events` on Live tab | Audit list endpoint not exposed; use Analytics modal or SQL |
+| Conflict from PR2 | Calendar-derived warning only (no dedicated conflict API) |
 
 ### Implementation sketch
 
@@ -113,25 +119,31 @@ Live hand in station TZ; now playing shows track + artist; current hour shows qu
 
 ## PR9 — Separation rules + burn rate protection
 
-**Status: Done (MVP)** — artist/title time windows, burn-rate deprioritization, relaxation cascade, audit flags. **Daypart-level overrides** on `StationClockDaypart` when `separation_override_enabled` (PR10).
+**Status: Done** — artist/title windows, burn-rate deprioritization, relaxation cascade, audit flags, **slot category separation**, **template default rules**, daypart overrides (PR10).
 
-**Goal:** `App\Radio\AutoDJ\SeparationRulesChecker` — artist/title/category/tempo/gender/decade separation + playlist burn rate; daypart overrides (ties to PR10); relaxation cascade with logging.
+**Implemented:**
 
-**Integration point:** After `filterByDuration` / before algorithm in `ClockWheelPlaybackPlanner::resolveSlot` (or shared candidate pipeline).
+| Piece | Location |
+|-------|----------|
+| Checker | `SeparationRulesChecker.php` |
+| Settings | `ClockWheelSeparationSettings` — resolve order: daypart override → wheel → **template defaults** |
+| Category | When a slot pins `category_id`, same category in recent plays (artist window) is blocked |
+| History | `StationQueueRepository::getRecentlyPlayedWithCategoryByTimeRange()` |
+| Wheel UI | `EditModal` / `Form/Entries.vue` |
+| Template UI | `TemplateEditModal` + migration `Version20260603120000` |
+| Daypart UI | `DaypartEditModal` separation override section |
 
-**Uses:** `StationQueueRepository::getRecentlyPlayedByTimeRange()` with extended lookback.
+**Not in repo (PDF extras):** tempo / gender / decade separation — no matching fields on `StationMedia` today.
 
-**Depends on PR11 for:** `separation_relaxed`, `burn_rate_warning` flags on audit rows.
-
-**Tests:** Unit tests for separation windows, cascade order, burn deprioritization, never-empty fallback.
+**Tests:** `SeparationRulesCheckerTest.php`, `ClockWheelSeparationSettingsTest.php`
 
 ---
 
 ## PR10 — Daypart clock inheritance
 
-**Status: Done (MVP)**
+**Status: Done**
 
-**Goal:** `ClockTemplate`, `ClockInstance`, `Daypart` entities — edit one template, propagate to hours; instance overrides; daypart auto-generates hour instances.
+**Goal:** Reusable templates, dayparts that materialize hourly wheels, and inheritance so one template edit updates linked instances.
 
 **Implemented:**
 
@@ -143,11 +155,25 @@ Live hand in station TZ; now playing shows track + artist; current hour shows qu
 | Wheel links | `template_id`, `daypart_id`, `hour_of_day`, `inherits_template_slots` on `StationClockWheel` |
 | Services | `ClockWheelSlotWriter`, `ClockWheelInheritanceService` |
 | Separation | `ClockWheelSeparationSettings::resolveForWheel()` — daypart wins when `separation_override_enabled` |
-| API | `/clock-wheel-templates`, `/clock-dayparts`, `POST .../clock-daypart/{id}/sync` |
-| UI | `ClockWheels.vue` tabs; `DaypartEditModal` override separation section |
+| API | `/clock-wheel-templates`, `/clock-dayparts`, `POST .../clock-daypart/{id}/sync`; wheel PUT accepts `template_id` + `inherits_template_slots` |
+| UI — manage | `ClockWheels.vue` tabs: Wheels / Templates / Dayparts |
+| UI — daypart | `DaypartEditModal` — template, AM/PM hour chips, separation override, **Re-sync wheels** (footer) |
+| UI — daypart list | **Re-sync** per row (Actions column) |
+| UI — manual wheel | `EditModal` + `Form/Entries.vue` — optional template link, **Inherit template slots** (read-only slots when on) |
+| UI — schedule | `CreateEventModal` — start/end time chips auto-set from `hour_of_day` when picking a daypart wheel |
+| Time UX | `AmPmTimeInput.vue`, `frontend/functions/amPmTime.ts` (dayparts + schedule) |
 | Tests | `ClockWheelInheritanceServiceTest.php`, `ClockWheelSeparationSettingsTest.php` |
 
-**Behaviour:** Editing template slots propagates to wheels with `inherits_template_slots = true`. Saving a daypart syncs hourly wheels (`{Daypart} HH:00`). Direct wheel slot edits clear inheritance. **Daypart separation override:** when `separation_override_enabled`, planner/scheduler use daypart artist/title/burn settings instead of each wheel's. Planner/scheduler still use `StationClockWheel` + slots.
+**Operator workflow:**
+
+1. **Template** — define slot layout on Templates tab; saves propagate to inheriting wheels.
+2. **Daypart** — pick template + hour range; save creates/updates `{Daypart} HH:00` wheels. **Re-sync** after template-only edits (list or edit modal).
+3. **Schedule** — **Schedule → Create Event → Clock Wheel**; daypart wheels pre-fill a 1-hour window from `hour_of_day`.
+4. **Manual wheel** — link to template + enable inherit on the wheel editor; daypart-generated wheels are managed via daypart (no template toggle on those rows).
+
+**Behaviour:** Template slot PUT propagates to wheels with `inherits_template_slots = true`. Saving a daypart runs sync (same as Re-sync). Direct wheel slot edits clear inheritance. Daypart separation override applies to all hourly wheels in that daypart when enabled. Runtime still uses `StationClockWheel` + slots.
+
+**Optional later (not PR10):** bulk “schedule all daypart wheels” on calendar; export/import between stations.
 
 ---
 
@@ -199,7 +225,11 @@ LIMIT 20;
 
 ## PR13 — Emergency override (optional)
 
+**Status: Done**
+
 **Goal:** `is_emergency` on `StationSchedule`; `ClockWheelScheduler` yields when emergency schedule active; log `fallback_reason = emergency_override`; UI checkbox with warning.
+
+**Implemented:** `is_emergency` on schedule rows; checkbox in `CreateEventModal` for playlist events; scheduler skips clock wheel when emergency window is active.
 
 **PDF:** Boolean only — no numeric priority stack.
 
@@ -216,16 +246,15 @@ LIMIT 20;
 
 ---
 
-## Suggested work while waiting for PR1 & PR6 client feedback
+## Suggested follow-up (post v7)
 
-| Safe to start now | Wait for client sign-off |
-|-------------------|---------------------------|
-| PR7 UI spike (mock data → wire APIs) | PR1 migration narrative on prod |
-| PR11 schema + migration draft | PR6 “tests sufficient” for merge |
-| PR13 design (single column + scheduler guard) | Any PR10 entity design approval |
-| Doc + API inventory for PR12 preview | |
-
-**Avoid starting** PR10 full implementation until inheritance model is agreed (biggest data model change).
+| Area | Notes |
+|------|--------|
+| CI | Wire Codeception into GitHub Actions |
+| Migrations | Run `Version20260603120000` (template separation) on prod with PR10 migrations |
+| PR7 | Optional recent `clock_wheel_events` list on Live tab |
+| PR9 | Tempo/gender/decade if media metadata is added later |
+| PR10 | Bulk calendar scheduling for daypart wheels |
 
 ---
 
@@ -249,4 +278,4 @@ docker compose exec web bash -c \
 
 ## Client messaging (remaining phases)
 
-> PR1–PR8 foundation is in branch with automated tests (PR6) and migration `Version20260519120000` for `position_seconds`. We have reviewed **Remaining Phases v7** and queued **PR7 → PR11 → PR9 → PR12 → PR10 → PR13**. PR7 can start as frontend-only against existing queue/nowplaying/schedule APIs; preview/audit features land with PR11/PR12 per the PDF dependency order.
+> PR1–PR8 foundation plus **PR7–PR13** are implemented (see sections above). **PR7 Live** tab shows queued and **projected** (current-hour preview). **PR9** adds template default separation, slot category rules, and daypart overrides. Operators use **Clock Wheels** templates/dayparts, Re-sync, and schedule integration. Run migrations through `Version20260603120000` on deploy; invest in CI and optional follow-ups from the table above.

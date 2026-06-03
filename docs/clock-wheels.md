@@ -65,9 +65,16 @@ Goal: make “tweaks on the fly” extremely fast and reduce operator errors.
 - Overlap/gap warnings in the slot editor.
 - **PR7 (MVP)** — Schedule → **Live Clock Wheel** tab (`Schedule/ClockWheelLiveTab.vue`): station clock face, now playing, hour anchors + queue titles, upcoming wheels, schedule conflict warning.
 
-**Remaining (enterprise v7 — `docs/clock-wheels-remaining-phases-v7.md`):**
-- **PR12** — Next-hour preview simulator + analytics dashboard.
-- Optional: full circular drag/resize wheel UI (deferred in v7 PDF).
+**Done (enterprise v7 — detail in `docs/clock-wheels-remaining-phases-v7.md`):**
+- **PR7** — Schedule → Live Clock Wheel tab.
+- **PR9** — Separation rules + burn rate (wheel, **template defaults**, daypart override, **slot category**).
+- **PR7** — Live tab **Projected** column via current-hour preview API.
+- **PR10** — Templates, dayparts, inheritance, Re-sync, schedule time auto-fill.
+- **PR11** — `clock_wheel_events` audit table.
+- **PR12** — Preview + analytics per wheel.
+- **PR13** — Emergency schedule override.
+
+**Optional later:** full circular drag/resize wheel UI (deferred in v7 PDF); bulk daypart scheduling on calendar.
 
 ### Phase 3 — Hardening + tests + production guardrails (**largely implemented**)
 Goal: ensure reliability and prevent regressions.
@@ -179,6 +186,14 @@ Log files (inside container): `/var/azuracast/www_tmp/app_nowplaying-YYYY-MM-DD.
 - **Clock wheel schedule feed now supports calendar click-to-edit**:
   - Adds `edit_url` to the clock wheel schedule events.
   - File: `backend/src/Controller/Api/Stations/ClockWheels/ClockWheelsController.php`
+- **PR10 — Templates, dayparts, inheritance**:
+  - Migrations: `Version20260601120000`, `Version20260602120000`
+  - Entities: `StationClockWheelTemplate`, `StationClockWheelTemplateSlot`, `StationClockDaypart`
+  - Wheel FKs: `template_id`, `daypart_id`, `hour_of_day`, `inherits_template_slots`
+  - Services: `ClockWheelInheritanceService`, `ClockWheelSlotWriter`
+  - APIs: `/clock-wheel-templates`, `/clock-dayparts`, `POST .../clock-daypart/{id}/sync`
+  - Wheel PUT: `template_id`, `inherits_template_slots` (copy template slots when inherit is on)
+  - Controllers: `ClockWheelTemplatesController`, `ClockWheelDaypartsController`, `ClockWheelsController`
 
 ### Playback metadata (station UI + API)
 - Queue rows and song history store `clock_wheel_id` when AutoDJ picks a track from a clock wheel.
@@ -190,12 +205,17 @@ Log files (inside container): `/var/azuracast/www_tmp/app_nowplaying-YYYY-MM-DD.
   - File: `frontend/components/Stations/Schedule.vue`
 - **ScheduleCalendar component** supporting multiple event sources + create button.
   - File: `frontend/components/Stations/Common/ScheduleCalendar.vue`
-- **Clock wheel editor** supports schedule items and timed anchors.
+- **Live Clock Wheel tab** (PR7): `frontend/components/Stations/Schedule/ClockWheelLiveTab.vue`, `useClockWheelLiveData.ts`
+- **Clock Wheels manage page** (PR10): tabs for Wheels / Templates / Dayparts — `frontend/components/Stations/ClockWheels.vue`
+  - `TemplateEditModal.vue`, `DaypartEditModal.vue` (AM/PM hour chips, separation override, Re-sync)
+  - `PreviewModal.vue`, `AnalyticsModal.vue` (PR12)
+- **Clock wheel editor** supports schedule items, timed anchors, optional template inherit (PR10).
   - Files:
     - `frontend/components/Stations/ClockWheels/EditModal.vue`
     - `frontend/components/Stations/ClockWheels/Form/Entries.vue`
     - `frontend/components/Stations/ClockWheels/Form/Schedule.vue`
-- **Create Event modal** supports clock wheel events with **Flexible / Strict** (`clock_wheel_mode`); playlist-only **Flexible / Strict / Loop Once** remain for playlists.
+- **Shared time chips**: `frontend/components/Common/AmPmTimeInput.vue`, `frontend/functions/amPmTime.ts`
+- **Create Event modal** supports clock wheel events with **Flexible / Strict** (`clock_wheel_mode`); when a daypart hourly wheel is selected, **start/end times** auto-fill from `hour_of_day` (1-hour window).
   - File: `frontend/components/Stations/Common/CreateEventModal.vue`
 - **PR8 fallback caps** via `ClockWheelAnnotator` when `station_queue.clock_wheel_enforce_cap` is set (no admin mode switch).
   - Files: `ClockWheelPlaybackPlanner.php`, `ClockWheelAnnotator.php`
@@ -242,6 +262,15 @@ See **PR 6 — Tests & regression coverage** for the full matrix, run commands, 
 - Optional later: full circular drag/resize wheel UI (same `position_seconds` backend).
 
 ## Operational validation (how to check it works)
+
+### PR10 — templates and dayparts
+1. **Templates** tab → create template, add slots, save.
+2. **Dayparts** tab → pick template, set start/end hours (AM/PM chips), save → hourly wheels appear on **Wheels** tab (`Template` badge).
+3. **Re-sync** on daypart row or in edit modal after changing template slots only.
+4. **Manual wheel** → optional template + **Inherit template slots**; slots read-only while inheriting.
+5. **Schedule** → Create Event → Clock Wheel → pick e.g. `Morning 09:00` → times should show 9:00 AM–10:00 AM; assign recurrence/days as needed.
+
+### Basic wheel + calendar
 - Create a wheel with anchors:
   - 0:00 ID
   - 20:00 Ad
@@ -364,12 +393,12 @@ Full breakdown: **`docs/clock-wheels-remaining-phases-v7.md`** (from `docs/Azura
 
 | PR | Summary |
 |----|---------|
-| PR7 | **Done (MVP)** — Schedule → Live Clock Wheel tab (`queue` + now playing + `/schedule`) |
-| PR9 | **Done (MVP)** — `SeparationRulesChecker` + wheel settings UI |
-| PR10 | **Done (MVP)** — templates, dayparts, hourly sync, daypart separation overrides |
+| PR7 | **Done** — Live tab: queue + **current-hour preview** projection + now playing |
+| PR9 | **Done** — separation checker, wheel + **template** + daypart UI, **category** on pinned slots |
+| PR10 | **Done** — templates, dayparts, inherit, Re-sync, wheel template link, schedule `hour_of_day` times |
 | PR11 | **Done** — `clock_wheel_events` audit table + planner/scheduler hooks |
 | PR12 | **Done** — `/clock-wheel/{id}/preview`, `/analytics`, fill strategy UI |
-| PR13 | `is_emergency` schedule override — done |
+| PR13 | **Done** — `is_emergency` schedule override |
 
 ### Remaining gaps (honest)
 
@@ -378,4 +407,7 @@ Full breakdown: **`docs/clock-wheels-remaining-phases-v7.md`** (from `docs/Azura
 - Limited functional coverage of every recurrence type via HTTP (unit tests cover more).
 - No automated test for Liquidsoap `standard_playlists` fallback during a wheel window.
 - `util/test_clock_wheels.sh` remains optional manual smoke only.
+- PR10: no bulk “schedule all daypart wheels” on calendar.
+- PR9: tempo/gender/decade separation not implemented (no media fields).
+- PR7: optional recent `clock_wheel_events` feed on Live tab.
 

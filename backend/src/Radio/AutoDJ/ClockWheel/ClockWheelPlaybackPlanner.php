@@ -328,6 +328,7 @@ final class ClockWheelPlaybackPlanner
             $recentHistory,
             $separationSettings,
             $expectedPlayTime,
+            $slot->category_id,
         );
         $candidates = $separationResult->candidates;
 

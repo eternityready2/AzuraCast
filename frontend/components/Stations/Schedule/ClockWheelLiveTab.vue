@@ -119,12 +119,25 @@
 
             <template v-if="activeWheel && slotsWithTracks.length > 0">
                 <h3 class="h5 mb-2">
-                    {{ $gettext('This hour — anchors & queue') }}
+                    {{ $gettext('This hour — anchors, queue & projection') }}
                 </h3>
+                <div
+                    v-if="hourPreview?.warnings?.length"
+                    class="alert alert-warning py-2 small mb-2"
+                >
+                    <ul class="mb-0 ps-3">
+                        <li
+                            v-for="(warn, wi) in hourPreview.warnings"
+                            :key="wi"
+                        >
+                            {{ warn }}
+                        </li>
+                    </ul>
+                </div>
                 <p class="small text-muted">
                     {{
                         $gettext(
-                            'Track names come from the AutoDJ queue for this wheel (planned playback, not a simulator).'
+                            'Queued = AutoDJ queue. Projected = PR12 simulator for this hour (may differ from on-air order).'
                         )
                     }}
                 </p>
@@ -134,7 +147,8 @@
                             <tr>
                                 <th>{{ $gettext('Position') }}</th>
                                 <th>{{ $gettext('Type') }}</th>
-                                <th>{{ $gettext('Queued track') }}</th>
+                                <th>{{ $gettext('Queued') }}</th>
+                                <th>{{ $gettext('Projected') }}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -153,6 +167,24 @@
                                         v-else
                                         class="text-muted fst-italic"
                                     >{{ $gettext('Not yet queued') }}</span>
+                                </td>
+                                <td>
+                                    <span v-if="item.projectedLabel">{{ item.projectedLabel }}</span>
+                                    <span
+                                        v-else
+                                        class="text-muted fst-italic"
+                                    >—</span>
+                                    <ul
+                                        v-if="item.previewWarnings?.length"
+                                        class="small text-warning mb-0 ps-3 mt-1"
+                                    >
+                                        <li
+                                            v-for="(w, wi) in item.previewWarnings"
+                                            :key="wi"
+                                        >
+                                            {{ w }}
+                                        </li>
+                                    </ul>
                                 </td>
                             </tr>
                         </tbody>
@@ -204,6 +236,7 @@ const {$gettext} = useTranslate();
 
 const {
     activeWheel,
+    hourPreview,
     slotsWithTracks,
     handDegrees,
     stationTimeLabel,

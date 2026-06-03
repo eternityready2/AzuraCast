@@ -79,4 +79,26 @@ final class ClockWheelSeparationSettingsTest extends Unit
 
         self::assertFalse($settings->enabled);
     }
+
+    public function testUsesTemplateDefaultsWhenWheelSeparationDisabled(): void
+    {
+        $station = new Station();
+        $template = new StationClockWheelTemplate($station);
+        $template->separation_enabled = true;
+        $template->separation_artist_minutes = 33;
+        $template->separation_title_minutes = 66;
+        $template->burn_rate_max_plays_24h = 5;
+
+        $wheel = new StationClockWheel($station);
+        $wheel->template = $template;
+        $wheel->separation_enabled = false;
+        $wheel->burn_rate_max_plays_24h = null;
+
+        $settings = ClockWheelSeparationSettings::resolveForWheel($wheel);
+
+        self::assertTrue($settings->enabled);
+        self::assertSame(33, $settings->artistMinutes);
+        self::assertSame(66, $settings->titleMinutes);
+        self::assertSame(5, $settings->burnRateMaxPlays24h);
+    }
 }

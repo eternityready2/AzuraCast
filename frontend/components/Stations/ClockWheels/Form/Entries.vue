@@ -40,12 +40,13 @@
         />
 
         <form-group-checkbox
-            v-if="!isTemplate"
             id="separation_enabled"
             class="mb-3"
             :field="r$.separation_enabled"
             :label="$gettext('Enable separation rules')"
-            :description="$gettext('Apply artist/title time windows and optional burn-rate limits when queueing from this wheel.')"
+            :description="isTemplate
+                ? $gettext('Default rules for wheels linked to this template when the wheel has no separation enabled.')
+                : $gettext('Apply artist/title/time windows and optional burn-rate limits when queueing from this wheel. Slots with a category also avoid repeating that category within the artist window.')"
         />
 
         <template v-if="!isTemplate && isDaypartManaged">
@@ -75,7 +76,7 @@
         </template>
 
         <div
-            v-if="!isTemplate && form.separation_enabled"
+            v-if="form.separation_enabled"
             class="row mb-3"
         >
             <div class="col-md-4">
@@ -105,7 +106,10 @@
             </div>
         </div>
 
-        <div class="alert alert-info py-2 mb-4">
+        <div
+            v-if="!isTemplate"
+            class="alert alert-info py-2 mb-4"
+        >
             {{ $gettext('Air times are managed on the station Schedule page (calendar), not here. Create the wheel first, then use Schedule → Create Event to assign it.') }}
         </div>
 
