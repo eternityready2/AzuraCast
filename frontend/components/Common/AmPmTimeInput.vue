@@ -1,50 +1,120 @@
 <template>
-    <div class="am-pm-time-input">
-        <input
-            :id="inputId"
-            ref="inputEl"
-            v-model="displayText"
-            type="text"
-            class="form-control"
-            :class="[fieldClass, {'is-invalid': showInvalid}]"
-            :placeholder="placeholderText"
-            :aria-label="ariaLabel"
-            :list="datalistId"
-            inputmode="numeric"
-            autocomplete="off"
-            spellcheck="false"
-            maxlength="11"
-            @input="onUserInput"
-            @blur="commitFromDisplay"
-            @keydown.enter.prevent="commitFromDisplay"
-            @keydown="onKeydown"
-        >
-        <datalist :id="datalistId">
-            <option
-                v-for="suggestion in suggestions"
-                :key="suggestion"
-                :value="suggestion"
-            />
-        </datalist>
-        <div
-            v-if="showHint"
-            class="form-text"
-        >
-            {{ hintText }}
+    <div
+        class="am-pm-time-segments"
+        :class="[fieldClass, {'is-invalid': showInvalid}]"
+        role="group"
+        :aria-label="ariaLabel ?? $gettext('Time')"
+    >
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="d-flex align-items-center gap-1">
+                <label
+                    class="visually-hidden"
+                    :for="hourSelectId"
+                >
+                    {{ $gettext('Hour') }}
+                </label>
+                <select
+                    :id="hourSelectId"
+                    v-model.number="hour12"
+                    class="form-select form-select-sm am-pm-time-segments__select"
+                    @change="onSegmentChange"
+                >
+                    <option
+                        v-for="h in hourOptions"
+                        :key="h"
+                        :value="h"
+                    >
+                        {{ h }}
+                    </option>
+                </select>
+                <span
+                    class="am-pm-time-segments__colon"
+                    aria-hidden="true"
+                >:</span>
+                <template v-if="wholeHourOnly">
+                    <span class="am-pm-time-segments__minutes-fixed">00</span>
+                </template>
+                <template v-else>
+                    <label
+                        class="visually-hidden"
+                        :for="minuteSelectId"
+                    >
+                        {{ $gettext('Minutes') }}
+                    </label>
+                    <select
+                        :id="minuteSelectId"
+                        v-model.number="minutes"
+                        class="form-select form-select-sm am-pm-time-segments__select"
+                        @change="onSegmentChange"
+                    >
+                        <option
+                            v-for="m in minuteOptions"
+                            :key="m"
+                            :value="m"
+                        >
+                            {{ formatMinuteOption(m) }}
+                        </option>
+                    </select>
+                </template>
+            </div>
+
+            <div
+                class="btn-group btn-group-sm am-pm-time-segments__period"
+                role="group"
+                :aria-label="$gettext('AM or PM')"
+            >
+                <input
+                    :id="amRadioId"
+                    v-model="period"
+                    type="radio"
+                    class="btn-check"
+                    value="AM"
+                    @change="onSegmentChange"
+                >
+                <label
+                    class="btn btn-outline-primary"
+                    :for="amRadioId"
+                >
+                    {{ $gettext('AM') }}
+                </label>
+                <input
+                    :id="pmRadioId"
+                    v-model="period"
+                    type="radio"
+                    class="btn-check"
+                    value="PM"
+                    @change="onSegmentChange"
+                >
+                <label
+                    class="btn btn-outline-primary"
+                    :for="pmRadioId"
+                >
+                    {{ $gettext('PM') }}
+                </label>
+            </div>
+
+            <span
+                class="text-muted small am-pm-time-segments__preview"
+                aria-live="polite"
+            >
+                {{ previewLabel }}
+            </span>
         </div>
     </div>
 </template>
 
 <script setup lang="ts">
-import {computed, ref, watch} from 'vue';
+import {computed, ref, useId, watch} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {
-    buildAmPmTimeSuggestions,
-    formatAmPmTimeAsYouType,
-    formatHourOfDayToAmPm,
-    formatTimeCodeToAmPm,
-    parseHourOfDayFromAmPm,
-    parseTimeCodeFromAmPm,
+    formatPartsToAmPm,
+    HOUR12_OPTIONS,
+    MINUTE_OPTIONS,
+    modelValueToSegments,
+    segmentsToHourOfDay,
+    segmentsToModelValue,
+    type AmPmPeriod,
+    type AmPmTimeSegments,
 } from '~/functions/amPmTime.ts';
 
 const props = withDefaults(
@@ -55,7 +125,6 @@ const props = withDefaults(
         inputId?: string;
         ariaLabel?: string;
         fieldClass?: string;
-        placeholder?: string;
     }>(),
     {
         modelValue: null,
@@ -63,7 +132,6 @@ const props = withDefaults(
         inputId: undefined,
         ariaLabel: undefined,
         fieldClass: '',
-        placeholder: undefined,
     }
 );
 
@@ -72,126 +140,119 @@ const emit = defineEmits<{
 }>();
 
 const {$gettext} = useTranslate();
-const inputEl = ref<HTMLInputElement>();
-const displayText = ref('');
-const showInvalid = ref(false);
-const isEditing = ref(false);
-const showHint = ref(false);
 
 const wholeHourOnly = computed(() => props.mode === 'hour');
+const hourOptions = HOUR12_OPTIONS;
+const minuteOptions = MINUTE_OPTIONS;
 
-const datalistId = computed(
-    () => (props.inputId ? `${props.inputId}_suggestions` : undefined)
+const fallbackId = useId();
+const baseId = computed(() => props.inputId ?? fallbackId);
+const hourSelectId = computed(() => baseId.value);
+const minuteSelectId = computed(() => `${baseId.value}_minute`);
+const amRadioId = computed(() => `${baseId.value}_am`);
+const pmRadioId = computed(() => `${baseId.value}_pm`);
+
+const hour12 = ref(12);
+const minutes = ref(0);
+const period = ref<AmPmPeriod>('AM');
+const showInvalid = ref(false);
+const suppressSync = ref(false);
+
+const formatMinuteOption = (m: number): string => String(m).padStart(2, '0');
+
+const currentSegments = computed(
+    (): AmPmTimeSegments => ({
+        hour12: hour12.value,
+        minutes: wholeHourOnly.value ? 0 : minutes.value,
+        period: period.value,
+    })
 );
 
-const suggestions = computed(() =>
-    buildAmPmTimeSuggestions(wholeHourOnly.value)
-);
+const previewLabel = computed(() => {
+    const segs = currentSegments.value;
+    const hour24 = segmentsToHourOfDay(segs);
 
-const placeholderText = computed(
-    () => props.placeholder ?? $gettext('Type 930a → 9:30 AM')
-);
+    return formatPartsToAmPm(hour24, segs.minutes);
+});
 
-const hintText = computed(() =>
-    wholeHourOnly.value
-        ? $gettext('Whole hours: type 6a → 6:00 AM, or pick from suggestions.')
-        : $gettext('Type digits + a/p: 930a → 9:30 AM, 1200p → 12:00 PM.')
-);
+const applySegments = (segments: AmPmTimeSegments) => {
+    hour12.value = segments.hour12;
+    minutes.value = wholeHourOnly.value ? 0 : segments.minutes;
+    period.value = segments.period;
+};
 
-const formatModel = (value: number | null | undefined): string => {
-    if (value === null || value === undefined || Number.isNaN(value)) {
-        return '';
+const emitFromSegments = () => {
+    if (suppressSync.value) {
+        return;
     }
 
-    return wholeHourOnly.value
-        ? formatHourOfDayToAmPm(value)
-        : formatTimeCodeToAmPm(value);
+    showInvalid.value = false;
+    const value = segmentsToModelValue(currentSegments.value, wholeHourOnly.value);
+    emit('update:modelValue', value);
+};
+
+const onSegmentChange = () => {
+    emitFromSegments();
 };
 
 watch(
     () => props.modelValue,
     (value) => {
-        if (isEditing.value) {
-            return;
+        suppressSync.value = true;
+
+        if (value === null || value === undefined || Number.isNaN(value)) {
+            applySegments({hour12: 12, minutes: 0, period: 'AM'});
+        } else {
+            applySegments(modelValueToSegments(value, wholeHourOnly.value));
         }
 
-        displayText.value = formatModel(value);
         showInvalid.value = false;
-        showHint.value = false;
+        suppressSync.value = false;
     },
     {immediate: true}
 );
 
-const applyFormattedInput = (raw: string, moveCursorToEnd = true) => {
-    const state = formatAmPmTimeAsYouType(raw, wholeHourOnly.value);
-    displayText.value = state.display;
-    showInvalid.value = false;
-    showHint.value = state.display !== '' && !state.complete;
-
-    if (state.complete && state.parsed !== null) {
-        emit('update:modelValue', state.parsed);
+watch(wholeHourOnly, () => {
+    if (wholeHourOnly.value) {
+        minutes.value = 0;
     }
-
-    if (moveCursorToEnd && inputEl.value) {
-        requestAnimationFrame(() => {
-            const el = inputEl.value;
-            if (el) {
-                const len = displayText.value.length;
-                el.setSelectionRange(len, len);
-            }
-        });
-    }
-
-    return state;
-};
-
-const onKeydown = (event: KeyboardEvent) => {
-    if (event.key === 'a' || event.key === 'A') {
-        event.preventDefault();
-        applyFormattedInput(displayText.value + 'a');
-        return;
-    }
-    if (event.key === 'p' || event.key === 'P') {
-        event.preventDefault();
-        applyFormattedInput(displayText.value + 'p');
-    }
-};
-
-const onUserInput = () => {
-    isEditing.value = true;
-    applyFormattedInput(displayText.value);
-};
-
-const commitFromDisplay = () => {
-    isEditing.value = false;
-    showHint.value = false;
-    const raw = displayText.value.trim();
-
-    if (raw === '') {
-        showInvalid.value = false;
-        emit('update:modelValue', null);
-        return;
-    }
-
-    const state = formatAmPmTimeAsYouType(raw, wholeHourOnly.value);
-    if (state.complete && state.parsed !== null) {
-        showInvalid.value = false;
-        emit('update:modelValue', state.parsed);
-        displayText.value = formatModel(state.parsed);
-        return;
-    }
-
-    const parsed = wholeHourOnly.value
-        ? parseHourOfDayFromAmPm(raw, true)
-        : parseTimeCodeFromAmPm(raw);
-
-    if (parsed !== null) {
-        showInvalid.value = false;
-        emit('update:modelValue', parsed);
-        displayText.value = formatModel(parsed);
-        return;
-    }
-
-    showInvalid.value = true;
-};
+    emitFromSegments();
+});
 </script>
+
+<style scoped>
+.am-pm-time-segments__select {
+    width: auto;
+    min-width: 4.25rem;
+}
+
+.am-pm-time-segments__colon {
+    font-weight: 600;
+    line-height: 1;
+}
+
+.am-pm-time-segments__minutes-fixed {
+    display: inline-block;
+    min-width: 2.25rem;
+    padding: 0.25rem 0.5rem;
+    font-variant-numeric: tabular-nums;
+    background: var(--bs-secondary-bg);
+    border-radius: var(--bs-border-radius-sm);
+}
+
+.am-pm-time-segments.is-invalid .form-select,
+.am-pm-time-segments.is-invalid .am-pm-time-segments__period .btn {
+    border-color: var(--bs-form-invalid-border-color);
+}
+
+.am-pm-time-segments__preview {
+    flex: 1 1 100%;
+    min-width: 6rem;
+}
+
+@media (min-width: 576px) {
+    .am-pm-time-segments__preview {
+        flex: 0 1 auto;
+    }
+}
+</style>

@@ -72,7 +72,7 @@
                 class="col-md-4"
                 :field="r$.start_time"
                 :label="$gettext('Start Time')"
-                :description="$gettext('Type a time like 9:30 AM. To play once per day, set start and end to the same value.')"
+                :description="$gettext('To play once per day, set start and end to the same value.')"
             >
                 <template #default="{id, model, fieldClass}">
                     <am-pm-time-input
@@ -88,7 +88,7 @@
                 class="col-md-4"
                 :field="r$.end_time"
                 :label="$gettext('End Time')"
-                :description="$gettext('Type a time like 5:00 PM. If end is before start, the event plays overnight.')"
+                :description="$gettext('If end is before start, the event plays overnight.')"
             >
                 <template #default="{id, model, fieldClass}">
                     <am-pm-time-input

@@ -106,6 +106,77 @@ export function parseHourOfDayFromAmPm(text: string, requireWholeHour = true): n
     return parsed.hour;
 }
 
+export type AmPmPeriod = 'AM' | 'PM';
+
+export type AmPmTimeSegments = {
+    hour12: number;
+    minutes: number;
+    period: AmPmPeriod;
+};
+
+/** Convert schedule HHMM or daypart hour (0–23) into 12-hour segments. */
+export function modelValueToSegments(
+    value: number,
+    wholeHourOnly: boolean,
+): AmPmTimeSegments {
+    if (wholeHourOnly) {
+        return hour24ToSegments(Math.min(23, Math.max(0, Math.trunc(value))), 0);
+    }
+
+    const padded = String(Math.max(0, Math.trunc(value))).padStart(4, '0');
+    const hour24 = parseInt(padded.slice(0, 2), 10);
+    const minutes = parseInt(padded.slice(2), 10);
+
+    return hour24ToSegments(hour24, minutes);
+}
+
+function hour24ToSegments(hour24: number, minutes: number): AmPmTimeSegments {
+    const h = ((Math.trunc(hour24) % 24) + 24) % 24;
+    const period: AmPmPeriod = h >= 12 ? 'PM' : 'AM';
+    let hour12 = h % 12;
+    if (hour12 === 0) {
+        hour12 = 12;
+    }
+
+    return {
+        hour12,
+        minutes: snapMinuteToFive(Math.min(59, Math.max(0, Math.trunc(minutes)))),
+        period,
+    };
+}
+
+export function segmentsToTimeCode(segments: AmPmTimeSegments): number {
+    const parsed = parseAmPmTime(
+        `${segments.hour12}:${String(segments.minutes).padStart(2, '0')} ${segments.period}`
+    );
+
+    return parsed !== null ? timeCodeFromParsed(parsed) : 0;
+}
+
+export function segmentsToHourOfDay(segments: AmPmTimeSegments): number {
+    const parsed = parseAmPmTime(`${segments.hour12}:00 ${segments.period}`);
+
+    return parsed !== null ? parsed.hour : 0;
+}
+
+export function segmentsToModelValue(
+    segments: AmPmTimeSegments,
+    wholeHourOnly: boolean,
+): number {
+    return wholeHourOnly
+        ? segmentsToHourOfDay({...segments, minutes: 0})
+        : segmentsToTimeCode(segments);
+}
+
+export const HOUR12_OPTIONS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+
+export const MINUTE_OPTIONS = Array.from({length: 12}, (_, i) => i * 5);
+
+/** Snap API minutes to the nearest 5-minute step used in the UI. */
+export function snapMinuteToFive(minutes: number): number {
+    return Math.min(55, Math.max(0, Math.round(minutes / 5) * 5));
+}
+
 export type AmPmFormatState = {
     /** Normalized display string shown in the input. */
     display: string;

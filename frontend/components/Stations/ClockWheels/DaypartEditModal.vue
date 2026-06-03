@@ -30,7 +30,7 @@
                 class="col-md-6"
                 :field="r$.start_hour"
                 :label="$gettext('Start hour')"
-                :description="$gettext('Whole hours only, e.g. 6:00 AM')"
+                :description="$gettext('Station local hour (:00 only).')"
             >
                 <template #default="{id, model, fieldClass}">
                     <am-pm-time-input
