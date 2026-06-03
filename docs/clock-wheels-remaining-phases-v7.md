@@ -93,6 +93,7 @@ PR11 ──► PR12   (audit table before analytics/preview)
 | Enhancement | Location |
 |-------------|----------|
 | **Current-hour preview** | Live tab calls `GET .../clock-wheel/{id}/preview?hour=` (station hour) — **Projected** column next to **Queued** |
+| **Live UX (timeline + clock)** | Hour bar with now-needle + segment shading; circular clock with elapsed arc, ticks, projected ring; segment dashboard; status/drift/mismatch; Analytics button |
 | Conflict heads-up | Schedule feed `is_now` + playlist/streamer overlap warning |
 
 ### Optional later
