@@ -139,6 +139,24 @@
                             :fields="daypartFields"
                             :provider="daypartListProvider"
                         >
+                            <template #cell(actions)="{ item }">
+                                <div
+                                    class="btn-group btn-group-sm"
+                                    @click.stop
+                                >
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary"
+                                        :disabled="syncingDaypartId === item.id"
+                                        :title="$gettext('Regenerate hourly wheels from this daypart')"
+                                        @click="doSyncDaypart(item)"
+                                    >
+                                        {{ syncingDaypartId === item.id
+                                            ? $gettext('Syncing…')
+                                            : $gettext('Re-sync') }}
+                                    </button>
+                                </div>
+                            </template>
                             <template #cell(name)="{ item }">
                                 <div
                                     class="d-flex align-items-center gap-3 clock-wheel-row"
@@ -186,6 +204,7 @@
     <edit-modal
         ref="$editModal"
         :create-url="listUrl"
+        :templates-url="templatesUrl"
         @relist="relistWheels"
     />
 
@@ -212,7 +231,9 @@ import AddButton from '~/components/Common/AddButton.vue';
 import Tabs from '~/components/Common/Tabs.vue';
 import Tab from '~/components/Common/Tab.vue';
 import {useTranslate} from '~/vendor/gettext';
-import {useTemplateRef} from 'vue';
+import {ref, useTemplateRef} from 'vue';
+import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
+import {useAxios} from '~/vendor/axios';
 import useHasEditModal from '~/functions/useHasEditModal';
 import {useApiItemProvider} from '~/functions/dataTable/useApiItemProvider.ts';
 import {QueryKeys, queryKeyWithStation} from '~/entities/Queries.ts';
@@ -231,6 +252,9 @@ const templatesUrl = getStationApiUrl('/clock-wheel-templates');
 const daypartsUrl = getStationApiUrl('/clock-dayparts');
 
 const {$gettext} = useTranslate();
+const {notifySuccess, notifyError} = useNotify();
+const {axios} = useAxios();
+const syncingDaypartId = ref<number | null>(null);
 
 type ClockWheelRow = {
     id: number;
@@ -322,6 +346,21 @@ const openPreview = (item: ClockWheelRow) => {
 const openAnalytics = (item: ClockWheelRow) => {
     const url = getStationApiUrl(`/clock-wheel/${item.id}/analytics`).value;
     void $analyticsModal.value?.open(item.name, url);
+};
+
+const doSyncDaypart = async (item: DaypartRow) => {
+    const syncUrl = getStationApiUrl(`/clock-daypart/${item.id}/sync`).value;
+    syncingDaypartId.value = item.id;
+
+    try {
+        await axios.post(syncUrl);
+        notifySuccess($gettext('Daypart hourly wheels re-synced from template.'));
+        relistDayparts();
+    } catch {
+        notifyError($gettext('Could not re-sync daypart wheels.'));
+    } finally {
+        syncingDaypartId.value = null;
+    }
 };
 </script>
 

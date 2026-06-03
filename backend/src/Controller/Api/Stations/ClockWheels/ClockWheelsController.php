@@ -11,6 +11,7 @@ use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
+use App\Entity\StationClockWheelTemplate;
 use App\Entity\StationSchedule;
 use App\Exception\ValidationException;
 use App\Http\Response;
@@ -284,8 +285,49 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         $scheduleItems = $data['schedule_items'] ?? null;
         unset($data['schedule_items']);
 
+        // Daypart-generated instances are materialized by daypart sync only.
+        unset($data['daypart_id'], $data['hour_of_day']);
+
+        $inheritRequested = null;
+        if (array_key_exists('inherits_template_slots', $data)) {
+            $inheritRequested = filter_var($data['inherits_template_slots'], FILTER_VALIDATE_BOOLEAN);
+            $data['inherits_template_slots'] = $inheritRequested;
+        }
+
+        $templateIdProvided = array_key_exists('template_id', $data);
+        $templateIdRaw = $data['template_id'] ?? null;
+        unset($data['template_id']);
+
         /** @var StationClockWheel $wheel */
         $wheel = $this->fromArray($data, $record, $context);
+
+        if ($wheel->daypart !== null) {
+            if ($templateIdProvided || $inheritRequested !== null) {
+                throw new InvalidArgumentException(
+                    'Template link for daypart-generated wheels is managed via the daypart.'
+                );
+            }
+        } elseif ($templateIdProvided) {
+            if ($templateIdRaw === null || $templateIdRaw === '' || (int)$templateIdRaw <= 0) {
+                $wheel->template = null;
+                if ($inheritRequested === true) {
+                    throw new InvalidArgumentException(
+                        'template_id is required when inheriting template slots.'
+                    );
+                }
+                if ($inheritRequested === null || $inheritRequested === false) {
+                    $wheel->inherits_template_slots = false;
+                }
+            } else {
+                $wheel->template = $this->resolveTemplate($wheel->station, (int)$templateIdRaw);
+            }
+        } elseif ($inheritRequested === true) {
+            if ($wheel->template === null) {
+                throw new InvalidArgumentException(
+                    'template_id is required when inheriting template slots.'
+                );
+            }
+        }
 
         $errors = $this->validator->validate($wheel);
         if (count($errors) > 0) {
@@ -296,7 +338,10 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         // Apply slot replacement now (before flush) so the entire operation
         // — wheel metadata + slot list — commits in one transaction.
-        if ($slotsData !== null) {
+        if ($inheritRequested === true && $wheel->template !== null) {
+            $wheel->inherits_template_slots = true;
+            $this->slotWriter->copyTemplateSlotsToWheel($wheel->template, $wheel);
+        } elseif ($slotsData !== null) {
             $this->replaceSlots($wheel, $slotsData);
         }
 
@@ -541,5 +586,19 @@ final class ClockWheelsController extends AbstractScheduledEntityController
     private function replaceSlots(StationClockWheel $wheel, array $slotsData): void
     {
         $this->slotWriter->replaceWheelSlots($wheel, $slotsData, true);
+    }
+
+    private function resolveTemplate(Station $station, int $templateId): StationClockWheelTemplate
+    {
+        $template = $this->em->getRepository(StationClockWheelTemplate::class)->findOneBy([
+            'station' => $station,
+            'id' => $templateId,
+        ]);
+
+        if (!$template instanceof StationClockWheelTemplate) {
+            throw new InvalidArgumentException('Template not found for this station.');
+        }
+
+        return $template;
     }
 }
