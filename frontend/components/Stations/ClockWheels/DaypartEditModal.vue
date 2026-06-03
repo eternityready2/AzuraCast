@@ -140,6 +140,14 @@
             </button>
             <button
                 type="button"
+                class="btn btn-outline-secondary"
+                :disabled="syncing"
+                @click="doResync"
+            >
+                {{ syncing ? $gettext('Syncing…') : $gettext('Re-sync wheels') }}
+            </button>
+            <button
+                type="button"
                 class="btn btn-secondary"
                 @click="close"
             >
@@ -180,7 +188,7 @@ const props = defineProps<BaseEditModalProps & {
 const emit = defineEmits<BaseEditModalEmits>();
 
 const $modal = useTemplateRef('$modal');
-const {notifySuccess} = useNotify();
+const {notifySuccess, notifyError} = useNotify();
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
@@ -354,6 +362,24 @@ const doDeleteFromModal = () => {
     if (editUrl.value) {
         $modal.value?.hide();
         void doDelete(editUrl.value);
+    }
+};
+
+const doResync = async () => {
+    if (!editUrl.value) {
+        return;
+    }
+
+    syncing.value = true;
+
+    try {
+        await axios.post(`${editUrl.value}/sync`);
+        notifySuccess($gettext('Daypart hourly wheels re-synced from template.'));
+        emit('relist');
+    } catch {
+        notifyError($gettext('Could not re-sync daypart wheels.'));
+    } finally {
+        syncing.value = false;
     }
 };
 

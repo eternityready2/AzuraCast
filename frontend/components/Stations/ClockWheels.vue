@@ -293,6 +293,7 @@ const templateFields: DataTableField<TemplateRow>[] = [
 ];
 
 const daypartFields: DataTableField<DaypartRow>[] = [
+    {key: 'actions', label: $gettext('Actions'), sortable: false},
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
     {key: 'hours', label: $gettext('Hours'), sortable: false},
     {key: 'separation', label: $gettext('Separation'), sortable: false},
