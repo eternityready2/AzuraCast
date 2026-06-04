@@ -156,7 +156,7 @@ function hour24ToSegments(hour24: number, minutes: number): AmPmTimeSegments {
 
     return {
         hour12,
-        minutes: snapMinuteToFive(Math.min(59, Math.max(0, Math.trunc(minutes)))),
+        minutes: clampMinute(Math.min(59, Math.max(0, Math.trunc(minutes)))),
         period,
     };
 }
@@ -186,11 +186,11 @@ export function segmentsToModelValue(
 
 export const HOUR12_OPTIONS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
 
-export const MINUTE_OPTIONS = Array.from({length: 12}, (_, i) => i * 5);
+/** Minute values for schedule time selects (0–59). */
+export const MINUTE_OPTIONS = Array.from({length: 60}, (_, i) => i);
 
-/** Snap API minutes to the nearest 5-minute step used in the UI. */
-export function snapMinuteToFive(minutes: number): number {
-    return Math.min(55, Math.max(0, Math.round(minutes / 5) * 5));
+export function clampMinute(minutes: number): number {
+    return Math.min(59, Math.max(0, Math.trunc(minutes)));
 }
 
 export type AmPmFormatState = {

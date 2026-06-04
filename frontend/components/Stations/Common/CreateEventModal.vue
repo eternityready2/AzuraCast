@@ -89,7 +89,7 @@
                 class="col-md-4"
                 :field="r$.end_time"
                 :label="$gettext('End Time')"
-                :description="$gettext('If end is before start, the event plays overnight.')"
+                :description="$gettext('If end is before start, the event plays overnight. To avoid overlapping the next event, you can end at :59 (e.g. 1:59 PM before 2:00 PM).')"
             >
                 <template #default="{id, model, fieldClass}">
                     <am-pm-time-input
