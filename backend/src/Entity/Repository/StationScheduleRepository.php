@@ -85,6 +85,7 @@ final class StationScheduleRepository extends Repository
                 static fn (int $d) => $d >= 1 && $d <= 7
             )));
             $record->loop_once = $item['loop_once'] ?? false;
+            $record->is_emergency = (bool)($item['is_emergency'] ?? false);
 
             if ($relation instanceof StationClockWheel) {
                 $record->loop_once = false;

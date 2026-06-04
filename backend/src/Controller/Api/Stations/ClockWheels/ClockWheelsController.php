@@ -7,24 +7,23 @@ namespace App\Controller\Api\Stations\ClockWheels;
 use App\Controller\Api\Stations\AbstractScheduledEntityController;
 use App\Entity\Api\Error;
 use App\Entity\Api\Status;
-use App\Entity\Enums\ClockWheelSlotAlgorithms;
-use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
-use App\Entity\StationMediaCategory;
-use App\Entity\StationPlaylist;
+use App\Entity\StationClockWheelTemplate;
 use App\Entity\StationSchedule;
 use App\Exception\ValidationException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelSlotWriter;
 use App\Radio\AutoDJ\Scheduler;
 use App\Utilities\DateRange;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
@@ -224,6 +223,7 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         Scheduler $scheduler,
         Serializer $serializer,
         ValidatorInterface $validator,
+        private readonly ClockWheelSlotWriter $slotWriter,
     ) {
         parent::__construct($scheduleRepo, $scheduler, $serializer, $validator);
     }
@@ -285,8 +285,49 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         $scheduleItems = $data['schedule_items'] ?? null;
         unset($data['schedule_items']);
 
+        // Daypart-generated instances are materialized by daypart sync only.
+        unset($data['daypart_id'], $data['hour_of_day']);
+
+        $inheritRequested = null;
+        if (array_key_exists('inherits_template_slots', $data)) {
+            $inheritRequested = filter_var($data['inherits_template_slots'], FILTER_VALIDATE_BOOLEAN);
+            $data['inherits_template_slots'] = $inheritRequested;
+        }
+
+        $templateIdProvided = array_key_exists('template_id', $data);
+        $templateIdRaw = $data['template_id'] ?? null;
+        unset($data['template_id']);
+
         /** @var StationClockWheel $wheel */
         $wheel = $this->fromArray($data, $record, $context);
+
+        if ($wheel->daypart !== null) {
+            if ($templateIdProvided || $inheritRequested !== null) {
+                throw new InvalidArgumentException(
+                    'Template link for daypart-generated wheels is managed via the daypart.'
+                );
+            }
+        } elseif ($templateIdProvided) {
+            if ($templateIdRaw === null || $templateIdRaw === '' || (int)$templateIdRaw <= 0) {
+                $wheel->template = null;
+                if ($inheritRequested === true) {
+                    throw new InvalidArgumentException(
+                        'template_id is required when inheriting template slots.'
+                    );
+                }
+                if ($inheritRequested === null || $inheritRequested === false) {
+                    $wheel->inherits_template_slots = false;
+                }
+            } else {
+                $wheel->template = $this->resolveTemplate($wheel->station, (int)$templateIdRaw);
+            }
+        } elseif ($inheritRequested === true) {
+            if ($wheel->template === null) {
+                throw new InvalidArgumentException(
+                    'template_id is required when inheriting template slots.'
+                );
+            }
+        }
 
         $errors = $this->validator->validate($wheel);
         if (count($errors) > 0) {
@@ -297,7 +338,10 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         // Apply slot replacement now (before flush) so the entire operation
         // — wheel metadata + slot list — commits in one transaction.
-        if ($slotsData !== null) {
+        if ($inheritRequested === true && $wheel->template !== null) {
+            $wheel->inherits_template_slots = true;
+            $this->slotWriter->copyTemplateSlotsToWheel($wheel->template, $wheel);
+        } elseif ($slotsData !== null) {
             $this->replaceSlots($wheel, $slotsData);
         }
 
@@ -307,10 +351,9 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         $this->em->flush();
 
-        // Refresh slot entities so the read-only category_id column reflects
-        // the persisted FK value (Doctrine doesn't back-fill it in memory).
+        $wheel->syncReadOnlyForeignKeys();
         foreach ($wheel->slots as $slot) {
-            $this->em->refresh($slot);
+            $slot->syncReadOnlyForeignKeys();
         }
 
         return $wheel;
@@ -379,13 +422,23 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         // ORM OrderBy annotation on the collection.
         $slotsOut = [];
         foreach ($record->slots as $slot) {
-            $slotsOut[] = $this->toArray($slot);
+            $slotsOut[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel'],
+                ]
+            );
         }
         $return['slots'] = $slotsOut;
 
         $scheduleOut = [];
         foreach ($this->scheduleRepo->findByRelation($record) as $scheduleItem) {
-            $scheduleOut[] = $this->toArray($scheduleItem);
+            $scheduleOut[] = $this->toArray(
+                $scheduleItem,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel', 'playlist', 'streamer'],
+                ]
+            );
         }
         $return['schedule_items'] = $scheduleOut;
 
@@ -406,6 +459,29 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         ];
 
         return $return;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     *
+     * @return array<mixed>
+     */
+    protected function toArray(object $record, array $context = []): array
+    {
+        return parent::toArray(
+            $record,
+            array_merge(
+                $context,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => [
+                        'slots',
+                        'schedule_items',
+                        'template',
+                        'daypart',
+                    ],
+                ]
+            )
+        );
     }
 
     // ------------------------------------------------------------------
@@ -479,8 +555,13 @@ final class ClockWheelsController extends AbstractScheduledEntityController
 
         $savedSlots = [];
         foreach ($record->slots as $slot) {
-            $this->em->refresh($slot);
-            $savedSlots[] = $this->toArray($slot);
+            $slot->syncReadOnlyForeignKeys();
+            $savedSlots[] = $this->toArray(
+                $slot,
+                [
+                    AbstractNormalizer::IGNORED_ATTRIBUTES => ['clock_wheel'],
+                ]
+            );
         }
 
         return $response->withJson($savedSlots);
@@ -504,86 +585,20 @@ final class ClockWheelsController extends AbstractScheduledEntityController
      */
     private function replaceSlots(StationClockWheel $wheel, array $slotsData): void
     {
-        $wheel->slots->clear();
+        $this->slotWriter->replaceWheelSlots($wheel, $slotsData, true);
+    }
 
-        $normalized = [];
-        foreach ($slotsData as $datum) {
-            if (!is_array($datum)) {
-                continue;
-            }
-            $normalized[] = $datum;
+    private function resolveTemplate(Station $station, int $templateId): StationClockWheelTemplate
+    {
+        $template = $this->em->getRepository(StationClockWheelTemplate::class)->findOneBy([
+            'station' => $station,
+            'id' => $templateId,
+        ]);
+
+        if (!$template instanceof StationClockWheelTemplate) {
+            throw new InvalidArgumentException('Template not found for this station.');
         }
 
-        usort(
-            $normalized,
-            static function (array $a, array $b): int {
-                $posA = isset($a['position_seconds']) && is_numeric($a['position_seconds'])
-                    ? (int)$a['position_seconds']
-                    : 0;
-                $posB = isset($b['position_seconds']) && is_numeric($b['position_seconds'])
-                    ? (int)$b['position_seconds']
-                    : 0;
-
-                return $posA <=> $posB;
-            }
-        );
-
-        $order = 0;
-        foreach ($normalized as $datum) {
-            $slot = new StationClockWheelSlot($wheel);
-            $slot->slot_order = $order++;
-
-            $posRaw = $datum['position_seconds'] ?? null;
-            $slot->position_seconds = (is_numeric($posRaw) && (int)$posRaw >= 0)
-                ? min(3599, (int)$posRaw)
-                : 0;
-
-            $typeRaw = (array_key_exists('type', $datum) && $datum['type'] !== null && $datum['type'] !== '')
-                ? (string)$datum['type']
-                : 'music';
-            $slot->type = ClockWheelSlotTypes::tryFrom($typeRaw) ?? ClockWheelSlotTypes::Music;
-
-            $categoryId = array_key_exists('category_id', $datum) && is_numeric($datum['category_id'])
-                ? (int)$datum['category_id']
-                : null;
-
-            if ($categoryId !== null) {
-                $category = $this->em->find(StationMediaCategory::class, $categoryId);
-                if ($category !== null && $category->station->id === $wheel->station->id) {
-                    $slot->category = $category;
-                } else {
-                    $slot->category = null;
-                }
-            } else {
-                $slot->category = null;
-            }
-
-            $algoRaw = isset($datum['algorithm']) ? (string)$datum['algorithm'] : 'random';
-            $slot->algorithm = ClockWheelSlotAlgorithms::tryFrom($algoRaw) ?? ClockWheelSlotAlgorithms::Random;
-
-            // Optional playlist pin — must belong to the same station.
-            $playlistId = isset($datum['playlist_id']) && is_numeric($datum['playlist_id'])
-                ? (int)$datum['playlist_id']
-                : null;
-
-            if ($playlistId !== null && $playlistId > 0) {
-                $playlist = $this->em->find(StationPlaylist::class, $playlistId);
-
-                if ($playlist !== null && $playlist->station->id === $wheel->station->id) {
-                    $slot->playlist = $playlist;
-                }
-                // Playlist not found or from another station → slot becomes
-                // type-based (null pin). Content still airs from the type pool.
-            }
-
-            // Duration cap in seconds. NULL means "play one full track".
-            $durRaw = $datum['duration_seconds'] ?? null;
-            $slot->duration_seconds = (is_numeric($durRaw) && (int)$durRaw > 0)
-                ? (int)$durRaw
-                : null;
-
-            $wheel->addSlot($slot);
-            $this->em->persist($slot);
-        }
+        return $template;
     }
 }

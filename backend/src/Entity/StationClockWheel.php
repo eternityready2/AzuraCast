@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Entity\Enums\ClockWheelFillStrategy;
 use App\Entity\Attributes\Auditable;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use App\Entity\Interfaces\StationAwareInterface;
@@ -117,6 +118,43 @@ final class StationClockWheel implements
     ]
     public bool $is_active = true;
 
+    /**
+     * Preview / fill behaviour for tight anchor windows (PR12).
+     */
+    #[
+        OA\Property(example: 'conservative'),
+        ORM\Column(length: 20, enumType: ClockWheelFillStrategy::class)
+    ]
+    public ClockWheelFillStrategy $fill_strategy = ClockWheelFillStrategy::Conservative;
+
+    /** Enable time-window artist/title separation for this wheel (PR9). */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $separation_enabled = false;
+
+    #[
+        OA\Property(example: 45),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_artist_minutes = 45;
+
+    #[
+        OA\Property(example: 90),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $separation_title_minutes = 90;
+
+    /**
+     * Max plays per song_id in 24h before deprioritization; null disables burn protection.
+     */
+    #[
+        OA\Property(example: 3),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true])
+    ]
+    public ?int $burn_rate_max_plays_24h = null;
+
     // ------------------------------------------------------------------
     // Slots collection
     // ------------------------------------------------------------------
@@ -154,6 +192,46 @@ final class StationClockWheel implements
     ]
     public private(set) Collection $schedule_items;
 
+    /** Source template when this wheel inherits slot layout (PR10). */
+    #[
+        OA\Property(example: 1, nullable: true),
+        ORM\ManyToOne(targetEntity: StationClockWheelTemplate::class, inversedBy: 'wheels'),
+        ORM\JoinColumn(name: 'template_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationClockWheelTemplate $template = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $template_id = null;
+
+    /** Daypart that generated this hourly instance, if any. */
+    #[
+        OA\Property(example: 1, nullable: true),
+        ORM\ManyToOne(targetEntity: StationClockDaypart::class, inversedBy: 'wheels'),
+        ORM\JoinColumn(name: 'daypart_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationClockDaypart $daypart = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $daypart_id = null;
+
+    /** Hour label (0–23) for daypart-generated instances. */
+    #[
+        OA\Property(example: 9, nullable: true),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 23)
+    ]
+    public ?int $hour_of_day = null;
+
+    /**
+     * When true, slot changes on the linked template are copied to this wheel.
+     * Cleared when an operator edits this wheel's slots directly.
+     */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $inherits_template_slots = false;
+
     public function __construct(Station $station)
     {
         $this->station         = $station;
@@ -178,12 +256,20 @@ final class StationClockWheel implements
         $this->slots->removeElement($slot);
     }
 
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+        $this->template_id = $this->template?->id;
+        $this->daypart_id = $this->daypart?->id;
+    }
+
     // ------------------------------------------------------------------
     // Stringable
     // ------------------------------------------------------------------
 
     public function __toString(): string
     {
-        return $this->name;
+        // AuditLog stringifies entities on flush; tests may persist before name is set.
+        return isset($this->name) ? $this->name : 'Station Clock Wheel';
     }
 }

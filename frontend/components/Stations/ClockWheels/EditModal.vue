@@ -12,6 +12,7 @@
             <ClockWheelsFormEntries
                 :form="form"
                 :r$="r$"
+                :template-options="templateOptions"
                 v-model:entries="entries"
                 :add-entry="addEntry"
                 :remove-entry="removeEntry"
@@ -56,7 +57,8 @@
 import ModalForm from '~/components/Common/ModalForm.vue';
 import Tabs from '~/components/Common/Tabs.vue';
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from '~/functions/useBaseEditModal';
-import {computed, reactive, ref, useTemplateRef} from 'vue';
+import {computed, onMounted, reactive, ref, useTemplateRef, watch} from 'vue';
+import {useAxios} from '~/vendor/axios';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAppRegle} from '~/vendor/regle.ts';
@@ -77,17 +79,38 @@ interface ClockWheelEntry {
     duration_seconds: number | null;
 }
 
-const props = defineProps<BaseEditModalProps>();
+const props = defineProps<BaseEditModalProps & {
+    templatesUrl: string;
+}>();
 const emit = defineEmits<BaseEditModalEmits>();
 
 const $modal = useTemplateRef('$modal');
 const {notifySuccess} = useNotify();
 const {$gettext} = useTranslate();
+const {axios} = useAxios();
+
+const templateOptions = ref<{value: number; text: string}[]>([]);
+
+onMounted(async () => {
+    const {data} = await axios.get(props.templatesUrl);
+    templateOptions.value = (data as Array<{id: number; name: string}>).map((t) => ({
+        value: t.id,
+        text: t.name,
+    }));
+});
 
 const blankForm = {
     name: '',
     color: '#e87722',
     is_active: true,
+    fill_strategy: 'conservative',
+    separation_enabled: false,
+    separation_artist_minutes: 45,
+    separation_title_minutes: 90,
+    burn_rate_max_plays_24h: null as number | null,
+    template_id: null as number | null,
+    inherits_template_slots: false,
+    daypart_id: null as number | null,
 };
 
 const form = ref({...blankForm});
@@ -97,6 +120,11 @@ const {r$} = useAppRegle(form, {
     name: {required},
     color: {},
     is_active: {},
+    fill_strategy: {},
+    separation_enabled: {},
+    separation_artist_minutes: {},
+    separation_title_minutes: {},
+    burn_rate_max_plays_24h: {},
 });
 
 const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
@@ -184,7 +212,12 @@ const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
 };
 
 const populateForm = (data: Record<string, unknown>) => {
-    form.value = mergeExisting(form.value, data);
+    form.value = mergeExisting(form.value, {
+        ...data,
+        template_id: data.template_id != null ? Number(data.template_id) : null,
+        inherits_template_slots: Boolean(data.inherits_template_slots),
+        daypart_id: data.daypart_id != null ? Number(data.daypart_id) : null,
+    });
     if (Array.isArray(data.slots)) {
         const converted = (data.slots as {
             type?: string | null;
@@ -206,14 +239,30 @@ const populateForm = (data: Record<string, unknown>) => {
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({
-        type: e.type,
-        category_id: null,
-        algorithm: e.algorithm,
-        position_seconds: e.position_seconds,
-        duration_seconds: e.duration_seconds,
-    }));
-    return {valid, data: {...form.value, slots}};
+    const inheritSlots = Boolean(form.value.inherits_template_slots)
+        && form.value.template_id != null
+        && form.value.template_id > 0
+        && (form.value.daypart_id == null || form.value.daypart_id <= 0);
+
+    const payload: Record<string, unknown> = {
+        ...form.value,
+        template_id: form.value.template_id != null && form.value.template_id > 0
+            ? Number(form.value.template_id)
+            : null,
+        inherits_template_slots: inheritSlots,
+    };
+
+    if (!inheritSlots) {
+        payload.slots = entries.map((e) => ({
+            type: e.type,
+            category_id: null,
+            algorithm: e.algorithm,
+            position_seconds: e.position_seconds,
+            duration_seconds: e.duration_seconds,
+        }));
+    }
+
+    return {valid, data: payload};
 };
 
 const langTitle = computed(() =>

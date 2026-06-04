@@ -43,14 +43,51 @@ const inputRef = ref<HTMLInputElement>();
 
 let picker: TimepickerUI | null = null;
 
+/** AzuraCast schedule times are stored as HHMM integers (e.g. 1600 = 4:00 PM). */
+const formatTimeCodeForDisplay = (timeCode: number): string => {
+    let hour24 = Math.floor(timeCode / 100);
+    const minutes = timeCode % 100;
+    const period = hour24 >= 12 ? 'PM' : 'AM';
+
+    if (hour24 === 0) {
+        hour24 = 12;
+    } else if (hour24 > 12) {
+        hour24 -= 12;
+    }
+
+    return `${String(hour24).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${period}`;
+};
+
+const timeCodeFromPickerConfirm = (hourRaw: string, minutesRaw: string, periodRaw?: string | null): number | null => {
+    let hour24 = parseInt(hourRaw, 10);
+    const minutes = parseInt(minutesRaw, 10);
+
+    if (Number.isNaN(hour24) || Number.isNaN(minutes)) {
+        return null;
+    }
+
+    const period = String(periodRaw ?? '').trim().toUpperCase();
+
+    if (period === 'PM' || period === 'AM') {
+        if (period === 'PM' && hour24 !== 12) {
+            hour24 += 12;
+        }
+        if (period === 'AM' && hour24 === 12) {
+            hour24 = 0;
+        }
+    } else if (hour24 > 23 || minutes > 59) {
+        return null;
+    }
+
+    return hour24 * 100 + minutes;
+};
+
 const displayValue = computed(() => {
     if (props.modelValue === null || props.modelValue === undefined) {
         return '';
     }
-    const val = props.modelValue;
-    const hh = String(Math.floor(val / 100)).padStart(2, '0');
-    const mm = String(val % 100).padStart(2, '0');
-    return `${hh}:${mm}`;
+
+    return formatTimeCodeForDisplay(props.modelValue);
 });
 
 onMounted(() => {
@@ -74,14 +111,14 @@ onMounted(() => {
         callbacks: {
             onConfirm: (data) => {
                 if (data.hour !== undefined && data.minutes !== undefined) {
-                    let hh = parseInt(data.hour, 10);
-                    const mm = parseInt(data.minutes, 10);
-                    if (!isNaN(hh) && !isNaN(mm)) {
-                        // Convert 12h to 24h
-                        const isPM = data.type === 'pm';
-                        if (isPM && hh !== 12) hh += 12;
-                        if (!isPM && hh === 12) hh = 0; // midnight
-                        emit('update:modelValue', hh * 100 + mm);
+                    const timeCode = timeCodeFromPickerConfirm(
+                        String(data.hour),
+                        String(data.minutes),
+                        data.type
+                    );
+
+                    if (timeCode !== null) {
+                        emit('update:modelValue', timeCode);
                     }
                 }
             },

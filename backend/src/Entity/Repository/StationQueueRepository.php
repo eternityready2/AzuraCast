@@ -136,6 +136,32 @@ final class StationQueueRepository extends AbstractStationBasedRepository
     }
 
     /**
+     * Recent plays with media category for clock wheel category separation (PR9).
+     *
+     * @return array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null, category_id:int|null}>
+     */
+    public function getRecentlyPlayedWithCategoryByTimeRange(
+        Station $station,
+        DateTimeImmutable $now,
+        int $minutes
+    ): array {
+        $threshold = CarbonImmutable::instance($now)->subMinutes($minutes);
+
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT sq.song_id, sq.timestamp_played, sq.title, sq.artist, m.category_id
+                FROM App\Entity\StationQueue sq
+                LEFT JOIN App\Entity\StationMedia m WITH m.song_id = sq.song_id AND m.station = :station
+                WHERE sq.station = :station
+                AND (sq.is_played = 0 OR sq.timestamp_played >= :threshold)
+                ORDER BY sq.timestamp_played DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('threshold', $threshold)
+            ->getArrayResult();
+    }
+
+    /**
      * @param Station $station
      * @return StationQueue[]
      */

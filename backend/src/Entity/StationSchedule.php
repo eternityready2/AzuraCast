@@ -123,6 +123,15 @@ final class StationSchedule implements IdentifiableEntityInterface
     public bool $loop_once = false;
 
     /**
+     * When true, this schedule takes priority over clock wheel AutoDJ during its window.
+     */
+    #[
+        OA\Property(example: false),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $is_emergency = false;
+
+    /**
      * Clock wheel calendar mode: flexible (default) or strict wall-clock alignment.
      * Only used when clock_wheel is set; ignored for playlist/streamer schedules.
      */

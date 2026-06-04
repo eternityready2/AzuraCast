@@ -186,4 +186,50 @@ final class Api_Stations_ClockWheelsCest extends CestAbstract
         );
         $I->assertNotEmpty($matching, 'Schedule feed should include edit_url for the clock wheel.');
     }
+
+    /**
+     * @before setupComplete
+     * @before login
+     */
+    public function clockWheelTemplateSlotsAreSavedOnCreate(FunctionalTester $I): void
+    {
+        $I->wantTo('Create a clock wheel template with slots and retrieve them.');
+
+        $station = $this->getTestStation();
+        $baseUrl = '/api/station/' . $station->id . '/clock-wheel-templates';
+
+        $I->sendPOST($baseUrl, [
+            'name' => 'Template A',
+            'color' => '#aabbcc',
+            'slots' => [
+                [
+                    'type' => 'music',
+                    'category_id' => null,
+                    'algorithm' => 'random',
+                    'position_seconds' => 0,
+                    'duration_seconds' => null,
+                ],
+                [
+                    'type' => 'id',
+                    'category_id' => null,
+                    'algorithm' => 'random',
+                    'position_seconds' => 120,
+                    'duration_seconds' => 30,
+                ],
+            ],
+        ]);
+
+        $I->seeResponseCodeIs(200);
+
+        $selfLink = $I->grabDataFromResponseByJsonPath('links.self')[0];
+
+        $I->sendGET($selfLink);
+        $I->seeResponseCodeIs(200);
+        $I->seeResponseContainsJson([
+            'slots' => [
+                ['position_seconds' => 0, 'type' => 'music'],
+                ['position_seconds' => 120, 'type' => 'id'],
+            ],
+        ]);
+    }
 }

@@ -711,6 +711,30 @@ final class Station implements Stringable, IdentifiableEntityInterface
     ]
     public private(set) Collection $clock_wheels;
 
+    /** @var Collection<int, StationClockWheelTemplate> */
+    #[
+        ORM\OneToMany(
+            targetEntity: StationClockWheelTemplate::class,
+            mappedBy: 'station',
+            cascade: ['persist', 'remove'],
+            fetch: 'EXTRA_LAZY'
+        ),
+        ORM\OrderBy(['name' => 'ASC'])
+    ]
+    public private(set) Collection $clock_wheel_templates;
+
+    /** @var Collection<int, StationClockDaypart> */
+    #[
+        ORM\OneToMany(
+            targetEntity: StationClockDaypart::class,
+            mappedBy: 'station',
+            cascade: ['persist', 'remove'],
+            fetch: 'EXTRA_LAZY'
+        ),
+        ORM\OrderBy(['name' => 'ASC'])
+    ]
+    public private(set) Collection $clock_dayparts;
+
     #[
         ORM\ManyToOne,
         ORM\JoinColumn(name: 'current_song_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL'),
@@ -741,6 +765,8 @@ final class Station implements Stringable, IdentifiableEntityInterface
         $this->sftp_users = new ArrayCollection();
         $this->requests = new ArrayCollection();
         $this->clock_wheels = new ArrayCollection();
+        $this->clock_wheel_templates = new ArrayCollection();
+        $this->clock_dayparts = new ArrayCollection();
     }
 
     public function supportsAutoDjQueue(): bool

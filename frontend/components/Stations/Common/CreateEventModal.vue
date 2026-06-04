@@ -34,6 +34,7 @@
                 v-model="form.entity_id"
                 class="form-select"
                 :disabled="currentEntityOptions.length === 0"
+                @change="onEntityChange"
             >
                 <option
                     v-for="e in currentEntityOptions"
@@ -45,6 +46,26 @@
             </select>
         </div>
 
+        <div
+            v-if="form.source === 'playlist'"
+            class="mb-3"
+        >
+            <div class="form-check">
+                <input
+                    id="edit_form_is_emergency"
+                    v-model="scheduleRow.is_emergency"
+                    class="form-check-input"
+                    type="checkbox"
+                >
+                <label class="form-check-label" for="edit_form_is_emergency">
+                    {{ $gettext('Emergency override') }}
+                </label>
+            </div>
+            <small class="form-text text-warning">
+                {{ $gettext('While this schedule is active, clock wheel AutoDJ will not run. Use for breaking news or other must-play windows.') }}
+            </small>
+        </div>
+
         <!-- Schedule Row - Time section -->
         <div class="row g-3 mb-3">
             <form-group-field
@@ -52,13 +73,13 @@
                 class="col-md-4"
                 :field="r$.start_time"
                 :label="$gettext('Start Time')"
-                :description="$gettext('To play once per day, set the start and end times to the same value.')"
+                :description="$gettext('To play once per day, set start and end to the same value.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <circular-time-picker
+                    <am-pm-time-input
                         :input-id="id"
                         v-model="model.$model"
-                        :class="fieldClass"
+                        :field-class="fieldClass"
                     />
                 </template>
             </form-group-field>
@@ -68,13 +89,13 @@
                 class="col-md-4"
                 :field="r$.end_time"
                 :label="$gettext('End Time')"
-                :description="$gettext('If the end time is before the start time, the playlist will play overnight.')"
+                :description="$gettext('If end is before start, the event plays overnight.')"
             >
                 <template #default="{id, model, fieldClass}">
-                    <circular-time-picker
+                    <am-pm-time-input
                         :input-id="id"
                         v-model="model.$model"
-                        :class="fieldClass"
+                        :field-class="fieldClass"
                     />
                 </template>
             </form-group-field>
@@ -339,7 +360,7 @@
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
-import CircularTimePicker from '~/components/Common/CircularTimePicker.vue';
+import AmPmTimeInput from '~/components/Common/AmPmTimeInput.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupMultiCheck from '~/components/Form/FormGroupMultiCheck.vue';
@@ -358,6 +379,7 @@ import {
     createScheduleItemDefaults,
 } from '~/components/Stations/Common/scheduleItemDefaults.ts';
 import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
+import {scheduleTimeWindowForHourOfDay} from '~/functions/amPmTime.ts';
 
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
@@ -374,8 +396,13 @@ interface EntityOption {
     self_url: string;
 }
 
+interface ClockWheelOption extends EntityOption {
+    /** Set on daypart-generated hourly wheels (0–23). */
+    hour_of_day: number | null;
+}
+
 const playlists = ref<EntityOption[]>([]);
-const clockWheels = ref<EntityOption[]>([]);
+const clockWheels = ref<ClockWheelOption[]>([]);
 
 onMounted(async () => {
     const [plResp, cwResp] = await Promise.all([
@@ -393,6 +420,7 @@ onMounted(async () => {
         id: cw.id as number,
         name: cw.name as string,
         self_url: (cw.links as Record<string, string>).self,
+        hour_of_day: cw.hour_of_day != null ? Number(cw.hour_of_day) : null,
     }));
 });
 
@@ -436,6 +464,29 @@ const updateDuration = () => {
 const updateDurationFromHours = () => updateDuration();
 const updateDurationFromMinutes = () => updateDuration();
 
+const applyClockWheelHourToSchedule = (entityId: number | null) => {
+    if (entityId == null) {
+        return;
+    }
+
+    const wheel = clockWheels.value.find((w) => w.id === entityId);
+    if (wheel?.hour_of_day == null) {
+        return;
+    }
+
+    const {start_time, end_time} = scheduleTimeWindowForHourOfDay(wheel.hour_of_day);
+    scheduleRow.value.start_time = start_time;
+    scheduleRow.value.end_time = end_time;
+    durationHours.value = 1;
+    durationMinutes.value = 0;
+};
+
+const onEntityChange = () => {
+    if (isClockWheelSchedule.value) {
+        applyClockWheelHourToSchedule(form.value.entity_id);
+    }
+};
+
 const currentEntityOptions = computed(() =>
     form.value.source === 'playlist' ? playlists.value : clockWheels.value
 );
@@ -450,6 +501,22 @@ watch(currentEntityOptions, (opts) => {
     }
 }, {immediate: true});
 
+watch(
+    () => form.value.entity_id,
+    (entityId, previousId) => {
+        if (!isClockWheelSchedule.value || entityId == null) {
+            return;
+        }
+
+        // Editing an existing event: only adjust times when the user picks another wheel.
+        if (editingScheduleId.value !== null && previousId == null) {
+            return;
+        }
+
+        applyClockWheelHourToSchedule(entityId);
+    }
+);
+
 watch(schedulingMode, (mode) => {
     if (!isPlaylistSchedule.value) {
         return;
@@ -463,6 +530,7 @@ watch(
         if (source === 'clock_wheel') {
             scheduleRow.value.loop_once = false;
             scheduleRow.value.clock_wheel_mode = clockWheelScheduleMode.value;
+            scheduleRow.value.is_emergency = false;
         }
     }
 );
@@ -628,6 +696,7 @@ const apiScheduleItemToRow = (item: Record<string, unknown>): PlaylistScheduleRo
         end_date: String(item.end_date ?? ''),
         days: normalizeStationScheduleDays(item.days),
         loop_once: Boolean(item.loop_once),
+        is_emergency: Boolean(item.is_emergency),
         clock_wheel_mode: (item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible') as 'flexible' | 'strict',
         recurrence_type: recurrenceType ?? null,
         recurrence_interval: Number(item.recurrence_interval ?? 1),

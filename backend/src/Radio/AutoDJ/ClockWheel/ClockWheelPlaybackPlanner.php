@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\Api\StationPlaylistQueue;
+use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotTypes;
@@ -41,6 +42,8 @@ final class ClockWheelPlaybackPlanner
         private readonly EntityManagerInterface $em,
         private readonly StationQueueRepository $queueRepo,
         private readonly DuplicatePrevention $duplicatePrevention,
+        private readonly SeparationRulesChecker $separationChecker,
+        private readonly ClockWheelEventLogger $eventLogger,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -56,11 +59,19 @@ final class ClockWheelPlaybackPlanner
     ): ?StationQueue {
         $slots = $this->sortSlots($wheel->slots->toArray());
 
+        $station = $wheel->station;
+
         if ($slots === []) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                null,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::NoSlots,
+            );
+
             return null;
         }
-
-        $station = $wheel->station;
         $tz = $station->getTimezoneObject();
         $secondsIntoHour = $this->getPlannedSecondsIntoHour($station, $expectedPlayTime, $tz);
 
@@ -91,17 +102,29 @@ final class ClockWheelPlaybackPlanner
                     'slot_type' => $activeSlot->type?->value,
                 ]
             );
+            $this->eventLogger->recordDeferred(
+                $station,
+                $wheel,
+                $activeSlot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::DeferredInsufficientWindow,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
         $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
 
         return $this->resolveSlot(
+            $wheel,
             $activeSlot,
             $recentHistory,
             $availableSeconds,
             $scheduleMode,
-            $station
+            $station,
+            $expectedPlayTime,
+            $secondsIntoHour,
         );
     }
 
@@ -221,11 +244,14 @@ final class ClockWheelPlaybackPlanner
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
      */
     private function resolveSlot(
+        StationClockWheel $wheel,
         StationClockWheelSlot $slot,
         array $recentHistory,
         int $availableSeconds,
         ClockWheelScheduleMode $scheduleMode,
         Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        int $secondsIntoHour,
     ): ?StationQueue {
         $type = $slot->type;
         $categoryId = $slot->category_id;
@@ -233,14 +259,21 @@ final class ClockWheelPlaybackPlanner
 
         if ($type === null) {
             $this->logger->warning('Clock Wheel slot has no type — skipping.');
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::NoSlotType,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
-        $params = ['stationId' => $station->id];
+        $params = ['storageLocation' => $station->media_storage_location];
         $dql = 'SELECT m FROM App\Entity\StationMedia m
-             JOIN m.storage_location sl
-             JOIN sl.stations st
-             WHERE st.id = :stationId';
+             WHERE m.storage_location = :storageLocation';
 
         if ($playlistId !== null && $playlistId > 0) {
             $dql .= ' AND EXISTS (
@@ -272,6 +305,15 @@ final class ClockWheelPlaybackPlanner
                     $playlistId ?? '(any)',
                 )
             );
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::NoMediaCandidates,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
@@ -280,11 +322,30 @@ final class ClockWheelPlaybackPlanner
 
         $candidates = $this->filterByDuration($candidates, $maxDuration, $slot, $strictSchedule);
 
+        $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
+        $separationResult = $this->separationChecker->apply(
+            $candidates,
+            $recentHistory,
+            $separationSettings,
+            $expectedPlayTime,
+            $slot->category_id,
+        );
+        $candidates = $separationResult->candidates;
+
         if ($candidates === []) {
             $this->logger->warning(
                 'Clock Wheel slot: no media fits the available window.',
                 ['available_seconds' => $availableSeconds, 'max_duration' => $maxDuration]
             );
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::NoMediaFitsWindow,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
@@ -306,11 +367,29 @@ final class ClockWheelPlaybackPlanner
             ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
 
         if ($validTrack === null) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::DuplicatePreventionEmpty,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
         $media = $this->em->find(StationMedia::class, $validTrack->media_id);
         if (!$media instanceof StationMedia) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::MediaNotFound,
+                $secondsIntoHour,
+            );
+
             return null;
         }
 
@@ -325,6 +404,17 @@ final class ClockWheelPlaybackPlanner
             $maxDuration
         );
         $this->em->persist($queueEntry);
+
+        $this->eventLogger->recordTrackQueued(
+            $station,
+            $wheel,
+            $slot,
+            $media,
+            $expectedPlayTime,
+            $secondsIntoHour,
+            $separationResult->separationRelaxed,
+            $separationResult->burnRateWarning,
+        );
 
         $this->logger->info('Clock Wheel resolved track.', [
             'media_id' => $media->id,
@@ -347,11 +437,6 @@ final class ClockWheelPlaybackPlanner
         return (float)$availableSeconds;
     }
 
-    /**
-     * @param StationMedia[] $candidates
-     *
-     * @return StationMedia[]
-     */
     /**
      * When true, AutoDJ applies a cue_out cap (Liquidsoap) as a fallback after PHP track selection.
      */
@@ -391,28 +476,32 @@ final class ClockWheelPlaybackPlanner
             return [];
         }
 
-        if ($this->isFlexibleMusicSlot($slot)) {
-            usort(
-                $candidates,
-                static fn (StationMedia $a, StationMedia $b): int =>
-                    $a->getCalculatedLength() <=> $b->getCalculatedLength()
-            );
-
-            $shortest = $candidates[0];
-            $this->logger->warning(
-                'Clock Wheel: no track fits the available window; using shortest music/talk candidate.',
-                [
-                    'available_seconds' => $maxDuration,
-                    'media_id' => $shortest->id,
-                    'effective_length' => $shortest->getCalculatedLength(),
-                    'slot_type' => $slot->type?->value,
-                ]
-            );
-
-            return [$shortest];
+        if ($candidates === []) {
+            return [];
         }
 
-        return [];
+        usort(
+            $candidates,
+            static fn (StationMedia $a, StationMedia $b): int =>
+                $a->getCalculatedLength() <=> $b->getCalculatedLength()
+        );
+
+        $shortest = $candidates[0];
+        $logKey = $this->isFlexibleMusicSlot($slot)
+            ? 'Clock Wheel: no track fits the available window; using shortest music/talk candidate.'
+            : 'Clock Wheel: no short-form track fits the available window; using shortest candidate with playback cap.';
+
+        $this->logger->warning(
+            $logKey,
+            [
+                'available_seconds' => $maxDuration,
+                'media_id' => $shortest->id,
+                'effective_length' => $shortest->getCalculatedLength(),
+                'slot_type' => $slot->type?->value,
+            ]
+        );
+
+        return [$shortest];
     }
 
     /**

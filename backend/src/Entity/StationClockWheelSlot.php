@@ -47,8 +47,8 @@ use Symfony\Component\Validator\Constraints as Assert;
  *
  * - `duration_seconds` (nullable smallint): the intended length of this slot in
  *   seconds. NULL means "no hard limit — play one track and move on". When set,
- *   the Liquidsoap generator wraps the slot source in a `max_duration` so that
- *   the clock stays on schedule even if the content runs long.
+ *   PR8 uses PHP `cue_out` via AutoDJ when needed; a future Liquidsoap `max_duration`
+ *   wrapper (see docs/clock-wheels.md PR8 Phase 2) is not implemented yet.
  *   Radio reality: ID/Promo/Ad slots have known fixed durations; music slots
  *   are usually left null so a song plays to its natural end.
  *
@@ -153,8 +153,8 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     /**
      * Soft duration cap in seconds.
      * NULL = play one complete track, no time constraint.
-     * Positive value = the generator wraps this slot in a max_duration operator
-     * so it yields back to the next slot after at most this many seconds.
+     * Positive value = caps selection and triggers PR8 `clock_wheel_enforce_cap` when needed.
+     * Optional future: Liquidsoap `max_duration` in ConfigWriter (deferred).
      *
      * Practical values:
      *   - Music block:  null (let the song finish)
@@ -176,5 +176,12 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     public function __construct(StationClockWheel $clockWheel)
     {
         $this->clock_wheel = $clockWheel;
+    }
+
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->clock_wheel_id = $this->clock_wheel->id;
+        $this->playlist_id = $this->playlist?->id;
+        $this->category_id = $this->category?->id;
     }
 }

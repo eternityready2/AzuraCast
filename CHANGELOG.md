@@ -11,6 +11,31 @@ release channel, you can take advantage of these new features and fixes.
 
 ---
 
+# AzuraCast 0.28.0 (Jun 3, 2026)
+
+## New Features/Changes
+
+- **Clock Wheels — Live tab (Schedule page)**: Dual hour timeline and enhanced circular clock with segment summary,
+  countdown to next anchor, queue/projection table (status, drift, mismatch warnings), hour health badge, and inline
+  analytics for the active wheel.
+
+- **Clock Wheels — PR10 dayparts & templates**: Template/daypart management, hourly wheel generation, re-sync, template
+  slot inheritance, and schedule create-event time windows from daypart hours.
+
+- **Clock Wheels — PR9 separation**: Template default separation rules, daypart overrides, and category-aware slot
+  separation in the playback planner.
+
+- **Clock Wheels — PR12 preview & analytics**: Hour preview API, simulator projected tracks on the Live tab, and wheel
+  analytics (fallbacks, drift, deferred slots).
+
+## Code Quality/Technical Changes
+
+- Live tab queue rows are matched to anchors by expected play time within the hour when possible.
+
+## Bug Fixes
+
+---
+
 # AzuraCast 0.23.4 (Mar 8, 2026)
 
 ## New Features/Changes

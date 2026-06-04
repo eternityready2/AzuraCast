@@ -6,12 +6,15 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
 use App\Radio\Schedule\ScheduleConflictChecker;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -33,6 +36,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         private readonly Scheduler $scheduler,
         private readonly ClockWheelPlaybackPlanner $planner,
         private readonly ScheduleConflictChecker $conflictChecker,
+        private readonly ClockWheelEventLogger $eventLogger,
     ) {
     }
 
@@ -55,10 +59,37 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         $station = $event->getStation();
         $expectedPlayTime = $event->getExpectedPlayTime();
 
+        if ($this->conflictChecker->hasEmergencyScheduleActive($station, $expectedPlayTime)) {
+            $activeEvent = $this->findActiveClockWheelSchedule($station, $expectedPlayTime);
+
+            $this->logger->debug(
+                'Clock Wheel skipped: emergency schedule is active.'
+            );
+            $this->eventLogger->recordFallback(
+                $station,
+                $activeEvent?->clock_wheel,
+                null,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::EmergencyOverride,
+            );
+            $this->em->flush();
+
+            return;
+        }
+
         if ($this->conflictChecker->hasNonClockWheelScheduleActive($station, $expectedPlayTime)) {
             $this->logger->debug(
                 'Clock Wheel skipped: another scheduled playlist or streamer is active.'
             );
+            $this->eventLogger->recordFallback(
+                $station,
+                null,
+                null,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::ScheduleConflict,
+            );
+            $this->em->flush();
+
             return;
         }
 
@@ -71,6 +102,15 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         $wheel = $activeEvent->clock_wheel;
 
         if (!$wheel->is_active) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                null,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::WheelInactive,
+            );
+            $this->em->flush();
+
             return;
         }
 
@@ -79,10 +119,16 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
         );
 
-        $recentHistory = $this->queueRepo->getRecentlyPlayedByTimeRange(
+        $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
+        $historyMinutes = $station->backend_config->duplicate_prevention_time_range;
+        if ($separationSettings->enabled || $separationSettings->burnRateMaxPlays24h !== null) {
+            $historyMinutes = max($historyMinutes, $separationSettings->historyLookbackMinutes());
+        }
+
+        $recentHistory = $this->queueRepo->getRecentlyPlayedWithCategoryByTimeRange(
             $station,
             $expectedPlayTime,
-            $station->backend_config->duplicate_prevention_time_range
+            $historyMinutes
         );
 
         $nextSong = $this->planner->resolveNextQueueEntry($wheel, $recentHistory, $expectedPlayTime, $activeEvent);
@@ -104,6 +150,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
                     $wheel->name
                 )
             );
+            $this->em->flush();
         }
     }
 
