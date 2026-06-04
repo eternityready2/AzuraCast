@@ -55,24 +55,6 @@
                             {{ formatMinuteOption(m) }}
                         </option>
                     </select>
-                    <label
-                        class="visually-hidden"
-                        :for="minuteNumberId"
-                    >
-                        {{ $gettext('Minutes (manual entry)') }}
-                    </label>
-                    <input
-                        :id="minuteNumberId"
-                        type="number"
-                        class="form-control form-control-sm am-pm-time-segments__minute-number"
-                        min="0"
-                        max="59"
-                        step="1"
-                        inputmode="numeric"
-                        :value="minutes"
-                        :aria-label="$gettext('Minutes (manual entry)')"
-                        @change="onMinuteNumberInput"
-                    >
                 </template>
             </div>
 
@@ -125,7 +107,6 @@
 import {computed, ref, useId, watch} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {
-    clampMinute,
     formatPartsToAmPm,
     HOUR12_OPTIONS,
     MINUTE_OPTIONS,
@@ -168,7 +149,6 @@ const fallbackId = useId();
 const baseId = computed(() => props.inputId ?? fallbackId);
 const hourSelectId = computed(() => baseId.value);
 const minuteSelectId = computed(() => `${baseId.value}_minute`);
-const minuteNumberId = computed(() => `${baseId.value}_minute_number`);
 const amRadioId = computed(() => `${baseId.value}_am`);
 const pmRadioId = computed(() => `${baseId.value}_pm`);
 
@@ -213,25 +193,6 @@ const emitFromSegments = () => {
 
 const onSegmentChange = () => {
     emitFromSegments();
-};
-
-const onMinuteNumberInput = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const raw = target.value.trim();
-
-    if (raw === '') {
-        return;
-    }
-
-    const parsed = parseInt(raw, 10);
-    if (Number.isNaN(parsed)) {
-        showInvalid.value = true;
-        return;
-    }
-
-    minutes.value = clampMinute(parsed);
-    target.value = String(minutes.value);
-    onSegmentChange();
 };
 
 watch(
@@ -279,15 +240,7 @@ watch(wholeHourOnly, () => {
     border-radius: var(--bs-border-radius-sm);
 }
 
-.am-pm-time-segments__minute-number {
-    width: 3.5rem;
-    min-width: 3.5rem;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
-}
-
 .am-pm-time-segments.is-invalid .form-select,
-.am-pm-time-segments.is-invalid .form-control,
 .am-pm-time-segments.is-invalid .am-pm-time-segments__period .btn {
     border-color: var(--bs-form-invalid-border-color);
 }
