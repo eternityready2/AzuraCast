@@ -151,12 +151,13 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             <<<'DQL'
                 SELECT sq.song_id, sq.timestamp_played, sq.title, sq.artist, m.category_id
                 FROM App\Entity\StationQueue sq
-                LEFT JOIN App\Entity\StationMedia m WITH m.song_id = sq.song_id AND m.station = :station
+                LEFT JOIN App\Entity\StationMedia m WITH m.song_id = sq.song_id AND m.storage_location = :storageLocation
                 WHERE sq.station = :station
                 AND (sq.is_played = 0 OR sq.timestamp_played >= :threshold)
                 ORDER BY sq.timestamp_played DESC
             DQL
         )->setParameter('station', $station)
+            ->setParameter('storageLocation', $station->media_storage_location)
             ->setParameter('threshold', $threshold)
             ->getArrayResult();
     }
