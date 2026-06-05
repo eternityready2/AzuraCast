@@ -11,6 +11,22 @@ release channel, you can take advantage of these new features and fixes.
 
 ---
 
+# AzuraCast 0.28.1 (Jun 5, 2026)
+
+## Bug Fixes
+
+- **Clock Wheels — AutoDJ queue build**: Fixed a Doctrine query in recent play history that referenced a nonexistent
+  `StationMedia.station` field; use `storage_location` instead so clock wheel queue building no longer fails with
+  `Queue builder error` and Liquidsoap `Queue is empty!` during active wheel windows.
+
+- **Schedule — time picker**: Minute selection on the Create Event modal now supports 1-minute steps (0–59) instead of
+  5-minute increments, so adjacent schedule windows can end at :59 before the next :00 event.
+
+- **Migrations**: Renamed invalid migration class `Version20260532120000` to `Version20260531130000` (invalid date in
+  the version string).
+
+---
+
 # AzuraCast 0.28.0 (Jun 3, 2026)
 
 ## New Features/Changes
