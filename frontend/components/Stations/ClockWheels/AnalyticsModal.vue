@@ -67,6 +67,64 @@
                 </div>
             </div>
 
+            <template v-if="(analytics?.legal_id_hours_logged ?? 0) > 0">
+                <h3 class="h6 mt-2">
+                    {{ $gettext('Legal ID compliance') }}
+                    <span class="text-muted fw-normal small">
+                        ({{ $gettext('tolerance') }}: {{ analytics?.legal_id_tolerance_seconds ?? 10 }}s)
+                    </span>
+                </h3>
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <div class="fs-4 fw-semibold">
+                                {{ analytics?.legal_id_compliance_percent ?? '—' }}<span
+                                    v-if="analytics?.legal_id_compliance_percent != null"
+                                    class="fs-6"
+                                >%</span>
+                            </div>
+                            <div class="small text-muted">
+                                {{ $gettext('On time') }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <div class="fs-4 fw-semibold">
+                                {{ analytics?.legal_id_on_time_count ?? 0 }}
+                            </div>
+                            <div class="small text-muted">
+                                {{ $gettext('Compliant hours') }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <div class="fs-4 fw-semibold text-warning">
+                                {{ analytics?.legal_id_late_count ?? 0 }}
+                            </div>
+                            <div class="small text-muted">
+                                {{ $gettext('Late (> tolerance)') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <ul
+                    v-if="(analytics?.legal_id_late_events?.length ?? 0) > 0"
+                    class="list-group list-group-flush mb-3"
+                >
+                    <li
+                        v-for="(ev, idx) in analytics?.legal_id_late_events"
+                        :key="idx"
+                        class="list-group-item px-0 small"
+                    >
+                        {{ $gettext('Expected') }}: {{ ev.expected_play_at }}
+                        · {{ $gettext('Actual') }}: {{ ev.actual_play_at ?? '—' }}
+                        · Δ {{ ev.drift_seconds ?? '—' }}s
+                    </li>
+                </ul>
+            </template>
+
             <template v-if="fallbackEntries.length > 0">
                 <h3 class="h6">
                     {{ $gettext('Fallback reasons') }}
@@ -108,6 +166,17 @@ export interface ClockWheelAnalyticsResponse {
     separation_relaxed_count: number;
     burn_rate_warning_count: number;
     fallback_reasons: Record<string, number>;
+    legal_id_tolerance_seconds?: number;
+    legal_id_hours_logged?: number;
+    legal_id_on_time_count?: number;
+    legal_id_late_count?: number;
+    legal_id_compliance_percent?: number | null;
+    legal_id_late_events?: {
+        expected_play_at: string;
+        actual_play_at: string | null;
+        drift_seconds: number | null;
+        media_id: number | null;
+    }[];
 }
 
 const {$gettext} = useTranslate();

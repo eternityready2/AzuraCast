@@ -1,4 +1,4 @@
-export type MediaTypeValue = 'music' | 'talk' | 'id' | 'promo' | 'ad';
+export type MediaTypeValue = 'music' | 'talk' | 'legal_id' | 'id' | 'promo' | 'ad';
 
 export type MediaTypeOption = {
     value: MediaTypeValue;
@@ -13,6 +13,10 @@ export const getMediaTypeOptions = ($gettext: (msg: string) => string): MediaTyp
     {
         value: 'talk',
         label: $gettext('Talk (sermons, speeches, and live recordings)'),
+    },
+    {
+        value: 'legal_id',
+        label: $gettext('Legal ID (mandatory top-of-hour station identification)'),
     },
     {
         value: 'id',

@@ -206,6 +206,7 @@ Log files (inside container): `/var/azuracast/www_tmp/app_nowplaying-YYYY-MM-DD.
 - **ScheduleCalendar component** supporting multiple event sources + create button.
   - File: `frontend/components/Stations/Common/ScheduleCalendar.vue`
 - **Live Clock Wheel tab** (PR7+): `ClockWheelLiveTab.vue`, `useClockWheelLiveData.ts` — dual **hour timeline** + **enhanced circular clock**, segment summary (current/next anchor, countdown), status column, queue↔anchor matching by expected play time, hour health badge, inline **Analytics**
+- **Legal ID + end-of-hour** (Phase A2/A3/A5): `legal_id` slot type at `0:00`, end-of-hour music fit before `:00`, promo fallback if no legal ID file, playback `actual_play_at` logging, **Legal ID compliance** in Analytics modal (10s tolerance)
 - **Clock Wheels manage page** (PR10): tabs for Wheels / Templates / Dayparts — `frontend/components/Stations/ClockWheels.vue`
   - `TemplateEditModal.vue`, `DaypartEditModal.vue` (AM/PM hour chips, separation override, Re-sync)
   - `PreviewModal.vue`, `AnalyticsModal.vue` (PR12)

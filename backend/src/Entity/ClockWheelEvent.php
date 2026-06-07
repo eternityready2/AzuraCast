@@ -92,6 +92,15 @@ final class ClockWheelEvent implements IdentifiableEntityInterface, StationAware
     #[ORM\Column]
     public bool $burn_rate_warning = false;
 
+    #[
+        ORM\ManyToOne,
+        ORM\JoinColumn(name: 'station_queue_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationQueue $station_queue = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $station_queue_id = null;
+
     public function setStation(Station $station): void
     {
         $this->station = $station;

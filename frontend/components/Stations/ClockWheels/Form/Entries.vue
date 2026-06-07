@@ -242,6 +242,9 @@
                                 <option value="random">
                                     {{ $gettext('Random') }}
                                 </option>
+                                <option value="sequential">
+                                    {{ $gettext('Sequential (rotate evenly)') }}
+                                </option>
                                 <option value="oldest_album">
                                     {{ $gettext('Oldest Album') }}
                                 </option>

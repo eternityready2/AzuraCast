@@ -8,6 +8,7 @@ use App\Cache\NowPlayingCache;
 use App\Container\EntityManagerAwareTrait;
 use App\Entity\Repository\SongHistoryRepository;
 use App\Entity\Repository\StationQueueRepository;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelLegalIdPlaybackService;
 use App\Entity\Song;
 use App\Entity\SongHistory;
 use App\Entity\Station;
@@ -24,7 +25,8 @@ final class FeedbackCommand extends AbstractCommand
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly SongHistoryRepository $historyRepo,
-        private readonly NowPlayingCache $nowPlayingCache
+        private readonly NowPlayingCache $nowPlayingCache,
+        private readonly ClockWheelLegalIdPlaybackService $legalIdPlaybackService,
     ) {
     }
 
@@ -119,6 +121,7 @@ final class FeedbackCommand extends AbstractCommand
         }
 
         if (null !== $sq) {
+            $this->legalIdPlaybackService->recordPlaybackIfLegalId($station, $sq, $media);
             $this->queueRepo->trackPlayed($station, $sq);
             return SongHistory::fromQueue($sq);
         }

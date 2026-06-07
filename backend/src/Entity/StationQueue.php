@@ -121,6 +121,10 @@ final class StationQueue implements
     #[ORM\Column]
     public bool $clock_wheel_enforce_cap = false;
 
+    /** True when a legal_id slot queued a promo (or other) substitute. */
+    #[ORM\Column]
+    public bool $clock_wheel_legal_id_substitute = false;
+
     public function __construct(Station $station, Interfaces\SongInterface $song)
     {
         $this->setSong($song);

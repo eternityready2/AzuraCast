@@ -20,4 +20,6 @@ enum ClockWheelFallbackReason: string
     case DuplicatePreventionEmpty = 'duplicate_prevention_empty';
     case MediaNotFound = 'media_not_found';
     case AutodjFallback = 'autodj_fallback';
+    /** No legal_id media available; a station promo was substituted. */
+    case LegalIdMissingUsedPromo = 'legal_id_missing_used_promo';
 }

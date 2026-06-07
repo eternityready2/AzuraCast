@@ -34,6 +34,19 @@ final class ClockWheelAnalyticsService
         $analytics->burn_rate_warning_count = $summary['burn_rate_warning'];
         $analytics->fallback_reasons = $summary['fallback_reasons'];
 
+        $compliance = $this->eventRepo->getLegalIdComplianceSummary(
+            $wheel,
+            $since,
+            ClockWheelPlaybackPlanner::LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS,
+        );
+
+        $analytics->legal_id_tolerance_seconds = $compliance['tolerance_seconds'];
+        $analytics->legal_id_hours_logged = $compliance['hours_with_legal_id'];
+        $analytics->legal_id_on_time_count = $compliance['on_time_count'];
+        $analytics->legal_id_late_count = $compliance['late_count'];
+        $analytics->legal_id_compliance_percent = $compliance['compliance_percent'];
+        $analytics->legal_id_late_events = $compliance['late_events'];
+
         return $analytics;
     }
 }

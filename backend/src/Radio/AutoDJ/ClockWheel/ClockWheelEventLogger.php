@@ -11,6 +11,7 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
+use App\Entity\StationQueue;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -33,13 +34,23 @@ final class ClockWheelEventLogger
         int $secondsIntoHour,
         bool $separationRelaxed = false,
         bool $burnRateWarning = false,
+        ?StationQueue $queueRow = null,
+        ?DateTimeImmutable $legalIdExpectedPlayAt = null,
     ): void {
-        $event = $this->createBase($station, ClockWheelEventKind::TrackQueued, $expectedPlayAt);
+        $logExpectedPlayAt = $legalIdExpectedPlayAt ?? $expectedPlayAt;
+        $event = $this->createBase($station, ClockWheelEventKind::TrackQueued, $logExpectedPlayAt);
         $event->clock_wheel = $wheel;
         $event->slot = $slot;
         $event->media = $media;
+        $event->station_queue = $queueRow;
         $event->anchor_type = $slot->type?->value;
-        $event->drift_seconds = $this->computeDriftSeconds($secondsIntoHour, $slot->position_seconds);
+
+        if ($legalIdExpectedPlayAt instanceof DateTimeImmutable) {
+            $event->drift_seconds = 0;
+        } else {
+            $event->drift_seconds = $this->computeDriftSeconds($secondsIntoHour, $slot->position_seconds);
+        }
+
         $event->separation_relaxed = $separationRelaxed;
         $event->burn_rate_warning = $burnRateWarning;
 

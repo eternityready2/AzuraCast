@@ -266,6 +266,47 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         self::assertSame(20 * 60, $slots[$activeIndex]->position_seconds);
     }
 
+    public function testEndOfHourFilterDoesNotUseOverflowTrack(): void
+    {
+        $long = $this->makeMedia(1, 400.0);
+        $short = $this->makeMedia(2, 120.0);
+
+        $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'filterByDuration');
+        $wheel = new StationClockWheel($this->station);
+        $slot = new StationClockWheelSlot($wheel);
+        $slot->type = ClockWheelSlotTypes::Music;
+
+        $filtered = $method->invoke(
+            $this->planner,
+            [$long, $short],
+            180.0,
+            $slot,
+            true,
+            true,
+        );
+
+        self::assertCount(1, $filtered);
+        self::assertSame(2, $filtered[0]->id);
+    }
+
+    public function testEndOfHourEnforcesPlaybackCap(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Music);
+        $media = $this->makeMedia(1, 200.0);
+
+        self::assertTrue(
+            $this->invokeShouldEnforcePlaybackCapEndOfHour($slot, $media, 300.0)
+        );
+    }
+
+    public function testLegalIdSlotTypeIsMandatoryShortForm(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::LegalId);
+        $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'isFlexibleMusicSlot');
+
+        self::assertFalse($method->invoke($this->planner, $slot));
+    }
+
     private function invokePlannedSeconds(DateTimeImmutable $expectedPlayTime): int
     {
         return $this->invokePlannedSecondsOn($this->planner, $this->station, $expectedPlayTime);
@@ -315,6 +356,24 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             $this->station,
             new DateTimeImmutable('now', new DateTimeZone('UTC')),
             $slot->position_seconds,
+            false,
+        );
+    }
+
+    private function invokeShouldEnforcePlaybackCapEndOfHour(
+        StationClockWheelSlot $slot,
+        StationMedia $media,
+        float $maxDuration,
+    ): bool {
+        $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'shouldEnforcePlaybackCap');
+
+        return (bool)$method->invoke(
+            $this->planner,
+            $slot,
+            ClockWheelScheduleMode::Flexible,
+            $media,
+            $maxDuration,
+            true,
         );
     }
 
@@ -351,7 +410,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
 
         $method = new ReflectionMethod(ClockWheelPlaybackPlanner::class, 'filterByDuration');
 
-        return $method->invoke($this->planner, $candidates, $maxDuration, $slot, $strictSchedule);
+        return $method->invoke($this->planner, $candidates, $maxDuration, $slot, $strictSchedule, false);
     }
 
     private function invokeShouldEnforcePlaybackCap(

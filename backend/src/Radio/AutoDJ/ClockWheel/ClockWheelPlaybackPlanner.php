@@ -38,6 +38,9 @@ final class ClockWheelPlaybackPlanner
 
     private const int MIN_SHORT_FORM_WINDOW_SECONDS = 10;
 
+    /** Seconds late before legal ID compliance is flagged (A5). */
+    public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = 10;
+
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly StationQueueRepository $queueRepo,
@@ -93,6 +96,18 @@ final class ClockWheelPlaybackPlanner
             'slot_type' => $activeSlot->type?->value,
         ]);
 
+        if ($activeSlot->type === ClockWheelSlotTypes::LegalId) {
+            return $this->resolveMandatoryLegalIdSlot(
+                $wheel,
+                $activeSlot,
+                $recentHistory,
+                $scheduleMode,
+                $station,
+                $expectedPlayTime,
+                $secondsIntoHour,
+            );
+        }
+
         if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
             $this->logger->info(
                 'Clock Wheel: insufficient time before next anchor; deferring to next BuildQueue tick.',
@@ -115,6 +130,7 @@ final class ClockWheelPlaybackPlanner
         }
 
         $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
+        $isEndOfHour = $this->isEndOfHourMusicSlot($slots, $activeIndex);
 
         return $this->resolveSlot(
             $wheel,
@@ -125,6 +141,7 @@ final class ClockWheelPlaybackPlanner
             $station,
             $expectedPlayTime,
             $secondsIntoHour,
+            $isEndOfHour,
         );
     }
 
@@ -241,6 +258,39 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
+     * @param StationClockWheelSlot[] $slots
+     */
+    private function isEndOfHourMusicSlot(array $slots, int $activeIndex): bool
+    {
+        if (!isset($slots[$activeIndex])) {
+            return false;
+        }
+
+        $slot = $slots[$activeIndex];
+        if (!$this->isFlexibleMusicSlot($slot)) {
+            return false;
+        }
+
+        return $this->getNextAnchorSeconds($slots, $activeIndex) >= self::HOUR_SECONDS;
+    }
+
+    private function resolveTopOfHourExpectedPlayAt(
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+    ): DateTimeImmutable {
+        $tz = $station->getTimezoneObject();
+        $local = CarbonImmutable::instance($expectedPlayTime)->setTimezone($tz);
+        $hourStart = $local->startOf('hour');
+        $secondsIntoHour = $local->getTimestamp() - $hourStart->getTimestamp();
+
+        if ($secondsIntoHour > 30) {
+            return $hourStart->addHour()->toDateTimeImmutable();
+        }
+
+        return $hourStart->toDateTimeImmutable();
+    }
+
+    /**
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
      */
     private function resolveSlot(
@@ -252,6 +302,7 @@ final class ClockWheelPlaybackPlanner
         Station $station,
         DateTimeImmutable $expectedPlayTime,
         int $secondsIntoHour,
+        bool $isEndOfHour = false,
     ): ?StationQueue {
         $type = $slot->type;
         $categoryId = $slot->category_id;
@@ -320,7 +371,21 @@ final class ClockWheelPlaybackPlanner
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
         $strictSchedule = ClockWheelScheduleMode::Strict === $scheduleMode;
 
-        $candidates = $this->filterByDuration($candidates, $maxDuration, $slot, $strictSchedule);
+        $candidates = $this->filterByDuration(
+            $candidates,
+            $maxDuration,
+            $slot,
+            $strictSchedule || $isEndOfHour,
+            $isEndOfHour,
+        );
+
+        if ($isEndOfHour && $candidates !== []) {
+            usort(
+                $candidates,
+                static fn (StationMedia $a, StationMedia $b): int =>
+                    $b->getCalculatedLength() <=> $a->getCalculatedLength()
+            );
+        }
 
         $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
         $separationResult = $this->separationChecker->apply(
@@ -401,7 +466,8 @@ final class ClockWheelPlaybackPlanner
             $slot,
             $scheduleMode,
             $media,
-            $maxDuration
+            $maxDuration,
+            $isEndOfHour,
         );
         $this->em->persist($queueEntry);
 
@@ -414,6 +480,7 @@ final class ClockWheelPlaybackPlanner
             $secondsIntoHour,
             $separationResult->separationRelaxed,
             $separationResult->burnRateWarning,
+            $queueEntry,
         );
 
         $this->logger->info('Clock Wheel resolved track.', [
@@ -426,6 +493,188 @@ final class ClockWheelPlaybackPlanner
         ]);
 
         return $queueEntry;
+    }
+
+    /**
+     * Mandatory legal_id at top of hour — never returns null; promo fallback if needed.
+     *
+     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
+     */
+    private function resolveMandatoryLegalIdSlot(
+        StationClockWheel $wheel,
+        StationClockWheelSlot $slot,
+        array $recentHistory,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        int $secondsIntoHour,
+    ): ?StationQueue {
+        $legalIdExpectedAt = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
+        $usedSubstitute = false;
+        $fallbackReason = null;
+
+        $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::LegalId, $slot);
+
+        if ($candidates === []) {
+            $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Promo, $slot);
+            $usedSubstitute = true;
+            $fallbackReason = ClockWheelFallbackReason::LegalIdMissingUsedPromo;
+        }
+
+        if ($candidates === []) {
+            $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Id, $slot);
+            $usedSubstitute = true;
+            $fallbackReason = ClockWheelFallbackReason::LegalIdMissingUsedPromo;
+        }
+
+        if ($candidates === []) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $legalIdExpectedAt,
+                ClockWheelFallbackReason::NoMediaCandidates,
+                $secondsIntoHour,
+            );
+
+            $this->logger->error(
+                'Clock Wheel legal_id: no legal_id, promo, or id media available — cannot queue mandatory ID.',
+                ['clock_wheel_id' => $wheel->id]
+            );
+
+            return null;
+        }
+
+        $maxDuration = $this->resolveMaxDuration($slot, max(1, 120));
+        $allCandidates = $candidates;
+        $candidates = $this->filterByDuration($allCandidates, $maxDuration, $slot, true, false);
+
+        if ($candidates === [] && $allCandidates !== []) {
+            usort(
+                $allCandidates,
+                static fn (StationMedia $a, StationMedia $b): int =>
+                    $a->getCalculatedLength() <=> $b->getCalculatedLength()
+            );
+            $candidates = [$allCandidates[0]];
+        }
+
+        $mediaQueue = [];
+        foreach ($candidates as $m) {
+            $q = new StationPlaylistQueue();
+            $q->media_id = $m->id;
+            $q->spm_id = 0;
+            $q->song_id = $m->song_id;
+            $q->artist = $m->artist ?? '';
+            $q->title = $m->title ?? '';
+            $mediaQueue[] = $q;
+        }
+
+        $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Sequential;
+        if ($algorithm === ClockWheelSlotAlgorithms::Random) {
+            $algorithm = ClockWheelSlotAlgorithms::Sequential;
+        }
+
+        $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
+
+        $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
+            ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true)
+            ?? $mediaQueue[0] ?? null;
+
+        if ($validTrack === null) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $legalIdExpectedAt,
+                ClockWheelFallbackReason::DuplicatePreventionEmpty,
+                $secondsIntoHour,
+            );
+
+            return null;
+        }
+
+        $media = $this->em->find(StationMedia::class, $validTrack->media_id);
+        if (!$media instanceof StationMedia) {
+            return null;
+        }
+
+        if ($fallbackReason instanceof ClockWheelFallbackReason) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $slot,
+                $legalIdExpectedAt,
+                $fallbackReason,
+                $secondsIntoHour,
+            );
+        }
+
+        $queueEntry = StationQueue::fromMedia($station, $media);
+        $queueEntry->clock_wheel = $slot->clock_wheel;
+        $queueEntry->clock_wheel_max_play_seconds = (int)floor($maxDuration);
+        $queueEntry->clock_wheel_schedule_mode = $scheduleMode->value;
+        $queueEntry->clock_wheel_enforce_cap = true;
+        $queueEntry->clock_wheel_legal_id_substitute = $usedSubstitute;
+        $this->em->persist($queueEntry);
+
+        $this->eventLogger->recordTrackQueued(
+            $station,
+            $wheel,
+            $slot,
+            $media,
+            $expectedPlayTime,
+            $secondsIntoHour,
+            false,
+            false,
+            $queueEntry,
+            $legalIdExpectedAt,
+        );
+
+        $this->logger->info('Clock Wheel resolved mandatory legal_id.', [
+            'media_id' => $media->id,
+            'substitute' => $usedSubstitute,
+            'expected_top_of_hour' => $legalIdExpectedAt->format(DateTimeImmutable::ATOM),
+        ]);
+
+        return $queueEntry;
+    }
+
+    /**
+     * @return StationMedia[]
+     */
+    private function loadMediaCandidates(
+        Station $station,
+        ClockWheelSlotTypes $type,
+        StationClockWheelSlot $slot,
+    ): array {
+        $params = [
+            'storageLocation' => $station->media_storage_location,
+            'type' => $type->value,
+        ];
+
+        $dql = 'SELECT m FROM App\Entity\StationMedia m
+             WHERE m.storage_location = :storageLocation
+             AND m.type = :type';
+
+        if ($slot->playlist_id !== null && $slot->playlist_id > 0) {
+            $dql .= ' AND EXISTS (
+                SELECT 1 FROM App\Entity\StationPlaylistMedia spm
+                WHERE spm.media = m AND spm.playlist = :playlistId
+            )';
+            $params['playlistId'] = $slot->playlist_id;
+        }
+
+        if ($slot->category_id !== null) {
+            $dql .= ' AND m.category_id = :categoryId';
+            $params['categoryId'] = $slot->category_id;
+        }
+
+        /** @var StationMedia[] $result */
+        $result = $this->em->createQuery($dql)
+            ->setParameters($params)
+            ->getResult();
+
+        return $result;
     }
 
     private function resolveMaxDuration(StationClockWheelSlot $slot, int $availableSeconds): float
@@ -445,7 +694,12 @@ final class ClockWheelPlaybackPlanner
         ClockWheelScheduleMode $scheduleMode,
         StationMedia $media,
         float $maxDuration,
+        bool $isEndOfHour = false,
     ): bool {
+        if ($isEndOfHour) {
+            return true;
+        }
+
         if (ClockWheelScheduleMode::Strict === $scheduleMode) {
             return true;
         }
@@ -462,6 +716,7 @@ final class ClockWheelPlaybackPlanner
         float $maxDuration,
         StationClockWheelSlot $slot,
         bool $strictSchedule,
+        bool $isEndOfHour = false,
     ): array {
         $fitting = array_values(array_filter(
             $candidates,
@@ -472,7 +727,15 @@ final class ClockWheelPlaybackPlanner
             return $fitting;
         }
 
-        if ($strictSchedule) {
+        if ($strictSchedule || $isEndOfHour) {
+            $this->logger->warning(
+                'Clock Wheel: no track fits before hour boundary; end-of-hour lookahead could not place a song.',
+                [
+                    'available_seconds' => $maxDuration,
+                    'slot_type' => $slot->type?->value,
+                ]
+            );
+
             return [];
         }
 
@@ -520,6 +783,10 @@ final class ClockWheelPlaybackPlanner
         if ($algorithm === ClockWheelSlotAlgorithms::Random) {
             shuffle($mediaQueue);
             return $mediaQueue;
+        }
+
+        if ($algorithm === ClockWheelSlotAlgorithms::Sequential) {
+            $algorithm = ClockWheelSlotAlgorithms::OldestTrack;
         }
 
         $histTimestamp = [];

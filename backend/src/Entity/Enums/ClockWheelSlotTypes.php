@@ -22,6 +22,12 @@ enum ClockWheelSlotTypes: string
     case Talk = 'talk';
 
     /**
+     * Mandatory top-of-hour legal station identification.
+     * Distinct from generic ID sweepers; must not be skipped on-air.
+     */
+    case LegalId = 'legal_id';
+
+    /**
      * Station identification: sweepers, imaging, jingles.
      * These are typically short (~5–30 s) and run between music blocks.
      */
@@ -44,6 +50,7 @@ enum ClockWheelSlotTypes: string
         return match($this) {
             self::Music => 'Music',
             self::Talk  => 'Talk',
+            self::LegalId => 'Legal ID',
             self::Id    => 'ID',
             self::Promo => 'Promo',
             self::Ad    => 'Ad',
