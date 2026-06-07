@@ -96,6 +96,8 @@ final class ClockWheelPlaybackPlanner
             'slot_type' => $activeSlot->type?->value,
         ]);
 
+        $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
+
         if ($activeSlot->type === ClockWheelSlotTypes::LegalId) {
             return $this->resolveMandatoryLegalIdSlot(
                 $wheel,
@@ -129,7 +131,6 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
 
-        $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
         $isEndOfHour = $this->isEndOfHourMusicSlot($slots, $activeIndex);
 
         return $this->resolveSlot(
