@@ -152,7 +152,15 @@ final class AiNewsGenerator
             );
 
             if ('error' !== $station->ai_news_last_generation_status) {
-                $this->persistStatus($station, 'error', $e->getMessage(), null);
+                try {
+                    if (!$this->em->isOpen()) {
+                        $this->em->getConnection()->close();
+                        $this->em->getConnection()->connect();
+                    }
+                    $this->persistStatus($station, 'error', $e->getMessage(), null);
+                } catch (Throwable) {
+                    // EntityManager could not be recovered; status persisted on next successful run.
+                }
             }
 
             throw $e;
@@ -896,6 +904,9 @@ final class AiNewsGenerator
     private function normalizeHtmlText(string $text): string
     {
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Strip or replace any bytes that are not valid UTF-8 (e.g. Windows-1252
+        // smart quotes / em-dashes scraped via DOMDocument::loadHTML).
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
         $text = preg_replace('/\s+/u', ' ', trim($text)) ?? trim($text);
 
         return $this->stripNewsLeadIn($text);
@@ -1113,10 +1124,24 @@ final class AiNewsGenerator
         $station->ai_news_last_generation_time = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $station->ai_news_last_error = $error;
         if (null !== $metadata) {
-            $station->ai_news_latest_bulletin = $metadata;
+            $station->ai_news_latest_bulletin = $this->sanitizeForJson($metadata);
         }
 
         $this->em->persist($station);
         $this->em->flush();
+    }
+
+    /**
+     * Recursively sanitize an array so all string values are valid UTF-8,
+     * preventing Doctrine JSON serialization failures on scraped content.
+     */
+    private function sanitizeForJson(array $data): array
+    {
+        array_walk_recursive($data, static function (mixed &$value): void {
+            if (is_string($value)) {
+                $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+            }
+        });
+        return $data;
     }
 }
