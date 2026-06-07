@@ -69,7 +69,7 @@ import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
 } from '~/functions/clockWheelPosition.ts';
-import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 interface ClockWheelEntry {
     type: MediaTypeValue;
@@ -159,8 +159,7 @@ const resetForm = () => {
 };
 
 const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
-    const allowed: MediaTypeValue[] = ['music', 'talk', 'id', 'promo', 'ad'];
-    return allowed.includes(type as MediaTypeValue) ? (type as MediaTypeValue) : 'music';
+    return isMediaTypeValue(type) ? type : 'music';
 };
 
 const populateForm = (data: Record<string, unknown>) => {

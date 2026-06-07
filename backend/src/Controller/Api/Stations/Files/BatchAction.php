@@ -13,6 +13,7 @@ use App\Entity\Repository\StationPlaylistFolderRepository;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\StationMedia;
 use App\Entity\StationMediaCategory;
 use App\Entity\StationPlaylist;
@@ -492,7 +493,10 @@ final class BatchAction implements SingleActionInterface
     ): MediaBatchResult {
         $result = $this->parseRequest($request, $fs, true);
 
-        $allowedTypes = ['music', 'talk', 'id', 'promo', 'ad'];
+        $allowedTypes = array_map(
+            static fn (ClockWheelSlotTypes $case): string => $case->value,
+            ClockWheelSlotTypes::cases()
+        );
 
         $body = $request->getParsedBody();
         if (!is_array($body)) {

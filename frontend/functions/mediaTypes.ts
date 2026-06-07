@@ -1,5 +1,15 @@
 export type MediaTypeValue = 'music' | 'talk' | 'legal_id' | 'id' | 'promo' | 'ad';
 
+/** Canonical list — keep in sync with {@see ClockWheelSlotTypes} on the backend. */
+export const MEDIA_TYPE_VALUES: readonly MediaTypeValue[] = [
+    'music',
+    'talk',
+    'legal_id',
+    'id',
+    'promo',
+    'ad',
+] as const;
+
 export type MediaTypeOption = {
     value: MediaTypeValue;
     label: string;
@@ -31,6 +41,9 @@ export const getMediaTypeOptions = ($gettext: (msg: string) => string): MediaTyp
         label: $gettext('Ad (advert replacement files)'),
     },
 ];
+
+export const isMediaTypeValue = (type: string | null | undefined): type is MediaTypeValue =>
+    MEDIA_TYPE_VALUES.includes(type as MediaTypeValue);
 
 export const formatMediaType = (
     type: string | null | undefined,
