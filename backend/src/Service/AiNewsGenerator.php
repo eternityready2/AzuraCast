@@ -692,12 +692,12 @@ final class AiNewsGenerator
 
             $summary = $this->normalizeHtmlText($paragraph->textContent ?? '');
             if ('' !== $summary) {
-                $summary = preg_replace(
-                    '/^' . preg_quote($title, '/') . '(?:\s*[:\-–—]\s*|\s+)/u',
-                    '',
-                    $summary,
-                    1
-                ) ?? $summary;
+                $pattern = '/^' . preg_quote($title, '/') . '(?:\s*[:\-–—]\s*|\s+)/u';
+                // Guard against invalid UTF-8 in the built pattern (e.g. from DOMDocument
+                // replacement chars that survived normalisation in the paragraph text).
+                if (false !== @preg_match($pattern, '')) {
+                    $summary = preg_replace($pattern, '', $summary, 1) ?? $summary;
+                }
                 $summary = $this->normalizeHtmlText($summary);
             }
 
@@ -907,6 +907,9 @@ final class AiNewsGenerator
         // Strip or replace any bytes that are not valid UTF-8 (e.g. Windows-1252
         // smart quotes / em-dashes scraped via DOMDocument::loadHTML).
         $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        // Remove Unicode replacement characters that DOMDocument inserts for
+        // unrecognised bytes — these corrupt regex patterns downstream.
+        $text = str_replace("\u{FFFD}", '', $text);
         $text = preg_replace('/\s+/u', ' ', trim($text)) ?? trim($text);
 
         return $this->stripNewsLeadIn($text);
