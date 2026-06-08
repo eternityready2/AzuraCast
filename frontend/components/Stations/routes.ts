@@ -62,6 +62,11 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:ai_news'
                 },
                 {
+                    path: 'ai_dj',
+                    component: () => import('~/components/Stations/AiDj.vue'),
+                    name: 'stations:ai_dj'
+                },
+                {
                     path: 'logs',
                     component: () => import('~/components/Stations/Logs.vue'),
                     name: 'stations:logs'
