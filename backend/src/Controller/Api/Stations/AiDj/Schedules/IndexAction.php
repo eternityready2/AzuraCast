@@ -36,11 +36,11 @@ final readonly class IndexAction implements SingleActionInterface
         $station = $request->getStation();
         $dj = $this->djRepo->find((int)$params['dj_id']);
 
-        if (null === $dj || $dj->getStationId() !== $station->getId()) {
-            return $response->withStatus(404)->withJson(Status::error('AI DJ not found'));
+        if (null === $dj || $dj->getStationId() !== $station->id) {
+            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found']);
         }
 
-        $schedules = $this->scheduleRepo->findBy(['ai_dj' => $dj]);
+        $schedules = $this->scheduleRepo->findByDj($dj->id);
 
         return $response->withJson(array_map(
             fn($schedule) => $schedule->api(),

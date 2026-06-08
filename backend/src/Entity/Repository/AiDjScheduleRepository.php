@@ -92,4 +92,19 @@ final class AiDjScheduleRepository extends Repository
 
         return false;
     }
+
+    /**
+     * @return AiDjSchedule[]
+     */
+    public function findByDj(int $djId): array
+    {
+        return $this->em->createQueryBuilder()
+            ->select('schedule')
+            ->from(AiDjSchedule::class, 'schedule')
+            ->andWhere('IDENTITY(schedule.ai_dj) = :djId')
+            ->setParameter('djId', $djId)
+            ->orderBy('schedule.start_time', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
 }

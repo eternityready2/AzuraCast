@@ -41,8 +41,8 @@ final readonly class PutAction implements SingleActionInterface
         $station = $request->getStation();
         $dj = $this->djRepo->find((int)$params['dj_id']);
 
-        if (null === $dj || $dj->getStationId() !== $station->getId()) {
-            return $response->withStatus(404)->withJson(Status::error('AI DJ not found'));
+        if (null === $dj || $dj->getStationId() !== $station->id) {
+            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found']);
         }
 
         $schedule = $this->scheduleRepo->findOneBy([
@@ -51,7 +51,7 @@ final readonly class PutAction implements SingleActionInterface
         ]);
 
         if (null === $schedule) {
-            return $response->withStatus(404)->withJson(Status::error('Schedule not found'));
+            return $response->withStatus(404)->withJson(['error' => 'Schedule not found']);
         }
 
         $data = (array)$request->getParsedBody();
@@ -74,7 +74,7 @@ final readonly class PutAction implements SingleActionInterface
 
         if ($this->scheduleRepo->hasOverlap($schedule, true)) {
             return $response->withStatus(400)
-                ->withJson(Status::error('Schedule overlaps with existing schedule for this DJ'));
+                ->withJson(['error' => 'Schedule overlaps with existing schedule for this DJ']);
         }
 
         $this->scheduleRepo->save($schedule);

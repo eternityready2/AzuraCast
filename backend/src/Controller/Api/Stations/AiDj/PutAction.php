@@ -59,7 +59,7 @@ final class PutAction implements SingleActionInterface
 
         $dj = $this->aiDjRepository->find($djId);
 
-        if (null === $dj || $dj->getStationId() !== $station->getId()) {
+        if (null === $dj || $dj->getStationId() !== $station->id) {
             return $response->withStatus(404)->withJson([
                 'error' => 'AI DJ not found.',
             ]);

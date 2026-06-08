@@ -62,6 +62,6 @@ final class PostAction implements SingleActionInterface
         $this->em->persist($dj);
         $this->em->flush();
 
-        return $response->withJson(['id' => $dj->getId()]);
+        return $response->withJson(['id' => $dj->id]);
     }
 }
