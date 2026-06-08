@@ -12,15 +12,14 @@ use Doctrine\Common\Collections\Collection;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
+use App\Service\AiNewsGenerator;
 
 final class AiDjGenerator
 {
     use LoggerAwareTrait;
 
-    private const string PIPER_BIN = '/usr/local/bin/piper';
+    private const string PIPER_BIN = 'piper';
     private const string FFMPEG_BIN = 'ffmpeg';
-    private const string DEFAULT_VOICE_MODEL =
-        '/usr/local/share/piper-voices/en/en_US/lessac/medium/en_US-lessac-medium.onnx';
     private const int TTS_TIMEOUT = 3;
     private const int DISK_LIMIT_MB = 400; // 80% of 500MB max
 
@@ -38,7 +37,7 @@ final class AiDjGenerator
         ?string $voiceModelPath,
         string $outputPath
     ): ?string {
-        $modelPath = $voiceModelPath ?: self::DEFAULT_VOICE_MODEL;
+        $modelPath = $voiceModelPath ?: AiNewsGenerator::AVAILABLE_VOICE_MODELS[0]['path'];
         $tempDir = dirname($outputPath);
 
         if (!is_dir($tempDir) && !@mkdir($tempDir, 0755, true)) {

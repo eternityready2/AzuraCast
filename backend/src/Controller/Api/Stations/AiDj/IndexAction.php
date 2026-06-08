@@ -9,6 +9,7 @@ use App\Entity\Repository\AiDjRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
@@ -52,6 +53,9 @@ final class IndexAction implements SingleActionInterface
             $djList
         );
 
-        return $response->withJson($result);
+        return $response->withJson([
+            'rows' => $result,
+            'voice_options' => AiNewsGenerator::AVAILABLE_VOICE_MODELS,
+        ]);
     }
 }
