@@ -60,7 +60,12 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
 
     /** @var Collection<int, AiDjContent> */
     #[
-        ORM\ManyToMany(targetEntity: AiDjContent::class, mappedBy: 'ai_djs', fetch: 'EXTRA_LAZY')
+        ORM\ManyToMany(targetEntity: AiDjContent::class, inversedBy: 'ai_djs', fetch: 'EXTRA_LAZY'),
+        ORM\JoinTable(
+            name: 'ai_dj_has_content',
+            joinColumns: [new ORM\JoinColumn(name: 'ai_dj_id', referencedColumnName: 'id', onDelete: 'CASCADE')],
+            inverseJoinColumns: [new ORM\JoinColumn(name: 'ai_dj_content_id', referencedColumnName: 'id', onDelete: 'CASCADE')]
+        )
     ]
     private Collection $contents;
 

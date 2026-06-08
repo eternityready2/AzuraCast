@@ -32,6 +32,8 @@ final class AiDjScheduleRepository extends Repository
 
     public function findActiveForTimeSlot(int $stationId, int $dayOfWeek, string $time): ?AiDjSchedule
     {
+        // Pass time as plain string (H:i:s) — Doctrine TIME_IMMUTABLE binding
+        // produces format mismatches with MariaDB TIME columns; raw string comparison works correctly.
         return $this->em->createQueryBuilder()
             ->select('schedule')
             ->from(AiDjSchedule::class, 'schedule')
@@ -44,7 +46,7 @@ final class AiDjScheduleRepository extends Repository
             ->andWhere('schedule.end_time > :time')
             ->setParameter('stationId', $stationId)
             ->setParameter('isEnabled', true)
-            ->setParameter('dayOfWeek', '%'.$dayOfWeek.'%')
+            ->setParameter('dayOfWeek', '%' . $dayOfWeek . '%')
             ->setParameter('time', $time)
             ->orderBy('schedule.start_time', 'DESC')
             ->setMaxResults(1)
