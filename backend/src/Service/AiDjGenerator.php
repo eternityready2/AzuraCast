@@ -125,7 +125,8 @@ final class AiDjGenerator
             return null;
         }
 
-        $template = $this->selectRandomTemplate($dj->getContents());
+        $template = $this->selectRandomTemplate($dj->getContents())
+            ?? 'Coming up next on {{station_name}}.';
 
         $text = $this->replaceTemplateVariables(
             $template,
@@ -133,7 +134,7 @@ final class AiDjGenerator
                 'dj_name' => $dj->getName(),
                 'artist' => $artist ?? 'this artist',
                 'song' => $songTitle ?? 'this song',
-                'station_name' => $station->getName(),
+                'station_name' => $station->name,
             ]
         );
 

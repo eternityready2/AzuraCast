@@ -50,23 +50,30 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
     public function onBuildQueue(BuildQueue $event): void
     {
+        $station = $event->getStation();
+        $this->logger->debug('AI DJ: onBuildQueue fired.', ['station_id' => $station->id, 'is_interrupting' => $event->isInterrupting()]);
+
         if ($event->isInterrupting()) {
             return;
         }
 
-        $station = $event->getStation();
         $backend = $this->adapters->getBackendAdapter($station);
 
         if (!($backend instanceof Liquidsoap)) {
+            $this->logger->debug('AI DJ: Backend is not Liquidsoap, skipping.');
             return;
         }
 
-        if (!$backend->isQueueEmpty($station, LiquidsoapQueues::Interrupting)) {
+        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Interrupting);
+        $this->logger->debug('AI DJ: Queue empty check.', ['is_empty' => $queueEmpty]);
+
+        if (!$queueEmpty) {
             $this->logger->debug('AI DJ: Interrupting queue not empty, skipping.');
             return;
         }
 
         $expectedPlayTime = $event->getExpectedPlayTime();
+        $this->logger->debug('AI DJ: Checking for active DJ.', ['station_id' => $station->id, 'time' => $expectedPlayTime?->format('c')]);
         $dj = $this->scheduler->findActiveDj($station->id, $expectedPlayTime);
 
         if (null === $dj) {
@@ -74,14 +81,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        $nextSongs = $event->getNextSongs();
-        if (empty($nextSongs)) {
-            return;
-        }
+        $this->logger->info('AI DJ: Active DJ found.', ['dj_name' => $dj->getName()]);
 
-        $nextSong = is_array($nextSongs) ? $nextSongs[0] : $nextSongs;
-        $artist = $nextSong->song->artist ?? null;
-        $songTitle = $nextSong->song->title ?? null;
+        $nextSongs = $event->getNextSongs();
+        $this->logger->debug('AI DJ: Next songs count.', ['count' => count((array)$nextSongs)]);
+
+        // At priority 5 (before QueueBuilder), nextSongs may be empty.
+        // We still push the clip - use null for artist/title and let template handle it.
+        $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
+        $artist = $nextSong?->song?->artist ?? null;
+        $songTitle = $nextSong?->song?->title ?? null;
 
         $this->pushIntroClip($dj, $artist, $songTitle, $station, $backend);
     }
