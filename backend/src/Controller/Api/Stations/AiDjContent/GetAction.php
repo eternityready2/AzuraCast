@@ -57,6 +57,13 @@ final readonly class GetAction implements SingleActionInterface
             return $response->withStatus(404)->withJson(Error::notFound());
         }
 
-        return $response->withJson($content);
+        return $response->withJson([
+            'id' => $content->id,
+            'type' => $content->type,
+            'content' => $content->content,
+            'reference' => $content->reference,
+            'is_enabled' => $content->is_enabled,
+            'is_global' => $content->is_global,
+        ]);
     }
 }

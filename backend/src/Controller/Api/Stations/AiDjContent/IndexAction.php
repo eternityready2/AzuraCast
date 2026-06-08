@@ -88,6 +88,15 @@ final readonly class IndexAction implements SingleActionInterface
             $content = array_filter($content, fn(AiDjContent $item) => $item->is_global === $global);
         }
 
-        return $response->withJson(array_values($content));
+        $result = array_map(fn(AiDjContent $item) => [
+            'id' => $item->id,
+            'type' => $item->type,
+            'content' => $item->content,
+            'reference' => $item->reference,
+            'is_enabled' => $item->is_enabled,
+            'is_global' => $item->is_global,
+        ], array_values($content));
+
+        return $response->withJson($result);
     }
 }
