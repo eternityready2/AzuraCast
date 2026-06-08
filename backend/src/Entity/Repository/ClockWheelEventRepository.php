@@ -7,6 +7,8 @@ namespace App\Entity\Repository;
 use App\Doctrine\Repository;
 use App\Entity\ClockWheelEvent;
 use App\Entity\Enums\ClockWheelEventKind;
+use App\Entity\Enums\ClockWheelFallbackReason;
+use BackedEnum;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use DateTimeImmutable;
@@ -111,7 +113,7 @@ final class ClockWheelEventRepository extends Repository
             ->setParameter('since', $since)
             ->getSingleScalarResult();
 
-        /** @var array<array{reason: string|null, cnt: string}> $reasonRows */
+        /** @var array<array{reason: ClockWheelFallbackReason|string|null, cnt: string}> $reasonRows */
         $reasonRows = $this->em->createQuery(
             <<<'DQL'
                 SELECT e.fallback_reason AS reason, COUNT(e.id) AS cnt
@@ -127,9 +129,13 @@ final class ClockWheelEventRepository extends Repository
 
         $fallbackReasons = [];
         foreach ($reasonRows as $row) {
-            if ($row['reason'] !== null) {
-                $fallbackReasons[$row['reason']] = (int)$row['cnt'];
+            $reason = $row['reason'] ?? null;
+            if ($reason === null) {
+                continue;
             }
+
+            $key = $reason instanceof BackedEnum ? $reason->value : (string)$reason;
+            $fallbackReasons[$key] = (int)$row['cnt'];
         }
 
         return [
