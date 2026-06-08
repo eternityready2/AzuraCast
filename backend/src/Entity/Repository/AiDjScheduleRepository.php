@@ -5,25 +5,23 @@ declare(strict_types=1);
 namespace App\Entity\Repository;
 
 use App\Entity\AiDjSchedule;
-use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
-use Doctrine\Persistence\ManagerRegistry;
+use App\Doctrine\Repository;
 
 /**
- * @extends ServiceEntityRepository<AiDjSchedule>
+ * @extends Repository<AiDjSchedule>
  */
-final class AiDjScheduleRepository extends ServiceEntityRepository
+final class AiDjScheduleRepository extends Repository
 {
-    public function __construct(ManagerRegistry $registry)
-    {
-        parent::__construct($registry, AiDjSchedule::class);
-    }
+    protected string $entityClass = AiDjSchedule::class;
 
     /**
      * @return AiDjSchedule[]
      */
     public function findByStation(int $stationId): array
     {
-        return $this->createQueryBuilder('schedule')
+        return $this->em->createQueryBuilder()
+            ->select('schedule')
+            ->from(AiDjSchedule::class, 'schedule')
             ->innerJoin('schedule.ai_dj', 'dj')
             ->andWhere('IDENTITY(dj.station) = :stationId')
             ->setParameter('stationId', $stationId)
@@ -34,7 +32,9 @@ final class AiDjScheduleRepository extends ServiceEntityRepository
 
     public function findActiveForTimeSlot(int $stationId, int $dayOfWeek, string $time): ?AiDjSchedule
     {
-        return $this->createQueryBuilder('schedule')
+        return $this->em->createQueryBuilder()
+            ->select('schedule')
+            ->from(AiDjSchedule::class, 'schedule')
             ->innerJoin('schedule.ai_dj', 'dj')
             ->andWhere('IDENTITY(dj.station) = :stationId')
             ->andWhere('schedule.is_enabled = :isEnabled')
@@ -66,7 +66,9 @@ final class AiDjScheduleRepository extends ServiceEntityRepository
 
     public function hasOverlap(AiDjSchedule $schedule, bool $excludeSelf = false): bool
     {
-        $qb = $this->createQueryBuilder('s')
+        $qb = $this->em->createQueryBuilder()
+            ->select('s')
+            ->from(AiDjSchedule::class, 's')
             ->where('s.ai_dj = :aiDj')
             ->setParameter('aiDj', $schedule->getAiDj())
             ->andWhere('s.start_time < :endTime')
@@ -74,9 +76,9 @@ final class AiDjScheduleRepository extends ServiceEntityRepository
             ->andWhere('s.end_time > :startTime')
             ->setParameter('startTime', $schedule->getStartTime());
 
-        if ($excludeSelf && null !== $schedule->getId()) {
+        if ($excludeSelf && null !== $schedule->id) {
             $qb->andWhere('s.id != :id')
-                ->setParameter('id', $schedule->getId());
+                ->setParameter('id', $schedule->id);
         }
 
         $existingSchedules = $qb->getQuery()->getResult();

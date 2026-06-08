@@ -79,6 +79,6 @@ final readonly class PutAction implements SingleActionInterface
 
         $this->scheduleRepo->save($schedule);
 
-        return $response->withJson(Status::updated()->withData($schedule->api()));
+        return $response->withJson($schedule->api());
     }
 }

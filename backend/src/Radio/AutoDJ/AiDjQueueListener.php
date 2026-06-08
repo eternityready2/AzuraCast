@@ -67,7 +67,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         $expectedPlayTime = $event->getExpectedPlayTime();
-        $dj = $this->scheduler->findActiveDj($station->getId(), $expectedPlayTime);
+        $dj = $this->scheduler->findActiveDj($station->id, $expectedPlayTime);
 
         if (null === $dj) {
             $this->logger->debug('AI DJ: No active DJ for this time slot.');
@@ -113,7 +113,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
                 basename($clipPath)
             ), [
-                'dj_id' => $dj->getId(),
+                'dj_id' => $dj->id,
                 'dj_name' => $dj->getName(),
                 'clip_path' => $clipPath,
                 'artist' => $artist,

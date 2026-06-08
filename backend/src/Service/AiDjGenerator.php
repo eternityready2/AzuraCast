@@ -115,7 +115,7 @@ final class AiDjGenerator
         Station $station
     ): ?string {
         // Check disk usage before generating
-        $usedMb = $this->cleanup->checkDiskUsage($station->getId());
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
         if ($usedMb > self::DISK_LIMIT_MB) {
             $this->logger->warning(sprintf(
                 'AI DJ generation skipped: disk usage %dMB exceeds limit of %dMB',
@@ -137,7 +137,7 @@ final class AiDjGenerator
             ]
         );
 
-        $outputDir = '/var/azuracast/stations/' . $station->getId() . '/ai_dj';
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
         $outputPath = $outputDir . '/song_intro_' . uniqid() . '.mp3';
 
         return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);

@@ -39,11 +39,11 @@ final class IndexAction implements SingleActionInterface
         array $params
     ): ResponseInterface {
         $station = $request->getStation();
-        $djList = $this->aiDjRepository->findByStation($station->getId());
+        $djList = $this->aiDjRepository->findByStation($station->id);
 
         $result = array_map(
             static fn(\App\Entity\AiDj $dj): array => [
-                'id' => $dj->getId(),
+                'id' => $dj->id,
                 'name' => $dj->getName(),
                 'is_enabled' => $dj->isEnabled(),
                 'voice_model_path' => $dj->getVoiceModelPath(),

@@ -61,6 +61,6 @@ final readonly class PostAction implements SingleActionInterface
         $this->scheduleRepo->save($schedule);
 
         return $response->withStatus(201)
-            ->withJson(Status::created()->withData($schedule->api()));
+            ->withJson($schedule->api());
     }
 }

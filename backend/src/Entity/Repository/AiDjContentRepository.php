@@ -5,22 +5,20 @@ declare(strict_types=1);
 namespace App\Entity\Repository;
 
 use App\Entity\AiDjContent;
-use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
-use Doctrine\Persistence\ManagerRegistry;
+use App\Doctrine\Repository;
 
 /**
- * @extends ServiceEntityRepository<AiDjContent>
+ * @extends Repository<AiDjContent>
  */
-final class AiDjContentRepository extends ServiceEntityRepository
+final class AiDjContentRepository extends Repository
 {
-    public function __construct(ManagerRegistry $registry)
-    {
-        parent::__construct($registry, AiDjContent::class);
-    }
+    protected string $entityClass = AiDjContent::class;
 
     public function findForStation(string|int $id, \App\Entity\Station $station): ?AiDjContent
     {
-        return $this->createQueryBuilder('content')
+        return $this->em->createQueryBuilder()
+            ->select('content')
+            ->from(AiDjContent::class, 'content')
             ->andWhere('content.id = :id')
             ->andWhere('IDENTITY(content.station) = :stationId')
             ->setParameter('id', $id)
@@ -34,7 +32,9 @@ final class AiDjContentRepository extends ServiceEntityRepository
      */
     public function findByStation(int $stationId): array
     {
-        return $this->createQueryBuilder('content')
+        return $this->em->createQueryBuilder()
+            ->select('content')
+            ->from(AiDjContent::class, 'content')
             ->andWhere('IDENTITY(content.station) = :stationId')
             ->setParameter('stationId', $stationId)
             ->orderBy('content.type', 'ASC')
@@ -48,7 +48,9 @@ final class AiDjContentRepository extends ServiceEntityRepository
      */
     public function findEnabledByType(int $stationId, string $type): array
     {
-        return $this->createQueryBuilder('content')
+        return $this->em->createQueryBuilder()
+            ->select('content')
+            ->from(AiDjContent::class, 'content')
             ->andWhere('IDENTITY(content.station) = :stationId')
             ->andWhere('content.type = :type')
             ->andWhere('content.is_enabled = :isEnabled')
@@ -65,7 +67,9 @@ final class AiDjContentRepository extends ServiceEntityRepository
      */
     public function findGlobalContent(string $type): array
     {
-        return $this->createQueryBuilder('content')
+        return $this->em->createQueryBuilder()
+            ->select('content')
+            ->from(AiDjContent::class, 'content')
             ->andWhere('content.type = :type')
             ->andWhere('content.is_global = :isGlobal')
             ->setParameter('type', $type)

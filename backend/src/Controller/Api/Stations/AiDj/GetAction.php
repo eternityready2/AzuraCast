@@ -50,14 +50,14 @@ final class GetAction implements SingleActionInterface
 
         $dj = $this->aiDjRepository->find($djId);
 
-        if (null === $dj || $dj->getStationId() !== $station->getId()) {
+        if (null === $dj || $dj->getStationId() !== $station->id) {
             return $response->withStatus(404)->withJson([
                 'error' => 'AI DJ not found.',
             ]);
         }
 
         return $response->withJson([
-            'id' => $dj->getId(),
+            'id' => $dj->id,
             'name' => $dj->getName(),
             'is_enabled' => $dj->isEnabled(),
             'voice_model_path' => $dj->getVoiceModelPath(),
