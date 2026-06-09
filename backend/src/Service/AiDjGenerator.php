@@ -144,6 +144,43 @@ final class AiDjGenerator
     }
 
     /**
+     * Generate a shift outro (sign-off) audio file for the given DJ.
+     *
+     * @return string|null MP3 path on success, null on failure
+     */
+    public function generateShiftOutro(
+        AiDj $dj,
+        Station $station
+    ): ?string {
+        // Check disk usage before generating
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
+        if ($usedMb > self::DISK_LIMIT_MB) {
+            $this->logger->warning(sprintf(
+                'AI DJ generation skipped: disk usage %dMB exceeds limit of %dMB',
+                $usedMb,
+                self::DISK_LIMIT_MB
+            ));
+            return null;
+        }
+
+        $template = $dj->getShiftOutroTemplate()
+            ?? 'This has been {{dj_name}} on {{station_name}}. Thanks for listening!';
+
+        $text = $this->replaceTemplateVariables(
+            $template,
+            [
+                'dj_name' => $dj->getName(),
+                'station_name' => $station->name,
+            ]
+        );
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/shift_outro_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+    }
+
+    /**
      * Select a random song_intro_template from the DJ's content collection.
      */
     private function selectRandomTemplate(Collection $contents): ?string

@@ -235,6 +235,27 @@
                                 </template>
                             </form-group-field>
 
+                            <form-group-field
+                                id="dj_shift_outro_template"
+                                :field="v$.shift_outro_template"
+                            >
+                                <template #label>
+                                    {{ $gettext('Shift Sign-off Template') }}
+                                </template>
+                                <template #default="{id, model}">
+                                    <textarea
+                                        :id="id"
+                                        v-model="model.$model"
+                                        class="form-control form-control-dark"
+                                        rows="3"
+                                        :placeholder="defaultOutroTemplate"
+                                    />
+                                </template>
+                                <template #description>
+                                    {{ $gettext('Template read when this DJ ends a shift. Variables: {dj_name}, {station_name}.') }}
+                                </template>
+                            </form-group-field>
+
                             <div class="btn-row">
                                 <button
                                     type="submit"
@@ -332,6 +353,7 @@ interface AiDj {
     voice_model_path: string | null;
     is_enabled: boolean;
     shift_intro_template: string | null;
+    shift_outro_template: string | null;
     schedules?: AiDjSchedule[];
 }
 
@@ -340,6 +362,7 @@ interface AiDjForm {
     voice_model_path: string | null;
     is_enabled: boolean;
     shift_intro_template: string | null;
+    shift_outro_template: string | null;
 }
 
 interface VoiceOption {
@@ -361,6 +384,7 @@ const djUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}`);
 const djTestUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}/test`);
 
 const defaultIntroTemplate = 'This is {{dj_name}} on {{station_name}}';
+const defaultOutroTemplate = 'This has been {{dj_name}} on {{station_name}}. Thanks for listening!';
 
 // --- State ---
 
@@ -380,6 +404,7 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     voice_model_path: null,
     is_enabled: true,
     shift_intro_template: null,
+    shift_outro_template: null,
 }));
 
 const {r$: v$} = useAppRegle(form, {}, {});
@@ -489,6 +514,7 @@ const openEdit = (dj: AiDj): void => {
         voice_model_path: dj.voice_model_path,
         is_enabled: dj.is_enabled,
         shift_intro_template: dj.shift_intro_template,
+        shift_outro_template: dj.shift_outro_template,
     };
     editorOpen.value = true;
     deleteTarget.value = null;

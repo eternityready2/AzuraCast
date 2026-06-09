@@ -47,6 +47,9 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $shift_intro_template = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $shift_outro_template = null;
+
     /** @var Collection<int, AiDjSchedule> */
     #[
         ORM\OneToMany(
@@ -133,6 +136,16 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     public function setShiftIntroTemplate(?string $shiftIntroTemplate): void
     {
         $this->shift_intro_template = $shiftIntroTemplate;
+    }
+
+    public function getShiftOutroTemplate(): ?string
+    {
+        return $this->shift_outro_template;
+    }
+
+    public function setShiftOutroTemplate(?string $shiftOutroTemplate): void
+    {
+        $this->shift_outro_template = $shiftOutroTemplate;
     }
 
     /** @return Collection<int, AiDjSchedule> */

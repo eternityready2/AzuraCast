@@ -17,6 +17,7 @@ use App\Radio\Enums\LiquidsoapQueues;
 use App\Service\AiDjGenerator;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
+use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -38,6 +39,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly AiDjGenerator $generator,
         private readonly Adapters $adapters,
         private readonly ReloadableEntityManagerInterface $em,
+        private readonly CacheInterface $cache,
     ) {
     }
 
@@ -75,6 +77,22 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $expectedPlayTime = $event->getExpectedPlayTime();
         $this->logger->debug('AI DJ: Checking for active DJ.', ['station_id' => $station->id, 'time' => $expectedPlayTime?->format('c')]);
         $dj = $this->scheduler->findActiveDj($station->id, $expectedPlayTime);
+
+        // Track DJ shift transitions for outro firing
+        $cacheKey = 'ai_dj_last_active_' . $station->id;
+        $previousDjId = $this->cache->get($cacheKey);
+        $currentDjId = $dj?->getId() ?? null;
+
+        // Store current for next cycle
+        $this->cache->set($cacheKey, $currentDjId, 3600);
+
+        // Fire outro if DJ changed (shift ended)
+        if ($previousDjId !== null && $previousDjId !== $currentDjId) {
+            $previousDj = $this->em->find(AiDj::class, $previousDjId);
+            if ($previousDj instanceof AiDj) {
+                $this->pushOutroClip($previousDj, $station, $backend);
+            }
+        }
 
         if (null === $dj) {
             $this->logger->debug('AI DJ: No active DJ for this time slot.');
@@ -136,11 +154,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
-    private function createQueueEntry(Station $station, string $djName, string $clipPath): void
+    private function createQueueEntry(Station $station, string $djName, string $clipPath, string $title = 'AI DJ Intro'): void
     {
         try {
-            $song = Song::createFromText(sprintf('%s - AI DJ Intro', $djName));
-            $song->title = 'AI DJ Intro';
+            $song = Song::createFromText(sprintf('%s - %s', $djName, $title));
+            $song->title = $title;
             $song->artist = $djName;
 
             $queueEntry = new StationQueue($station, $song);
@@ -152,6 +170,43 @@ final class AiDjQueueListener implements EventSubscriberInterface
         } catch (\Throwable $e) {
             $this->logger->error(sprintf(
                 'AI DJ: Failed to create StationQueue entry: %s',
+                $e->getMessage()
+            ), ['exception' => $e]);
+        }
+    }
+
+    private function pushOutroClip(
+        AiDj $dj,
+        Station $station,
+        Liquidsoap $backend
+    ): void {
+        try {
+            $clipPath = $this->generator->generateShiftOutro($dj, $station);
+
+            if (null === $clipPath) {
+                $this->logger->warning('AI DJ: Failed to generate outro clip, continuing normal playback.');
+                return;
+            }
+
+            $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s":%s', $dj->getName(), $clipPath);
+
+            $backend->enqueue($station, LiquidsoapQueues::Interrupting, $track);
+
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Sign-off');
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued outro clip for DJ "%s" at %s (clip: %s)',
+                $dj->getName(),
+                (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
+                basename($clipPath)
+            ), [
+                'dj_id' => $dj->id,
+                'dj_name' => $dj->getName(),
+                'clip_path' => $clipPath,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf(
+                'AI DJ: Failed to push outro clip: %s. Continuing normal playback.',
                 $e->getMessage()
             ), ['exception' => $e]);
         }
