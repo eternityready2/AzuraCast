@@ -1243,7 +1243,7 @@ return static function (RouteCollectorProxy $group) {
                                 Controller\Api\Stations\AiDj\DeleteAction::class
                             );
 
-                            $group->post(
+                            $group->get(
                                 '/{dj_id}/test',
                                 Controller\Api\Stations\AiDj\TestAction::class
                             );

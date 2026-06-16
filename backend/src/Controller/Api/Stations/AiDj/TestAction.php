@@ -13,7 +13,7 @@ use App\Service\AiDjGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
-#[OA\Post(
+#[OA\Get(
     path: '/station/{station_id}/ai-dj/{dj_id}/test',
     operationId: 'testStationAiDj',
     summary: 'Test generate AI DJ audio.',

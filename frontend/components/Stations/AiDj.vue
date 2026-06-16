@@ -576,7 +576,7 @@ const doDelete = async (): Promise<void> => {
 const runTest = async (dj: AiDj): Promise<void> => {
     isTesting.value = dj.id;
     try {
-        await axios.post(djTestUrl(dj.id).value);
+        await axios.get(djTestUrl(dj.id).value);
         notifySuccess($gettext('Test generation queued for "%{name}".', {name: dj.name}));
     } catch {
         notifyError($gettext('Test generation failed.'));
