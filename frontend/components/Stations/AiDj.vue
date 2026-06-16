@@ -378,7 +378,6 @@ const {notifySuccess, notifyError} = useNotify();
 const {getStationApiUrl} = useApiRouter();
 
 const listUrl = getStationApiUrl('/ai-dj');
-const voicesUrl = getStationApiUrl('/ai-dj/voices');
 
 const djUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}`);
 const djTestUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}/test`);
@@ -588,7 +587,7 @@ const runTest = async (dj: AiDj): Promise<void> => {
 // --- Init ---
 
 onMounted(async () => {
-    await Promise.all([loadDjs(), loadVoices()]);
+    await Promise.all([loadDjs()]);
 });
 </script>
 
