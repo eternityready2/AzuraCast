@@ -30,7 +30,7 @@
                             {{ $gettext('Require Legal ID at top of hour') }}
                         </template>
 
-                        <form-toggle
+                        <form-checkbox
                             id="top_of_hour_id_enabled"
                             v-model="form.top_of_hour_id_enabled"
                         />
@@ -137,7 +137,7 @@ import CardPage from '~/components/Common/CardPage.vue';
 import InfoCard from '~/components/Common/InfoCard.vue';
 import Loading from '~/components/Common/Loading.vue';
 import FormGroup from '~/components/Form/FormGroup.vue';
-import FormToggle from '~/components/Form/FormToggle.vue';
+import FormCheckbox from '~/components/Form/FormCheckbox.vue';
 import {useAxios} from '~/vendor/axios.ts';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
