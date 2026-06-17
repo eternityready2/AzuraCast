@@ -62,6 +62,11 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:ai_news'
                 },
                 {
+                    path: 'top_of_hour',
+                    component: () => import('~/components/Stations/TopOfHour.vue'),
+                    name: 'stations:top_of_hour'
+                },
+                {
                     path: 'logs',
                     component: () => import('~/components/Stations/Logs.vue'),
                     name: 'stations:logs'

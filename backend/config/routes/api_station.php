@@ -1214,6 +1214,22 @@ return static function (RouteCollectorProxy $group) {
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
+                    // Top-of-hour legal ID protection (v0.29)
+                    $group->group(
+                        '/top-of-hour',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\TopOfHour\GetAction::class
+                            )->setName('api:stations:top-of-hour');
+
+                            $group->put(
+                                '',
+                                Controller\Api\Stations\TopOfHour\PutAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Logs
                     $group->group(
                         '',

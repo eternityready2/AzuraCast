@@ -36,6 +36,7 @@ final class QueueBuilder implements EventSubscriberInterface
     public function __construct(
         private readonly Scheduler $scheduler,
         private readonly DuplicatePrevention $duplicatePrevention,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly CacheInterface $cache,
         private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly StationRequestRepository $requestRepo,
@@ -270,6 +271,18 @@ final class QueueBuilder implements EventSubscriberInterface
             };
 
             if (null !== $validTrack) {
+                $validTrack = $this->applyHourBoundarySelection(
+                    $playlist,
+                    $validTrack,
+                    $recentSongHistory,
+                    $expectedPlayTime,
+                    $allowDuplicates,
+                );
+
+                if (null === $validTrack) {
+                    return null;
+                }
+
                 $queueEntry = $this->makeQueueFromApi($validTrack, $playlist, $expectedPlayTime);
 
                 if (null !== $queueEntry) {
@@ -309,6 +322,16 @@ final class QueueBuilder implements EventSubscriberInterface
 
         $stationQueueEntry = StationQueue::fromMedia($playlist->station, $mediaToPlay);
         $stationQueueEntry->playlist = $playlist;
+
+        $maxDuration = $this->hourBoundaryPlanner->maxMusicDurationBeforeTopOfHour(
+            $playlist->station,
+            $expectedPlayTime,
+        );
+
+        if (null !== $maxDuration && $mediaToPlay->getCalculatedLength() > $maxDuration) {
+            $stationQueueEntry->hour_boundary_enforce_cap = true;
+            $stationQueueEntry->hour_boundary_max_play_seconds = (int)floor($maxDuration);
+        }
 
         $this->em->persist($stationQueueEntry);
 
@@ -388,6 +411,86 @@ final class QueueBuilder implements EventSubscriberInterface
         return ($mediaId)
             ? [$mediaId, 0]
             : null;
+    }
+
+    /**
+     * When top-of-hour protection is in the lookahead window, prefer tracks that fit before :00.
+     */
+    private function applyHourBoundarySelection(
+        StationPlaylist $playlist,
+        StationPlaylistQueue $selectedTrack,
+        array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
+        bool $allowDuplicates,
+    ): ?StationPlaylistQueue {
+        $maxDuration = $this->hourBoundaryPlanner->maxMusicDurationBeforeTopOfHour(
+            $playlist->station,
+            $expectedPlayTime,
+        );
+
+        if (null === $maxDuration) {
+            return $selectedTrack;
+        }
+
+        $media = $this->em->find(StationMedia::class, $selectedTrack->media_id);
+        if ($media instanceof StationMedia && $media->getCalculatedLength() <= $maxDuration) {
+            return $selectedTrack;
+        }
+
+        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $fitting = [];
+
+        foreach ($mediaQueue as $queueItem) {
+            $candidate = $this->em->find(StationMedia::class, $queueItem->media_id);
+            if (!$candidate instanceof StationMedia) {
+                continue;
+            }
+
+            if ($candidate->getCalculatedLength() <= $maxDuration) {
+                $fitting[] = $queueItem;
+            }
+        }
+
+        if ($fitting !== []) {
+            usort(
+                $fitting,
+                function (StationPlaylistQueue $a, StationPlaylistQueue $b) use ($maxDuration): int {
+                    $mediaA = $this->em->find(StationMedia::class, $a->media_id);
+                    $mediaB = $this->em->find(StationMedia::class, $b->media_id);
+                    $lenA = $mediaA instanceof StationMedia ? $mediaA->getCalculatedLength() : 0.0;
+                    $lenB = $mediaB instanceof StationMedia ? $mediaB->getCalculatedLength() : 0.0;
+
+                    return $lenB <=> $lenA;
+                }
+            );
+
+            if ($playlist->avoid_duplicates) {
+                $duplicateSafe = $this->duplicatePrevention->preventDuplicates(
+                    $fitting,
+                    $recentSongHistory,
+                    $allowDuplicates
+                );
+                if (null !== $duplicateSafe) {
+                    return $duplicateSafe;
+                }
+            }
+
+            return $fitting[0];
+        }
+
+        if (!$media instanceof StationMedia) {
+            return $selectedTrack;
+        }
+
+        $this->logger->info(
+            'Hour boundary: no track fits before top of hour; using shortest available with playback cap.',
+            [
+                'playlist_id' => $playlist->id,
+                'max_duration_seconds' => $maxDuration,
+            ]
+        );
+
+        return $selectedTrack;
     }
 
     private function getRandomMediaIdFromPlaylist(

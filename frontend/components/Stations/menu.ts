@@ -294,6 +294,15 @@ export function useStationsMenu() {
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
         {
+            key: 'top_of_hour',
+            label: $gettext('Top of Hour ID'),
+            icon: () => IconIcSchedule,
+            url: {
+                name: 'stations:top_of_hour'
+            },
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+        },
+        {
             key: 'broadcasting',
             label: $gettext('Broadcasting'),
             icon: () => IconBiBroadcast,

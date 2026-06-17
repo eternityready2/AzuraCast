@@ -34,7 +34,13 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         }
 
         if (null === $queue->clock_wheel || !$queue->clock_wheel_enforce_cap) {
-            return;
+            if (!$queue->hour_boundary_enforce_cap) {
+                return;
+            }
+
+            $maxSeconds = $queue->hour_boundary_max_play_seconds;
+        } else {
+            $maxSeconds = $queue->clock_wheel_max_play_seconds;
         }
 
         $media = $event->getMedia();
@@ -42,7 +48,6 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
             return;
         }
 
-        $maxSeconds = $queue->clock_wheel_max_play_seconds;
         if (null === $maxSeconds || $maxSeconds <= 0) {
             return;
         }

@@ -17,6 +17,7 @@ use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\DuplicatePrevention;
+use App\Radio\AutoDJ\HourBoundaryPlanner;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -38,8 +39,8 @@ final class ClockWheelPlaybackPlanner
 
     private const int MIN_SHORT_FORM_WINDOW_SECONDS = 10;
 
-    /** Seconds late before legal ID compliance is flagged (A5). */
-    public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = 10;
+    /** @deprecated Use HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS or station config. */
+    public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS;
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -47,11 +48,12 @@ final class ClockWheelPlaybackPlanner
         private readonly DuplicatePrevention $duplicatePrevention,
         private readonly SeparationRulesChecker $separationChecker,
         private readonly ClockWheelEventLogger $eventLogger,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly LoggerInterface $logger,
     ) {
     }
 
-  /**
+    /**
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
      */
     public function resolveNextQueueEntry(
@@ -76,7 +78,7 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
         $tz = $station->getTimezoneObject();
-        $secondsIntoHour = $this->getPlannedSecondsIntoHour($station, $expectedPlayTime, $tz);
+        $secondsIntoHour = $this->hourBoundaryPlanner->getPlannedSecondsIntoHour($station, $expectedPlayTime, $tz);
 
         $activeIndex = $this->getActiveSlotIndex($slots, $secondsIntoHour);
         $activeSlot = $slots[$activeIndex];
@@ -173,33 +175,7 @@ final class ClockWheelPlaybackPlanner
         DateTimeImmutable $expectedPlayTime,
         DateTimeZone $tz,
     ): int {
-        $local = CarbonImmutable::instance($expectedPlayTime)->setTimezone($tz);
-        $hourStart = $local->startOf('hour');
-        $seconds = $local->getTimestamp() - $hourStart->getTimestamp();
-
-        foreach ($this->queueRepo->getUnplayedQueue($station) as $row) {
-            $playedAt = $row->timestamp_played;
-            if ($playedAt === null) {
-                continue;
-            }
-
-            $queuedLocal = CarbonImmutable::instance($playedAt)->setTimezone($tz);
-            if ($queuedLocal->format('Y-m-d H') !== $local->format('Y-m-d H')) {
-                continue;
-            }
-
-            if ($queuedLocal->greaterThanOrEqualTo($local)) {
-                continue;
-            }
-
-            $queuedHourStart = $queuedLocal->startOf('hour');
-            $queuedStartOffset = $queuedLocal->getTimestamp() - $queuedHourStart->getTimestamp();
-            $queuedEndOffset = $queuedStartOffset + (int)ceil((float)($row->duration ?? 0));
-
-            $seconds = max($seconds, min($queuedEndOffset, self::HOUR_SECONDS - 1));
-        }
-
-        return min(max(0, $seconds), self::HOUR_SECONDS - 1);
+        return $this->hourBoundaryPlanner->getPlannedSecondsIntoHour($station, $expectedPlayTime, $tz);
     }
 
     private function getMinWindowSeconds(StationClockWheelSlot $slot): int
@@ -272,23 +248,14 @@ final class ClockWheelPlaybackPlanner
             return false;
         }
 
-        return $this->getNextAnchorSeconds($slots, $activeIndex) >= self::HOUR_SECONDS;
+        return $this->getNextAnchorSeconds($slots, $activeIndex) >= HourBoundaryPlanner::HOUR_SECONDS;
     }
 
     private function resolveTopOfHourExpectedPlayAt(
         Station $station,
         DateTimeImmutable $expectedPlayTime,
     ): DateTimeImmutable {
-        $tz = $station->getTimezoneObject();
-        $local = CarbonImmutable::instance($expectedPlayTime)->setTimezone($tz);
-        $hourStart = $local->startOf('hour');
-        $secondsIntoHour = $local->getTimestamp() - $hourStart->getTimestamp();
-
-        if ($secondsIntoHour > 30) {
-            return $hourStart->addHour()->toDateTimeImmutable();
-        }
-
-        return $hourStart->toDateTimeImmutable();
+        return $this->hourBoundaryPlanner->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
     }
 
     /**

@@ -18,6 +18,7 @@ use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
 use App\Radio\AutoDJ\ClockWheel\SeparationRulesChecker;
 use App\Radio\AutoDJ\DuplicatePrevention;
+use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Tests\Module;
 use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
@@ -389,6 +390,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             $this->testsModule->container->get(DuplicatePrevention::class),
             new SeparationRulesChecker($logger),
             new ClockWheelEventLogger($entityManager),
+            $this->testsModule->container->get(HourBoundaryPlanner::class),
             $logger,
         );
     }

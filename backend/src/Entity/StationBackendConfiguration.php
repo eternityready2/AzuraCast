@@ -379,6 +379,41 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public bool $top_of_hour_id_enabled = false {
+        set (bool|string|null $value) => Types::bool($value, false, true);
+    }
+
+    #[OA\Property]
+    public string $top_of_hour_id_mode = 'strict' {
+        set (string|null $value) {
+            $value = Types::string($value, 'strict', true);
+            $this->top_of_hour_id_mode = in_array($value, ['strict', 'interrupt'], true)
+                ? $value
+                : 'strict';
+        }
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_lookahead_minutes = 10 {
+        set (int|string|null $value) => Types::int($value, 10);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_compliance_tolerance_seconds = 10 {
+        set (int|string|null $value) => Types::int($value, 10);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_finish_buffer_seconds = 15 {
+        set (int|string|null $value) => Types::int($value, 15);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_id_max_seconds = 60 {
+        set (int|string|null $value) => Types::int($value, 60);
+    }
+
+    #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
     }

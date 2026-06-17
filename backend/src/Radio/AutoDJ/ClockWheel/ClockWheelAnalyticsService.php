@@ -7,12 +7,14 @@ namespace App\Radio\AutoDJ\ClockWheel;
 use App\Entity\Api\ClockWheel\ClockWheelAnalytics;
 use App\Entity\Repository\ClockWheelEventRepository;
 use App\Entity\StationClockWheel;
+use App\Radio\AutoDJ\HourBoundaryPlanner;
 use Carbon\CarbonImmutable;
 
 final class ClockWheelAnalyticsService
 {
     public function __construct(
         private readonly ClockWheelEventRepository $eventRepo,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
     ) {
     }
 
@@ -37,7 +39,7 @@ final class ClockWheelAnalyticsService
         $compliance = $this->eventRepo->getLegalIdComplianceSummary(
             $wheel,
             $since,
-            ClockWheelPlaybackPlanner::LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS,
+            $this->hourBoundaryPlanner->getComplianceToleranceSeconds($wheel->station),
         );
 
         $analytics->legal_id_tolerance_seconds = $compliance['tolerance_seconds'];
