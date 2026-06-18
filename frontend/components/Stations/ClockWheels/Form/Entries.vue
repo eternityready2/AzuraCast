@@ -132,6 +132,39 @@
 
             <div
                 v-if="entries.length > 0"
+                class="clock-wheel-hour-distribution mb-3"
+            >
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-1">
+                    <span class="fw-semibold small">{{ $gettext('Hour distribution') }}</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span
+                            class="badge"
+                            :class="layoutValid ? 'text-bg-success' : 'text-bg-warning'"
+                        >
+                            {{ layoutValid ? $gettext('Valid layout') : $gettext('Needs review') }}
+                        </span>
+                        <span class="small text-muted">
+                            {{ $gettext('Est. loop') }}: {{ formatLoopTime(estimatedLoopSeconds) }}
+                        </span>
+                    </div>
+                </div>
+                <div
+                    class="clock-wheel-hour-distribution__bars d-flex gap-1 align-items-end"
+                    role="img"
+                    :aria-label="$gettext('Anchor density across the hour')"
+                >
+                    <div
+                        v-for="bucket in hourDistribution"
+                        :key="bucket.segment"
+                        class="clock-wheel-hour-distribution__bar flex-grow-1 rounded-top"
+                        :style="{ height: barHeight(bucket.count) + 'px' }"
+                        :title="bucket.label + ': ' + bucket.count"
+                    />
+                </div>
+            </div>
+
+            <div
+                v-if="entries.length > 0"
                 class="clock-wheel-timeline mb-3"
                 role="img"
                 :aria-label="$gettext('Hour timeline showing anchor positions')"
@@ -195,6 +228,18 @@
                         </th>
                         <th
                             class="text-uppercase small text-center"
+                            :title="$gettext('Hard anchor')"
+                        >
+                            {{ $gettext('Hard') }}
+                        </th>
+                        <th class="text-uppercase small">
+                            {{ $gettext('Score') }}
+                        </th>
+                        <th class="text-uppercase small">
+                            {{ $gettext('Code') }}
+                        </th>
+                        <th
+                            class="text-uppercase small text-center"
                             style="width: 9rem;"
                         >
                             {{ $gettext('Actions') }}
@@ -204,7 +249,7 @@
                 <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="9"
+                            colspan="12"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -352,6 +397,36 @@
                             </div>
                         </td>
                         <td class="text-center align-middle">
+                            <input
+                                v-model="entry.is_hard_anchor"
+                                type="checkbox"
+                                class="form-check-input"
+                                :title="$gettext('Must play at this anchor time')"
+                                @change="props.onEntriesChanged()"
+                            >
+                        </td>
+                        <td>
+                            <input
+                                v-model.number="entry.research_score"
+                                type="number"
+                                min="0"
+                                max="100"
+                                class="form-control form-control-sm"
+                                :placeholder="'—'"
+                                @change="props.onEntriesChanged()"
+                            >
+                        </td>
+                        <td>
+                            <input
+                                v-model="entry.sound_code"
+                                type="text"
+                                maxlength="20"
+                                class="form-control form-control-sm"
+                                :placeholder="'—'"
+                                @change="props.onEntriesChanged()"
+                            >
+                        </td>
+                        <td class="text-center align-middle">
                             <div class="btn-group btn-group-sm w-100 justify-content-center">
                                 <button
                                     type="button"
@@ -421,6 +496,9 @@ import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
+    getClockWheelHourDistribution,
+    estimateClockWheelLoopSeconds,
+    isClockWheelLayoutValid,
     parseClockWheelPosition,
     timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
@@ -446,6 +524,9 @@ export interface ClockWheelEntryRow {
     separation_override_enabled: boolean;
     separation_artist_minutes: number | null;
     separation_title_minutes: number | null;
+    is_hard_anchor: boolean;
+    research_score: number | null;
+    sound_code: string | null;
 }
 
 const fillStrategyOptions = computed(() => [
@@ -528,6 +609,27 @@ const sortedEntries = computed(() =>
 const timelineWarnings = computed(() =>
     getClockWheelTimelineWarnings(entries.value, $gettext)
 );
+
+const hourDistribution = computed(() => getClockWheelHourDistribution(entries.value));
+
+const estimatedLoopSeconds = computed(() =>
+    estimateClockWheelLoopSeconds(entries.value)
+);
+
+const layoutValid = computed(() => isClockWheelLayoutValid(entries.value));
+
+const maxBucketCount = computed(() =>
+    Math.max(1, ...hourDistribution.value.map((b) => b.count))
+);
+
+const barHeight = (count: number) =>
+    count === 0 ? 2 : Math.max(4, Math.round((count / maxBucketCount.value) * 28));
+
+const formatLoopTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+};
 
 const $tbody = useTemplateRef('$tbody');
 
@@ -642,5 +744,17 @@ const focusRow = (index: number) => {
     justify-content: center;
     padding-left: 0;
     padding-right: 0;
+}
+
+.clock-wheel-hour-distribution__bars {
+    min-height: 2rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.clock-wheel-hour-distribution__bar {
+    min-width: 3px;
+    background: var(--bs-primary);
+    opacity: 0.75;
 }
 </style>

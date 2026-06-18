@@ -190,6 +190,29 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     ]
     public ?int $duration_seconds = null;
 
+    /** When true, this anchor must play at position_seconds; misses are logged. */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $is_hard_anchor = false;
+
+    /** Optional research / test score (0–100) for PD analytics. */
+    #[
+        OA\Property(example: 85, nullable: true),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 100)
+    ]
+    public ?int $research_score = null;
+
+    /** Optional sound-code label (e.g. P1, G2) for reconciliation exports. */
+    #[
+        OA\Property(example: 'P1', nullable: true),
+        ORM\Column(length: 20, nullable: true),
+        Assert\Length(max: 20)
+    ]
+    public ?string $sound_code = null;
+
     // ------------------------------------------------------------------
     // Constructor
     // ------------------------------------------------------------------

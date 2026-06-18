@@ -29,6 +29,18 @@ export interface ClockWheelSlotRow {
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
+    is_hard_anchor?: boolean;
+    sound_code?: string | null;
+}
+
+export interface ClockWheelReconciliationEventRow {
+    id: number;
+    event_timestamp: string;
+    event_kind: string;
+    fallback_reason: string | null;
+    anchor_type: string | null;
+    sound_code: string | null;
+    drift_seconds: number | null;
 }
 
 export interface ClockWheelDetail {
@@ -170,6 +182,7 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
     const scheduleUrl = getStationApiUrl('/schedule');
     const queueUrl = getStationApiUrl('/queue');
     const wheelsUrl = getStationApiUrl('/clock-wheels');
+    const reconciliationUrl = getStationApiUrl('/clock-wheels/reconciliation-log');
 
     const queryEnabled = computed(() => toValue(enabled) && stationData.value.id > 0);
 
@@ -517,6 +530,32 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
 
     const hourPreview = computed(() => previewQuery.data.value ?? null);
 
+    const reconciliationQuery = useQuery({
+        queryKey: computed(() =>
+            queryKeyWithStation(
+                [QueryKeys.StationPlaylists, 'clock_wheel_reconciliation', activeWheelMeta.value?.id],
+            )
+        ),
+        queryFn: async ({signal}) => {
+            const meta = activeWheelMeta.value;
+            const {data} = await axiosSilent.get<{rows: ClockWheelReconciliationEventRow[]}>(
+                reconciliationUrl.value,
+                {
+                    signal,
+                    params: {
+                        limit: 12,
+                        wheel_id: meta?.id,
+                    },
+                },
+            );
+            return data.rows ?? [];
+        },
+        enabled: computed(() => queryEnabled.value && activeWheelMeta.value !== null),
+        refetchInterval: POLL_MS,
+    });
+
+    const recentEvents = computed(() => reconciliationQuery.data.value ?? []);
+
     const lastUpdatedAt = computed(() => {
         const times = [
             scheduleQuery.dataUpdatedAt.value,
@@ -534,6 +573,7 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
             queueQuery.refetch(),
             wheelDetailQuery.refetch(),
             previewQuery.refetch(),
+            reconciliationQuery.refetch(),
         ]);
     };
 
@@ -556,6 +596,7 @@ export default function useClockWheelLiveData(enabled: MaybeRefOrGetter<boolean>
         analyticsUrl,
         conflictMessage,
         upcomingWheelEvents,
+        recentEvents,
         isLoading,
         lastUpdatedAt,
         refresh,

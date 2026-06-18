@@ -29,7 +29,14 @@
         >
             <button
                 type="button"
-                class="btn btn-danger me-auto"
+                class="btn btn-outline-secondary me-auto"
+                @click="doExportJson"
+            >
+                {{ $gettext('Export JSON') }}
+            </button>
+            <button
+                type="button"
+                class="btn btn-danger"
                 @click="doDeleteFromModal"
             >
                 {{ $gettext('Delete') }}
@@ -83,6 +90,9 @@ interface ClockWheelEntry {
     separation_override_enabled: boolean;
     separation_artist_minutes: number | null;
     separation_title_minutes: number | null;
+    is_hard_anchor: boolean;
+    research_score: number | null;
+    sound_code: string | null;
 }
 
 const props = defineProps<BaseEditModalProps & {
@@ -91,7 +101,7 @@ const props = defineProps<BaseEditModalProps & {
 const emit = defineEmits<BaseEditModalEmits>();
 
 const $modal = useTemplateRef('$modal');
-const {notifySuccess} = useNotify();
+const {notifySuccess, notifyError} = useNotify();
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
@@ -144,6 +154,9 @@ const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
     separation_override_enabled: false,
     separation_artist_minutes: null,
     separation_title_minutes: null,
+    is_hard_anchor: false,
+    research_score: null,
+    sound_code: null,
 });
 
 const addEntry = () => {
@@ -241,6 +254,9 @@ const populateForm = (data: Record<string, unknown>) => {
             separation_override_enabled?: boolean;
             separation_artist_minutes?: number | null;
             separation_title_minutes?: number | null;
+            is_hard_anchor?: boolean;
+            research_score?: number | null;
+            sound_code?: string | null;
         }[]).map(
             (s) => ({
                 type: normalizeSlotType(s.type),
@@ -253,6 +269,9 @@ const populateForm = (data: Record<string, unknown>) => {
                 separation_override_enabled: Boolean(s.separation_override_enabled),
                 separation_artist_minutes: s.separation_artist_minutes ?? null,
                 separation_title_minutes: s.separation_title_minutes ?? null,
+                is_hard_anchor: Boolean(s.is_hard_anchor),
+                research_score: s.research_score ?? null,
+                sound_code: s.sound_code ?? null,
             })
         );
         entries.splice(0, entries.length, ...converted);
@@ -291,6 +310,9 @@ const validateForm = async () => {
             separation_title_minutes: e.separation_override_enabled
                 ? e.separation_title_minutes
                 : null,
+            is_hard_anchor: e.is_hard_anchor,
+            research_score: e.research_score,
+            sound_code: e.sound_code,
         }));
     }
 
@@ -338,6 +360,26 @@ const doDeleteFromModal = () => {
     if (editUrl.value) {
         $modal.value?.hide();
         void doDelete(editUrl.value);
+    }
+};
+
+const doExportJson = async () => {
+    if (!editUrl.value) {
+        return;
+    }
+
+    try {
+        const exportUrl = editUrl.value.replace(/\/?$/, '') + '/export';
+        const {data} = await axios.get<Record<string, unknown>>(exportUrl);
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${form.value.name || 'clock-wheel'}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    } catch {
+        notifyError($gettext('Could not export clock wheel.'));
     }
 };
 

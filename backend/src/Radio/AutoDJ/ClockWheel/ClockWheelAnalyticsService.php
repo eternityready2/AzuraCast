@@ -49,6 +49,44 @@ final class ClockWheelAnalyticsService
         $analytics->legal_id_compliance_percent = $compliance['compliance_percent'];
         $analytics->legal_id_late_events = $compliance['late_events'];
 
+        $analytics->effectiveness_score = $this->computeEffectivenessScore($analytics);
+        $analytics->effectiveness_grade = $this->gradeFromScore($analytics->effectiveness_score);
+
+        $listenerStats = $this->eventRepo->getListenerOverlayForWheel($wheel, $since);
+        $analytics->avg_listeners = $listenerStats['avg_listeners'];
+        $analytics->peak_listeners = $listenerStats['peak_listeners'];
+
         return $analytics;
+    }
+
+    private function computeEffectivenessScore(ClockWheelAnalytics $analytics): ?float
+    {
+        if ($analytics->tracks_queued === 0 && $analytics->fallbacks === 0) {
+            return null;
+        }
+
+        $score = 100.0;
+        $score -= min(40.0, $analytics->fallbacks * 2.0);
+        $score -= min(20.0, $analytics->deferred * 1.0);
+        $score -= min(15.0, ($analytics->avg_drift_seconds ?? 0.0) / 2.0);
+        $score -= min(25.0, $analytics->legal_id_late_count * 5.0);
+        $score -= min(10.0, $analytics->separation_relaxed_count * 0.5);
+
+        return max(0.0, min(100.0, round($score, 1)));
+    }
+
+    private function gradeFromScore(?float $score): ?string
+    {
+        if ($score === null) {
+            return null;
+        }
+
+        return match (true) {
+            $score >= 90 => 'A',
+            $score >= 80 => 'B',
+            $score >= 70 => 'C',
+            $score >= 60 => 'D',
+            default => 'F',
+        };
     }
 }

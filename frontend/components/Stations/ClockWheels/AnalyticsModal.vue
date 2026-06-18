@@ -67,6 +67,52 @@
                 </div>
             </div>
 
+            <div
+                v-if="analytics?.effectiveness_score != null"
+                class="row g-3 mb-3"
+            >
+                <div class="col-6 col-md-4">
+                    <div class="border rounded p-2 text-center">
+                        <div class="fs-4 fw-semibold">
+                            {{ analytics.effectiveness_score }}
+                            <span class="fs-6 text-muted">/ 100</span>
+                        </div>
+                        <div class="small text-muted">
+                            {{ $gettext('Effectiveness score') }}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4">
+                    <div class="border rounded p-2 text-center">
+                        <div class="fs-4 fw-semibold">
+                            {{ analytics.effectiveness_grade ?? '—' }}
+                        </div>
+                        <div class="small text-muted">
+                            {{ $gettext('Wheel grade') }}
+                        </div>
+                    </div>
+                </div>
+                <div
+                    v-if="analytics.avg_listeners != null"
+                    class="col-6 col-md-4"
+                >
+                    <div class="border rounded p-2 text-center">
+                        <div class="fs-4 fw-semibold">
+                            {{ analytics.avg_listeners }}
+                            <span
+                                v-if="analytics.peak_listeners != null"
+                                class="fs-6 text-muted"
+                            >
+                                ({{ $gettext('peak') }} {{ analytics.peak_listeners }})
+                            </span>
+                        </div>
+                        <div class="small text-muted">
+                            {{ $gettext('Avg listeners (hourly)') }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <template v-if="(analytics?.legal_id_hours_logged ?? 0) > 0">
                 <h3 class="h6 mt-2">
                     {{ $gettext('Legal ID compliance') }}
@@ -177,6 +223,10 @@ export interface ClockWheelAnalyticsResponse {
         drift_seconds: number | null;
         media_id: number | null;
     }[];
+    effectiveness_score?: number | null;
+    effectiveness_grade?: string | null;
+    avg_listeners?: number | null;
+    peak_listeners?: number | null;
 }
 
 const {$gettext} = useTranslate();

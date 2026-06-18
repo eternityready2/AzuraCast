@@ -95,6 +95,21 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
     ]
     public ?int $duration_seconds = null;
 
+    #[ORM\Column]
+    public bool $is_hard_anchor = false;
+
+    #[
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 100)
+    ]
+    public ?int $research_score = null;
+
+    #[
+        ORM\Column(length: 20, nullable: true),
+        Assert\Length(max: 20)
+    ]
+    public ?string $sound_code = null;
+
     public function __construct(StationClockWheelTemplate $template)
     {
         $this->template = $template;

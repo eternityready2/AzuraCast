@@ -90,3 +90,58 @@ export function getClockWheelTimelineWarnings(
     return warnings;
 }
 
+export interface ClockWheelHourBucket {
+    segment: number;
+    label: string;
+    count: number;
+}
+
+/** Count anchors in each 2.5-minute segment of the broadcast hour (24 buckets). */
+export function getClockWheelHourDistribution(
+    entries: ClockWheelTimelineEntry[],
+): ClockWheelHourBucket[] {
+    const segmentSeconds = CLOCK_WHEEL_HOUR_SECONDS / 24;
+    const counts = Array.from({length: 24}, () => 0);
+
+    for (const entry of entries) {
+        const idx = Math.min(23, Math.floor(entry.position_seconds / segmentSeconds));
+        counts[idx]++;
+    }
+
+    return counts.map((count, segment) => ({
+        segment,
+        label: formatClockWheelPosition(Math.floor(segment * segmentSeconds)),
+        count,
+    }));
+}
+
+/** Rough loop duration: sum of max(duration cap, 180s default music) per slot. */
+export function estimateClockWheelLoopSeconds(
+    entries: Array<ClockWheelTimelineEntry & {duration_seconds?: number | null; type?: string}>,
+): number {
+    let total = 0;
+    const sorted = [...entries].sort((a, b) => a.position_seconds - b.position_seconds);
+
+    for (let i = 0; i < sorted.length; i++) {
+        const entry = sorted[i];
+        const next = sorted[i + 1];
+        const window = next
+            ? Math.max(1, next.position_seconds - entry.position_seconds)
+            : CLOCK_WHEEL_HOUR_SECONDS - entry.position_seconds;
+
+        if (entry.duration_seconds != null && entry.duration_seconds > 0) {
+            total += Math.min(entry.duration_seconds, window);
+        } else if (entry.type === 'legal_id' || entry.type === 'id' || entry.type === 'sweeper') {
+            total += Math.min(30, window);
+        } else {
+            total += Math.min(210, window);
+        }
+    }
+
+    return Math.min(CLOCK_WHEEL_HOUR_SECONDS, total);
+}
+
+export function isClockWheelLayoutValid(entries: ClockWheelTimelineEntry[]): boolean {
+    return getClockWheelTimelineWarnings(entries, (m) => m).length === 0;
+}
+

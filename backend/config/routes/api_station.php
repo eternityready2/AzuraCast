@@ -754,6 +754,21 @@ return static function (RouteCollectorProxy $group) {
                                 Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':scheduleAction'
                             )->setName('api:stations:clock-wheels:schedule');
 
+                            $group->get(
+                                '/clock-wheels/program-grid',
+                                Controller\Api\Stations\ClockWheels\ProgramGridAction::class
+                            )->setName('api:stations:clock-wheels:program-grid');
+
+                            $group->get(
+                                '/clock-wheels/reconciliation-log',
+                                Controller\Api\Stations\ClockWheels\ReconciliationLogAction::class
+                            )->setName('api:stations:clock-wheels:reconciliation-log');
+
+                            $group->post(
+                                '/clock-wheels/import',
+                                Controller\Api\Stations\ClockWheels\ImportAction::class
+                            )->setName('api:stations:clock-wheels:import');
+
                             $group->post(
                                 '/clock-wheels',
                                 Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':createAction'
@@ -871,6 +886,11 @@ return static function (RouteCollectorProxy $group) {
                                         '/analytics',
                                         Controller\Api\Stations\ClockWheels\AnalyticsAction::class
                                     )->setName('api:stations:clock-wheel:analytics');
+
+                                    $group->get(
+                                        '/export',
+                                        Controller\Api\Stations\ClockWheels\ExportAction::class
+                                    )->setName('api:stations:clock-wheel:export');
                                 }
                             );
 

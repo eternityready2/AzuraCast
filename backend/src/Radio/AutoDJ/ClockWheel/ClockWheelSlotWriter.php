@@ -78,6 +78,9 @@ final class ClockWheelSlotWriter
             $slot->separation_artist_minutes = $templateSlot->separation_artist_minutes;
             $slot->separation_title_minutes = $templateSlot->separation_title_minutes;
             $slot->duration_seconds = $templateSlot->duration_seconds;
+            $slot->is_hard_anchor = $templateSlot->is_hard_anchor;
+            $slot->research_score = $templateSlot->research_score;
+            $slot->sound_code = $templateSlot->sound_code;
             $wheel->addSlot($slot);
             $this->em->persist($slot);
         }
@@ -174,6 +177,16 @@ final class ClockWheelSlotWriter
         $slot->duration_seconds = (is_numeric($durRaw) && (int)$durRaw > 0)
             ? (int)$durRaw
             : null;
+
+        $slot->is_hard_anchor = filter_var($datum['is_hard_anchor'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        $researchRaw = $datum['research_score'] ?? null;
+        $slot->research_score = is_numeric($researchRaw) && (int)$researchRaw >= 0
+            ? min(100, (int)$researchRaw)
+            : null;
+
+        $soundCode = isset($datum['sound_code']) ? trim((string)$datum['sound_code']) : '';
+        $slot->sound_code = $soundCode !== '' ? substr($soundCode, 0, 20) : null;
     }
 
     /**

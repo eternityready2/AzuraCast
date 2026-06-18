@@ -33,4 +33,10 @@ final class ClockWheelPreview
         items: new OA\Items(type: 'string')
     )]
     public array $warnings = [];
+
+    #[OA\Property(example: 3540, nullable: true)]
+    public ?int $estimated_loop_seconds = null;
+
+    #[OA\Property(example: true)]
+    public bool $is_valid = true;
 }

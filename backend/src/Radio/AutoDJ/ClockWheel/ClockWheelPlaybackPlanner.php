@@ -117,29 +117,72 @@ final class ClockWheelPlaybackPlanner
         }
 
         if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
-            $this->logger->info(
-                'Clock Wheel: insufficient time before next anchor; deferring to next BuildQueue tick.',
+            if ($activeSlot->is_hard_anchor) {
+                if ($availableSeconds < self::MIN_SHORT_FORM_WINDOW_SECONDS) {
+                    $this->logger->warning(
+                        'Clock Wheel: hard anchor missed — insufficient window before next anchor.',
+                        [
+                            'available_seconds' => $availableSeconds,
+                            'position_seconds' => $activeSlot->position_seconds,
+                        ]
+                    );
+                    $this->eventLogger->recordFallback(
+                        $station,
+                        $wheel,
+                        $activeSlot,
+                        $expectedPlayTime,
+                        ClockWheelFallbackReason::HardAnchorMissed,
+                        $secondsIntoHour,
+                    );
+
+                    return null;
+                }
+
+                $this->logger->info(
+                    'Clock Wheel: hard anchor — forcing shortest fit in tight window.',
+                    [
+                        'available_seconds' => $availableSeconds,
+                        'min_window_seconds' => $minWindow,
+                    ]
+                );
+            } else {
+                $this->logger->info(
+                    'Clock Wheel: insufficient time before next anchor; deferring to next BuildQueue tick.',
+                    [
+                        'available_seconds' => $availableSeconds,
+                        'min_window_seconds' => $minWindow,
+                        'slot_type' => $activeSlot->type?->value,
+                    ]
+                );
+                $this->eventLogger->recordDeferred(
+                    $station,
+                    $wheel,
+                    $activeSlot,
+                    $expectedPlayTime,
+                    ClockWheelFallbackReason::DeferredInsufficientWindow,
+                    $secondsIntoHour,
+                );
+
+                return null;
+            }
+        }
+
+        if (
+            $activeSlot->is_hard_anchor
+            && $secondsIntoHour > $activeSlot->position_seconds + 5
+        ) {
+            $this->logger->warning(
+                'Clock Wheel: hard anchor playhead is past anchor position.',
                 [
-                    'available_seconds' => $availableSeconds,
-                    'min_window_seconds' => $minWindow,
-                    'slot_type' => $activeSlot->type?->value,
+                    'position_seconds' => $activeSlot->position_seconds,
+                    'seconds_into_hour' => $secondsIntoHour,
                 ]
             );
-            $this->eventLogger->recordDeferred(
-                $station,
-                $wheel,
-                $activeSlot,
-                $expectedPlayTime,
-                ClockWheelFallbackReason::DeferredInsufficientWindow,
-                $secondsIntoHour,
-            );
-
-            return null;
         }
 
         $isEndOfHour = $this->isEndOfHourMusicSlot($slots, $activeIndex);
 
-        return $this->resolveSlot(
+        $queueEntry = $this->resolveSlot(
             $wheel,
             $activeSlot,
             $recentHistory,
@@ -150,6 +193,19 @@ final class ClockWheelPlaybackPlanner
             $secondsIntoHour,
             $isEndOfHour,
         );
+
+        if (null === $queueEntry && $activeSlot->is_hard_anchor) {
+            $this->eventLogger->recordFallback(
+                $station,
+                $wheel,
+                $activeSlot,
+                $expectedPlayTime,
+                ClockWheelFallbackReason::HardAnchorMissed,
+                $secondsIntoHour,
+            );
+        }
+
+        return $queueEntry;
     }
 
     /**

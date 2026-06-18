@@ -59,4 +59,16 @@ final class ClockWheelAnalytics
      */
     #[OA\Property(type: 'array', items: new OA\Items(type: 'object'))]
     public array $legal_id_late_events = [];
+
+    #[OA\Property(example: 92.5, nullable: true)]
+    public ?float $effectiveness_score = null;
+
+    #[OA\Property(example: 'A', nullable: true)]
+    public ?string $effectiveness_grade = null;
+
+    #[OA\Property(example: 42, nullable: true)]
+    public ?int $avg_listeners = null;
+
+    #[OA\Property(example: 128, nullable: true)]
+    public ?int $peak_listeners = null;
 }

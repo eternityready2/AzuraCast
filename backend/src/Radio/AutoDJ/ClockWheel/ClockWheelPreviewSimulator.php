@@ -90,6 +90,9 @@ final class ClockWheelPreviewSimulator
             $cursor += max(1, min($playSeconds, $availableSeconds));
         }
 
+        $response->estimated_loop_seconds = min($cursor, self::HOUR_SECONDS);
+        $response->is_valid = $response->warnings === [] && $cursor <= self::HOUR_SECONDS;
+
         return $response;
     }
 

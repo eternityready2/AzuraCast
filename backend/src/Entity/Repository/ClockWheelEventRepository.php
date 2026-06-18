@@ -668,4 +668,99 @@ final class ClockWheelEventRepository extends Repository
             'late_events' => $lateEvents,
         ];
     }
+
+    /**
+     * @return array{avg_listeners: int|null, peak_listeners: int|null}
+     */
+    public function getListenerOverlayForWheel(
+        StationClockWheel $wheel,
+        DateTimeImmutable $since,
+    ): array {
+        $result = $this->em->createQuery(
+            <<<'DQL'
+                SELECT AVG(a.number_avg), MAX(a.number_max)
+                FROM App\Entity\Analytics a
+                WHERE a.station = :station
+                AND a.moment >= :since
+                AND a.type = :type
+            DQL
+        )->setParameter('station', $wheel->station)
+            ->setParameter('since', $since)
+            ->setParameter('type', \App\Entity\Enums\AnalyticsIntervals::Hourly)
+            ->getSingleResult();
+
+        if (!is_array($result) || ($result[0] === null && $result[1] === null)) {
+            return ['avg_listeners' => null, 'peak_listeners' => null];
+        }
+
+        return [
+            'avg_listeners' => $result[0] !== null ? (int)round((float)$result[0]) : null,
+            'peak_listeners' => $result[1] !== null ? (int)$result[1] : null,
+        ];
+    }
+
+    /**
+     * @return array{rows: list<array<string, mixed>>, total: int}
+     */
+    public function getReconciliationLog(
+        Station $station,
+        int $limit = 50,
+        int $offset = 0,
+        ?int $wheelId = null,
+        ?ClockWheelEventKind $eventKind = null,
+    ): array {
+        $limit = max(1, min(200, $limit));
+        $offset = max(0, $offset);
+
+        $qb = $this->em->createQueryBuilder()
+            ->select('e', 'w', 's', 'm')
+            ->from(ClockWheelEvent::class, 'e')
+            ->leftJoin('e.clock_wheel', 'w')
+            ->leftJoin('e.slot', 's')
+            ->leftJoin('e.media', 'm')
+            ->where('e.station = :station')
+            ->setParameter('station', $station)
+            ->orderBy('e.event_timestamp', 'DESC');
+
+        if ($wheelId !== null) {
+            $qb->andWhere('IDENTITY(e.clock_wheel) = :wheelId')
+                ->setParameter('wheelId', $wheelId);
+        }
+
+        if ($eventKind instanceof ClockWheelEventKind) {
+            $qb->andWhere('e.event_kind = :kind')
+                ->setParameter('kind', $eventKind);
+        }
+
+        $countQb = clone $qb;
+        $total = (int)$countQb->select('COUNT(e.id)')->getQuery()->getSingleScalarResult();
+
+        /** @var ClockWheelEvent[] $events */
+        $events = $qb->setFirstResult($offset)
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->execute();
+
+        $rows = [];
+        foreach ($events as $event) {
+            $rows[] = [
+                'id' => $event->id,
+                'event_timestamp' => $event->event_timestamp->format(DateTimeImmutable::ATOM),
+                'event_kind' => $event->event_kind->value,
+                'fallback_reason' => $event->fallback_reason?->value,
+                'clock_wheel_id' => $event->clock_wheel_id,
+                'clock_wheel_name' => $event->clock_wheel?->name,
+                'slot_id' => $event->slot_id,
+                'anchor_type' => $event->anchor_type,
+                'sound_code' => $event->slot?->sound_code,
+                'research_score' => $event->slot?->research_score,
+                'drift_seconds' => $event->drift_seconds,
+                'expected_play_at' => $event->expected_play_at?->format(DateTimeImmutable::ATOM),
+                'actual_play_at' => $event->actual_play_at?->format(DateTimeImmutable::ATOM),
+                'media_id' => $event->media_id,
+            ];
+        }
+
+        return ['rows' => $rows, 'total' => $total];
+    }
 }
