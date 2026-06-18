@@ -102,6 +102,17 @@
                     />
                 </tab>
 
+                <tab :label="$gettext('Health')">
+                    <health-dashboard-tab :api-url="healthUrl" />
+                </tab>
+
+                <tab :label="$gettext('Programme Log')">
+                    <programme-log-tab
+                        :api-url="programmeLogUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
                 <tab :label="$gettext('Streams')">
                     <streams-tab
                         :api-url="byStreamUrl"
@@ -160,6 +171,8 @@ import ListenerInsightsTab from "~/components/Stations/Reports/Overview/Listener
 import GrowthTrendTab from "~/components/Stations/Reports/Overview/GrowthTrendTab.vue";
 import RetentionCurveTab from "~/components/Stations/Reports/Overview/RetentionCurveTab.vue";
 import DaypartAudienceTab from "~/components/Stations/Reports/Overview/DaypartAudienceTab.vue";
+import HealthDashboardTab from "~/components/Stations/Reports/Overview/HealthDashboardTab.vue";
+import ProgrammeLogTab from "~/components/Stations/Reports/Overview/ProgrammeLogTab.vue";
 import {ref} from "vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -189,6 +202,8 @@ const listenerInsightsUrl = getStationApiUrl('/reports/overview/listener-insight
 const growthTrendUrl = getStationApiUrl('/reports/overview/growth-trend');
 const retentionCurveUrl = getStationApiUrl('/reports/overview/retention-curve');
 const daypartAudienceUrl = getStationApiUrl('/reports/overview/daypart-audience');
+const healthUrl = getStationApiUrl('/reports/overview/health');
+const programmeLogUrl = getStationApiUrl('/reports/programme-log');
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);

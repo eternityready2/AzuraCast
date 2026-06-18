@@ -20,6 +20,7 @@ use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
+use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -869,7 +870,10 @@ final class ClockWheelPlaybackPlanner
             ->setParameters($params)
             ->getResult();
 
-        return $result;
+        return array_values(array_filter(
+            $result,
+            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media),
+        ));
     }
 
     private function resolveMaxDuration(StationClockWheelSlot $slot, int $availableSeconds): float

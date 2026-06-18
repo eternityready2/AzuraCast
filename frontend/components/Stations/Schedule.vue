@@ -54,6 +54,21 @@
                         {{ $gettext('Live Clock Wheel') }}
                     </button>
                 </div>
+                <div
+                    class="nav-item"
+                    role="presentation"
+                >
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: activeTab === 'holidays'}"
+                        role="tab"
+                        :aria-selected="activeTab === 'holidays'"
+                        @click="activeTab = 'holidays'"
+                    >
+                        {{ $gettext('Holidays') }}
+                    </button>
+                </div>
             </nav>
         </div>
         <div class="card-body">
@@ -68,6 +83,12 @@
             <clock-wheel-live-tab
                 v-show="activeTab === 'live'"
                 :active="activeTab === 'live'"
+            />
+            <holiday-overrides-tab
+                v-show="activeTab === 'holidays'"
+                :list-url="holidayOverridesUrl"
+                :wheels-url="clockWheelsListUrl"
+                :playlists-url="listUrl"
             />
         </div>
         <edit-modal
@@ -90,6 +111,7 @@
 <script setup lang="ts">
 import ScheduleCalendar from "~/components/Stations/Common/ScheduleCalendar.vue";
 import ClockWheelLiveTab from "~/components/Stations/Schedule/ClockWheelLiveTab.vue";
+import HolidayOverridesTab from "~/components/Stations/Schedule/HolidayOverridesTab.vue";
 import EditModal from "~/components/Stations/Playlists/EditModal.vue";
 import ClockWheelEditModal from "~/components/Stations/ClockWheels/EditModal.vue";
 import CreateEventModal from "~/components/Stations/Common/CreateEventModal.vue";
@@ -103,10 +125,11 @@ import {useTranslate} from "~/vendor/gettext";
 const {$gettext} = useTranslate();
 const {getStationApiUrl} = useApiRouter();
 
-const activeTab = ref<'calendar' | 'live'>('calendar');
+const activeTab = ref<'calendar' | 'live' | 'holidays'>('calendar');
 
 const listUrl = getStationApiUrl('/playlists');
 const clockWheelsListUrl = getStationApiUrl('/clock-wheels');
+const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
 

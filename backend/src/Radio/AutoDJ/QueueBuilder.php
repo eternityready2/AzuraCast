@@ -21,7 +21,9 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
 use App\Radio\PlaylistParser;
+use App\Service\HolidayOverrideService;
 use DateTimeImmutable;
 use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -43,6 +45,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly StationRequestRepository $requestRepo,
         private readonly StationQueueRepository $queueRepo,
         private readonly SongHistoryRepository $historyRepo,
+        private readonly HolidayOverrideService $holidayOverrideService,
     ) {
     }
 
@@ -92,6 +95,41 @@ final class QueueBuilder implements EventSubscriberInterface
             $expectedPlayTime,
             $station->backend_config->duplicate_prevention_time_range
         );
+
+        $daypartSettings = ClockWheelSeparationSettings::resolveForStationHour($station, $expectedPlayTime);
+        if ($daypartSettings !== null && ($daypartSettings->enabled || $daypartSettings->burnRateMaxPlays24h !== null)) {
+            $recentSongHistoryForDuplicatePrevention = $this->queueRepo->getRecentlyPlayedByTimeRange(
+                $station,
+                $expectedPlayTime,
+                max(
+                    $station->backend_config->duplicate_prevention_time_range,
+                    $daypartSettings->historyLookbackMinutes()
+                )
+            );
+        }
+
+        $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $expectedPlayTime);
+        if ($holidayPlaylist !== null) {
+            foreach ([false, true] as $allowDuplicates) {
+                if (
+                    $event->setNextSongs(
+                        $this->playSongFromPlaylist(
+                            $holidayPlaylist,
+                            $recentSongHistoryForDuplicatePrevention,
+                            $expectedPlayTime,
+                            $allowDuplicates
+                        )
+                    )
+                ) {
+                    $this->logger->info(
+                        'Holiday override playlist is active.',
+                        ['playlist_id' => $holidayPlaylist->id]
+                    );
+
+                    return;
+                }
+            }
+        }
 
         $this->logger->debug(
             'AutoDJ recent song playback history',
@@ -258,21 +296,25 @@ final class QueueBuilder implements EventSubscriberInterface
                 PlaylistOrders::Random => $this->getRandomMediaIdFromPlaylist(
                     $playlist,
                     $recentSongHistory,
+                    $expectedPlayTime,
                     $allowDuplicates
                 ),
                 PlaylistOrders::Sequential => $this->getSequentialMediaIdFromPlaylist(
                     $playlist,
                     $recentSongHistory,
+                    $expectedPlayTime,
                     $allowDuplicates
                 ),
                 PlaylistOrders::Shuffle => $this->getShuffledMediaIdFromPlaylist(
                     $playlist,
                     $recentSongHistory,
+                    $expectedPlayTime,
                     $allowDuplicates
                 ),
                 PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
                     $playlist,
                     $recentSongHistory,
+                    $expectedPlayTime,
                     $allowDuplicates
                 ),
             };
@@ -540,14 +582,51 @@ final class QueueBuilder implements EventSubscriberInterface
         return $filtered;
     }
 
+    /**
+     * @param StationPlaylistQueue[] $mediaQueue
+     *
+     * @return StationPlaylistQueue[]
+     */
+    private function filterQueueByPlayability(array $mediaQueue, DateTimeImmutable $expectedPlayTime): array
+    {
+        $filtered = [];
+
+        foreach ($mediaQueue as $item) {
+            if (!isset($item->media_id)) {
+                $filtered[] = $item;
+                continue;
+            }
+
+            $media = $this->em->find(StationMedia::class, $item->media_id);
+            if ($media instanceof StationMedia && MediaPlayability::isEligibleForPlayback($media, $expectedPlayTime)) {
+                $filtered[] = $item;
+            }
+        }
+
+        return $filtered;
+    }
+
+    private function preparePlaylistQueue(
+        StationPlaylist $playlist,
+        array $mediaQueue,
+        DateTimeImmutable $expectedPlayTime,
+    ): array {
+        return $this->filterQueueByPlayability(
+            $this->filterQueueByRotationGoal($playlist, $mediaQueue),
+            $expectedPlayTime,
+        );
+    }
+
     private function getRandomMediaIdFromPlaylist(
         StationPlaylist $playlist,
         array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->filterQueueByRotationGoal(
+        $mediaQueue = $this->preparePlaylistQueue(
             $playlist,
             $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
         );
 
         if ($playlist->avoid_duplicates) {
@@ -560,17 +639,20 @@ final class QueueBuilder implements EventSubscriberInterface
     private function getSequentialMediaIdFromPlaylist(
         StationPlaylist $playlist,
         array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates = false
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->filterQueueByRotationGoal(
+        $mediaQueue = $this->preparePlaylistQueue(
             $playlist,
             $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
         );
         if (empty($mediaQueue)) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->filterQueueByRotationGoal(
+            $mediaQueue = $this->preparePlaylistQueue(
                 $playlist,
                 $this->spmRepo->getQueue($playlist),
+                $expectedPlayTime,
             );
         }
 
@@ -593,17 +675,20 @@ final class QueueBuilder implements EventSubscriberInterface
     private function getShuffledMediaIdFromPlaylist(
         StationPlaylist $playlist,
         array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->filterQueueByRotationGoal(
+        $mediaQueue = $this->preparePlaylistQueue(
             $playlist,
             $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
         );
         if (empty($mediaQueue)) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->filterQueueByRotationGoal(
+            $mediaQueue = $this->preparePlaylistQueue(
                 $playlist,
                 $this->spmRepo->getQueue($playlist),
+                $expectedPlayTime,
             );
         }
 
@@ -622,9 +707,10 @@ final class QueueBuilder implements EventSubscriberInterface
         );
 
         $this->spmRepo->resetQueue($playlist);
-        $mediaQueue = $this->filterQueueByRotationGoal(
+        $mediaQueue = $this->preparePlaylistQueue(
             $playlist,
             $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
         );
 
         return $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentSongHistory);
@@ -648,21 +734,25 @@ final class QueueBuilder implements EventSubscriberInterface
             PlaylistOrders::Random => $this->getRandomMediaIdFromPlaylist(
                 $playlist,
                 $recentSongHistory,
+                new DateTimeImmutable(),
                 $allowDuplicates
             ),
             PlaylistOrders::Sequential => $this->getSequentialMediaIdFromPlaylist(
                 $playlist,
                 $recentSongHistory,
+                new DateTimeImmutable(),
                 $allowDuplicates
             ),
             PlaylistOrders::Shuffle => $this->getShuffledMediaIdFromPlaylist(
                 $playlist,
                 $recentSongHistory,
+                new DateTimeImmutable(),
                 $allowDuplicates
             ),
             PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
                 $playlist,
                 $recentSongHistory,
+                new DateTimeImmutable(),
                 $allowDuplicates
             ),
         };
@@ -678,18 +768,21 @@ final class QueueBuilder implements EventSubscriberInterface
     private function getSmartShuffleMediaIdFromPlaylist(
         StationPlaylist $playlist,
         array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
         $distance = max(2, $playlist->smart_shuffle_distance ?? self::DEFAULT_SMART_SHUFFLE_DISTANCE);
-        $mediaQueue = $this->filterQueueByRotationGoal(
+        $mediaQueue = $this->preparePlaylistQueue(
             $playlist,
             $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
         );
         if ($mediaQueue === []) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->filterQueueByRotationGoal(
+            $mediaQueue = $this->preparePlaylistQueue(
                 $playlist,
                 $this->spmRepo->getQueue($playlist),
+                $expectedPlayTime,
             );
         }
 

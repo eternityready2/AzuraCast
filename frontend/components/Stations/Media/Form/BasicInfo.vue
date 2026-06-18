@@ -97,6 +97,31 @@
                 </select>
             </div>
         </div>
+
+        <form-group-checkbox
+            id="do_not_play"
+            class="mb-3"
+            :field="r$.do_not_play"
+            :label="$gettext('Do not play')"
+            :description="$gettext('Exclude this track from AutoDJ and clock wheel selection.')"
+        />
+
+        <template v-if="form.do_not_play">
+            <form-group-field
+                id="do_not_play_reason"
+                class="mb-3"
+                :field="r$.do_not_play_reason"
+                :label="$gettext('DNP reason')"
+            />
+            <form-group-field
+                id="do_not_play_until"
+                class="mb-3"
+                :field="r$.do_not_play_until"
+                type="datetime-local"
+                :label="$gettext('DNP until (optional)')"
+                :description="$gettext('Leave empty for a permanent do-not-play flag.')"
+            />
+        </template>
     </tab>
 </template>
 
@@ -110,7 +135,7 @@ import Tab from "~/components/Common/Tab.vue";
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useAxios} from '~/vendor/axios.ts';
 
-const {r$} = storeToRefs(useStationsMediaForm());
+const {r$, form} = storeToRefs(useStationsMediaForm());
 const tabClass = useFormTabClass(computed(() => r$.value.$groups.basicInfoTab));
 
 const {getStationApiUrl} = useApiRouter();

@@ -894,6 +894,36 @@ return static function (RouteCollectorProxy $group) {
                                 }
                             );
 
+                            $group->get(
+                                '/holiday-overrides',
+                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':listAction'
+                            )->setName('api:stations:holiday-overrides');
+
+                            $group->post(
+                                '/holiday-overrides',
+                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':createAction'
+                            );
+
+                            $group->group(
+                                '/holiday-override/{id}',
+                                function (RouteCollectorProxy $group) {
+                                    $group->get(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':getAction'
+                                    )->setName('api:stations:holiday-override');
+
+                                    $group->put(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':editAction'
+                                    );
+
+                                    $group->delete(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':deleteAction'
+                                    );
+                                }
+                            );
+
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
@@ -1004,6 +1034,16 @@ return static function (RouteCollectorProxy $group) {
                                 '/overview/daypart-audience',
                                 Controller\Api\Stations\Reports\Overview\DaypartAudienceAction::class
                             )->setName('api:stations:reports:overview-daypart-audience');
+
+                            $group->get(
+                                '/overview/health',
+                                Controller\Api\Stations\Reports\Overview\HealthAction::class
+                            )->setName('api:stations:reports:overview-health');
+
+                            $group->get(
+                                '/programme-log',
+                                Controller\Api\Stations\Reports\ProgrammeLogAction::class
+                            )->setName('api:stations:reports:programme-log');
 
                             $group->get(
                                 '/soundexchange',
