@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ;
 
+use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\StationPlaylist;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -228,6 +230,20 @@ final class HourBoundaryPlanner
         }
 
         return !$this->hasTopOfHourIdQueued($station, $targetLocal, $tz);
+    }
+
+    /**
+     * When station-wide top-of-hour protection is on, legacy once-per-hour playlists
+     * pinned to minute :00 are suppressed — {@see TopOfHourIdScheduler} queues legal_id instead.
+     */
+    public function shouldSuppressOncePerHourPlaylist(StationPlaylist $playlist): bool
+    {
+        if (!$this->isTopOfHourProtectionEnabled($playlist->station)) {
+            return false;
+        }
+
+        return $playlist->type === PlaylistTypes::OncePerHour
+            && $playlist->play_per_hour_minute === 0;
     }
 
     public function hasTopOfHourIdQueued(

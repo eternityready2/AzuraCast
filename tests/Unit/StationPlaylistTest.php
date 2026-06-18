@@ -121,6 +121,43 @@ class StationPlaylistTest extends Unit
         self::assertFalse($this->scheduler->shouldPlaylistPlayNow($playlist, $testTime));
     }
 
+    public function testOncePerHourPlaylistStrictWhenTopOfHourProtectionEnabled(): void
+    {
+        $station = $this->makeStation();
+        $station->backend_config->top_of_hour_id_enabled = true;
+
+        $playlist = new StationPlaylist($station);
+        $playlist->name = 'Hourly Promo';
+        $playlist->type = PlaylistTypes::OncePerHour;
+        $playlist->play_per_hour_minute = 50;
+
+        $utc = new DateTimeZone('UTC');
+        $testDay = CarbonImmutable::create(2018, 1, 15, 0, 0, 0, $utc);
+
+        // Strict: only at :50, not within 15-minute fuzzy window.
+        self::assertTrue($this->scheduler->shouldPlaylistPlayNow($playlist, $testDay->setTime(12, 50)));
+        self::assertFalse($this->scheduler->shouldPlaylistPlayNow($playlist, $testDay->setTime(12, 4)));
+        self::assertFalse($this->scheduler->shouldPlaylistPlayNow($playlist, $testDay->setTime(23, 59)));
+    }
+
+    public function testOncePerHourAtTopOfHourSuppressedWhenProtectionEnabled(): void
+    {
+        $station = $this->makeStation();
+        $station->backend_config->top_of_hour_id_enabled = true;
+
+        $playlist = new StationPlaylist($station);
+        $playlist->name = 'Legacy ID Playlist';
+        $playlist->type = PlaylistTypes::OncePerHour;
+        $playlist->play_per_hour_minute = 0;
+
+        $utc = new DateTimeZone('UTC');
+        $testDay = CarbonImmutable::create(2018, 1, 15, 10, 0, 0, $utc);
+
+        // Would have matched fuzzy window at :07 with protection off; suppressed with protection on.
+        self::assertFalse($this->scheduler->shouldPlaylistPlayNow($playlist, $testDay));
+        self::assertFalse($this->scheduler->shouldPlaylistPlayNow($playlist, $testDay->setTime(10, 7)));
+    }
+
     private function makeStation(): Station
     {
         $station = new Station();

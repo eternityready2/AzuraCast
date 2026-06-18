@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Unit;
 
 use App\Doctrine\ReloadableEntityManagerInterface;
+use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\Song;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
@@ -125,6 +127,24 @@ final class HourBoundaryPlannerTest extends Unit
 
         // 5 minutes until :00 minus 15s buffer minus 60s ID = 225s
         self::assertSame(225.0, $maxDuration);
+    }
+
+    public function testShouldSuppressOncePerHourPlaylistAtTopOfHour(): void
+    {
+        $playlist = new StationPlaylist($this->station);
+        $playlist->type = PlaylistTypes::OncePerHour;
+        $playlist->play_per_hour_minute = 0;
+
+        self::assertFalse($this->planner->shouldSuppressOncePerHourPlaylist($playlist));
+
+        $backendConfig = $this->station->backend_config;
+        $backendConfig->top_of_hour_id_enabled = true;
+        $this->station->backend_config = $backendConfig;
+
+        self::assertTrue($this->planner->shouldSuppressOncePerHourPlaylist($playlist));
+
+        $playlist->play_per_hour_minute = 30;
+        self::assertFalse($this->planner->shouldSuppressOncePerHourPlaylist($playlist));
     }
 
     private function persistStation(ReloadableEntityManagerInterface $em): Station
