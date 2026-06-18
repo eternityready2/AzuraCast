@@ -133,6 +133,20 @@ final class StationPlaylist implements
         }
     }
 
+    /**
+     * Optional named crossfade profile (see station crossfade_profiles in backend_config).
+     */
+    #[
+        OA\Property(example: 'quick_id', nullable: true),
+        ORM\Column(length: 50, nullable: true)
+    ]
+    public ?string $crossfade_profile = null {
+        set (string|null $value) {
+            $value = null !== $value ? trim($value) : null;
+            $this->crossfade_profile = ('' === $value) ? null : $value;
+        }
+    }
+
     #[
         OA\Property(example: "https://remote-url.example.com/stream.mp3"),
         ORM\Column(length: 255, nullable: true)

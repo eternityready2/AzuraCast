@@ -419,6 +419,35 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public bool $content_type_crossfade_enabled = true {
+        set (bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    /**
+     * Transition keys: "from_type:to_type" → {fade_in, fade_out} or null for station default.
+     *
+     * @var array<string, array{fade_in: float, fade_out: float}|null>
+     */
+    #[OA\Property(type: 'object')]
+    public array $content_type_crossfade_matrix = [] {
+        set (array|string|null $value) {
+            $this->content_type_crossfade_matrix = is_array($value) ? $value : [];
+        }
+    }
+
+    /**
+     * Named profile overrides merged on top of the station matrix.
+     *
+     * @var array<string, array<string, array{fade_in: float, fade_out: float}|null>>
+     */
+    #[OA\Property(type: 'object')]
+    public array $crossfade_profiles = [] {
+        set (array|string|null $value) {
+            $this->crossfade_profiles = is_array($value) ? $value : [];
+        }
+    }
+
+    #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
     }

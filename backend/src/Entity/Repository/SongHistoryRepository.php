@@ -228,4 +228,22 @@ final class SongHistoryRepository extends AbstractStationBasedRepository
             $rows,
         );
     }
+
+    public function getLastPlayedMediaType(Station $station): ?string
+    {
+        /** @var SongHistory|null $last */
+        $last = $this->em->createQuery(
+            <<<'DQL'
+                SELECT sh FROM App\Entity\SongHistory sh
+                WHERE sh.station = :station
+                AND sh.is_visible = 1
+                AND sh.media IS NOT NULL
+                ORDER BY sh.timestamp_start DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return $last?->media?->type;
+    }
 }

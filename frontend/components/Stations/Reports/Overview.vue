@@ -88,6 +88,20 @@
                     />
                 </tab>
 
+                <tab :label="$gettext('Retention')">
+                    <retention-curve-tab
+                        :api-url="retentionCurveUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
+                <tab :label="$gettext('Daypart Audience')">
+                    <daypart-audience-tab
+                        :api-url="daypartAudienceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
                 <tab :label="$gettext('Streams')">
                     <streams-tab
                         :api-url="byStreamUrl"
@@ -144,6 +158,8 @@ import PlaylistPerformanceTab from "~/components/Stations/Reports/Overview/Playl
 import DropoutTab from "~/components/Stations/Reports/Overview/DropoutTab.vue";
 import ListenerInsightsTab from "~/components/Stations/Reports/Overview/ListenerInsightsTab.vue";
 import GrowthTrendTab from "~/components/Stations/Reports/Overview/GrowthTrendTab.vue";
+import RetentionCurveTab from "~/components/Stations/Reports/Overview/RetentionCurveTab.vue";
+import DaypartAudienceTab from "~/components/Stations/Reports/Overview/DaypartAudienceTab.vue";
 import {ref} from "vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -171,6 +187,8 @@ const playlistPerformanceUrl = getStationApiUrl('/reports/overview/playlist-perf
 const dropoutUrl = getStationApiUrl('/reports/overview/dropout');
 const listenerInsightsUrl = getStationApiUrl('/reports/overview/listener-insights');
 const growthTrendUrl = getStationApiUrl('/reports/overview/growth-trend');
+const retentionCurveUrl = getStationApiUrl('/reports/overview/retention-curve');
+const daypartAudienceUrl = getStationApiUrl('/reports/overview/daypart-audience');
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);

@@ -2448,6 +2448,7 @@ export type StationPlaylist = HasAutoIncrementId & {
   smart_shuffle_distance?: number | null;
   /** Minimum days between repeats of the same track (positive rotation goal). */
   rotation_goal_days?: number | null;
+  crossfade_profile?: string | null;
   /** StationSchedule> */
   schedule_items?: any[];
   /** Podcast> */

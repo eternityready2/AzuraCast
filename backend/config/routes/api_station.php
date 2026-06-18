@@ -976,6 +976,16 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:overview-growth-trend');
 
                             $group->get(
+                                '/overview/retention-curve',
+                                Controller\Api\Stations\Reports\Overview\RetentionCurveAction::class
+                            )->setName('api:stations:reports:overview-retention-curve');
+
+                            $group->get(
+                                '/overview/daypart-audience',
+                                Controller\Api\Stations\Reports\Overview\DaypartAudienceAction::class
+                            )->setName('api:stations:reports:overview-daypart-audience');
+
+                            $group->get(
                                 '/soundexchange',
                                 Controller\Api\Stations\Reports\SoundExchangeAction::class
                             )->setName('api:stations:reports:soundexchange');
@@ -1256,6 +1266,22 @@ return static function (RouteCollectorProxy $group) {
                             $group->put(
                                 '',
                                 Controller\Api\Stations\TopOfHour\PutAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    // Content-type crossfade profiles (v0.33)
+                    $group->group(
+                        '/crossfade-profiles',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\CrossfadeProfiles\GetAction::class
+                            )->setName('api:stations:crossfade-profiles');
+
+                            $group->put(
+                                '',
+                                Controller\Api\Stations\CrossfadeProfiles\PutAction::class
                             );
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));

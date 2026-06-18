@@ -41,6 +41,7 @@ export const useStationsPlaylistsForm = defineStore(
             avoid_duplicates: true,
             smart_shuffle_distance: null as number | null,
             rotation_goal_days: null as number | null,
+            crossfade_profile: null as string | null,
             backend_options: [],
             schedule_items: []
         });
@@ -72,6 +73,7 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.avoid_duplicates,
                         fields.smart_shuffle_distance,
                         fields.rotation_goal_days,
+                        fields.crossfade_profile,
                     ],
                     advancedTab: [
                         fields.backend_options

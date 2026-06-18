@@ -133,6 +133,14 @@
                         :label="$gettext('Rotation goal (days)')"
                         :description="$gettext('Minimum days before the same track can play again from this playlist. Leave empty to disable.')"
                     />
+
+                    <form-group-field
+                        id="form_edit_crossfade_profile"
+                        class="col-md-6"
+                        :field="r$.crossfade_profile"
+                        :label="$gettext('Crossfade profile')"
+                        :description="$gettext('Optional named profile from Crossfade Profiles settings. Leave empty for station default matrix.')"
+                    />
                 </div>
 
                 <form-fieldset v-show="form.type === 'default'">

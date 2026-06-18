@@ -67,6 +67,11 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:top_of_hour'
                 },
                 {
+                    path: 'crossfade_profiles',
+                    component: () => import('~/components/Stations/CrossfadeProfiles.vue'),
+                    name: 'stations:crossfade_profiles'
+                },
+                {
                     path: 'logs',
                     component: () => import('~/components/Stations/Logs.vue'),
                     name: 'stations:logs'

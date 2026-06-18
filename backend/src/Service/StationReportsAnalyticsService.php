@@ -406,4 +406,54 @@ final class StationReportsAnalyticsService
             ),
         ];
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getRetentionCurve(
+        Station $station,
+        DateRange $dateRange,
+    ): array {
+        $excludeBots = $this->shouldExcludeBots($station);
+
+        return [
+            'analytics_exclude_bots' => $excludeBots,
+            ...$this->listenerRepo->getRetentionCurve(
+                $station,
+                $dateRange->start,
+                $dateRange->end,
+                $excludeBots,
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getDaypartAudience(
+        Station $station,
+        DateRange $dateRange,
+    ): array {
+        /** @var array<array{id: int, name: string, start_hour: int, end_hour: int, is_active: bool}> $dayparts */
+        $dayparts = $this->em->createQuery(
+            <<<'DQL'
+                SELECT d.id, d.name, d.start_hour, d.end_hour, d.is_active
+                FROM App\Entity\StationClockDaypart d
+                WHERE d.station = :station
+                ORDER BY d.start_hour ASC
+            DQL
+        )->setParameter('station', $station)
+            ->getArrayResult();
+
+        return [
+            'analytics_exclude_bots' => $this->shouldExcludeBots($station),
+            'dayparts' => $this->listenerRepo->getDaypartAudienceStats(
+                $station,
+                $dateRange->start,
+                $dateRange->end,
+                $dayparts,
+                $this->shouldExcludeBots($station),
+            ),
+        ];
+    }
 }
