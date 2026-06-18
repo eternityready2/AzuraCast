@@ -9,6 +9,8 @@ use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
+use App\Entity\Enums\ClockWheelFallbackReason;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
@@ -23,6 +25,7 @@ final class HourBoundaryLegalIdResolver
         private readonly EntityManagerInterface $em,
         private readonly DuplicatePrevention $duplicatePrevention,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
+        private readonly ClockWheelEventLogger $eventLogger,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -108,6 +111,21 @@ final class HourBoundaryLegalIdResolver
         $queueEntry->hour_boundary_enforce_cap = true;
         $queueEntry->hour_boundary_max_play_seconds = (int)floor($maxDuration);
         $this->em->persist($queueEntry);
+
+        $this->eventLogger->recordTopOfHourLegalIdQueued(
+            $station,
+            $media,
+            $legalIdExpectedAt,
+            $queueEntry,
+        );
+
+        if ($usedSubstitute) {
+            $this->eventLogger->recordTopOfHourFallback(
+                $station,
+                $legalIdExpectedAt,
+                ClockWheelFallbackReason::LegalIdMissingUsedPromo,
+            );
+        }
 
         $this->logger->info('Top-of-hour legal_id queued.', [
             'station_id' => $station->id,

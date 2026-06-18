@@ -108,7 +108,7 @@
                         >
                     </form-group>
 
-                    <p class="text-secondary mb-0">
+                    <p class="text-secondary mb-3">
                         {{
                             $gettext(
                                 'Legal ID files in library: %{count}',
@@ -116,6 +116,60 @@
                             )
                         }}
                     </p>
+
+                    <template v-if="(compliance?.hours_with_legal_id ?? 0) > 0">
+                        <h3 class="h6">
+                            {{ $gettext('Legal ID compliance (last 7 days)') }}
+                            <span class="text-muted fw-normal small">
+                                ({{ $gettext('tolerance') }}: {{ compliance?.tolerance_seconds ?? 10 }}s)
+                            </span>
+                        </h3>
+                        <div class="row g-3 mb-3">
+                            <div class="col-6 col-md-3">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="fs-4 fw-semibold">
+                                        {{ compliance?.compliance_percent ?? '—' }}<span
+                                            v-if="compliance?.compliance_percent != null"
+                                            class="fs-6"
+                                        >%</span>
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ $gettext('On time') }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="fs-4 fw-semibold">
+                                        {{ compliance?.on_time_count ?? 0 }}
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ $gettext('Compliant hours') }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="fs-4 fw-semibold text-warning">
+                                        {{ compliance?.late_count ?? 0 }}
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ $gettext('Late (> tolerance)') }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="border rounded p-2 text-center">
+                                    <div class="fs-4 fw-semibold text-secondary">
+                                        {{ compliance?.fallback_count ?? 0 }}
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ $gettext('Fallback events') }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </loading>
 
@@ -143,6 +197,15 @@ import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {onMounted, ref} from 'vue';
 
+interface TopOfHourCompliance {
+    tolerance_seconds: number;
+    hours_with_legal_id: number;
+    on_time_count: number;
+    late_count: number;
+    compliance_percent: number | null;
+    fallback_count: number;
+}
+
 interface TopOfHourSettings {
     top_of_hour_id_enabled: boolean;
     top_of_hour_id_mode: string;
@@ -151,6 +214,7 @@ interface TopOfHourSettings {
     top_of_hour_finish_buffer_seconds: number;
     top_of_hour_id_max_seconds: number;
     legal_id_media_count: number;
+    compliance?: TopOfHourCompliance;
 }
 
 const {axios} = useAxios();
@@ -162,6 +226,7 @@ const apiUrl = getStationApiUrl('/top-of-hour');
 const isLoading = ref(true);
 const isSaving = ref(false);
 const legalIdMediaCount = ref(0);
+const compliance = ref<TopOfHourCompliance | null>(null);
 
 const form = ref({
     top_of_hour_id_enabled: false,
@@ -185,6 +250,7 @@ const loadSettings = async () => {
             top_of_hour_id_max_seconds: data.top_of_hour_id_max_seconds,
         };
         legalIdMediaCount.value = data.legal_id_media_count ?? 0;
+        compliance.value = data.compliance ?? null;
     } finally {
         isLoading.value = false;
     }

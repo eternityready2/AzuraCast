@@ -46,6 +46,11 @@ class StationQueue
     public ?string $clock_wheel = null;
 
     #[OA\Property(
+        description: 'Indicates this queue row is a station-wide top-of-hour legal ID.',
+    )]
+    public bool $top_of_hour_legal_id = false;
+
+    #[OA\Property(
         description: 'Indicates whether the song is a listener request.',
     )]
     public bool $is_request = false;

@@ -6,10 +6,12 @@ namespace App\Controller\Api\Stations\TopOfHour;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
+use App\Entity\Repository\ClockWheelEventRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
+use DateTimeImmutable;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
@@ -34,6 +36,12 @@ final class GetAction implements SingleActionInterface
 {
     use EntityManagerAwareTrait;
 
+    public function __construct(
+        private readonly ClockWheelEventRepository $eventRepo,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
+    ) {
+    }
+
     public function __invoke(
         ServerRequest $request,
         Response $response,
@@ -41,6 +49,8 @@ final class GetAction implements SingleActionInterface
     ): ResponseInterface {
         $station = $this->em->refetch($request->getStation());
         $backendConfig = $station->backend_config;
+        $tolerance = $this->hourBoundaryPlanner->getComplianceToleranceSeconds($station);
+        $since = new DateTimeImmutable('-7 days', $station->getTimezoneObject());
 
         return $response->withJson([
             'top_of_hour_id_enabled' => $backendConfig->top_of_hour_id_enabled,
@@ -59,6 +69,11 @@ final class GetAction implements SingleActionInterface
                 'storageLocation' => $station->media_storage_location,
                 'type' => 'legal_id',
             ])->getSingleScalarResult(),
+            'compliance' => $this->eventRepo->getStationTopOfHourLegalIdComplianceSummary(
+                $station,
+                $since,
+                $tolerance,
+            ),
             'defaults' => [
                 'lookahead_minutes' => HourBoundaryPlanner::DEFAULT_LOOKAHEAD_MINUTES,
                 'finish_buffer_seconds' => HourBoundaryPlanner::DEFAULT_FINISH_BUFFER_SECONDS,

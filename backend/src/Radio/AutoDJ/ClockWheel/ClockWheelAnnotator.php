@@ -18,7 +18,10 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
-            AnnotateNextSong::class => ['applyClockWheelCap', 11],
+            AnnotateNextSong::class => [
+                ['applyClockWheelCap', 11],
+                ['applyLegalIdQuickCut', 9],
+            ],
         ];
     }
 
@@ -70,5 +73,32 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         ]);
 
         $queue->duration = $cueOut;
+    }
+
+    public function applyLegalIdQuickCut(AnnotateNextSong $event): void
+    {
+        if (!$event->isAsAutoDj()) {
+            return;
+        }
+
+        $queue = $event->getQueue();
+        if (!$queue instanceof StationQueue) {
+            return;
+        }
+
+        $media = $event->getMedia();
+        $isLegalId = ($queue->top_of_hour_legal_id ?? false)
+            || ($queue->clock_wheel_legal_id_substitute ?? false)
+            || ($media instanceof StationMedia && $media->type === 'legal_id');
+
+        if (!$isLegalId) {
+            return;
+        }
+
+        $event->addAnnotations([
+            'autocue_fade_in' => 0.0,
+            'autocue_fade_out' => 0.0,
+            'autocue_start_next' => null,
+        ]);
     }
 }

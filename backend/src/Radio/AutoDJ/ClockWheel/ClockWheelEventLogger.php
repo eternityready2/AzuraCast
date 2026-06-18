@@ -75,6 +75,33 @@ final class ClockWheelEventLogger
         $this->em->persist($event);
     }
 
+    public function recordTopOfHourLegalIdQueued(
+        Station $station,
+        StationMedia $media,
+        DateTimeImmutable $expectedPlayAt,
+        ?StationQueue $queueRow = null,
+    ): void {
+        $event = $this->createBase($station, ClockWheelEventKind::TrackQueued, $expectedPlayAt);
+        $event->media = $media;
+        $event->station_queue = $queueRow;
+        $event->anchor_type = 'legal_id';
+        $event->drift_seconds = 0;
+
+        $this->em->persist($event);
+    }
+
+    public function recordTopOfHourFallback(
+        Station $station,
+        DateTimeImmutable $expectedPlayAt,
+        ClockWheelFallbackReason $reason,
+    ): void {
+        $event = $this->createBase($station, ClockWheelEventKind::Fallback, $expectedPlayAt);
+        $event->fallback_reason = $reason;
+        $event->anchor_type = 'legal_id';
+
+        $this->em->persist($event);
+    }
+
     public function recordFallback(
         Station $station,
         ?StationClockWheel $wheel,

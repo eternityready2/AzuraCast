@@ -7,11 +7,13 @@ namespace App\Radio\AutoDJ;
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
 use App\Entity\Enums\ClockWheelSlotTypes;
+use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\Schedule\ScheduleConflictChecker;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -31,6 +33,7 @@ final class TopOfHourIdScheduler implements EventSubscriberInterface
         private readonly StationScheduleRepository $scheduleRepo,
         private readonly Scheduler $scheduler,
         private readonly ScheduleConflictChecker $conflictChecker,
+        private readonly ClockWheelEventLogger $eventLogger,
     ) {
     }
 
@@ -83,6 +86,16 @@ final class TopOfHourIdScheduler implements EventSubscriberInterface
         );
 
         if (null === $nextSong) {
+            $expectedAt = $this->hourBoundaryPlanner->resolveTopOfHourExpectedPlayAt(
+                $station,
+                $expectedPlayTime,
+            );
+            $this->eventLogger->recordTopOfHourFallback(
+                $station,
+                $expectedAt,
+                ClockWheelFallbackReason::NoMediaCandidates,
+            );
+            $this->em->flush();
             $this->logger->warning('Top-of-hour ID: could not resolve mandatory legal_id track.');
 
             return;

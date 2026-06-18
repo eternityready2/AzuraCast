@@ -171,6 +171,90 @@ final class ClockWheelEventRepository extends Repository
             ->getOneOrNullResult();
     }
 
+    public function findLatestUnplayedTopOfHourLegalIdQueued(
+        Station $station,
+        int $queueId,
+    ): ?ClockWheelEvent {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_kind = :kind
+                AND e.anchor_type = :anchor
+                AND e.actual_play_at IS NULL
+                AND e.station_queue_id = :queueId
+                ORDER BY e.id DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('queueId', $queueId)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>,
+     *     fallback_count: int
+     * }
+     */
+    public function getStationTopOfHourLegalIdComplianceSummary(
+        Station $station,
+        DateTimeImmutable $since,
+        int $toleranceSeconds = 10,
+    ): array {
+        $compliance = $this->getLegalIdComplianceForQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+                AND e.actual_play_at IS NOT NULL
+                ORDER BY e.actual_play_at DESC
+            DQL,
+            [
+                'station' => $station,
+                'since' => $since,
+                'anchor' => 'legal_id',
+                'kind' => ClockWheelEventKind::TrackQueued,
+            ],
+            $toleranceSeconds,
+        );
+
+        $fallbackCount = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getSingleScalarResult();
+
+        $compliance['fallback_count'] = $fallbackCount;
+
+        return $compliance;
+    }
+
     /**
      * @return array{
      *     tolerance_seconds: int,
@@ -191,8 +275,7 @@ final class ClockWheelEventRepository extends Repository
         DateTimeImmutable $since,
         int $toleranceSeconds = 10,
     ): array {
-        /** @var ClockWheelEvent[] $events */
-        $events = $this->em->createQuery(
+        return $this->getLegalIdComplianceForQuery(
             <<<'DQL'
                 SELECT e FROM App\Entity\ClockWheelEvent e
                 WHERE e.clock_wheel = :wheel
@@ -201,12 +284,46 @@ final class ClockWheelEventRepository extends Repository
                 AND e.event_kind = :kind
                 AND e.actual_play_at IS NOT NULL
                 ORDER BY e.actual_play_at DESC
-            DQL
-        )->setParameter('wheel', $wheel)
-            ->setParameter('since', $since)
-            ->setParameter('anchor', 'legal_id')
-            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
-            ->getResult();
+            DQL,
+            [
+                'wheel' => $wheel,
+                'since' => $since,
+                'anchor' => 'legal_id',
+                'kind' => ClockWheelEventKind::TrackQueued,
+            ],
+            $toleranceSeconds,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $parameters
+     *
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>
+     * }
+     */
+    private function getLegalIdComplianceForQuery(
+        string $dql,
+        array $parameters,
+        int $toleranceSeconds,
+    ): array {
+        $query = $this->em->createQuery($dql);
+        foreach ($parameters as $key => $value) {
+            $query->setParameter($key, $value);
+        }
+
+        /** @var ClockWheelEvent[] $events */
+        $events = $query->getResult();
 
         $onTime = 0;
         $late = 0;

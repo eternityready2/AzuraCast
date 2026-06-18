@@ -57,7 +57,12 @@
                 <small>{{ formatTimestampAsRelative(row.item.played_at) }}</small>
             </template>
             <template #cell(source)="row">
-                <div v-if="row.item.is_request">
+                <div v-if="row.item.top_of_hour_legal_id">
+                    <span class="badge text-bg-info">
+                        {{ $gettext('Top of Hour ID') }}
+                    </span>
+                </div>
+                <div v-else-if="row.item.is_request">
                     {{ $gettext('Listener Request') }}
                 </div>
                 <div v-else-if="row.item.playlist">

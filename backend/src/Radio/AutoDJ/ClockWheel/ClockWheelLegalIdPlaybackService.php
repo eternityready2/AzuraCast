@@ -15,7 +15,7 @@ use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
- * Records actual on-air play time for mandatory legal_id clock wheel slots (A3/A5).
+ * Records actual on-air play time for mandatory legal_id slots (clock wheel and station-wide top-of-hour).
  */
 final class ClockWheelLegalIdPlaybackService
 {
@@ -30,19 +30,25 @@ final class ClockWheelLegalIdPlaybackService
         ?StationQueue $queueRow,
         StationMedia $media,
     ): void {
-        if ($queueRow?->clock_wheel === null) {
+        if ($queueRow === null) {
             return;
         }
 
-        $wheel = $queueRow->clock_wheel;
         $isLegalIdPlayback = $media->type === 'legal_id'
-            || ($queueRow->clock_wheel_legal_id_substitute ?? false);
+            || ($queueRow->clock_wheel_legal_id_substitute ?? false)
+            || ($queueRow->top_of_hour_legal_id ?? false);
 
         if (!$isLegalIdPlayback) {
             return;
         }
 
-        $event = $this->eventRepo->findLatestUnplayedLegalIdQueued($wheel, $queueRow->id);
+        $event = null;
+        if ($queueRow->top_of_hour_legal_id) {
+            $event = $this->eventRepo->findLatestUnplayedTopOfHourLegalIdQueued($station, $queueRow->id);
+        } elseif ($queueRow->clock_wheel !== null) {
+            $event = $this->eventRepo->findLatestUnplayedLegalIdQueued($queueRow->clock_wheel, $queueRow->id);
+        }
+
         if (!$event instanceof ClockWheelEvent) {
             return;
         }
