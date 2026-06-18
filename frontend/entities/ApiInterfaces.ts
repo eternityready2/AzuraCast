@@ -212,6 +212,7 @@ export enum PlaylistOrders {
   Random = "random",
   Shuffle = "shuffle",
   Sequential = "sequential",
+  SmartShuffle = "smart_shuffle",
 }
 
 export enum LoginTokenTypes {
@@ -2444,6 +2445,7 @@ export type StationPlaylist = HasAutoIncrementId & {
   backend_options?: string[];
   /** @example true */
   avoid_duplicates?: boolean;
+  smart_shuffle_distance?: number | null;
   /** StationSchedule> */
   schedule_items?: any[];
   /** Podcast> */

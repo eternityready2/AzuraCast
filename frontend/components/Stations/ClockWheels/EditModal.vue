@@ -77,6 +77,12 @@ interface ClockWheelEntry {
     algorithm: string;
     position_seconds: number;
     duration_seconds: number | null;
+    category_id: number | null;
+    playlist_id: number | null;
+    pool_mode: 'restrict_pool' | 'playlist_rotation';
+    separation_override_enabled: boolean;
+    separation_artist_minutes: number | null;
+    separation_title_minutes: number | null;
 }
 
 const props = defineProps<BaseEditModalProps & {
@@ -132,6 +138,12 @@ const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
     algorithm: 'random',
     position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
     duration_seconds: null,
+    category_id: null,
+    playlist_id: null,
+    pool_mode: 'restrict_pool',
+    separation_override_enabled: false,
+    separation_artist_minutes: null,
+    separation_title_minutes: null,
 });
 
 const addEntry = () => {
@@ -223,12 +235,24 @@ const populateForm = (data: Record<string, unknown>) => {
             algorithm?: string;
             position_seconds?: number;
             duration_seconds?: number | null;
+            category_id?: number | null;
+            playlist_id?: number | null;
+            pool_mode?: string;
+            separation_override_enabled?: boolean;
+            separation_artist_minutes?: number | null;
+            separation_title_minutes?: number | null;
         }[]).map(
             (s) => ({
                 type: normalizeSlotType(s.type),
                 algorithm: s.algorithm ?? 'random',
                 position_seconds: s.position_seconds ?? 0,
                 duration_seconds: s.duration_seconds ?? null,
+                category_id: s.category_id ?? null,
+                playlist_id: s.playlist_id ?? null,
+                pool_mode: s.pool_mode === 'playlist_rotation' ? 'playlist_rotation' : 'restrict_pool',
+                separation_override_enabled: Boolean(s.separation_override_enabled),
+                separation_artist_minutes: s.separation_artist_minutes ?? null,
+                separation_title_minutes: s.separation_title_minutes ?? null,
             })
         );
         entries.splice(0, entries.length, ...converted);
@@ -254,10 +278,19 @@ const validateForm = async () => {
     if (!inheritSlots) {
         payload.slots = entries.map((e) => ({
             type: e.type,
-            category_id: null,
+            category_id: e.category_id,
+            playlist_id: e.playlist_id,
+            pool_mode: e.playlist_id ? e.pool_mode : 'restrict_pool',
             algorithm: e.algorithm,
             position_seconds: e.position_seconds,
             duration_seconds: e.duration_seconds,
+            separation_override_enabled: e.separation_override_enabled,
+            separation_artist_minutes: e.separation_override_enabled
+                ? e.separation_artist_minutes
+                : null,
+            separation_title_minutes: e.separation_override_enabled
+                ? e.separation_title_minutes
+                : null,
         }));
     }
 

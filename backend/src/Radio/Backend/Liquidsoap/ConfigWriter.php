@@ -235,7 +235,7 @@ final class ConfigWriter implements EventSubscriberInterface
 
                 $playlistMode = match ($playlist->order) {
                     PlaylistOrders::Sequential => 'normal',
-                    PlaylistOrders::Shuffle => 'randomize',
+                    PlaylistOrders::Shuffle, PlaylistOrders::SmartShuffle => 'randomize',
                     PlaylistOrders::Random => 'random'
                 };
                 $playlistParams[] = 'mode="' . $playlistMode . '"';

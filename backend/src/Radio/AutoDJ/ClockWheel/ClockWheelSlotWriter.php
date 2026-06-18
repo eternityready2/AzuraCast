@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
+use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
@@ -72,6 +73,10 @@ final class ClockWheelSlotWriter
             $slot->category = $templateSlot->category;
             $slot->algorithm = $templateSlot->algorithm;
             $slot->playlist = $templateSlot->playlist;
+            $slot->pool_mode = $templateSlot->pool_mode;
+            $slot->separation_override_enabled = $templateSlot->separation_override_enabled;
+            $slot->separation_artist_minutes = $templateSlot->separation_artist_minutes;
+            $slot->separation_title_minutes = $templateSlot->separation_title_minutes;
             $slot->duration_seconds = $templateSlot->duration_seconds;
             $wheel->addSlot($slot);
             $this->em->persist($slot);
@@ -128,6 +133,29 @@ final class ClockWheelSlotWriter
 
         $algoRaw = isset($datum['algorithm']) ? (string)$datum['algorithm'] : 'random';
         $slot->algorithm = ClockWheelSlotAlgorithms::tryFrom($algoRaw) ?? ClockWheelSlotAlgorithms::Random;
+
+        $poolRaw = isset($datum['pool_mode']) ? (string)$datum['pool_mode'] : 'restrict_pool';
+        $slot->pool_mode = ClockWheelSlotPoolModes::tryFrom($poolRaw) ?? ClockWheelSlotPoolModes::RestrictPool;
+
+        $slot->separation_override_enabled = filter_var(
+            $datum['separation_override_enabled'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
+
+        $artistMinutes = $datum['separation_artist_minutes'] ?? null;
+        $slot->separation_artist_minutes = is_numeric($artistMinutes) && (int)$artistMinutes > 0
+            ? (int)$artistMinutes
+            : null;
+
+        $titleMinutes = $datum['separation_title_minutes'] ?? null;
+        $slot->separation_title_minutes = is_numeric($titleMinutes) && (int)$titleMinutes > 0
+            ? (int)$titleMinutes
+            : null;
+
+        if (!$slot->separation_override_enabled) {
+            $slot->separation_artist_minutes = null;
+            $slot->separation_title_minutes = null;
+        }
 
         $playlistId = isset($datum['playlist_id']) && is_numeric($datum['playlist_id'])
             ? (int)$datum['playlist_id']

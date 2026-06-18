@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
+use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use Doctrine\ORM\Mapping as ORM;
@@ -126,6 +127,26 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
         ORM\Column(type: 'string', length: 30, enumType: ClockWheelSlotAlgorithms::class)
     ]
     public ClockWheelSlotAlgorithms $algorithm = ClockWheelSlotAlgorithms::Random;
+
+    /**
+     * When a playlist is pinned: restrict_pool filters then uses slot algorithm;
+     * playlist_rotation follows the playlist's AutoDJ order.
+     */
+    #[
+        OA\Property(example: 'restrict_pool'),
+        ORM\Column(type: 'string', length: 30, enumType: ClockWheelSlotPoolModes::class)
+    ]
+    public ClockWheelSlotPoolModes $pool_mode = ClockWheelSlotPoolModes::RestrictPool;
+
+    /** Optional per-slot separation override (artist/title windows). */
+    #[ORM\Column]
+    public bool $separation_override_enabled = false;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_artist_minutes = null;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_title_minutes = null;
 
     // ------------------------------------------------------------------
     // Scheduling fields

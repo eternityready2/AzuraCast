@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\StationClockWheel;
+use App\Entity\StationClockWheelSlot;
 use App\Entity\StationClockWheelTemplate;
 
 /**
@@ -18,6 +19,23 @@ final class ClockWheelSeparationSettings
         public int $titleMinutes = 90,
         public ?int $burnRateMaxPlays24h = null,
     ) {
+    }
+
+    /**
+     * Resolve effective settings: slot override → daypart → wheel → template.
+     */
+    public static function resolveForSlot(StationClockWheelSlot $slot, StationClockWheel $wheel): self
+    {
+        if ($slot->separation_override_enabled) {
+            return new self(
+                enabled: true,
+                artistMinutes: max(1, $slot->separation_artist_minutes ?? 45),
+                titleMinutes: max(1, $slot->separation_title_minutes ?? 90),
+                burnRateMaxPlays24h: null,
+            );
+        }
+
+        return self::resolveForWheel($wheel);
     }
 
     /**

@@ -391,6 +391,7 @@ final class ClockWheelPlaybackPlannerTest extends Unit
             new SeparationRulesChecker($logger),
             new ClockWheelEventLogger($entityManager),
             $this->testsModule->container->get(HourBoundaryPlanner::class),
+            $this->testsModule->container->get(\App\Radio\AutoDJ\QueueBuilder::class),
             $logger,
         );
     }

@@ -101,4 +101,23 @@ final class ClockWheelSeparationSettingsTest extends Unit
         self::assertSame(66, $settings->titleMinutes);
         self::assertSame(5, $settings->burnRateMaxPlays24h);
     }
+
+    public function testSlotOverrideWinsOverWheel(): void
+    {
+        $station = new Station();
+        $wheel = new StationClockWheel($station);
+        $wheel->separation_enabled = true;
+        $wheel->separation_artist_minutes = 45;
+
+        $slot = new \App\Entity\StationClockWheelSlot($wheel);
+        $slot->separation_override_enabled = true;
+        $slot->separation_artist_minutes = 120;
+        $slot->separation_title_minutes = 60;
+
+        $settings = ClockWheelSeparationSettings::resolveForSlot($slot, $wheel);
+
+        self::assertTrue($settings->enabled);
+        self::assertSame(120, $settings->artistMinutes);
+        self::assertSame(60, $settings->titleMinutes);
+    }
 }

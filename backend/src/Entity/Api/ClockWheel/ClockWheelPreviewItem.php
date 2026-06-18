@@ -16,6 +16,9 @@ final class ClockWheelPreviewItem
     #[OA\Property(example: '2:00')]
     public string $position_label;
 
+    #[OA\Property(example: '2026-06-08T14:02:05+00:00', nullable: true)]
+    public ?string $projected_play_at = null;
+
     #[OA\Property(example: 'music')]
     public string $slot_type;
 

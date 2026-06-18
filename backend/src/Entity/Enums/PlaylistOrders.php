@@ -12,4 +12,6 @@ enum PlaylistOrders: string
     case Random = 'random';
     case Shuffle = 'shuffle';
     case Sequential = 'sequential';
+    /** Avoid repeating the same artist within N recent picks (PHP AutoDJ only). */
+    case SmartShuffle = 'smart_shuffle';
 }

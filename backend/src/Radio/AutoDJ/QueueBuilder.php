@@ -267,7 +267,12 @@ final class QueueBuilder implements EventSubscriberInterface
                     $playlist,
                     $recentSongHistory,
                     $allowDuplicates
-                )
+                ),
+                PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
+                    $playlist,
+                    $recentSongHistory,
+                    $allowDuplicates
+                ),
             };
 
             if (null !== $validTrack) {
@@ -563,6 +568,98 @@ final class QueueBuilder implements EventSubscriberInterface
         $mediaQueue = $this->spmRepo->getQueue($playlist);
 
         return $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentSongHistory);
+    }
+
+    /**
+     * Pick the next track using a playlist's configured rotation order (PHP AutoDJ path).
+     *
+     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentSongHistory
+     */
+    public function pickNextTrackFromPlaylist(
+        StationPlaylist $playlist,
+        array $recentSongHistory,
+        bool $allowDuplicates = false,
+    ): ?StationPlaylistQueue {
+        if (PlaylistSources::RemoteUrl === $playlist->source) {
+            return null;
+        }
+
+        return match ($playlist->order) {
+            PlaylistOrders::Random => $this->getRandomMediaIdFromPlaylist(
+                $playlist,
+                $recentSongHistory,
+                $allowDuplicates
+            ),
+            PlaylistOrders::Sequential => $this->getSequentialMediaIdFromPlaylist(
+                $playlist,
+                $recentSongHistory,
+                $allowDuplicates
+            ),
+            PlaylistOrders::Shuffle => $this->getShuffledMediaIdFromPlaylist(
+                $playlist,
+                $recentSongHistory,
+                $allowDuplicates
+            ),
+            PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
+                $playlist,
+                $recentSongHistory,
+                $allowDuplicates
+            ),
+        };
+    }
+
+    private const int DEFAULT_SMART_SHUFFLE_DISTANCE = 5;
+
+    /**
+     * Shuffled queue order with no artist repeat within N recent plays.
+     *
+     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentSongHistory
+     */
+    private function getSmartShuffleMediaIdFromPlaylist(
+        StationPlaylist $playlist,
+        array $recentSongHistory,
+        bool $allowDuplicates,
+    ): ?StationPlaylistQueue {
+        $distance = max(2, $playlist->smart_shuffle_distance ?? self::DEFAULT_SMART_SHUFFLE_DISTANCE);
+        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        if ($mediaQueue === []) {
+            $this->spmRepo->resetQueue($playlist);
+            $mediaQueue = $this->spmRepo->getQueue($playlist);
+        }
+
+        $blockedArtists = [];
+        foreach (array_slice($recentSongHistory, 0, $distance) as $historyRow) {
+            $artist = mb_strtolower(trim((string)($historyRow['artist'] ?? '')));
+            if ($artist !== '') {
+                $blockedArtists[$artist] = true;
+            }
+        }
+
+        $artistSafeQueue = array_values(array_filter(
+            $mediaQueue,
+            static function (StationPlaylistQueue $item) use ($blockedArtists): bool {
+                $artist = mb_strtolower(trim($item->artist ?? ''));
+                if ($artist === '') {
+                    return true;
+                }
+
+                return !isset($blockedArtists[$artist]);
+            }
+        ));
+
+        if ($artistSafeQueue === []) {
+            $artistSafeQueue = $mediaQueue;
+        }
+
+        if ($playlist->avoid_duplicates) {
+            return $this->duplicatePrevention->preventDuplicates(
+                $artistSafeQueue,
+                $recentSongHistory,
+                $allowDuplicates
+            );
+        }
+
+        return array_shift($artistSafeQueue);
     }
 
     public function getNextSongFromRequests(BuildQueue $event): void

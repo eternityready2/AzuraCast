@@ -103,6 +103,16 @@ final class StationPlaylist implements
     ]
     public PlaylistOrders $order;
 
+    /**
+     * Minimum number of songs between repeats of the same artist when order is smart_shuffle.
+     * NULL uses the default (5).
+     */
+    #[
+        OA\Property(example: 5, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $smart_shuffle_distance = null;
+
     #[
         OA\Property(example: "https://remote-url.example.com/stream.mp3"),
         ORM\Column(length: 255, nullable: true)
