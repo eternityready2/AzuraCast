@@ -414,6 +414,11 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public bool $analytics_exclude_bots = true {
+        set (bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
     }

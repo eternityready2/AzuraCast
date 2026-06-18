@@ -74,6 +74,20 @@
                     />
                 </tab>
 
+                <tab :label="$gettext('Listener Insights')">
+                    <listener-insights-tab
+                        :api-url="listenerInsightsUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
+                <tab :label="$gettext('Growth Trend')">
+                    <growth-trend-tab
+                        :api-url="growthTrendUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
                 <tab :label="$gettext('Streams')">
                     <streams-tab
                         :api-url="byStreamUrl"
@@ -128,6 +142,8 @@ import HeatmapTab from "~/components/Stations/Reports/Overview/HeatmapTab.vue";
 import ClockPerformanceTab from "~/components/Stations/Reports/Overview/ClockPerformanceTab.vue";
 import PlaylistPerformanceTab from "~/components/Stations/Reports/Overview/PlaylistPerformanceTab.vue";
 import DropoutTab from "~/components/Stations/Reports/Overview/DropoutTab.vue";
+import ListenerInsightsTab from "~/components/Stations/Reports/Overview/ListenerInsightsTab.vue";
+import GrowthTrendTab from "~/components/Stations/Reports/Overview/GrowthTrendTab.vue";
 import {ref} from "vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -153,6 +169,8 @@ const heatmapUrl = getStationApiUrl('/reports/overview/heatmap');
 const clockPerformanceUrl = getStationApiUrl('/reports/overview/clock-performance');
 const playlistPerformanceUrl = getStationApiUrl('/reports/overview/playlist-performance');
 const dropoutUrl = getStationApiUrl('/reports/overview/dropout');
+const listenerInsightsUrl = getStationApiUrl('/reports/overview/listener-insights');
+const growthTrendUrl = getStationApiUrl('/reports/overview/growth-trend');
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);

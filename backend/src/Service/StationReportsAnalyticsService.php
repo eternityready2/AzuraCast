@@ -8,6 +8,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Entity\Enums\AnalyticsIntervals;
 use App\Entity\Repository\AnalyticsRepository;
 use App\Entity\Repository\ClockWheelEventRepository;
+use App\Entity\Repository\ListenerRepository;
 use App\Entity\Song;
 use App\Entity\Station;
 use App\Entity\ApiGenerator\SongApiGenerator;
@@ -23,9 +24,15 @@ final class StationReportsAnalyticsService
     public function __construct(
         private readonly AnalyticsRepository $analyticsRepo,
         private readonly ClockWheelEventRepository $eventRepo,
+        private readonly ListenerRepository $listenerRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly SongApiGenerator $songApiGenerator,
     ) {
+    }
+
+    private function shouldExcludeBots(Station $station): bool
+    {
+        return $station->backend_config->analytics_exclude_bots;
     }
 
     /**
@@ -178,7 +185,7 @@ final class StationReportsAnalyticsService
          */
         $rows = $this->em->createQuery(
             <<<'DQL'
-                SELECT p.id, p.name,
+                SELECT p.id, p.name, p.rotation_goal_days,
                     COUNT(sh.id) AS play_count,
                     AVG(sh.delta_total) AS avg_delta,
                     AVG(sh.unique_listeners) AS avg_unique_listeners,
@@ -190,7 +197,7 @@ final class StationReportsAnalyticsService
                 AND sh.playlist IS NOT NULL
                 AND sh.timestamp_start <= :end
                 AND sh.timestamp_end >= :start
-                GROUP BY p.id, p.name
+                GROUP BY p.id, p.name, p.rotation_goal_days
                 ORDER BY play_count DESC
             DQL
         )->setParameter('station', $station)
@@ -219,6 +226,9 @@ final class StationReportsAnalyticsService
                 'rotation_equity_percent' => $equity['equity_percent'] ?? null,
                 'min_track_plays' => $equity['min_plays'] ?? null,
                 'max_track_plays' => $equity['max_plays'] ?? null,
+                'rotation_goal_days' => isset($row['rotation_goal_days'])
+                    ? (int)$row['rotation_goal_days']
+                    : null,
             ];
         }
 
@@ -289,8 +299,12 @@ final class StationReportsAnalyticsService
         Station $station,
         DateRange $dateRange,
     ): array {
+        $botFilter = $this->shouldExcludeBots($station)
+            ? ' AND l.device_is_bot = 0'
+            : '';
+
         $statsRaw = $this->em->getConnection()->fetchAllAssociative(
-            <<<'SQL'
+            <<<SQL
                 SELECT sh.song_id, sh.text, sh.artist, sh.title, sh.media_id,
                        COUNT(DISTINCT sh.id) AS play_count,
                        COUNT(DISTINCT l.id) AS dropout_count
@@ -300,6 +314,7 @@ final class StationReportsAnalyticsService
                     AND l.timestamp_start <= sh.timestamp_start
                     AND l.timestamp_end >= sh.timestamp_start
                     AND l.timestamp_end <= DATE_ADD(sh.timestamp_start, INTERVAL 30 SECOND)
+                    {$botFilter}
                 WHERE sh.station_id = :station_id
                     AND sh.is_visible = 1
                     AND sh.timestamp_start >= :start
@@ -337,5 +352,58 @@ final class StationReportsAnalyticsService
         }
 
         return ['songs' => $songs];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getListenerInsights(
+        Station $station,
+        DateRange $dateRange,
+    ): array {
+        $excludeBots = $this->shouldExcludeBots($station);
+
+        return [
+            'analytics_exclude_bots' => $excludeBots,
+            'session_breakdown' => $this->listenerRepo->getSessionBreakdown(
+                $station,
+                $dateRange->start,
+                $dateRange->end,
+            ),
+            'loyalty' => $this->listenerRepo->getListenerLoyaltyStats(
+                $station,
+                $dateRange->start,
+                $dateRange->end,
+                $excludeBots,
+            ),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getGrowthTrend(
+        Station $station,
+        DateRange $dateRange,
+    ): array {
+        $midpoint = $dateRange->start->add(
+            new \DateInterval('PT' . (int) floor(
+                ($dateRange->end->getTimestamp() - $dateRange->start->getTimestamp()) / 2,
+            ) . 'S'),
+        );
+
+        return [
+            'analytics_exclude_bots' => $this->shouldExcludeBots($station),
+            'first_period_start' => $dateRange->start->format(\DateTimeInterface::ATOM),
+            'first_period_end' => $midpoint->format(\DateTimeInterface::ATOM),
+            'second_period_start' => $midpoint->format(\DateTimeInterface::ATOM),
+            'second_period_end' => $dateRange->end->format(\DateTimeInterface::ATOM),
+            'hourly' => $this->listenerRepo->getHourlyGrowthTrend(
+                $station,
+                $dateRange->start,
+                $dateRange->end,
+                $this->shouldExcludeBots($station),
+            ),
+        ];
     }
 }

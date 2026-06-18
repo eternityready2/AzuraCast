@@ -2446,6 +2446,8 @@ export type StationPlaylist = HasAutoIncrementId & {
   /** @example true */
   avoid_duplicates?: boolean;
   smart_shuffle_distance?: number | null;
+  /** Minimum days between repeats of the same track (positive rotation goal). */
+  rotation_goal_days?: number | null;
   /** StationSchedule> */
   schedule_items?: any[];
   /** Podcast> */

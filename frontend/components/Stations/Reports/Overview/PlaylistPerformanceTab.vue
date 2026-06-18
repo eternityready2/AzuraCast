@@ -20,6 +20,7 @@
                         <th class="text-end">{{ $gettext('Avg unique') }}</th>
                         <th class="text-end">{{ $gettext('Tune-outs') }}</th>
                         <th class="text-end">{{ $gettext('Rotation equity') }}</th>
+                        <th class="text-end">{{ $gettext('Rotation goal') }}</th>
                         <th class="text-end">{{ $gettext('Min/Max plays') }}</th>
                     </tr>
                 </thead>
@@ -36,6 +37,12 @@
                         <td class="text-end">
                             <span v-if="row.rotation_equity_percent != null">
                                 {{ row.rotation_equity_percent }}%
+                            </span>
+                            <span v-else>—</span>
+                        </td>
+                        <td class="text-end">
+                            <span v-if="row.rotation_goal_days != null">
+                                {{ row.rotation_goal_days }}d
                             </span>
                             <span v-else>—</span>
                         </td>
@@ -88,6 +95,7 @@ type PlaylistPerformanceData = {
         rotation_equity_percent: number | null,
         min_track_plays: number | null,
         max_track_plays: number | null,
+        rotation_goal_days: number | null,
     }>,
 };
 

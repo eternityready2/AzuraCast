@@ -232,7 +232,13 @@ final class RunAnalyticsTask extends AbstractTask
 
                 $unique = null;
                 if ($withListeners) {
-                    $unique = $this->listenerRepo->getUniqueListeners($station, $start, $end);
+                    $excludeBots = $station->backend_config->analytics_exclude_bots;
+                    $unique = $this->listenerRepo->getUniqueListeners(
+                        $station,
+                        $start,
+                        $end,
+                        $excludeBots,
+                    );
 
                     $hourlyUniqueListeners ??= 0;
                     $hourlyUniqueListeners += $unique;
@@ -313,7 +319,8 @@ final class RunAnalyticsTask extends AbstractTask
                 $dailyStationUnique = $this->listenerRepo->getUniqueListeners(
                     $station,
                     $stationDayStart,
-                    $stationDayEnd
+                    $stationDayEnd,
+                    $station->backend_config->analytics_exclude_bots,
                 );
 
                 $dailyUniqueListeners ??= 0;

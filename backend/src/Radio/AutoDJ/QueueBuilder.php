@@ -14,6 +14,7 @@ use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationRequestRepository;
+use App\Entity\Repository\SongHistoryRepository;
 use App\Entity\Song;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
@@ -40,7 +41,8 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly CacheInterface $cache,
         private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly StationRequestRepository $requestRepo,
-        private readonly StationQueueRepository $queueRepo
+        private readonly StationQueueRepository $queueRepo,
+        private readonly SongHistoryRepository $historyRepo,
     ) {
     }
 
@@ -498,12 +500,55 @@ final class QueueBuilder implements EventSubscriberInterface
         return $selectedTrack;
     }
 
+    /**
+     * @param StationPlaylistQueue[] $mediaQueue
+     *
+     * @return StationPlaylistQueue[]
+     */
+    private function filterQueueByRotationGoal(StationPlaylist $playlist, array $mediaQueue): array
+    {
+        $goalDays = $playlist->rotation_goal_days;
+        if (null === $goalDays || $goalDays <= 0 || $mediaQueue === []) {
+            return $mediaQueue;
+        }
+
+        $blockedIds = array_flip(
+            $this->historyRepo->getRecentlyPlayedMediaIdsForPlaylist($playlist, $goalDays),
+        );
+
+        if ($blockedIds === []) {
+            return $mediaQueue;
+        }
+
+        $filtered = array_values(array_filter(
+            $mediaQueue,
+            static fn (StationPlaylistQueue $item): bool => !isset($blockedIds[$item->media_id]),
+        ));
+
+        if ($filtered === []) {
+            $this->logger->warning(
+                'Rotation goal blocked all tracks in playlist; using full pool.',
+                [
+                    'playlist_id' => $playlist->id,
+                    'rotation_goal_days' => $goalDays,
+                ],
+            );
+
+            return $mediaQueue;
+        }
+
+        return $filtered;
+    }
+
     private function getRandomMediaIdFromPlaylist(
         StationPlaylist $playlist,
         array $recentSongHistory,
         bool $allowDuplicates
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $mediaQueue = $this->filterQueueByRotationGoal(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+        );
 
         if ($playlist->avoid_duplicates) {
             return $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentSongHistory, $allowDuplicates);
@@ -517,10 +562,16 @@ final class QueueBuilder implements EventSubscriberInterface
         array $recentSongHistory,
         bool $allowDuplicates = false
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $mediaQueue = $this->filterQueueByRotationGoal(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+        );
         if (empty($mediaQueue)) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->spmRepo->getQueue($playlist);
+            $mediaQueue = $this->filterQueueByRotationGoal(
+                $playlist,
+                $this->spmRepo->getQueue($playlist),
+            );
         }
 
         // Apply duplicate prevention if enabled for this playlist
@@ -544,10 +595,16 @@ final class QueueBuilder implements EventSubscriberInterface
         array $recentSongHistory,
         bool $allowDuplicates
     ): ?StationPlaylistQueue {
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $mediaQueue = $this->filterQueueByRotationGoal(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+        );
         if (empty($mediaQueue)) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->spmRepo->getQueue($playlist);
+            $mediaQueue = $this->filterQueueByRotationGoal(
+                $playlist,
+                $this->spmRepo->getQueue($playlist),
+            );
         }
 
         if (!$playlist->avoid_duplicates) {
@@ -565,7 +622,10 @@ final class QueueBuilder implements EventSubscriberInterface
         );
 
         $this->spmRepo->resetQueue($playlist);
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $mediaQueue = $this->filterQueueByRotationGoal(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+        );
 
         return $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentSongHistory);
     }
@@ -621,10 +681,16 @@ final class QueueBuilder implements EventSubscriberInterface
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
         $distance = max(2, $playlist->smart_shuffle_distance ?? self::DEFAULT_SMART_SHUFFLE_DISTANCE);
-        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $mediaQueue = $this->filterQueueByRotationGoal(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+        );
         if ($mediaQueue === []) {
             $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->spmRepo->getQueue($playlist);
+            $mediaQueue = $this->filterQueueByRotationGoal(
+                $playlist,
+                $this->spmRepo->getQueue($playlist),
+            );
         }
 
         $blockedArtists = [];

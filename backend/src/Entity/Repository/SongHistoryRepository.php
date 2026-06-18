@@ -7,6 +7,7 @@ namespace App\Entity\Repository;
 use App\Entity\Interfaces\SongInterface;
 use App\Entity\SongHistory;
 use App\Entity\Station;
+use App\Entity\StationPlaylist;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -191,5 +192,40 @@ final class SongHistoryRepository extends AbstractStationBasedRepository
             DQL
         )->setParameter('threshold', $threshold)
             ->execute();
+    }
+
+    /**
+     * @return int[]
+     */
+    public function getRecentlyPlayedMediaIdsForPlaylist(
+        StationPlaylist $playlist,
+        int $goalDays,
+    ): array {
+        if ($goalDays <= 0) {
+            return [];
+        }
+
+        $since = new DateTimeImmutable('-' . $goalDays . ' days', $playlist->station->getTimezoneObject());
+
+        /** @var array<array{media_id: int}> $rows */
+        $rows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT DISTINCT sh.media_id
+                FROM App\Entity\SongHistory sh
+                WHERE sh.station = :station
+                AND sh.playlist = :playlist
+                AND sh.media_id IS NOT NULL
+                AND sh.is_visible = 1
+                AND sh.timestamp_start >= :since
+            DQL
+        )->setParameter('station', $playlist->station)
+            ->setParameter('playlist', $playlist)
+            ->setParameter('since', $since)
+            ->getArrayResult();
+
+        return array_map(
+            static fn (array $row): int => (int)$row['media_id'],
+            $rows,
+        );
     }
 }

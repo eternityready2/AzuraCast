@@ -124,6 +124,15 @@
                         :label="$gettext('Smart Shuffle: min songs between same artist')"
                         :description="$gettext('Leave empty for default (5). Applies to PHP AutoDJ track selection.')"
                     />
+
+                    <form-group-field
+                        id="form_edit_rotation_goal_days"
+                        class="col-md-6"
+                        :field="r$.rotation_goal_days"
+                        type="number"
+                        :label="$gettext('Rotation goal (days)')"
+                        :description="$gettext('Minimum days before the same track can play again from this playlist. Leave empty to disable.')"
+                    />
                 </div>
 
                 <form-fieldset v-show="form.type === 'default'">

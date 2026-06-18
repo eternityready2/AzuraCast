@@ -113,6 +113,26 @@ final class StationPlaylist implements
     ]
     public ?int $smart_shuffle_distance = null;
 
+    /**
+     * Minimum days between repeats of the same track from this playlist (positive rotation goal).
+     * NULL disables rotation goal enforcement.
+     */
+    #[
+        OA\Property(example: 7, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $rotation_goal_days = null {
+        set (int|string|null $value) {
+            if (null === $value || '' === $value) {
+                $this->rotation_goal_days = null;
+                return;
+            }
+
+            $days = (int)$value;
+            $this->rotation_goal_days = $days > 0 ? $days : null;
+        }
+    }
+
     #[
         OA\Property(example: "https://remote-url.example.com/stream.mp3"),
         ORM\Column(length: 255, nullable: true)

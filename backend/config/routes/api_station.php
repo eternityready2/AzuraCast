@@ -966,6 +966,16 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:overview-dropout');
 
                             $group->get(
+                                '/overview/listener-insights',
+                                Controller\Api\Stations\Reports\Overview\ListenerInsightsAction::class
+                            )->setName('api:stations:reports:overview-listener-insights');
+
+                            $group->get(
+                                '/overview/growth-trend',
+                                Controller\Api\Stations\Reports\Overview\GrowthTrendAction::class
+                            )->setName('api:stations:reports:overview-growth-trend');
+
+                            $group->get(
                                 '/soundexchange',
                                 Controller\Api\Stations\Reports\SoundExchangeAction::class
                             )->setName('api:stations:reports:soundexchange');
