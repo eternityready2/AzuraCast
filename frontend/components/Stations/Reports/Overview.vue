@@ -46,6 +46,34 @@
                     />
                 </tab>
 
+                <tab :label="$gettext('Heatmap')">
+                    <heatmap-tab
+                        :api-url="heatmapUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
+                <tab :label="$gettext('Clock Performance')">
+                    <clock-performance-tab
+                        :api-url="clockPerformanceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
+                <tab :label="$gettext('Playlist Performance')">
+                    <playlist-performance-tab
+                        :api-url="playlistPerformanceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
+                <tab :label="$gettext('Dropouts')">
+                    <dropout-tab
+                        :api-url="dropoutUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+
                 <tab :label="$gettext('Streams')">
                     <streams-tab
                         :api-url="byStreamUrl"
@@ -96,6 +124,10 @@ import CountriesTab from "~/components/Stations/Reports/Overview/CountriesTab.vu
 import StreamsTab from "~/components/Stations/Reports/Overview/StreamsTab.vue";
 import ClientsTab from "~/components/Stations/Reports/Overview/ClientsTab.vue";
 import ListeningTimeTab from "~/components/Stations/Reports/Overview/ListeningTimeTab.vue";
+import HeatmapTab from "~/components/Stations/Reports/Overview/HeatmapTab.vue";
+import ClockPerformanceTab from "~/components/Stations/Reports/Overview/ClockPerformanceTab.vue";
+import PlaylistPerformanceTab from "~/components/Stations/Reports/Overview/PlaylistPerformanceTab.vue";
+import DropoutTab from "~/components/Stations/Reports/Overview/DropoutTab.vue";
 import {ref} from "vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -117,6 +149,10 @@ const byBrowserUrl = getStationApiUrl('/reports/overview/by-browser');
 const byCountryUrl = getStationApiUrl('/reports/overview/by-country');
 const byClientUrl = getStationApiUrl('/reports/overview/by-client');
 const listeningTimeUrl = getStationApiUrl('/reports/overview/by-listening-time');
+const heatmapUrl = getStationApiUrl('/reports/overview/heatmap');
+const clockPerformanceUrl = getStationApiUrl('/reports/overview/clock-performance');
+const playlistPerformanceUrl = getStationApiUrl('/reports/overview/playlist-performance');
+const dropoutUrl = getStationApiUrl('/reports/overview/dropout');
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);

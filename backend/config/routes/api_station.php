@@ -946,6 +946,26 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:by-listening-time');
 
                             $group->get(
+                                '/overview/heatmap',
+                                Controller\Api\Stations\Reports\Overview\HeatmapAction::class
+                            )->setName('api:stations:reports:overview-heatmap');
+
+                            $group->get(
+                                '/overview/clock-performance',
+                                Controller\Api\Stations\Reports\Overview\ClockPerformanceAction::class
+                            )->setName('api:stations:reports:overview-clock-performance');
+
+                            $group->get(
+                                '/overview/playlist-performance',
+                                Controller\Api\Stations\Reports\Overview\PlaylistPerformanceAction::class
+                            )->setName('api:stations:reports:overview-playlist-performance');
+
+                            $group->get(
+                                '/overview/dropout',
+                                Controller\Api\Stations\Reports\Overview\DropoutAction::class
+                            )->setName('api:stations:reports:overview-dropout');
+
+                            $group->get(
                                 '/soundexchange',
                                 Controller\Api\Stations\Reports\SoundExchangeAction::class
                             )->setName('api:stations:reports:soundexchange');
