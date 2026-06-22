@@ -50,6 +50,10 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $shift_outro_template = null;
 
+    /** Talk frequency: 0.0 (never) to 1.0 (every song). Default 0.5 = ~50% of songs. */
+    #[ORM\Column(type: 'float', options: ['default' => 0.5])]
+    private float $talk_frequency = 0.5;
+
     /** @var Collection<int, AiDjSchedule> */
     #[
         ORM\OneToMany(
@@ -146,6 +150,16 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     public function setShiftOutroTemplate(?string $shiftOutroTemplate): void
     {
         $this->shift_outro_template = $shiftOutroTemplate;
+    }
+
+    public function getTalkFrequency(): float
+    {
+        return $this->talk_frequency;
+    }
+
+    public function setTalkFrequency(float $talkFrequency): void
+    {
+        $this->talk_frequency = max(0.0, min(1.0, $talkFrequency));
     }
 
     /** @return Collection<int, AiDjSchedule> */

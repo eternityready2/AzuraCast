@@ -20,7 +20,7 @@ final class AiDjGenerator
 
     private const string PIPER_BIN = 'piper';
     private const string FFMPEG_BIN = 'ffmpeg';
-    private const int TTS_TIMEOUT = 3;
+    private const int TTS_TIMEOUT = 15;
     private const int DISK_LIMIT_MB = 400; // 80% of 500MB max
 
     public function __construct(
@@ -178,6 +178,55 @@ final class AiDjGenerator
         $outputPath = $outputDir . '/shift_outro_' . uniqid() . '.mp3';
 
         return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+    }
+
+    /**
+     * Generate a content liner (bible verse, joke, encouragement, etc.) audio file.
+     *
+     * @return string|null MP3 path on success, null on failure
+     */
+    public function generateContentLiner(
+        AiDj $dj,
+        AiDjContent $content,
+        Station $station
+    ): ?string {
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
+        if ($usedMb > self::DISK_LIMIT_MB) {
+            $this->logger->warning(sprintf(
+                'AI DJ generation skipped: disk usage %dMB exceeds limit of %dMB',
+                $usedMb,
+                self::DISK_LIMIT_MB
+            ));
+            return null;
+        }
+
+        $text = $this->buildLinerText($dj, $content, $station);
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/liner_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+    }
+
+    /**
+     * Build spoken text for a content liner based on its type.
+     */
+    private function buildLinerText(AiDj $dj, AiDjContent $content, Station $station): string
+    {
+        $djName = $dj->getName();
+        $text = $content->content;
+        $reference = $content->reference;
+
+        return match ($content->type) {
+            AiDjContent::TYPE_BIBLE_VERSE => $reference
+                ? sprintf('%s. %s', $reference, $text)
+                : $text,
+            AiDjContent::TYPE_JOKE => sprintf("Here's a little something from %s. %s", $djName, $text),
+            AiDjContent::TYPE_ENCOURAGEMENT => $text,
+            AiDjContent::TYPE_TESTIMONY => sprintf("I want to share this with you. %s", $text),
+            AiDjContent::TYPE_STORY => sprintf("Let me tell you something. %s", $text),
+            default => $text,
+        };
     }
 
     /**

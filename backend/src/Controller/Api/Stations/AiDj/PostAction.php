@@ -53,6 +53,10 @@ final class PostAction implements SingleActionInterface
         $dj->setIsEnabled((bool)($body['is_enabled'] ?? true));
         $dj->setVoiceModelPath(isset($body['voice_model_path']) ? (string)$body['voice_model_path'] : null);
         $dj->setShiftIntroTemplate(isset($body['shift_intro_template']) ? (string)$body['shift_intro_template'] : null);
+        $dj->setShiftOutroTemplate(isset($body['shift_outro_template']) ? (string)$body['shift_outro_template'] : null);
+        if (isset($body['talk_frequency'])) {
+            $dj->setTalkFrequency((float)$body['talk_frequency']);
+        }
 
         $errors = $this->validator->validate($dj);
         if (count($errors) > 0) {

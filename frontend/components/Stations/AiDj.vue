@@ -214,6 +214,28 @@
                                 </label>
                             </div>
 
+                            <div class="mb-3">
+                                <label
+                                    for="dj_talk_frequency"
+                                    class="form-label"
+                                >
+                                    {{ $gettext('Talk Frequency') }}
+                                    <span class="text-muted ms-1">{{ Math.round(form.talk_frequency * 100) }}%</span>
+                                </label>
+                                <input
+                                    id="dj_talk_frequency"
+                                    v-model.number="form.talk_frequency"
+                                    type="range"
+                                    class="form-range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                >
+                                <div class="form-text">
+                                    {{ $gettext('How often the DJ speaks between songs. 0% = never, 100% = every song.') }}
+                                </div>
+                            </div>
+
                             <form-group-field
                                 id="dj_shift_intro_template"
                                 :field="v$.shift_intro_template"
@@ -354,6 +376,7 @@ interface AiDj {
     is_enabled: boolean;
     shift_intro_template: string | null;
     shift_outro_template: string | null;
+    talk_frequency: number;
     schedules?: AiDjSchedule[];
 }
 
@@ -363,6 +386,7 @@ interface AiDjForm {
     is_enabled: boolean;
     shift_intro_template: string | null;
     shift_outro_template: string | null;
+    talk_frequency: number;
 }
 
 interface VoiceOption {
@@ -404,6 +428,7 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     is_enabled: true,
     shift_intro_template: null,
     shift_outro_template: null,
+    talk_frequency: 0.5,
 }));
 
 const {r$: v$} = useAppRegle(form, {}, {});
@@ -486,17 +511,6 @@ const loadDjs = async (): Promise<void> => {
     }
 };
 
-const loadVoices = async (): Promise<void> => {
-    try {
-        const resp = await axios.get<VoiceOption[]>(voicesUrl.value);
-        if (Array.isArray(resp.data)) {
-            voiceOptions.value = resp.data;
-        }
-    } catch {
-        // Non-fatal — voices may be bundled with list response
-    }
-};
-
 // --- Editor ---
 
 const openCreate = (): void => {
@@ -514,6 +528,7 @@ const openEdit = (dj: AiDj): void => {
         is_enabled: dj.is_enabled,
         shift_intro_template: dj.shift_intro_template,
         shift_outro_template: dj.shift_outro_template,
+        talk_frequency: dj.talk_frequency ?? 0.5,
     };
     editorOpen.value = true;
     deleteTarget.value = null;

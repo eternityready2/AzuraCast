@@ -62,6 +62,12 @@ final class GetAction implements SingleActionInterface
             'is_enabled' => $dj->isEnabled(),
             'voice_model_path' => $dj->getVoiceModelPath(),
             'shift_intro_template' => $dj->getShiftIntroTemplate(),
+            'shift_outro_template' => $dj->getShiftOutroTemplate(),
+            'talk_frequency' => $dj->getTalkFrequency(),
+            'schedules' => array_map(
+                static fn(\App\Entity\AiDjSchedule $s): array => $s->api(),
+                $dj->getSchedules()->toArray()
+            ),
         ]);
     }
 }

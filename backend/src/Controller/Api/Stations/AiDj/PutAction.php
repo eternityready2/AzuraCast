@@ -77,6 +77,12 @@ final class PutAction implements SingleActionInterface
         if (array_key_exists('shift_intro_template', $body)) {
             $dj->setShiftIntroTemplate($body['shift_intro_template'] !== null ? (string)$body['shift_intro_template'] : null);
         }
+        if (array_key_exists('shift_outro_template', $body)) {
+            $dj->setShiftOutroTemplate($body['shift_outro_template'] !== null ? (string)$body['shift_outro_template'] : null);
+        }
+        if (isset($body['talk_frequency'])) {
+            $dj->setTalkFrequency((float)$body['talk_frequency']);
+        }
 
         $errors = $this->validator->validate($dj);
         if (count($errors) > 0) {
