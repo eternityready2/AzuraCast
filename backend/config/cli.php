@@ -8,6 +8,7 @@ return function (App\Event\BuildConsoleCommands $event) {
     $event->addAliases([
         'azuracast:acme:get-certificate' => Command\Acme\GetCertificateCommand::class,
         'azuracast:acme:reload' => Command\Acme\ReloadCommand::class,
+        'azuracast:ai-dj:generate' => Command\GenerateAiDjCommand::class,
         'azuracast:ai-news:generate' => Command\GenerateAiNewsCommand::class,
         'azuracast:backup' => Command\Backup\BackupCommand::class,
         'azuracast:restore' => Command\Backup\RestoreCommand::class,

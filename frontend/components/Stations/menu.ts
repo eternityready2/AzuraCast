@@ -286,13 +286,28 @@ export function useStationsMenu() {
             ]
         },
         {
-            key: 'ai_news',
-            label: $gettext('AI News Bulletin'),
+            key: 'ai',
+            label: $gettext('AI'),
             icon: () => IconIcPsychology,
-            url: {
-                name: 'stations:ai_news'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting),
+            items: [
+                {
+                    key: 'ai_news',
+                    label: $gettext('News Bulletins'),
+                    url: {
+                        name: 'stations:ai_news'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
+                {
+                    key: 'ai_dj',
+                    label: $gettext('DJ'),
+                    url: {
+                        name: 'stations:ai_dj'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                }
+            ]
         },
         {
             key: 'top_of_hour',

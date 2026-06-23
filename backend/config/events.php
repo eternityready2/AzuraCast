@@ -86,6 +86,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 App\Sync\Task\RunBackupTask::class,
                 App\Sync\Task\UpdateGeoLiteTask::class,
                 App\Sync\Task\UpdateStorageLocationSizesTask::class,
+                App\Sync\Task\AiDjCleanupTask::class,
             ]);
         }
     );
@@ -153,6 +154,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Radio\AutoDJ\QueueBuilder::class,
             App\Radio\AutoDJ\Annotations::class,
             App\Radio\AutoDJ\ClockWheel\ClockWheelAnnotator::class,
+            App\Radio\AutoDJ\AiDjQueueListener::class,
             App\Radio\Backend\Liquidsoap\ConfigWriter::class,
             App\Radio\Backend\Liquidsoap\PlaylistFileWriter::class,
             App\Sync\NowPlaying\Task\NowPlayingTask::class,
