@@ -192,7 +192,7 @@
                                     />
                                 </template>
                                 <template #description>
-                                    {{ $gettext('Choose an installed Piper voice model.') }}
+                                    {{ $gettext('Choose a voice for this DJ personality.') }}
                                 </template>
                             </form-group-field>
 
@@ -437,15 +437,29 @@ const {r$: v$} = useAppRegle(form, {}, {});
 
 const voiceSelectOptions = computed(() => {
     const base = [{text: $gettext('— Select a voice —'), value: null as string | null}];
-    const mapped = voiceOptions.value.map((v) => ({
-        text: v.label,
-        value: v.path,
-    }));
-    const all = [...base, ...mapped];
 
+    const kokoro = voiceOptions.value
+        .filter((v) => v.path.startsWith('kokoro:'))
+        .map((v) => ({text: v.label, value: v.path}));
+
+    const piper = voiceOptions.value
+        .filter((v) => !v.path.startsWith('kokoro:'))
+        .map((v) => ({text: v.label, value: v.path}));
+
+    const all = [...base];
+    if (kokoro.length > 0) {
+        all.push({text: `── ${$gettext('Kokoro (Human-like)')} ──`, value: '__kokoro_header__'});
+        all.push(...kokoro);
+    }
+    if (piper.length > 0) {
+        all.push({text: `── ${$gettext('Piper (Lightweight)')} ──`, value: '__piper_header__'});
+        all.push(...piper);
+    }
+
+    const mapped = voiceOptions.value.map((v) => v.path);
     if (
         form.value.voice_model_path &&
-        !mapped.some((o) => o.value === form.value.voice_model_path)
+        !mapped.includes(form.value.voice_model_path)
     ) {
         all.push({text: $gettext('Custom Path'), value: form.value.voice_model_path});
     }
@@ -459,6 +473,7 @@ const voiceLabel = (path: string | null): string => {
     if (!path) return '—';
     const match = voiceOptions.value.find((v) => v.path === path);
     if (match) return match.label;
+    if (path.startsWith('kokoro:')) return path.replace('kokoro:', 'Kokoro: ');
     const parts = path.split('/');
     return parts[parts.length - 1] ?? path;
 };

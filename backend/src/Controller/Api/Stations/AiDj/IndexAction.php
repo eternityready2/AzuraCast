@@ -9,6 +9,7 @@ use App\Entity\Repository\AiDjRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Service\AiDjGenerator;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -59,9 +60,19 @@ final class IndexAction implements SingleActionInterface
             $djList
         );
 
+        $kokoroVoices = array_map(
+            static fn(array $v): array => [
+                'label' => $v['name'],
+                'path' => $v['id'],
+            ],
+            AiDjGenerator::KOKORO_VOICES
+        );
+
+        $piperVoices = AiNewsGenerator::AVAILABLE_VOICE_MODELS;
+
         return $response->withJson([
             'rows' => $result,
-            'voice_options' => AiNewsGenerator::AVAILABLE_VOICE_MODELS,
+            'voice_options' => array_merge($kokoroVoices, $piperVoices),
         ]);
     }
 }

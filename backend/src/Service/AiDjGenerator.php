@@ -19,9 +19,30 @@ final class AiDjGenerator
     use LoggerAwareTrait;
 
     private const string PIPER_BIN = 'piper';
+    private const string KOKORO_SCRIPT = '/opt/kokoro/kokoro_tts.py';
     private const string FFMPEG_BIN = 'ffmpeg';
-    private const int TTS_TIMEOUT = 15;
+    private const int TTS_TIMEOUT = 30;
     private const int DISK_LIMIT_MB = 400; // 80% of 500MB max
+    private const string KOKORO_PREFIX = 'kokoro:';
+
+    public const array KOKORO_VOICES = [
+        ['name' => 'Adam (Morning Host)',     'id' => 'kokoro:am_adam',    'gender' => 'male',   'style' => 'calm-energetic'],
+        ['name' => 'Michael (Warm Male)',      'id' => 'kokoro:am_michael', 'gender' => 'male',   'style' => 'warm'],
+        ['name' => 'Eric (Relaxed Male)',      'id' => 'kokoro:am_eric',    'gender' => 'male',   'style' => 'relaxed'],
+        ['name' => 'Liam (Smooth Male)',       'id' => 'kokoro:am_liam',    'gender' => 'male',   'style' => 'smooth'],
+        ['name' => 'Onyx (Deep Male)',         'id' => 'kokoro:am_onyx',    'gender' => 'male',   'style' => 'deep-calm'],
+        ['name' => 'Fenrir (Mature Male)',     'id' => 'kokoro:am_fenrir',  'gender' => 'male',   'style' => 'mature'],
+        ['name' => 'Bella (Energetic Female)', 'id' => 'kokoro:af_bella',   'gender' => 'female', 'style' => 'energetic'],
+        ['name' => 'Sarah (Bright Female)',    'id' => 'kokoro:af_sarah',   'gender' => 'female', 'style' => 'bright'],
+        ['name' => 'Heart (Warm Female)',      'id' => 'kokoro:af_heart',   'gender' => 'female', 'style' => 'warm'],
+        ['name' => 'Nova (Dynamic Female)',    'id' => 'kokoro:af_nova',    'gender' => 'female', 'style' => 'dynamic'],
+        ['name' => 'Sky (Upbeat Female)',      'id' => 'kokoro:af_sky',     'gender' => 'female', 'style' => 'upbeat'],
+        ['name' => 'Nicole (Smooth Female)',   'id' => 'kokoro:af_nicole',  'gender' => 'female', 'style' => 'smooth'],
+        ['name' => 'Jessica (Clear Female)',   'id' => 'kokoro:af_jessica', 'gender' => 'female', 'style' => 'clear'],
+        ['name' => 'George (British Male)',    'id' => 'kokoro:bm_george',  'gender' => 'male',   'style' => 'british'],
+        ['name' => 'Daniel (British Male)',    'id' => 'kokoro:bm_daniel',  'gender' => 'male',   'style' => 'british'],
+        ['name' => 'Emma (British Female)',    'id' => 'kokoro:bf_emma',    'gender' => 'female', 'style' => 'british'],
+    ];
 
     public function __construct(
         private readonly AiDjCleanup $cleanup,
@@ -37,7 +58,6 @@ final class AiDjGenerator
         ?string $voiceModelPath,
         string $outputPath
     ): ?string {
-        $modelPath = $voiceModelPath ?: AiNewsGenerator::AVAILABLE_VOICE_MODELS[0]['path'];
         $tempDir = dirname($outputPath);
 
         if (!is_dir($tempDir) && !@mkdir($tempDir, 0755, true)) {
@@ -45,15 +65,85 @@ final class AiDjGenerator
             return null;
         }
 
-        $scriptFile = $tempDir . '/script_' . uniqid() . '.txt';
+        $isKokoro = $voiceModelPath && str_starts_with($voiceModelPath, self::KOKORO_PREFIX);
+
+        if ($isKokoro) {
+            return $this->generateWithKokoro($text, $voiceModelPath, $outputPath, $tempDir);
+        }
+
+        return $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir);
+    }
+
+    private function generateWithKokoro(
+        string $text,
+        string $voiceModelPath,
+        string $outputPath,
+        string $tempDir
+    ): ?string {
+        $voiceId = substr($voiceModelPath, strlen(self::KOKORO_PREFIX));
         $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
         $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
 
         try {
-            if (false === file_put_contents($scriptFile, $text)) {
-                throw new RuntimeException('Failed to write TTS script file.');
+            $kokoro = new Process([
+                'python3',
+                self::KOKORO_SCRIPT,
+                $text,
+                $voiceId,
+                $wavFile,
+            ]);
+            $kokoro->setTimeout(self::TTS_TIMEOUT);
+            $kokoro->run();
+
+            if (!$kokoro->isSuccessful()) {
+                $this->logger->warning(sprintf(
+                    'Kokoro TTS failed: %s',
+                    $kokoro->getErrorOutput() ?: 'Unknown error'
+                ));
+                return null;
             }
 
+            $ffmpeg = new Process([
+                self::FFMPEG_BIN,
+                '-y',
+                '-i', $wavFile,
+                '-c:a', 'libmp3lame',
+                '-b:a', '192k',
+                $tmpMp3,
+            ]);
+            $ffmpeg->setTimeout(10);
+            $ffmpeg->run();
+
+            if (!$ffmpeg->isSuccessful()) {
+                $this->logger->warning('FFmpeg conversion failed.');
+                return null;
+            }
+
+            if (!@rename($tmpMp3, $outputPath)) {
+                throw new RuntimeException(sprintf('Failed to move audio to "%s".', $outputPath));
+            }
+
+            return $outputPath;
+        } catch (Throwable $e) {
+            $this->logger->error(sprintf('Kokoro AI DJ audio generation failed: %s', $e->getMessage()));
+            return null;
+        } finally {
+            @unlink($wavFile);
+            @unlink($tmpMp3);
+        }
+    }
+
+    private function generateWithPiper(
+        string $text,
+        ?string $voiceModelPath,
+        string $outputPath,
+        string $tempDir
+    ): ?string {
+        $modelPath = $voiceModelPath ?: AiNewsGenerator::AVAILABLE_VOICE_MODELS[0]['path'];
+        $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
+        $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
+
+        try {
             $piper = new Process([
                 self::PIPER_BIN,
                 '--model', $modelPath,
@@ -96,7 +186,6 @@ final class AiDjGenerator
             $this->logger->error(sprintf('AI DJ audio generation failed: %s', $e->getMessage()));
             return null;
         } finally {
-            @unlink($scriptFile);
             @unlink($wavFile);
             @unlink($tmpMp3);
         }
