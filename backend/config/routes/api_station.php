@@ -1041,11 +1041,6 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:overview-health');
 
                             $group->get(
-                                '/programme-log',
-                                Controller\Api\Stations\Reports\ProgrammeLogAction::class
-                            )->setName('api:stations:reports:programme-log');
-
-                            $group->get(
                                 '/soundexchange',
                                 Controller\Api\Stations\Reports\SoundExchangeAction::class
                             )->setName('api:stations:reports:soundexchange');

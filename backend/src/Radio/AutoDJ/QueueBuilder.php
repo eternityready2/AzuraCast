@@ -305,13 +305,7 @@ final class QueueBuilder implements EventSubscriberInterface
                     $expectedPlayTime,
                     $allowDuplicates
                 ),
-                PlaylistOrders::Shuffle => $this->getShuffledMediaIdFromPlaylist(
-                    $playlist,
-                    $recentSongHistory,
-                    $expectedPlayTime,
-                    $allowDuplicates
-                ),
-                PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
+                PlaylistOrders::Shuffle, PlaylistOrders::SmartShuffle => $this->getShuffledMediaIdFromPlaylist(
                     $playlist,
                     $recentSongHistory,
                     $expectedPlayTime,
@@ -743,82 +737,13 @@ final class QueueBuilder implements EventSubscriberInterface
                 new DateTimeImmutable(),
                 $allowDuplicates
             ),
-            PlaylistOrders::Shuffle => $this->getShuffledMediaIdFromPlaylist(
-                $playlist,
-                $recentSongHistory,
-                new DateTimeImmutable(),
-                $allowDuplicates
-            ),
-            PlaylistOrders::SmartShuffle => $this->getSmartShuffleMediaIdFromPlaylist(
+            PlaylistOrders::Shuffle, PlaylistOrders::SmartShuffle => $this->getShuffledMediaIdFromPlaylist(
                 $playlist,
                 $recentSongHistory,
                 new DateTimeImmutable(),
                 $allowDuplicates
             ),
         };
-    }
-
-    private const int DEFAULT_SMART_SHUFFLE_DISTANCE = 5;
-
-    /**
-     * Shuffled queue order with no artist repeat within N recent plays.
-     *
-     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentSongHistory
-     */
-    private function getSmartShuffleMediaIdFromPlaylist(
-        StationPlaylist $playlist,
-        array $recentSongHistory,
-        DateTimeImmutable $expectedPlayTime,
-        bool $allowDuplicates,
-    ): ?StationPlaylistQueue {
-        $distance = max(2, $playlist->smart_shuffle_distance ?? self::DEFAULT_SMART_SHUFFLE_DISTANCE);
-        $mediaQueue = $this->preparePlaylistQueue(
-            $playlist,
-            $this->spmRepo->getQueue($playlist),
-            $expectedPlayTime,
-        );
-        if ($mediaQueue === []) {
-            $this->spmRepo->resetQueue($playlist);
-            $mediaQueue = $this->preparePlaylistQueue(
-                $playlist,
-                $this->spmRepo->getQueue($playlist),
-                $expectedPlayTime,
-            );
-        }
-
-        $blockedArtists = [];
-        foreach (array_slice($recentSongHistory, 0, $distance) as $historyRow) {
-            $artist = mb_strtolower(trim((string)($historyRow['artist'] ?? '')));
-            if ($artist !== '') {
-                $blockedArtists[$artist] = true;
-            }
-        }
-
-        $artistSafeQueue = array_values(array_filter(
-            $mediaQueue,
-            static function (StationPlaylistQueue $item) use ($blockedArtists): bool {
-                $artist = mb_strtolower(trim($item->artist ?? ''));
-                if ($artist === '') {
-                    return true;
-                }
-
-                return !isset($blockedArtists[$artist]);
-            }
-        ));
-
-        if ($artistSafeQueue === []) {
-            $artistSafeQueue = $mediaQueue;
-        }
-
-        if ($playlist->avoid_duplicates) {
-            return $this->duplicatePrevention->preventDuplicates(
-                $artistSafeQueue,
-                $recentSongHistory,
-                $allowDuplicates
-            );
-        }
-
-        return array_shift($artistSafeQueue);
     }
 
     public function getNextSongFromRequests(BuildQueue $event): void

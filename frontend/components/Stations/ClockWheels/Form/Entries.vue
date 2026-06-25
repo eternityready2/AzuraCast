@@ -215,28 +215,10 @@
                             {{ $gettext('Category') }}
                         </th>
                         <th class="text-uppercase small">
-                            {{ $gettext('Playlist') }}
-                        </th>
-                        <th class="text-uppercase small">
-                            {{ $gettext('Pool') }}
-                        </th>
-                        <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
                         </th>
                         <th class="text-uppercase small">
                             {{ $gettext('Max sec') }}
-                        </th>
-                        <th
-                            class="text-uppercase small text-center"
-                            :title="$gettext('Hard anchor')"
-                        >
-                            {{ $gettext('Hard') }}
-                        </th>
-                        <th class="text-uppercase small">
-                            {{ $gettext('Score') }}
-                        </th>
-                        <th class="text-uppercase small">
-                            {{ $gettext('Code') }}
                         </th>
                         <th
                             class="text-uppercase small text-center"
@@ -249,7 +231,7 @@
                 <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="12"
+                            colspan="7"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -305,40 +287,8 @@
                         </td>
                         <td>
                             <select
-                                v-model="entry.playlist_id"
-                                class="form-select form-select-sm"
-                                @change="onPlaylistChange(entry)"
-                            >
-                                <option
-                                    v-for="opt in playlistOptions"
-                                    :key="String(opt.value)"
-                                    :value="opt.value"
-                                >
-                                    {{ opt.text }}
-                                </option>
-                            </select>
-                        </td>
-                        <td>
-                            <select
-                                v-model="entry.pool_mode"
-                                class="form-select form-select-sm"
-                                :disabled="!entry.playlist_id"
-                                :title="poolModeHelp"
-                                @change="props.onEntriesChanged()"
-                            >
-                                <option value="restrict_pool">
-                                    {{ $gettext('Restrict pool') }}
-                                </option>
-                                <option value="playlist_rotation">
-                                    {{ $gettext('Run rotation rules') }}
-                                </option>
-                            </select>
-                        </td>
-                        <td>
-                            <select
                                 v-model="entry.algorithm"
                                 class="form-select form-select-sm"
-                                :disabled="entry.pool_mode === 'playlist_rotation' && !!entry.playlist_id"
                             >
                                 <option value="random">
                                     {{ $gettext('Random') }}
@@ -395,36 +345,6 @@
                                     @change="props.onEntriesChanged()"
                                 >
                             </div>
-                        </td>
-                        <td class="text-center align-middle">
-                            <input
-                                v-model="entry.is_hard_anchor"
-                                type="checkbox"
-                                class="form-check-input"
-                                :title="$gettext('Must play at this anchor time')"
-                                @change="props.onEntriesChanged()"
-                            >
-                        </td>
-                        <td>
-                            <input
-                                v-model.number="entry.research_score"
-                                type="number"
-                                min="0"
-                                max="100"
-                                class="form-control form-control-sm"
-                                :placeholder="'—'"
-                                @change="props.onEntriesChanged()"
-                            >
-                        </td>
-                        <td>
-                            <input
-                                v-model="entry.sound_code"
-                                type="text"
-                                maxlength="20"
-                                class="form-control form-control-sm"
-                                :placeholder="'—'"
-                                @change="props.onEntriesChanged()"
-                            >
                         </td>
                         <td class="text-center align-middle">
                             <div class="btn-group btn-group-sm w-100 justify-content-center">
@@ -502,32 +422,15 @@ import {
     parseClockWheelPosition,
     timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
-import {formatMediaType, getMediaTypeOptions, type MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {formatMediaType, getMediaTypeOptions} from '~/functions/mediaTypes.ts';
+import type {ClockWheelSlotEditorRow} from '~/functions/clockWheelSlotEditor.ts';
 
 const {$gettext} = useTranslate();
 
-const {categoryOptions, playlistOptions, load: loadSlotOptions} = useClockWheelSlotOptions();
+const {categoryOptions, load: loadSlotOptions} = useClockWheelSlotOptions();
 const showSeparationOverrides = ref(false);
 
-const poolModeHelp = computed(() =>
-    $gettext('Restrict pool: filter by playlist then use slot algorithm. Run rotation rules: follow the playlist AutoDJ order.')
-);
-
-export interface ClockWheelEntryRow {
-    type: MediaTypeValue;
-    algorithm: string;
-    position_seconds: number;
-    duration_seconds: number | null;
-    category_id: number | null;
-    playlist_id: number | null;
-    pool_mode: 'restrict_pool' | 'playlist_rotation';
-    separation_override_enabled: boolean;
-    separation_artist_minutes: number | null;
-    separation_title_minutes: number | null;
-    is_hard_anchor: boolean;
-    research_score: number | null;
-    sound_code: string | null;
-}
+export type ClockWheelEntryRow = ClockWheelSlotEditorRow;
 
 const fillStrategyOptions = computed(() => [
     {value: 'conservative', text: $gettext('Conservative (defer tight windows)')},
@@ -662,13 +565,6 @@ const onPositionChange = (entry: ClockWheelEntryRow, event: Event) => {
     const target = event.target as HTMLInputElement;
     entry.position_seconds = parseClockWheelPosition(target.value);
     target.value = formatPosition(entry.position_seconds);
-    props.onEntriesChanged();
-};
-
-const onPlaylistChange = (entry: ClockWheelEntryRow) => {
-    if (!entry.playlist_id) {
-        entry.pool_mode = 'restrict_pool';
-    }
     props.onEntriesChanged();
 };
 

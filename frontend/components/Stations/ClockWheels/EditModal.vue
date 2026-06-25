@@ -77,23 +77,14 @@ import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
 } from '~/functions/clockWheelPosition.ts';
-import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {
+    defaultClockWheelSlotEditorRow,
+    mapApiSlotToEditorRow,
+    mapEditorRowToApiSlot,
+    type ClockWheelSlotEditorRow,
+} from '~/functions/clockWheelSlotEditor.ts';
 
-interface ClockWheelEntry {
-    type: MediaTypeValue;
-    algorithm: string;
-    position_seconds: number;
-    duration_seconds: number | null;
-    category_id: number | null;
-    playlist_id: number | null;
-    pool_mode: 'restrict_pool' | 'playlist_rotation';
-    separation_override_enabled: boolean;
-    separation_artist_minutes: number | null;
-    separation_title_minutes: number | null;
-    is_hard_anchor: boolean;
-    research_score: number | null;
-    sound_code: string | null;
-}
+interface ClockWheelEntry extends ClockWheelSlotEditorRow {}
 
 const props = defineProps<BaseEditModalProps & {
     templatesUrl: string;
@@ -143,21 +134,8 @@ const {r$} = useAppRegle(form, {
     burn_rate_max_plays_24h: {},
 });
 
-const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
-    type: 'music',
-    algorithm: 'random',
-    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
-    duration_seconds: null,
-    category_id: null,
-    playlist_id: null,
-    pool_mode: 'restrict_pool',
-    separation_override_enabled: false,
-    separation_artist_minutes: null,
-    separation_title_minutes: null,
-    is_hard_anchor: false,
-    research_score: null,
-    sound_code: null,
-});
+const defaultEntry = (positionSeconds: number): ClockWheelEntry =>
+    defaultClockWheelSlotEditorRow(positionSeconds);
 
 const addEntry = () => {
     sortClockWheelEntries(entries);
@@ -231,10 +209,6 @@ const resetForm = () => {
     entries.splice(0, entries.length);
 };
 
-const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
-    return isMediaTypeValue(type) ? type : 'music';
-};
-
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, {
         ...data,
@@ -243,36 +217,8 @@ const populateForm = (data: Record<string, unknown>) => {
         daypart_id: data.daypart_id != null ? Number(data.daypart_id) : null,
     });
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {
-            type?: string | null;
-            algorithm?: string;
-            position_seconds?: number;
-            duration_seconds?: number | null;
-            category_id?: number | null;
-            playlist_id?: number | null;
-            pool_mode?: string;
-            separation_override_enabled?: boolean;
-            separation_artist_minutes?: number | null;
-            separation_title_minutes?: number | null;
-            is_hard_anchor?: boolean;
-            research_score?: number | null;
-            sound_code?: string | null;
-        }[]).map(
-            (s) => ({
-                type: normalizeSlotType(s.type),
-                algorithm: s.algorithm ?? 'random',
-                position_seconds: s.position_seconds ?? 0,
-                duration_seconds: s.duration_seconds ?? null,
-                category_id: s.category_id ?? null,
-                playlist_id: s.playlist_id ?? null,
-                pool_mode: s.pool_mode === 'playlist_rotation' ? 'playlist_rotation' : 'restrict_pool',
-                separation_override_enabled: Boolean(s.separation_override_enabled),
-                separation_artist_minutes: s.separation_artist_minutes ?? null,
-                separation_title_minutes: s.separation_title_minutes ?? null,
-                is_hard_anchor: Boolean(s.is_hard_anchor),
-                research_score: s.research_score ?? null,
-                sound_code: s.sound_code ?? null,
-            })
+        const converted = (data.slots as Record<string, unknown>[]).map((s) =>
+            mapApiSlotToEditorRow(s)
         );
         entries.splice(0, entries.length, ...converted);
         sortClockWheelEntries(entries);
@@ -295,25 +241,7 @@ const validateForm = async () => {
     };
 
     if (!inheritSlots) {
-        payload.slots = entries.map((e) => ({
-            type: e.type,
-            category_id: e.category_id,
-            playlist_id: e.playlist_id,
-            pool_mode: e.playlist_id ? e.pool_mode : 'restrict_pool',
-            algorithm: e.algorithm,
-            position_seconds: e.position_seconds,
-            duration_seconds: e.duration_seconds,
-            separation_override_enabled: e.separation_override_enabled,
-            separation_artist_minutes: e.separation_override_enabled
-                ? e.separation_artist_minutes
-                : null,
-            separation_title_minutes: e.separation_override_enabled
-                ? e.separation_title_minutes
-                : null,
-            is_hard_anchor: e.is_hard_anchor,
-            research_score: e.research_score,
-            sound_code: e.sound_code,
-        }));
+        payload.slots = entries.map((e) => mapEditorRowToApiSlot(e));
     }
 
     return {valid, data: payload};

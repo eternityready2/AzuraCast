@@ -104,7 +104,7 @@ final class StationPlaylist implements
     public PlaylistOrders $order;
 
     /**
-     * Minimum number of songs between repeats of the same artist when order is smart_shuffle.
+     * @deprecated Unused — Smart Shuffle removed; kept for existing DB rows.
      * NULL uses the default (5).
      */
     #[

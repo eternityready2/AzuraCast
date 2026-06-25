@@ -207,6 +207,8 @@ Log files (inside container): `/var/azuracast/www_tmp/app_nowplaying-YYYY-MM-DD.
   - File: `frontend/components/Stations/Common/ScheduleCalendar.vue`
 - **Live Clock Wheel tab** (PR7+): `ClockWheelLiveTab.vue`, `useClockWheelLiveData.ts` — dual **hour timeline** + **enhanced circular clock**, segment summary (current/next anchor, countdown), status column, queue↔anchor matching by expected play time, hour health badge, inline **Analytics**
 - **Legal ID + end-of-hour** (Phase A2/A3/A5): `legal_id` slot type at `0:00`, end-of-hour music fit before `:00`, promo fallback if no legal ID file, playback `actual_play_at` logging, **Legal ID compliance** in Analytics modal (10s tolerance)
+- **Station-wide top-of-hour ID** (v0.29): Station → **Top of Hour ID** toggle queues mandatory `legal_id` at `:00` on playlist-only hours (wheel `legal_id` at `0:00` wins when a clock wheel is active). Uses the same `HourBoundaryPlanner` lookahead, `cue_out` caps, zero-crossfade quick-cut, and `clock_wheel_events` audit rows (`clock_wheel_id` null). Compliance summary on the Top of Hour settings page (last 7 days).
+- **Slot source pickers** (v0.30): Clock wheel editor — **Category** per slot row; optional per-slot separation override; preview shows **Wall clock** times.
 - **Clock Wheels manage page** (PR10): tabs for Wheels / Templates / Dayparts — `frontend/components/Stations/ClockWheels.vue`
   - `TemplateEditModal.vue`, `DaypartEditModal.vue` (AM/PM hour chips, separation override, Re-sync)
   - `PreviewModal.vue`, `AnalyticsModal.vue` (PR12)
@@ -289,6 +291,18 @@ See **PR 6 — Tests & regression coverage** for the full matrix, run commands, 
 - Create an overlapping playlist schedule in the same window:
   - verify the save is **blocked**
   - and/or at runtime the wheel is **skipped** and normal AutoDJ runs
+
+### Station-wide Top of Hour ID (playlist-only hours)
+
+Use when the station runs normal playlist AutoDJ but still needs a Legal ID at exactly `:00` without interrupting songs.
+
+1. **Music Files** → set **Type** to **Legal ID** on station ID audio (e.g. `stationid-past-original`).
+2. **Station → Top of Hour ID** → enable **Require Legal ID at top of hour**.
+3. Adjust **Lookahead** (default 10 min), **Finish buffer** (default 15 s), and **Compliance tolerance** (default 10 s) if needed.
+4. During the lookahead window before `:00`, confirm **Upcoming Queue** shows a **Top of Hour ID** badge on the next legal ID row.
+5. After on-air play, open **Top of Hour ID** again — **Legal ID compliance (last 7 days)** shows on-time %, late count, and fallback events.
+6. If a clock wheel with a `legal_id` slot at `0:00` is active that hour, the wheel wins (no duplicate ID from the station toggle).
+7. **Legacy once-per-hour ID playlist at :00** — suppressed when Top of Hour protection is on; use `legal_id` media + Top of Hour toggle instead.
 
 ## PR 6 — Tests & regression coverage
 
