@@ -15,6 +15,14 @@ final class AiDjScheduleRepository extends Repository
     protected string $entityClass = AiDjSchedule::class;
 
     /**
+     * @param array<string, mixed> $criteria
+     */
+    public function findOneBy(array $criteria): ?AiDjSchedule
+    {
+        return $this->repository->findOneBy($criteria);
+    }
+
+    /**
      * @return AiDjSchedule[]
      */
     public function findByStation(int $stationId): array
