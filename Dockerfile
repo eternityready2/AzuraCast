@@ -214,6 +214,9 @@ RUN mkdir -p /var/azuracast/storage/logs \
 RUN rm -rf /var/azuracast/www/storage && \
     ln -s /var/azuracast/storage /var/azuracast/www/storage
 
+RUN mkdir -p /var/azuracast/www/vendor \
+    && chown -R azuracast:azuracast /var/azuracast/www/vendor
+
 USER azuracast
 
 RUN composer install --no-dev --no-ansi --no-autoloader --no-interaction \
@@ -221,6 +224,17 @@ RUN composer install --no-dev --no-ansi --no-autoloader --no-interaction \
     && composer clear-cache
 
 USER root
+
+# Install Kokoro TTS for human-like AI DJ voices
+RUN pip install --break-system-packages kokoro-onnx soundfile \
+    && mkdir -p /opt/kokoro \
+    && curl -L -o /opt/kokoro/kokoro-v1.0.onnx \
+       https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx \
+    && curl -L -o /opt/kokoro/voices-v1.0.bin \
+       https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+
+COPY --chown=root:root util/docker/kokoro/kokoro_tts.py /opt/kokoro/kokoro_tts.py
+RUN chmod +x /opt/kokoro/kokoro_tts.py
 
 ENTRYPOINT ["tini", "--", "/usr/local/bin/my_init"]
 CMD ["--no-main-command"]
