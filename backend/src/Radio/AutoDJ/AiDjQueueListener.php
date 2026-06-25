@@ -23,20 +23,15 @@ use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Event listener that injects AI DJ audio clips into the Liquidsoap interrupting queue.
+ * Event listener that injects AI DJ audio clips into the Liquidsoap requests queue.
  *
  * Fail-open behavior: all errors are caught and logged, never blocking normal playback.
- * - TTS timeout/generation failure → skip intro, continue playback
- * - Liquidsoap push fails → log error, continue playback
- * - No active DJ → skip, continue playback
- * - No clip available → skip, continue playback
- * - Station restart → clip lost, next song plays normally (fire-and-forget)
  */
 final class AiDjQueueListener implements EventSubscriberInterface
 {
     use LoggerAwareTrait;
 
-    /** @var string[] Content types eligible for random liners (excludes song_intro_template) */
+    /** @var string[] Content types eligible for random liners */
     private const array LINER_TYPES = [
         AiDjContent::TYPE_BIBLE_VERSE,
         AiDjContent::TYPE_JOKE,
@@ -74,20 +69,17 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $backend = $this->adapters->getBackendAdapter($station);
 
         if (!($backend instanceof Liquidsoap)) {
-            $this->logger->debug('AI DJ: Backend is not Liquidsoap, skipping.');
             return;
         }
 
-        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Interrupting);
-        $this->logger->debug('AI DJ: Queue empty check.', ['is_empty' => $queueEmpty]);
+        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Requests);
 
         if (!$queueEmpty) {
-            $this->logger->debug('AI DJ: Interrupting queue not empty, skipping.');
+            $this->logger->debug('AI DJ: Requests queue not empty, skipping.');
             return;
         }
 
         $expectedPlayTime = $event->getExpectedPlayTime();
-        $this->logger->debug('AI DJ: Checking for active DJ.', ['station_id' => $station->id, 'time' => $expectedPlayTime?->format('c')]);
         $dj = $this->scheduler->findActiveDj($station->id, $expectedPlayTime);
 
         // Track DJ shift transitions for outro firing
@@ -95,10 +87,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $previousDjId = $this->cache->get($cacheKey);
         $currentDjId = $dj?->getId() ?? null;
 
-        // Store current for next cycle
         $this->cache->set($cacheKey, $currentDjId, 3600);
 
-        // Fire outro if DJ changed (shift ended)
         if ($previousDjId !== null && $previousDjId !== $currentDjId) {
             $previousDj = $this->em->find(AiDj::class, $previousDjId);
             if ($previousDj instanceof AiDj) {
@@ -113,29 +103,55 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         $this->logger->info('AI DJ: Active DJ found.', ['dj_name' => $dj->getName()]);
 
-        // Check talk frequency — skip this cycle if random check fails
+        // Check talk frequency
         $frequency = $dj->getTalkFrequency();
         if ($frequency < 1.0 && (mt_rand(1, 100) / 100) > $frequency) {
             $this->logger->debug('AI DJ: Skipped by talk frequency.', ['frequency' => $frequency]);
+            // Still track current song for post-song use even when skipping
+            $this->trackCurrentSong($event, $station);
             return;
         }
 
-        // Randomly decide: song intro (60%) or content liner (40%)
-        $playLiner = mt_rand(1, 100) <= 40;
+        // Get next song info
+        $nextSongs = $event->getNextSongs();
+        $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
+        $nextArtist = $nextSong?->song?->artist ?? null;
+        $nextTitle = $nextSong?->song?->title ?? null;
 
-        if ($playLiner) {
-            $this->pushContentLiner($dj, $station, $backend);
+        // Get previous song info from cache
+        $prevCacheKey = 'ai_dj_prev_song_' . $station->id;
+        $prevSong = $this->cache->get($prevCacheKey);
+        $prevArtist = $prevSong['artist'] ?? null;
+        $prevTitle = $prevSong['title'] ?? null;
+
+        // Decide what to play: pre-intro (35%), post-song (30%), or content liner (35%)
+        $roll = mt_rand(1, 100);
+
+        if ($roll <= 35) {
+            // Pre-song intro
+            $this->pushIntroClip($dj, $nextArtist, $nextTitle, $station, $backend);
+        } elseif ($roll <= 65 && $prevArtist) {
+            // Post-song wrap (only if we know what just played)
+            $this->pushPostSongClip($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station, $backend);
         } else {
-            $nextSongs = $event->getNextSongs();
-            $this->logger->debug('AI DJ: Next songs count.', ['count' => count((array)$nextSongs)]);
+            // Content liner
+            $this->pushContentLiner($dj, $station, $backend);
+        }
 
-            // At priority 5 (before QueueBuilder), nextSongs may be empty.
-            // We still push the clip - use null for artist/title and let template handle it.
-            $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
-            $artist = $nextSong?->song?->artist ?? null;
-            $songTitle = $nextSong?->song?->title ?? null;
+        // Track current song for next cycle's post-song use
+        $this->trackCurrentSong($event, $station);
+    }
 
-            $this->pushIntroClip($dj, $artist, $songTitle, $station, $backend);
+    private function trackCurrentSong(BuildQueue $event, Station $station): void
+    {
+        $nextSongs = $event->getNextSongs();
+        $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
+
+        if ($nextSong?->song) {
+            $this->cache->set('ai_dj_prev_song_' . $station->id, [
+                'artist' => $nextSong->song->artist,
+                'title' => $nextSong->song->title,
+            ], 600);
         }
     }
 
@@ -155,28 +171,55 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $track = sprintf('annotate:title="AI DJ Intro",artist="%s":%s', $dj->getName(), $clipPath);
-
-            $backend->enqueue($station, LiquidsoapQueues::Interrupting, $track);
-
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath);
 
             $this->logger->info(sprintf(
-                'AI DJ: Queued intro clip for DJ "%s" at %s (clip: %s)',
+                'AI DJ: Queued intro clip for DJ "%s" (clip: %s)',
                 $dj->getName(),
-                (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
                 basename($clipPath)
-            ), [
-                'dj_id' => $dj->id,
-                'dj_name' => $dj->getName(),
-                'clip_path' => $clipPath,
-                'artist' => $artist,
-                'song' => $songTitle,
-            ]);
+            ));
         } catch (\Throwable $e) {
-            $this->logger->error(sprintf(
-                'AI DJ: Failed to push intro clip: %s. Continuing normal playback.',
-                $e->getMessage()
-            ), ['exception' => $e]);
+            $this->logger->error(sprintf('AI DJ: Failed to push intro clip: %s', $e->getMessage()));
+        }
+    }
+
+    private function pushPostSongClip(
+        AiDj $dj,
+        ?string $prevArtist,
+        ?string $prevTitle,
+        ?string $nextArtist,
+        ?string $nextTitle,
+        Station $station,
+        Liquidsoap $backend
+    ): void {
+        try {
+            $clipPath = $this->generator->generatePostSong(
+                $dj,
+                $prevArtist,
+                $prevTitle,
+                $nextArtist,
+                $nextTitle,
+                $station
+            );
+
+            if (null === $clipPath) {
+                // Fallback to content liner if post-song generation fails
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+
+            $track = sprintf('annotate:title="AI DJ",artist="%s":%s', $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ');
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued post-song clip for DJ "%s" (clip: %s)',
+                $dj->getName(),
+                basename($clipPath)
+            ));
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to push post-song clip: %s', $e->getMessage()));
         }
     }
 
@@ -194,10 +237,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $this->em->persist($queueEntry);
             $this->em->flush();
         } catch (\Throwable $e) {
-            $this->logger->error(sprintf(
-                'AI DJ: Failed to create StationQueue entry: %s',
-                $e->getMessage()
-            ), ['exception' => $e]);
+            $this->logger->error(sprintf('AI DJ: Failed to create StationQueue entry: %s', $e->getMessage()));
         }
     }
 
@@ -207,7 +247,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
         Liquidsoap $backend
     ): void {
         try {
-            // Pick a random content type, then select content
             $type = self::LINER_TYPES[array_rand(self::LINER_TYPES)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
@@ -219,7 +258,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $clipPath = $this->generator->generateContentLiner($dj, $content, $station);
 
             if (null === $clipPath) {
-                $this->logger->warning('AI DJ: Failed to generate content liner.');
                 return;
             }
 
@@ -233,9 +271,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             };
 
             $track = sprintf('annotate:title="%s",artist="%s":%s', $title, $dj->getName(), $clipPath);
-
-            $backend->enqueue($station, LiquidsoapQueues::Interrupting, $track);
-
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
 
             $this->logger->info(sprintf(
@@ -245,10 +281,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 basename($clipPath)
             ));
         } catch (\Throwable $e) {
-            $this->logger->error(sprintf(
-                'AI DJ: Failed to push content liner: %s. Continuing normal playback.',
-                $e->getMessage()
-            ), ['exception' => $e]);
+            $this->logger->error(sprintf('AI DJ: Failed to push content liner: %s', $e->getMessage()));
         }
     }
 
@@ -261,31 +294,20 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $clipPath = $this->generator->generateShiftOutro($dj, $station);
 
             if (null === $clipPath) {
-                $this->logger->warning('AI DJ: Failed to generate outro clip, continuing normal playback.');
                 return;
             }
 
             $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s":%s', $dj->getName(), $clipPath);
-
-            $backend->enqueue($station, LiquidsoapQueues::Interrupting, $track);
-
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Sign-off');
 
             $this->logger->info(sprintf(
-                'AI DJ: Queued outro clip for DJ "%s" at %s (clip: %s)',
+                'AI DJ: Queued outro clip for DJ "%s" (clip: %s)',
                 $dj->getName(),
-                (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),
                 basename($clipPath)
-            ), [
-                'dj_id' => $dj->id,
-                'dj_name' => $dj->getName(),
-                'clip_path' => $clipPath,
-            ]);
+            ));
         } catch (\Throwable $e) {
-            $this->logger->error(sprintf(
-                'AI DJ: Failed to push outro clip: %s. Continuing normal playback.',
-                $e->getMessage()
-            ), ['exception' => $e]);
+            $this->logger->error(sprintf('AI DJ: Failed to push outro clip: %s', $e->getMessage()));
         }
     }
 }

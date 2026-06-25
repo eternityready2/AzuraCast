@@ -10,6 +10,7 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjScheduler;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -32,6 +33,7 @@ final class IndexAction implements SingleActionInterface
 {
     public function __construct(
         private readonly AiDjRepository $aiDjRepository,
+        private readonly AiDjScheduler $scheduler,
     ) {
     }
 
@@ -70,9 +72,14 @@ final class IndexAction implements SingleActionInterface
 
         $piperVoices = AiNewsGenerator::AVAILABLE_VOICE_MODELS;
 
+        // Find currently active DJ for "Live on Air" indicator
+        $activeDj = $this->scheduler->findActiveDj($station->id);
+        $activeDjId = $activeDj?->getId();
+
         return $response->withJson([
             'rows' => $result,
             'voice_options' => array_merge($kokoroVoices, $piperVoices),
+            'active_dj_id' => $activeDjId,
         ]);
     }
 }

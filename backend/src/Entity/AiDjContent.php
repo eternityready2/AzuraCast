@@ -29,6 +29,7 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
     use Traits\TruncateStrings;
 
     public const string TYPE_SONG_INTRO_TEMPLATE = 'song_intro_template';
+    public const string TYPE_POST_SONG_TEMPLATE = 'post_song_template';
     public const string TYPE_BIBLE_VERSE = 'bible_verse';
     public const string TYPE_JOKE = 'joke';
     public const string TYPE_ENCOURAGEMENT = 'encouragement';
@@ -37,6 +38,7 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
 
     public const array TYPES = [
         self::TYPE_SONG_INTRO_TEMPLATE,
+        self::TYPE_POST_SONG_TEMPLATE,
         self::TYPE_BIBLE_VERSE,
         self::TYPE_JOKE,
         self::TYPE_ENCOURAGEMENT,

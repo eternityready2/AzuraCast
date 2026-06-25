@@ -40,8 +40,12 @@ final class AiDjScheduleRepository extends Repository
 
     public function findActiveForTimeSlot(int $stationId, int $dayOfWeek, string $time): ?AiDjSchedule
     {
-        // Pass time as plain string (H:i:s) — Doctrine TIME_IMMUTABLE binding
-        // produces format mismatches with MariaDB TIME columns; raw string comparison works correctly.
+        // Handle both normal (e.g. 06:00-17:00) and cross-midnight (e.g. 22:00-06:00) schedules.
+        // For cross-midnight: start_time > end_time, so match when time >= start OR time < end.
+        // For cross-midnight schedules the day check applies to the START day, so if it's past
+        // midnight we also check the previous day.
+        $previousDay = $dayOfWeek === 1 ? 7 : $dayOfWeek - 1;
+
         return $this->em->createQueryBuilder()
             ->select('schedule')
             ->from(AiDjSchedule::class, 'schedule')
@@ -49,12 +53,22 @@ final class AiDjScheduleRepository extends Repository
             ->andWhere('IDENTITY(dj.station) = :stationId')
             ->andWhere('schedule.is_enabled = :isEnabled')
             ->andWhere('dj.is_enabled = :isEnabled')
-            ->andWhere('schedule.loop_days LIKE :dayOfWeek')
-            ->andWhere('schedule.start_time <= :time')
-            ->andWhere('schedule.end_time > :time')
+            ->andWhere(
+                '(' .
+                    // Normal schedule (same day): start <= time < end, day matches today
+                    '(schedule.start_time <= schedule.end_time AND schedule.start_time <= :time AND schedule.end_time > :time AND schedule.loop_days LIKE :dayOfWeek)' .
+                    ' OR ' .
+                    // Cross-midnight: time >= start on the start day
+                    '(schedule.start_time > schedule.end_time AND schedule.start_time <= :time AND schedule.loop_days LIKE :dayOfWeek)' .
+                    ' OR ' .
+                    // Cross-midnight: time < end (we are past midnight, started previous day)
+                    '(schedule.start_time > schedule.end_time AND schedule.end_time > :time AND schedule.loop_days LIKE :previousDay)' .
+                ')'
+            )
             ->setParameter('stationId', $stationId)
             ->setParameter('isEnabled', true)
             ->setParameter('dayOfWeek', '%' . $dayOfWeek . '%')
+            ->setParameter('previousDay', '%' . $previousDay . '%')
             ->setParameter('time', $time)
             ->orderBy('schedule.start_time', 'DESC')
             ->setMaxResults(1)

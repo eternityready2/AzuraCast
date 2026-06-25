@@ -233,6 +233,62 @@ final class AiDjGenerator
     }
 
     /**
+     * Generate a post-song wrap-up audio file referencing the song that just played
+     * and optionally the next song coming up.
+     *
+     * @return string|null MP3 path on success, null on failure
+     */
+    public function generatePostSong(
+        AiDj $dj,
+        ?string $prevArtist,
+        ?string $prevTitle,
+        ?string $nextArtist,
+        ?string $nextTitle,
+        Station $station
+    ): ?string {
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
+        if ($usedMb > self::DISK_LIMIT_MB) {
+            return null;
+        }
+
+        $template = $this->selectRandomPostSongTemplate($dj->getContents());
+
+        if (null === $template) {
+            // Use built-in defaults if no custom templates exist
+            $defaults = [
+                'That was {{prev_artist}} with {{prev_song}}. You\'re listening to {{station_name}} with {{dj_name}}.',
+                'Hope you enjoyed {{prev_song}} by {{prev_artist}}. Coming up next on {{station_name}}.',
+                'That was {{prev_song}} by {{prev_artist}}. Stay tuned to {{station_name}}, more great music coming your way.',
+                '{{prev_artist}}, {{prev_song}}. This is {{dj_name}} on {{station_name}}.',
+            ];
+
+            if ($nextArtist) {
+                $defaults[] = 'That was {{prev_artist}} with {{prev_song}}. Coming up next, {{next_artist}} with {{next_song}}.';
+                $defaults[] = '{{prev_artist}}, {{prev_song}}. Next up on {{station_name}}, {{next_artist}}.';
+            }
+
+            $template = $defaults[array_rand($defaults)];
+        }
+
+        $text = $this->replaceTemplateVariables(
+            $template,
+            [
+                'dj_name' => $dj->getName(),
+                'prev_artist' => $prevArtist ?? 'that artist',
+                'prev_song' => $prevTitle ?? 'that song',
+                'next_artist' => $nextArtist ?? 'the next artist',
+                'next_song' => $nextTitle ?? 'the next song',
+                'station_name' => $station->name,
+            ]
+        );
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/post_song_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+    }
+
+    /**
      * Generate a shift outro (sign-off) audio file for the given DJ.
      *
      * @return string|null MP3 path on success, null on failure
@@ -325,6 +381,23 @@ final class AiDjGenerator
     {
         $templates = $contents
             ->filter(fn(AiDjContent $c) => $c->is_enabled && $c->type === AiDjContent::TYPE_SONG_INTRO_TEMPLATE)
+            ->map(fn(AiDjContent $c) => $c->content)
+            ->toArray();
+
+        if ([] === $templates) {
+            return null;
+        }
+
+        return $templates[array_rand($templates)];
+    }
+
+    /**
+     * Select a random post_song_template from the DJ's content collection.
+     */
+    private function selectRandomPostSongTemplate(Collection $contents): ?string
+    {
+        $templates = $contents
+            ->filter(fn(AiDjContent $c) => $c->is_enabled && $c->type === AiDjContent::TYPE_POST_SONG_TEMPLATE)
             ->map(fn(AiDjContent $c) => $c->content)
             ->toArray();
 

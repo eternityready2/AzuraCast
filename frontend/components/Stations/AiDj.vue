@@ -72,6 +72,13 @@
                                     >
                                         <td class="dj-name">
                                             {{ dj.name }}
+                                            <span
+                                                v-if="activeDjId === dj.id"
+                                                class="live-badge"
+                                            >
+                                                <span class="live-dot" />
+                                                LIVE
+                                            </span>
                                         </td>
                                         <td class="dj-voice">
                                             <span
@@ -347,7 +354,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from "vue";
+import {computed, onMounted, onUnmounted, ref} from "vue";
 import {useGettext} from "vue3-gettext";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
 import FormSelect from "~/components/Form/FormSelect.vue";
@@ -417,6 +424,7 @@ const isDeleting = ref(false);
 const isTesting = ref<number | null>(null);
 const djs = ref<AiDj[]>([]);
 const voiceOptions = ref<VoiceOption[]>([]);
+const activeDjId = ref<number | null>(null);
 const editorOpen = ref(false);
 const editingDj = ref<AiDj | null>(null);
 const deleteTarget = ref<AiDj | null>(null);
@@ -488,6 +496,12 @@ const dayNames: string[] = [
     $gettext('Sun'),
 ];
 
+const toMilitaryTime = (time: string): string => {
+    // Convert "HH:mm:ss" or "HH:mm" to "HHmm" military format
+    const parts = time.split(':');
+    return `${parts[0]}${parts[1]}`;
+};
+
 const scheduleSummary = (schedules: AiDjSchedule[]): string => {
     if (!schedules || schedules.length === 0) return $gettext('No schedule');
 
@@ -498,7 +512,7 @@ const scheduleSummary = (schedules: AiDjSchedule[]): string => {
                 : $gettext('Every day');
         const time =
             s.start_time && s.end_time
-                ? `${s.start_time}–${s.end_time}`
+                ? `${toMilitaryTime(s.start_time)}-${toMilitaryTime(s.end_time)}`
                 : $gettext('All day');
         return `${days} ${time}`;
     }).join(' | ');
@@ -509,7 +523,7 @@ const scheduleSummary = (schedules: AiDjSchedule[]): string => {
 const loadDjs = async (): Promise<void> => {
     isLoading.value = true;
     try {
-        const resp = await axios.get<{rows?: AiDj[]; voice_options?: VoiceOption[]} | AiDj[]>(listUrl.value);
+        const resp = await axios.get<{rows?: AiDj[]; voice_options?: VoiceOption[]; active_dj_id?: number | null} | AiDj[]>(listUrl.value);
         const data = resp.data;
         if (Array.isArray(data)) {
             djs.value = data;
@@ -518,6 +532,7 @@ const loadDjs = async (): Promise<void> => {
             if (data.voice_options) {
                 voiceOptions.value = data.voice_options;
             }
+            activeDjId.value = data.active_dj_id ?? null;
         }
     } catch {
         notifyError($gettext('Failed to load DJ list.'));
@@ -616,8 +631,23 @@ const runTest = async (dj: AiDj): Promise<void> => {
 
 // --- Init ---
 
+let liveRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
 onMounted(async () => {
     await Promise.all([loadDjs()]);
+    // Refresh every 30s to update LIVE indicator
+    liveRefreshTimer = setInterval(async () => {
+        try {
+            const resp = await axios.get<{active_dj_id?: number | null}>(listUrl.value);
+            if (!Array.isArray(resp.data) && resp.data.active_dj_id !== undefined) {
+                activeDjId.value = resp.data.active_dj_id;
+            }
+        } catch { /* silent */ }
+    }, 30000);
+});
+
+onUnmounted(() => {
+    if (liveRefreshTimer) clearInterval(liveRefreshTimer);
 });
 </script>
 
@@ -731,6 +761,35 @@ onMounted(async () => {
 
 .dj-name {
     font-weight: 600;
+}
+
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(40, 167, 69, 0.18);
+    color: #5cb85c;
+    border-radius: 12px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+
+.live-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #5cb85c;
+    animation: pulse-live 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
 
 .voice-badge {
