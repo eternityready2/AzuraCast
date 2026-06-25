@@ -21,7 +21,7 @@ final class AiDjGenerator
     private const string PIPER_BIN = 'piper';
     private const string KOKORO_SCRIPT = '/opt/kokoro/kokoro_tts.py';
     private const string FFMPEG_BIN = 'ffmpeg';
-    private const int TTS_TIMEOUT = 30;
+    private const int TTS_TIMEOUT = 90;
     private const int DISK_LIMIT_MB = 400; // 80% of 500MB max
     private const string KOKORO_PREFIX = 'kokoro:';
 
