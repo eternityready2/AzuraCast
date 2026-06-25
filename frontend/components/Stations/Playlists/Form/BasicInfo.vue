@@ -116,16 +116,6 @@
                     />
 
                     <form-group-field
-                        v-if="form.order === 'smart_shuffle'"
-                        id="form_edit_smart_shuffle_distance"
-                        class="col-md-6"
-                        :field="r$.smart_shuffle_distance"
-                        type="number"
-                        :label="$gettext('Smart Shuffle: min songs between same artist')"
-                        :description="$gettext('Leave empty for default (5). Applies to PHP AutoDJ track selection.')"
-                    />
-
-                    <form-group-field
                         id="form_edit_rotation_goal_days"
                         class="col-md-6"
                         :field="r$.rotation_goal_days"
@@ -337,11 +327,6 @@ const orderOptions = [
         value: 'sequential',
         text: $gettext('Sequential'),
         description: $gettext('The order of the playlist is manually specified and followed by the AutoDJ.')
-    },
-    {
-        value: 'smart_shuffle',
-        text: $gettext('Smart Shuffle'),
-        description: $gettext('Shuffled rotation that avoids repeating the same artist within N recent songs.')
     }
 ];
 

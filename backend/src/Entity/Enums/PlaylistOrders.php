@@ -12,6 +12,6 @@ enum PlaylistOrders: string
     case Random = 'random';
     case Shuffle = 'shuffle';
     case Sequential = 'sequential';
-    /** Avoid repeating the same artist within N recent picks (PHP AutoDJ only). */
+    /** @deprecated Legacy DB value — treated as {@see Shuffle} in AutoDJ; use Avoid Duplicate Artists/Songs on the playlist instead. */
     case SmartShuffle = 'smart_shuffle';
 }

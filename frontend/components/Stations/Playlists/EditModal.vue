@@ -61,6 +61,9 @@ const {
     $modal,
     resetForm,
     (data) => {
+        if (data.order === 'smart_shuffle') {
+            data.order = 'shuffle';
+        }
         if (data.schedule_items?.length) {
             data.schedule_items = data.schedule_items.map((item: Record<string, unknown>) => {
                 const endType = item.recurrence_end_type ?? 'never';
