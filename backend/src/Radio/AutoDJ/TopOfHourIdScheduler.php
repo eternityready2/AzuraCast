@@ -122,10 +122,7 @@ final class TopOfHourIdScheduler implements EventSubscriberInterface
         }
 
         foreach ($wheel->slots as $slot) {
-            if (
-                $slot->type === ClockWheelSlotTypes::LegalId
-                && $slot->position_seconds === 0
-            ) {
+            if (ClockWheelSlotTypes::isMandatoryTopOfHourSlot($slot->type, $slot->position_seconds)) {
                 return true;
             }
         }

@@ -1,4 +1,4 @@
-import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {normalizeMediaTypeForEditor, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 /**
  * Slot row shape for the Eternity Ready clock wheel editor (commercial-FM columns removed from UI).
@@ -36,7 +36,7 @@ type ApiSlotInput = {
 };
 
 export function normalizeSlotType(type: string | null | undefined): MediaTypeValue {
-    return isMediaTypeValue(type) ? type : 'music';
+    return normalizeMediaTypeForEditor(type);
 }
 
 export function mapApiSlotToEditorRow(slot: ApiSlotInput): ClockWheelSlotEditorRow {

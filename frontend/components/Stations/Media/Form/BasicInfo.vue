@@ -68,7 +68,7 @@
                 >
                     <option value="music">{{ $gettext('Music (music and copyrighted material)') }}</option>
                     <option value="talk">{{ $gettext('Talk (sermons, speeches, and live recordings)') }}</option>
-                    <option value="id">{{ $gettext('ID (station identification such as sweepers and jingles)') }}</option>
+                    <option value="id">{{ $gettext('ID (station identification, sweepers, and top-of-hour IDs)') }}</option>
                     <option value="promo">{{ $gettext('Promo (station promotion that is not considered an ID)') }}</option>
                     <option value="ad">{{ $gettext('Ad (advert replacement files)') }}</option>
                 </select>

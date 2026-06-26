@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ\ClockWheel;
 
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
@@ -89,7 +90,7 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         $media = $event->getMedia();
         $isLegalId = ($queue->top_of_hour_legal_id ?? false)
             || ($queue->clock_wheel_legal_id_substitute ?? false)
-            || ($media instanceof StationMedia && $media->type === 'legal_id');
+            || ($media instanceof StationMedia && StationMediaTypes::isStationId($media->type));
 
         if (!$isLegalId) {
             return;

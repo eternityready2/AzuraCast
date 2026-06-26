@@ -8,6 +8,7 @@ use App\Entity\ClockWheelEvent;
 use App\Entity\Enums\ClockWheelEventKind;
 use App\Entity\Repository\ClockWheelEventRepository;
 use App\Entity\Station;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use Carbon\CarbonImmutable;
@@ -34,7 +35,7 @@ final class ClockWheelLegalIdPlaybackService
             return;
         }
 
-        $isLegalIdPlayback = $media->type === 'legal_id'
+        $isLegalIdPlayback = StationMediaTypes::isStationId($media->type)
             || ($queueRow->clock_wheel_legal_id_substitute ?? false)
             || ($queueRow->top_of_hour_legal_id ?? false);
 

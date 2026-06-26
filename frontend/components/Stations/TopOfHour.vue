@@ -6,7 +6,7 @@
                     :id="id"
                     class="card-title my-0"
                 >
-                    {{ $gettext('Top of Hour Legal ID') }}
+                    {{ $gettext('Top of Hour ID') }}
                 </h2>
             </template>
 
@@ -14,7 +14,7 @@
                 <p class="mb-0">
                     {{
                         $gettext(
-                            'Queues a Legal ID at exactly :00 without interrupting the current song. During the lookahead window, music picks are filtered so long songs do not run past the hour. Tag files as Legal ID on the Music Files page.'
+                            'Queues a station ID at exactly :00 without interrupting the current song. During the lookahead window, music picks are filtered so long songs do not run past the hour. Tag files as ID on the Music Files page.'
                         )
                     }}
                 </p>
@@ -27,7 +27,7 @@
                         class="mb-3"
                     >
                         <template #label>
-                            {{ $gettext('Require Legal ID at top of hour') }}
+                            {{ $gettext('Require station ID at top of hour') }}
                         </template>
 
                         <form-checkbox
@@ -111,7 +111,7 @@
                     <p class="text-secondary mb-3">
                         {{
                             $gettext(
-                                'Legal ID files in library: %{count}',
+                                'ID files in library: %{count}',
                                 {count: legalIdMediaCount}
                             )
                         }}
@@ -119,7 +119,7 @@
 
                     <template v-if="(compliance?.hours_with_legal_id ?? 0) > 0">
                         <h3 class="h6">
-                            {{ $gettext('Legal ID compliance (last 7 days)') }}
+                            {{ $gettext('Top-of-hour ID compliance (last 7 days)') }}
                             <span class="text-muted fw-normal small">
                                 ({{ $gettext('tolerance') }}: {{ compliance?.tolerance_seconds ?? 10 }}s)
                             </span>
@@ -249,7 +249,7 @@ const loadSettings = async () => {
             top_of_hour_finish_buffer_seconds: data.top_of_hour_finish_buffer_seconds,
             top_of_hour_id_max_seconds: data.top_of_hour_id_max_seconds,
         };
-        legalIdMediaCount.value = data.legal_id_media_count ?? 0;
+        legalIdMediaCount.value = data.id_media_count ?? data.legal_id_media_count ?? 0;
         compliance.value = data.compliance ?? null;
     } finally {
         isLoading.value = false;

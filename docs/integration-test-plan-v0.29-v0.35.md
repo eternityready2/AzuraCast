@@ -14,7 +14,7 @@ Use this document on a **non-production test station** with AutoDJ enabled. Mark
 | Feature | Menu / route |
 |---------|----------------|
 | Top of Hour ID | Station sidebar → **Top of Hour ID** (`/station/{id}/top_of_hour`) |
-| Music / Legal ID tagging | **Music Files** → edit file or bulk classify → media type **Legal ID** |
+| Music / ID tagging | **Music Files** → edit file or bulk classify → media type **ID** |
 | Queue | **Upcoming Queue** (`/station/{id}/queue`) |
 | Clock Wheels | **Clock Wheels** (`/station/{id}/clock-wheels`) |
 | Schedule + Live + Holidays | **Schedule** → tabs **Calendar**, **Live Clock Wheel**, **Holidays** |
@@ -28,7 +28,7 @@ Use this document on a **non-production test station** with AutoDJ enabled. Mark
 
 ## Required test media library
 
-Prepare media **before** Phase 0. Upload to **Music Files**, then set **media type** via edit file or **bulk classify** (toolbar). Legal IDs and fallbacks must be **station media** with the correct type — playlists alone do not substitute for `legal_id` files.
+Prepare media **before** Phase 0. Upload to **Music Files**, then set **media type** via edit file or **bulk classify** (toolbar). Top-of-hour IDs use the **ID** type (same as sweepers and jingles). Playlists alone do not substitute for ID files.
 
 ### Minimum inventory (quick reference)
 
@@ -37,9 +37,9 @@ Prepare media **before** Phase 0. Upload to **Music Files**, then set **media ty
 | **Music** | **200+** (rotation pool) | 2:30–4:00 avg | P0.4, Phase 1 soak, analytics, most phases |
 | **Music** (long) | **1** | **4:00–6:00+** | Step 1.3 — hour-end cap / shortest-song fallback |
 | **Music** (short) | **10+** | **≤ 2:30** | Steps 1.2.4–1.2.5 — lookahead picks before `:00` |
-| **Legal ID** | **3** | **10–60 s** each | P0.5, Phase 1, 5.x wheel `:00` slot, crossfade 4.2 |
-| **ID** (sweeper/jingle) | **2** | **5–30 s** | P0.6 fallback chain; wheel `id` slots; hard-anchor tests |
-| **Promo** | **1** | **15–90 s** | Step 1.6 — fallback when no `legal_id`; wheel promo slots |
+| **ID** | **3** | **10–60 s** each | P0.5, Phase 1, wheel `:00` slot (type **ID** at 0:00), crossfade 4.2 |
+| **ID** (sweeper) | **2** | **5–30 s** | Wheel imaging slots between music blocks |
+| **Promo** | **1** | **15–90 s** | Step 1.6 — fallback when no ID files; wheel promo slots |
 | **Talk** | **2** (optional) | any | Wheel talk slots, crossfade matrix (optional) |
 | **Ad** | **1** (optional) | any | Wheel ad slot type smoke test (optional) |
 
@@ -51,30 +51,29 @@ Prepare media **before** Phase 0. Upload to **Music Files**, then set **media ty
 - **Lookahead:** 10 min — from `:50` onward, music length is filtered.
 - **Finish buffer:** 15 s — last music should end by `:59:45` before the ID.
 
-### Legal ID files (mandatory for Phase 1)
+### ID files (mandatory for Phase 1)
 
-These are the **primary** top-of-hour source. Tag as media type **Legal ID** (not **ID** or **Promo**).
+These are the **primary** top-of-hour source. Tag as media type **ID** (same type used for sweepers and jingles).
 
 | # | Suggested purpose | Duration | Notes |
 |---|-------------------|----------|-------|
-| L1 | Main station legal ID | 15–30 s | e.g. “Eternity Ready Radio” full legal |
-| L2 | Alternate legal (rotation) | 10–25 s | Second file to verify **sequential rotation** across hours |
-| L3 | Third legal (rotation) | 10–25 s | Confirms order cycles L1 → L2 → L3 |
+| L1 | Main station ID | 15–30 s | e.g. “Eternity Ready Radio” full legal |
+| L2 | Alternate ID (rotation) | 10–25 s | Second file to verify **sequential rotation** across hours |
+| L3 | Third ID (rotation) | 10–25 s | Confirms order cycles L1 → L2 → L3 |
 
-If you already have production files (e.g. `stationid-past-original`, `station i.d. 1 seth`, `eternity ready radio legal id`), reuse those — tag all as **Legal ID**.
+If you already have production files (e.g. `stationid-past-original`, `eternity ready radio legal id`), reuse those — tag all as **ID**.
 
-**Verify:** Top of Hour ID page shows **Legal ID files in library: 3** (or your count).
+**Verify:** Top of Hour ID page shows **ID files in library: 3** (or your count).
 
 ### Fallback chain (Step 1.6)
 
-When **no** `legal_id` files exist, AutoDJ tries **Promo**, then **ID**, then logs error (silence risk).
+When **no** ID files exist, AutoDJ tries **Promo**, then logs error (silence risk).
 
 | # | Type | Duration | Test use |
 |---|------|----------|----------|
-| F1 | **Promo** | 20–60 s | Temporarily disable all Legal ID files → `:00` should play F1 |
-| F2 | **ID** | 5–15 s | Backup if no promo; also used in wheel sweeper slots |
+| F1 | **Promo** | 20–60 s | Temporarily disable all ID files → `:00` should play F1 |
 
-For step **1.6**, disable or re-tag L1–L3 (not delete) so only F1/F2 remain, then restore Legal IDs after the test.
+For step **1.6**, disable or re-tag L1–L3 (not delete) so only F1 remains, then restore IDs after the test.
 
 ### Music library for rotation & hour-boundary tests
 
@@ -100,7 +99,7 @@ For step **1.6**, disable or re-tag L1–L3 (not delete) so only F1/F2 remain, t
 Build a test wheel with slots such as:
 
 ```text
-0:00  legal_id   (Hard anchor ON for step 5.6)
+0:00  id         (type ID at 0:00 — mandatory top-of-hour)
 0:02  music      (pinned Playlist A or category)
 0:08  id         (I1 sweeper)
 0:10  music
@@ -126,12 +125,12 @@ Schedule **TEST-Rotation** on calendar for playlist-only hours; schedule your te
 
 | # | Action | Done? |
 |---|--------|-------|
-| M1 | Upload L1–L3; set type **Legal ID** | ☐ |
+| M1 | Upload L1–L3; set type **ID** | ☐ |
 | M2 | Upload F1 (Promo), F2 (ID) for fallback | ☐ |
 | M3 | Upload or identify 1 **long** music track (4+ min) | ☐ |
 | M4 | Confirm 10+ **short** music tracks in rotation pool | ☐ |
 | M5 | Pick 1 track for **Do not play** (still in playlist) | ☐ |
-| M6 | Create test clock wheel with `legal_id` at `0:00` + music/id slots | ☐ |
+| M6 | Create test clock wheel with **ID** slot at `0:00` + music/id slots | ☐ |
 | M7 | Assign playlists to Schedule calendar + one holiday override date | ☐ |
 | M8 | Run **Bulk Media** or re-scan if durations show 0:00 after upload | ☐ |
 
@@ -534,8 +533,8 @@ Each row was checked against the repo at **v0.35.0** before this document was wr
 | DNP media form | 6.3.1 | ✅ | `Media/Form/BasicInfo.vue` — do_not_play, reason, until |
 | DNP AutoDJ filter | 6.3.2–3 | ⚠️ runtime | `MediaPlayability.php` — needs on-air |
 | Holidays tab | 6.4.* | ✅ | `Schedule/HolidayOverridesTab.vue` + Schedule **Holidays** tab |
-| Legal ID media type | P0.5 | ✅ | `mediaTypes.ts` — **Legal ID (mandatory top-of-hour…)** |
-| Fallback chain legal_id → promo → id | P0.6, 1.6 | ✅ | `HourBoundaryLegalIdResolver.php` |
+| Legal ID media type | P0.5 | ✅ | Single **ID** type in UI; legacy `legal_id` rows still read in backend |
+| Fallback chain id → promo | P0.6, 1.6 | ✅ | `HourBoundaryLegalIdResolver.php` |
 | ID max scheduling 60s default | Legal ID files | ✅ | `StationBackendConfiguration::$top_of_hour_id_max_seconds = 60` |
 | Menu entries | all | ✅ | `menu.ts` — Top of Hour ID, Clock Wheels, Crossfade Profiles, Reports |
 

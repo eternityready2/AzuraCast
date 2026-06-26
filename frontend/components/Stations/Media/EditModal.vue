@@ -86,6 +86,9 @@ const {
     $modal,
     resetForm,
     (data) => {
+        if (data.type === 'legal_id') {
+            data.type = 'id';
+        }
         record.value = mergeExisting(record.value, data);
 
         const newForm = mergeExisting(r$.value.$value, data);

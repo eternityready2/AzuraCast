@@ -25,7 +25,7 @@
                             {{ $gettext('Enable content-type crossfade matrix') }}
                         </label>
                         <div class="form-text">
-                            {{ $gettext('Apply fade_in/fade_out based on previous and current track media types. Legal ID quick-cut still applies for legal_id rows.') }}
+                            {{ $gettext('Apply fade_in/fade_out based on previous and current track media types. Top-of-hour ID quick-cut still applies for ID rows.') }}
                         </div>
                     </div>
 

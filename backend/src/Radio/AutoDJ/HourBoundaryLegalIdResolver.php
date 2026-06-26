@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ;
 
 use App\Entity\Api\StationPlaylistQueue;
 use App\Entity\Enums\ClockWheelSlotTypes;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
@@ -41,7 +42,7 @@ final class HourBoundaryLegalIdResolver
         $legalIdExpectedAt = $this->hourBoundaryPlanner->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
         $usedSubstitute = false;
 
-        $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::LegalId);
+        $candidates = $this->loadStationIdCandidates($station);
 
         if ($candidates === []) {
             $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Promo);
@@ -49,13 +50,8 @@ final class HourBoundaryLegalIdResolver
         }
 
         if ($candidates === []) {
-            $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Id);
-            $usedSubstitute = true;
-        }
-
-        if ($candidates === []) {
             $this->logger->error(
-                'Top-of-hour legal_id: no legal_id, promo, or id media available.',
+                'Top-of-hour ID: no id or promo media available.',
                 ['station_id' => $station->id]
             );
 
@@ -135,6 +131,27 @@ final class HourBoundaryLegalIdResolver
         ]);
 
         return $queueEntry;
+    }
+
+    /**
+     * @return StationMedia[]
+     */
+    private function loadStationIdCandidates(Station $station): array
+    {
+        /** @var StationMedia[] $result */
+        $result = $this->em->createQuery(
+            <<<'DQL'
+                SELECT m FROM App\Entity\StationMedia m
+                WHERE m.storage_location = :storageLocation
+                AND m.type IN (:types)
+                ORDER BY m.id ASC
+            DQL
+        )->setParameters([
+            'storageLocation' => $station->media_storage_location,
+            'types' => StationMediaTypes::stationIdTypeValues(),
+        ])->getResult();
+
+        return $result;
     }
 
     /**

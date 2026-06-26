@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ;
 
 use App\Entity\Enums\PlaylistTypes;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
@@ -270,7 +271,7 @@ final class HourBoundaryPlanner
             }
 
             $media = $row->media;
-            if ($media !== null && $media->type === 'legal_id') {
+            if ($media !== null && StationMediaTypes::isStationId($media->type)) {
                 return true;
             }
         }

@@ -22,14 +22,13 @@ enum ClockWheelSlotTypes: string
     case Talk = 'talk';
 
     /**
-     * Mandatory top-of-hour legal station identification.
-     * Distinct from generic ID sweepers; must not be skipped on-air.
+     * @deprecated Legacy slot value — use {@see Id} at 0:00 for mandatory top-of-hour ID.
      */
     case LegalId = 'legal_id';
 
     /**
-     * Station identification: sweepers, imaging, jingles.
-     * These are typically short (~5–30 s) and run between music blocks.
+     * Station identification: sweepers, imaging, jingles, and top-of-hour IDs.
+     * At 0:00, treated as mandatory (same as legacy LegalId slots).
      */
     case Id = 'id';
 
@@ -50,10 +49,26 @@ enum ClockWheelSlotTypes: string
         return match($this) {
             self::Music => 'Music',
             self::Talk  => 'Talk',
-            self::LegalId => 'Legal ID',
+            self::LegalId => 'ID',
             self::Id    => 'ID',
             self::Promo => 'Promo',
             self::Ad    => 'Ad',
+        };
+    }
+
+    /**
+     * Mandatory top-of-hour station ID slot (wheel path).
+     */
+    public static function isMandatoryTopOfHourSlot(?self $type, int $positionSeconds): bool
+    {
+        if ($type === null) {
+            return false;
+        }
+
+        return match ($type) {
+            self::LegalId => true,
+            self::Id => $positionSeconds === 0,
+            default => false,
         };
     }
 }

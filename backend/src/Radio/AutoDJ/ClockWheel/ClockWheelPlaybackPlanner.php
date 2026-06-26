@@ -10,6 +10,7 @@ use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Entity\Repository\StationQueueRepository;
@@ -105,7 +106,7 @@ final class ClockWheelPlaybackPlanner
 
         $scheduleMode = $activeSchedule->clock_wheel_mode ?? ClockWheelScheduleMode::Flexible;
 
-        if ($activeSlot->type === ClockWheelSlotTypes::LegalId) {
+        if (ClockWheelSlotTypes::isMandatoryTopOfHourSlot($activeSlot->type, $activeSlot->position_seconds)) {
             return $this->resolveMandatoryLegalIdSlot(
                 $wheel,
                 $activeSlot,
@@ -560,16 +561,10 @@ final class ClockWheelPlaybackPlanner
         $usedSubstitute = false;
         $fallbackReason = null;
 
-        $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::LegalId, $slot);
+        $candidates = $this->loadStationIdCandidates($station, $slot);
 
         if ($candidates === []) {
             $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Promo, $slot);
-            $usedSubstitute = true;
-            $fallbackReason = ClockWheelFallbackReason::LegalIdMissingUsedPromo;
-        }
-
-        if ($candidates === []) {
-            $candidates = $this->loadMediaCandidates($station, ClockWheelSlotTypes::Id, $slot);
             $usedSubstitute = true;
             $fallbackReason = ClockWheelFallbackReason::LegalIdMissingUsedPromo;
         }
@@ -585,7 +580,7 @@ final class ClockWheelPlaybackPlanner
             );
 
             $this->logger->error(
-                'Clock Wheel legal_id: no legal_id, promo, or id media available — cannot queue mandatory ID.',
+                'Clock Wheel top-of-hour ID: no id or promo media available — cannot queue mandatory ID.',
                 ['clock_wheel_id' => $wheel->id]
             );
 
@@ -833,6 +828,46 @@ final class ClockWheelPlaybackPlanner
         ]);
 
         return $recentHistory;
+    }
+
+    /**
+     * @return StationMedia[]
+     */
+    private function loadStationIdCandidates(
+        Station $station,
+        StationClockWheelSlot $slot,
+    ): array {
+        $params = [
+            'storageLocation' => $station->media_storage_location,
+            'types' => StationMediaTypes::stationIdTypeValues(),
+        ];
+
+        $dql = 'SELECT m FROM App\Entity\StationMedia m
+             WHERE m.storage_location = :storageLocation
+             AND m.type IN (:types)';
+
+        if ($slot->playlist_id !== null && $slot->playlist_id > 0) {
+            $dql .= ' AND EXISTS (
+                SELECT 1 FROM App\Entity\StationPlaylistMedia spm
+                WHERE spm.media = m AND spm.playlist = :playlistId
+            )';
+            $params['playlistId'] = $slot->playlist_id;
+        }
+
+        if ($slot->category_id !== null) {
+            $dql .= ' AND m.category_id = :categoryId';
+            $params['categoryId'] = $slot->category_id;
+        }
+
+        /** @var StationMedia[] $result */
+        $result = $this->em->createQuery($dql)
+            ->setParameters($params)
+            ->getResult();
+
+        return array_values(array_filter(
+            $result,
+            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media),
+        ));
     }
 
     /**

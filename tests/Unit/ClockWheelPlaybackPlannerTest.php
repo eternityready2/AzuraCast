@@ -308,6 +308,14 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         self::assertFalse($method->invoke($this->planner, $slot));
     }
 
+    public function testMandatoryTopOfHourSlotDetection(): void
+    {
+        self::assertTrue(ClockWheelSlotTypes::isMandatoryTopOfHourSlot(ClockWheelSlotTypes::LegalId, 0));
+        self::assertTrue(ClockWheelSlotTypes::isMandatoryTopOfHourSlot(ClockWheelSlotTypes::Id, 0));
+        self::assertFalse(ClockWheelSlotTypes::isMandatoryTopOfHourSlot(ClockWheelSlotTypes::Id, 120));
+        self::assertFalse(ClockWheelSlotTypes::isMandatoryTopOfHourSlot(ClockWheelSlotTypes::Music, 0));
+    }
+
     private function invokePlannedSeconds(DateTimeImmutable $expectedPlayTime): int
     {
         return $this->invokePlannedSecondsOn($this->planner, $this->station, $expectedPlayTime);

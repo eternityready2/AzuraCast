@@ -6,7 +6,7 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Entity\Repository\SongHistoryRepository;
-use App\Entity\StationMedia;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -52,7 +52,7 @@ final class ContentTypeCrossfadeAnnotator implements EventSubscriberInterface
         // Legal ID quick-cut (priority 9) overrides this for legal_id rows.
         if (($queue->top_of_hour_legal_id ?? false)
             || ($queue->clock_wheel_legal_id_substitute ?? false)
-            || $media->type === 'legal_id'
+            || StationMediaTypes::isStationId($media->type)
         ) {
             return;
         }
