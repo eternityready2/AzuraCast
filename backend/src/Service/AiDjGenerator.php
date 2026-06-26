@@ -7,6 +7,7 @@ namespace App\Service;
 use App\Container\LoggerAwareTrait;
 use App\Entity\AiDj;
 use App\Entity\AiDjContent;
+use App\Entity\Repository\AiDjContentRepository;
 use App\Entity\Station;
 use Doctrine\Common\Collections\Collection;
 use RuntimeException;
@@ -24,6 +25,7 @@ final class AiDjGenerator
     private const int TTS_TIMEOUT = 90;
     private const int DISK_LIMIT_MB = 400; // 80% of 500MB max
     private const string KOKORO_PREFIX = 'kokoro:';
+    private const int MAX_TTS_CHARS = 500; // Max characters for TTS to prevent timeouts
 
     public const array KOKORO_VOICES = [
         ['name' => 'Adam (Morning Host)',     'id' => 'kokoro:am_adam',    'gender' => 'male',   'style' => 'calm-energetic'],
@@ -46,6 +48,7 @@ final class AiDjGenerator
 
     public function __construct(
         private readonly AiDjCleanup $cleanup,
+        private readonly AiDjContentRepository $contentRepo,
     ) {
     }
     /**
@@ -64,6 +67,9 @@ final class AiDjGenerator
             $this->logger->error(sprintf('Failed to create AI DJ directory: %s', $tempDir));
             return null;
         }
+
+        // Truncate long text to prevent TTS timeouts on low-RAM servers
+        $text = $this->truncateForTts($text);
 
         $isKokoro = $voiceModelPath && str_starts_with($voiceModelPath, self::KOKORO_PREFIX);
 
@@ -103,10 +109,12 @@ final class AiDjGenerator
                 return null;
             }
 
+            // Add 0.5s silence padding at end to prevent crossfade cutoff
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
+                '-af', 'apad=pad_dur=0.5',
                 '-c:a', 'libmp3lame',
                 '-b:a', '192k',
                 $tmpMp3,
@@ -161,10 +169,12 @@ final class AiDjGenerator
                 return null;
             }
 
+            // Add 0.5s silence padding at end to prevent crossfade cutoff
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
+                '-af', 'apad=pad_dur=0.5',
                 '-c:a', 'libmp3lame',
                 '-b:a', '128k',
                 $tmpMp3,
@@ -214,7 +224,14 @@ final class AiDjGenerator
         }
 
         $template = $this->selectRandomTemplate($dj->getContents())
-            ?? 'Coming up next on {{station_name}}.';
+            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_SONG_INTRO_TEMPLATE)
+            ?? $this->getDefaultSongIntro();
+
+        $this->logger->info('AI DJ: Song intro metadata', [
+            'artist' => $artist,
+            'song' => $songTitle,
+            'dj' => $dj->getName(),
+        ]);
 
         $text = $this->replaceTemplateVariables(
             $template,
@@ -251,24 +268,9 @@ final class AiDjGenerator
             return null;
         }
 
-        $template = $this->selectRandomPostSongTemplate($dj->getContents());
-
-        if (null === $template) {
-            // Use built-in defaults if no custom templates exist
-            $defaults = [
-                'That was {{prev_artist}} with {{prev_song}}. You\'re listening to {{station_name}} with {{dj_name}}.',
-                'Hope you enjoyed {{prev_song}} by {{prev_artist}}. Coming up next on {{station_name}}.',
-                'That was {{prev_song}} by {{prev_artist}}. Stay tuned to {{station_name}}, more great music coming your way.',
-                '{{prev_artist}}, {{prev_song}}. This is {{dj_name}} on {{station_name}}.',
-            ];
-
-            if ($nextArtist) {
-                $defaults[] = 'That was {{prev_artist}} with {{prev_song}}. Coming up next, {{next_artist}} with {{next_song}}.';
-                $defaults[] = '{{prev_artist}}, {{prev_song}}. Next up on {{station_name}}, {{next_artist}}.';
-            }
-
-            $template = $defaults[array_rand($defaults)];
-        }
+        $template = $this->selectRandomPostSongTemplate($dj->getContents())
+            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE)
+            ?? $this->getDefaultPostSong($nextArtist !== null);
 
         $text = $this->replaceTemplateVariables(
             $template,
@@ -359,19 +361,71 @@ final class AiDjGenerator
     private function buildLinerText(AiDj $dj, AiDjContent $content, Station $station): string
     {
         $djName = $dj->getName();
+        $stationName = $station->name;
         $text = $content->content;
         $reference = $content->reference;
 
         return match ($content->type) {
             AiDjContent::TYPE_BIBLE_VERSE => $reference
-                ? sprintf('%s. %s', $reference, $text)
-                : $text,
-            AiDjContent::TYPE_JOKE => sprintf("Here's a little something from %s. %s", $djName, $text),
-            AiDjContent::TYPE_ENCOURAGEMENT => $text,
-            AiDjContent::TYPE_TESTIMONY => sprintf("I want to share this with you. %s", $text),
-            AiDjContent::TYPE_STORY => sprintf("Let me tell you something. %s", $text),
+                ? sprintf("You're listening to %s with %s. I want to share a scripture with you from %s. %s. Let that truth settle in your heart today.", $stationName, $djName, $reference, $text)
+                : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text),
+            AiDjContent::TYPE_JOKE => sprintf("Hey, it's %s here on %s, and I've got a little something to brighten your day. %s. Hope that put a smile on your face!", $djName, $stationName, $text),
+            AiDjContent::TYPE_ENCOURAGEMENT => sprintf("This is %s on %s with some words of encouragement for you today. %s. Remember, you are loved and you are not alone.", $djName, $stationName, $text),
+            AiDjContent::TYPE_INSPIRATION => sprintf("This is %s on %s, and I want to share something inspiring with you right now. %s.", $djName, $stationName, $text),
+            AiDjContent::TYPE_TESTIMONY => sprintf("I'm %s on %s, and I want to share something powerful with you. %s. What an amazing testimony.", $djName, $stationName, $text),
+            AiDjContent::TYPE_STORY => sprintf("This is %s on %s, and I've got a story for you. %s.", $djName, $stationName, $text),
             default => $text,
         };
+    }
+
+    /**
+     * Select a random template from station-wide content by type.
+     */
+    private function selectStationTemplate(int $stationId, string $type): ?string
+    {
+        $templates = $this->contentRepo->findEnabledByType($stationId, $type);
+
+        if (empty($templates)) {
+            return null;
+        }
+
+        return $templates[array_rand($templates)]->content;
+    }
+
+    /**
+     * Get a longer default song intro template for natural-sounding speech.
+     */
+    private function getDefaultSongIntro(): string
+    {
+        $defaults = [
+            "Hey there, you're listening to {{station_name}} with {{dj_name}}. Coming up next, we've got {{artist}} with {{song}}. I know you're going to love this one, so sit back and let it speak to your heart.",
+            "Welcome back to {{station_name}}, I'm {{dj_name}} and I'm so glad you're here with us today. Up next, we have {{artist}} performing {{song}}. This is one of those songs that really lifts your spirit. Here it is.",
+            "This is {{dj_name}} on {{station_name}}, and I've got something really special lined up for you right now. {{artist}} is coming up next with {{song}}. Take a moment, let these words wash over you, and be blessed.",
+            "You're tuned into {{station_name}} with your host {{dj_name}}. Get ready, because coming up next we have {{artist}} bringing you {{song}}. This one is sure to brighten your day, so turn it up and enjoy.",
+            "It's {{dj_name}} here on {{station_name}}, and I am loving being here with you today. Right now, let me introduce our next song. It's {{song}} by {{artist}}. I hope it blesses you as much as it blessed me.",
+        ];
+
+        return $defaults[array_rand($defaults)];
+    }
+
+    /**
+     * Get a longer default post-song template for natural-sounding speech.
+     */
+    private function getDefaultPostSong(bool $hasNextSong): string
+    {
+        $defaults = [
+            "That was {{prev_artist}} with {{prev_song}}, right here on {{station_name}}. I'm {{dj_name}}, and I hope that song touched your heart today. We've got more great music lined up for you, so don't go anywhere.",
+            "You just heard {{prev_song}} by {{prev_artist}} on {{station_name}} with {{dj_name}}. What a beautiful song. If that blessed you today, we've got plenty more where that came from. Stay with us.",
+            "That was {{prev_song}} by {{prev_artist}}. I'm {{dj_name}} and you're listening to {{station_name}}. Thank you for being here with us. More uplifting music is on the way, so keep listening.",
+            "Beautiful music from {{prev_artist}} right there. {{prev_song}} on {{station_name}} with {{dj_name}}. I love sharing these songs with you. Stay tuned, we've got so much more coming your way.",
+        ];
+
+        if ($hasNextSong) {
+            $defaults[] = "That was {{prev_artist}} with {{prev_song}}. This is {{dj_name}} on {{station_name}}. Coming up next, we have {{next_artist}} with {{next_song}}. You're going to love this one.";
+            $defaults[] = "What a song. {{prev_artist}} with {{prev_song}} right here on {{station_name}}. I'm {{dj_name}} and next up, {{next_artist}} is bringing you {{next_song}}. Stay blessed.";
+        }
+
+        return $defaults[array_rand($defaults)];
     }
 
     /**
@@ -419,5 +473,29 @@ final class AiDjGenerator
         }
 
         return strtr($template, $replacements);
+    }
+
+    /**
+     * Truncate text to MAX_TTS_CHARS, breaking at sentence boundary.
+     */
+    private function truncateForTts(string $text): string
+    {
+        if (mb_strlen($text) <= self::MAX_TTS_CHARS) {
+            return $text;
+        }
+
+        $truncated = mb_substr($text, 0, self::MAX_TTS_CHARS);
+        // Break at last sentence-ending punctuation
+        $lastPeriod = max(
+            (int) mb_strrpos($truncated, '.'),
+            (int) mb_strrpos($truncated, '!'),
+            (int) mb_strrpos($truncated, '?')
+        );
+
+        if ($lastPeriod > 50) {
+            return mb_substr($truncated, 0, $lastPeriod + 1);
+        }
+
+        return $truncated;
     }
 }

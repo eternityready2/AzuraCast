@@ -7,6 +7,7 @@ namespace App\Radio\AutoDJ;
 use App\Container\LoggerAwareTrait;
 use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Entity\AiDj;
+use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Song;
 use App\Entity\Station;
 use App\Entity\StationQueue;
@@ -36,6 +37,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         AiDjContent::TYPE_BIBLE_VERSE,
         AiDjContent::TYPE_JOKE,
         AiDjContent::TYPE_ENCOURAGEMENT,
+        AiDjContent::TYPE_INSPIRATION,
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
     ];
@@ -47,6 +49,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly Adapters $adapters,
         private readonly ReloadableEntityManagerInterface $em,
         private readonly CacheInterface $cache,
+        private readonly StationQueueRepository $stationQueueRepo,
     ) {
     }
 
@@ -60,7 +63,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
     public function onBuildQueue(BuildQueue $event): void
     {
         $station = $event->getStation();
-        $this->logger->debug('AI DJ: onBuildQueue fired.', ['station_id' => $station->id, 'is_interrupting' => $event->isInterrupting()]);
 
         if ($event->isInterrupting()) {
             return;
@@ -75,7 +77,20 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Requests);
 
         if (!$queueEmpty) {
-            $this->logger->debug('AI DJ: Requests queue not empty, skipping.');
+            return;
+        }
+
+        // Cooldown: prevent rapid-fire TTS calls (min 60s between generations)
+        $cooldownKey = 'ai_dj_cooldown_' . $station->id;
+        $lastGenTime = $this->cache->get($cooldownKey);
+        if ($lastGenTime && (time() - $lastGenTime) < 60) {
+            return;
+        }
+
+        // Skip near top/bottom of hour to avoid competing with news/station ID
+        $now = new DateTimeImmutable('now', $station->getTimezoneObject());
+        $minute = (int) $now->format('i');
+        if ($minute >= 53 || $minute <= 4 || ($minute >= 24 && $minute <= 34)) {
             return;
         }
 
@@ -108,15 +123,15 @@ final class AiDjQueueListener implements EventSubscriberInterface
         if ($frequency < 1.0 && (mt_rand(1, 100) / 100) > $frequency) {
             $this->logger->debug('AI DJ: Skipped by talk frequency.', ['frequency' => $frequency]);
             // Still track current song for post-song use even when skipping
-            $this->trackCurrentSong($event, $station);
+            $this->trackCurrentSong($station);
             return;
         }
 
-        // Get next song info
-        $nextSongs = $event->getNextSongs();
-        $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
-        $nextArtist = $nextSong?->song?->artist ?? null;
-        $nextTitle = $nextSong?->song?->title ?? null;
+        // Get next song info from station queue (direct query, since this listener
+        // runs before the main queue builder populates BuildQueue::nextSongs)
+        $nextMusicEntry = $this->findNextMusicEntry($station);
+        $nextArtist = $nextMusicEntry?->artist;
+        $nextTitle = $nextMusicEntry?->title;
 
         // Get previous song info from cache
         $prevCacheKey = 'ai_dj_prev_song_' . $station->id;
@@ -127,32 +142,46 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // Decide what to play: pre-intro (35%), post-song (30%), or content liner (35%)
         $roll = mt_rand(1, 100);
 
+        // Record cooldown BEFORE generation to prevent parallel attempts
+        $this->cache->set($cooldownKey, time(), 120);
+
         if ($roll <= 35) {
-            // Pre-song intro
             $this->pushIntroClip($dj, $nextArtist, $nextTitle, $station, $backend);
         } elseif ($roll <= 65 && $prevArtist) {
-            // Post-song wrap (only if we know what just played)
             $this->pushPostSongClip($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station, $backend);
         } else {
-            // Content liner
             $this->pushContentLiner($dj, $station, $backend);
         }
 
-        // Track current song for next cycle's post-song use
-        $this->trackCurrentSong($event, $station);
+        $this->trackCurrentSong($station);
     }
 
-    private function trackCurrentSong(BuildQueue $event, Station $station): void
+    private function trackCurrentSong(Station $station): void
     {
-        $nextSongs = $event->getNextSongs();
-        $nextSong = !empty($nextSongs) ? (is_array($nextSongs) ? $nextSongs[0] : $nextSongs) : null;
+        $nextMusicEntry = $this->findNextMusicEntry($station);
 
-        if ($nextSong?->song) {
+        if ($nextMusicEntry !== null && $nextMusicEntry->artist !== null) {
             $this->cache->set('ai_dj_prev_song_' . $station->id, [
-                'artist' => $nextSong->song->artist,
-                'title' => $nextSong->song->title,
+                'artist' => $nextMusicEntry->artist,
+                'title' => $nextMusicEntry->title,
             ], 600);
         }
+    }
+
+    /**
+     * Find the next queued music entry (not AI DJ clips) for the station.
+     */
+    private function findNextMusicEntry(Station $station): ?StationQueue
+    {
+        $upcomingQueue = $this->stationQueueRepo->getUnplayedQueue($station);
+
+        foreach ($upcomingQueue as $entry) {
+            if ($entry->media !== null) {
+                return $entry;
+            }
+        }
+
+        return null;
     }
 
     private function pushIntroClip(
@@ -170,7 +199,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ Intro",artist="%s":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="AI DJ Intro",artist="%s",liq_cross_duration="0",liq_fade_out="0",jingle_mode="true":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath);
 
@@ -209,7 +238,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ",artist="%s":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="AI DJ",artist="%s",liq_cross_duration="0",liq_fade_out="0",jingle_mode="true":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ');
 
@@ -265,12 +294,13 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 AiDjContent::TYPE_BIBLE_VERSE => 'Bible Verse',
                 AiDjContent::TYPE_JOKE => 'Joke',
                 AiDjContent::TYPE_ENCOURAGEMENT => 'Encouragement',
+                AiDjContent::TYPE_INSPIRATION => 'Inspiration',
                 AiDjContent::TYPE_TESTIMONY => 'Testimony',
                 AiDjContent::TYPE_STORY => 'Story',
                 default => 'AI DJ Liner',
             };
 
-            $track = sprintf('annotate:title="%s",artist="%s":%s', $title, $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_out="0",jingle_mode="true":%s', $title, $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
 
@@ -297,7 +327,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s",liq_cross_duration="0",liq_fade_out="0",jingle_mode="true":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Sign-off');
 
