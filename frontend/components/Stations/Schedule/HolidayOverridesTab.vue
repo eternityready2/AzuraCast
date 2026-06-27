@@ -11,7 +11,7 @@
             <data-table
                 id="station_holiday_overrides"
                 :fields="fields"
-                :items="rows"
+                :provider="itemProvider"
             >
                 <template #cell(actions)="{ item }">
                     <div class="btn-group btn-group-sm">
@@ -95,6 +95,7 @@ import {useAxios} from '~/vendor/axios.ts';
 import {useTranslate} from '~/vendor/gettext';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
+import {useClientItemProvider} from '~/functions/dataTable/useClientItemProvider.ts';
 
 interface HolidayRow {
     id: number;
@@ -136,7 +137,7 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 
-const fields: DataTableField[] = [
+const fields: DataTableField<HolidayRow>[] = [
     {key: 'override_date', label: $gettext('Date'), sortable: true},
     {key: 'name', label: $gettext('Name'), sortable: true},
     {key: 'is_active', label: $gettext('Active'), sortable: true},
@@ -156,6 +157,13 @@ const load = async () => {
         loading.value = false;
     }
 };
+
+const itemProvider = useClientItemProvider<HolidayRow>(
+    rows,
+    loading,
+    undefined,
+    load
+);
 
 const loadOptions = async () => {
     const [{data: wheels}, {data: playlists}] = await Promise.all([

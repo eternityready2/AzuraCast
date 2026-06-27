@@ -19,6 +19,7 @@
                 </div>
             </div>
         </div>
+
         <div class="card-body pb-0">
             <nav
                 class="nav nav-tabs"
@@ -39,6 +40,7 @@
                         {{ $gettext('Calendar') }}
                     </button>
                 </div>
+
                 <div
                     class="nav-item"
                     role="presentation"
@@ -54,6 +56,7 @@
                         {{ $gettext('Live Clock Wheel') }}
                     </button>
                 </div>
+
                 <div
                     class="nav-item"
                     role="presentation"
@@ -71,6 +74,7 @@
                 </div>
             </nav>
         </div>
+
         <div class="card-body">
             <schedule-calendar
                 v-show="activeTab === 'calendar'"
@@ -80,10 +84,12 @@
                 @click="doCalendarClick"
                 @create="doCreateEvent"
             />
+
             <clock-wheel-live-tab
                 v-show="activeTab === 'live'"
                 :active="activeTab === 'live'"
             />
+
             <holiday-overrides-tab
                 v-show="activeTab === 'holidays'"
                 :list-url="holidayOverridesUrl"
@@ -91,16 +97,20 @@
                 :playlists-url="listUrl"
             />
         </div>
+
         <edit-modal
             ref="$editModal"
             :create-url="listUrl"
             @relist="relist"
         />
+
         <clock-wheel-edit-modal
             ref="$clockWheelEditModal"
             :create-url="clockWheelsListUrl"
+            :templates-url="clockWheelTemplatesUrl"
             @relist="relist"
         />
+
         <create-event-modal
             ref="$createEventModal"
             @relist="relist"
@@ -129,6 +139,7 @@ const activeTab = ref<'calendar' | 'live' | 'holidays'>('calendar');
 
 const listUrl = getStationApiUrl('/playlists');
 const clockWheelsListUrl = getStationApiUrl('/clock-wheels');
+const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheels/templates');
 const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
