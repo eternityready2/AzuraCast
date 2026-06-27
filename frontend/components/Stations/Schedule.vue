@@ -127,7 +127,7 @@ import ClockWheelEditModal from "~/components/Stations/ClockWheels/EditModal.vue
 import CreateEventModal from "~/components/Stations/Common/CreateEventModal.vue";
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
-import {ref, useTemplateRef} from "vue";
+import {nextTick, ref, useTemplateRef, watch} from "vue";
 import {EventImpl} from "@fullcalendar/core/internal";
 import useHasEditModal from "~/functions/useHasEditModal";
 import {useTranslate} from "~/vendor/gettext";
@@ -139,7 +139,7 @@ const activeTab = ref<'calendar' | 'live' | 'holidays'>('calendar');
 
 const listUrl = getStationApiUrl('/playlists');
 const clockWheelsListUrl = getStationApiUrl('/clock-wheels');
-const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheels/templates');
+const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheel-templates');
 const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
@@ -152,6 +152,13 @@ const {doEdit: doEditClockWheel} = useHasEditModal($clockWheelEditModal);
 
 const $scheduleTab = useTemplateRef('$scheduleTab');
 const $createEventModal = useTemplateRef('$createEventModal');
+
+watch(activeTab, async (newTab) => {
+    if (newTab === 'calendar') {
+        await nextTick();
+        $scheduleTab.value?.updateSize();
+    }
+});
 
 const doCalendarClick = (event: EventImpl) => {
     $createEventModal.value?.openForEdit(event);

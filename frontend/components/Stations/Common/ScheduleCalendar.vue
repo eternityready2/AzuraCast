@@ -28,7 +28,7 @@ import Schedule from "~/components/Common/ScheduleView.vue";
 import IconIcAdd from "~icons/ic/baseline-add";
 import {Calendar, EventClickArg} from "@fullcalendar/core";
 import {EventImpl} from "@fullcalendar/core/internal";
-import {computed, useTemplateRef, toValue} from "vue";
+import {computed, nextTick, useTemplateRef, toValue} from "vue";
 import {useStationData} from "~/functions/useStationQuery.ts";
 import {toRefs} from "@vueuse/core";
 
@@ -76,8 +76,14 @@ const getCalendarApi = (): Calendar | undefined => {
 
 const refresh = () => getCalendarApi()?.refetchEvents();
 
+const updateSize = async () => {
+    await nextTick();
+    getCalendarApi()?.updateSize();
+};
+
 defineExpose({
     getCalendarApi,
-    refresh
+    refresh,
+    updateSize
 });
 </script>
