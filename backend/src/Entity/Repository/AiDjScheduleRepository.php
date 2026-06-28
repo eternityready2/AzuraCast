@@ -90,11 +90,17 @@ final class AiDjScheduleRepository extends Repository
 
     public function hasOverlap(AiDjSchedule $schedule, bool $excludeSelf = false): bool
     {
+        // Check ALL DJs on the same station, not just the same DJ.
+        // This prevents two different DJs from having overlapping schedules
+        // on the same station, which causes both to try to go on-air simultaneously.
+        $stationId = $schedule->getAiDj()->getStationId();
+
         $qb = $this->em->createQueryBuilder()
             ->select('s')
             ->from(AiDjSchedule::class, 's')
-            ->where('s.ai_dj = :aiDj')
-            ->setParameter('aiDj', $schedule->getAiDj())
+            ->innerJoin('s.ai_dj', 'dj')
+            ->where('IDENTITY(dj.station) = :stationId')
+            ->setParameter('stationId', $stationId)
             ->andWhere('s.start_time < :endTime')
             ->setParameter('endTime', $schedule->getEndTime())
             ->andWhere('s.end_time > :startTime')

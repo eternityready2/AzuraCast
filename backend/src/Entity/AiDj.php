@@ -54,6 +54,18 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     #[ORM\Column(type: 'float', options: ['default' => 0.5])]
     private float $talk_frequency = 0.5;
 
+    /** Voice speed: 0.7 (slow) to 1.5 (fast). Default 1.0 = normal speed. */
+    #[ORM\Column(type: 'float', options: ['default' => 1.0])]
+    private float $voice_speed = 1.0;
+
+    /** When true, a soft ambient music bed is mixed under the DJ's voice clips. */
+    #[ORM\Column(options: ['default' => false])]
+    private bool $use_background_audio = false;
+
+    /** City name for weather reports (e.g. "Atlanta, Georgia"). Null = weather disabled. */
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $weather_city = null;
+
     /** @var Collection<int, AiDjSchedule> */
     #[
         ORM\OneToMany(
@@ -160,6 +172,36 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     public function setTalkFrequency(float $talkFrequency): void
     {
         $this->talk_frequency = max(0.0, min(1.0, $talkFrequency));
+    }
+
+    public function getVoiceSpeed(): float
+    {
+        return $this->voice_speed;
+    }
+
+    public function setVoiceSpeed(float $voiceSpeed): void
+    {
+        $this->voice_speed = max(0.7, min(1.5, $voiceSpeed));
+    }
+
+    public function useBackgroundAudio(): bool
+    {
+        return $this->use_background_audio;
+    }
+
+    public function setUseBackgroundAudio(bool $useBackgroundAudio): void
+    {
+        $this->use_background_audio = $useBackgroundAudio;
+    }
+
+    public function getWeatherCity(): ?string
+    {
+        return $this->weather_city;
+    }
+
+    public function setWeatherCity(?string $weatherCity): void
+    {
+        $this->weather_city = $weatherCity ? $this->truncateString($weatherCity) : null;
     }
 
     /** @return Collection<int, AiDjSchedule> */

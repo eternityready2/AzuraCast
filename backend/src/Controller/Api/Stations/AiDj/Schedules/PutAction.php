@@ -74,7 +74,7 @@ final readonly class PutAction implements SingleActionInterface
 
         if ($this->scheduleRepo->hasOverlap($schedule, true)) {
             return $response->withStatus(400)
-                ->withJson(['error' => 'Schedule overlaps with existing schedule for this DJ']);
+                ->withJson(['error' => 'Schedule overlaps with an existing DJ schedule on this station']);
         }
 
         $this->scheduleRepo->save($schedule);

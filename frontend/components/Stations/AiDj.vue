@@ -243,6 +243,67 @@
                                 </div>
                             </div>
 
+                            <div class="mb-3">
+                                <label
+                                    for="dj_voice_speed"
+                                    class="form-label"
+                                >
+                                    {{ $gettext('Voice Speed') }}
+                                    <span class="text-muted ms-1">{{ form.voice_speed.toFixed(1) }}x</span>
+                                </label>
+                                <input
+                                    id="dj_voice_speed"
+                                    v-model.number="form.voice_speed"
+                                    type="range"
+                                    class="form-range"
+                                    min="0.7"
+                                    max="1.5"
+                                    step="0.1"
+                                >
+                                <div class="form-text">
+                                    {{ $gettext('Speed of DJ speech. 0.7 = slow/calm, 1.0 = normal, 1.5 = fast/energetic.') }}
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input
+                                        id="dj_use_background_audio"
+                                        v-model="form.use_background_audio"
+                                        type="checkbox"
+                                        class="form-check-input"
+                                    >
+                                    <label
+                                        for="dj_use_background_audio"
+                                        class="form-check-label"
+                                    >
+                                        {{ $gettext('Background Audio') }}
+                                    </label>
+                                </div>
+                                <div class="form-text">
+                                    {{ $gettext('Adds a soft ambient music bed underneath DJ voice clips. Great for overnight shifts.') }}
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label
+                                    for="dj_weather_city"
+                                    class="form-label"
+                                >
+                                    {{ $gettext('Weather City') }}
+                                </label>
+                                <input
+                                    id="dj_weather_city"
+                                    v-model="form.weather_city"
+                                    type="text"
+                                    class="form-control form-control-dark"
+                                    :placeholder="$gettext('e.g. Atlanta, Georgia')"
+                                >
+                                <div class="form-text">
+                                    {{ $gettext('City name for weather reports. Leave empty to disable weather segments.') }}
+                                </div>
+                            </div>
+
                             <form-group-field
                                 id="dj_shift_intro_template"
                                 :field="v$.shift_intro_template"
@@ -384,6 +445,9 @@ interface AiDj {
     shift_intro_template: string | null;
     shift_outro_template: string | null;
     talk_frequency: number;
+    voice_speed: number;
+    use_background_audio: boolean;
+    weather_city: string | null;
     schedules?: AiDjSchedule[];
 }
 
@@ -394,6 +458,9 @@ interface AiDjForm {
     shift_intro_template: string | null;
     shift_outro_template: string | null;
     talk_frequency: number;
+    voice_speed: number;
+    use_background_audio: boolean;
+    weather_city: string | null;
 }
 
 interface VoiceOption {
@@ -437,6 +504,9 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     shift_intro_template: null,
     shift_outro_template: null,
     talk_frequency: 0.5,
+    voice_speed: 1.0,
+    use_background_audio: false,
+    weather_city: null,
 }));
 
 const {r$: v$} = useAppRegle(form, {}, {});
@@ -496,12 +566,6 @@ const dayNames: string[] = [
     $gettext('Sun'),
 ];
 
-const toMilitaryTime = (time: string): string => {
-    // Convert "HH:mm:ss" or "HH:mm" to "HHmm" military format
-    const parts = time.split(':');
-    return `${parts[0]}${parts[1]}`;
-};
-
 const scheduleSummary = (schedules: AiDjSchedule[]): string => {
     if (!schedules || schedules.length === 0) return $gettext('No schedule');
 
@@ -512,7 +576,7 @@ const scheduleSummary = (schedules: AiDjSchedule[]): string => {
                 : $gettext('Every day');
         const time =
             s.start_time && s.end_time
-                ? `${toMilitaryTime(s.start_time)}-${toMilitaryTime(s.end_time)}`
+                ? `${s.start_time}-${s.end_time}`
                 : $gettext('All day');
         return `${days} ${time}`;
     }).join(' | ');
@@ -559,6 +623,9 @@ const openEdit = (dj: AiDj): void => {
         shift_intro_template: dj.shift_intro_template,
         shift_outro_template: dj.shift_outro_template,
         talk_frequency: dj.talk_frequency ?? 0.5,
+        voice_speed: dj.voice_speed ?? 1.0,
+        use_background_audio: dj.use_background_audio ?? false,
+        weather_city: dj.weather_city ?? null,
     };
     editorOpen.value = true;
     deleteTarget.value = null;
@@ -929,9 +996,83 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-    .dj-table th:nth-child(4),
-    .dj-table td:nth-child(4) {
-        display: none;
+    .ai-dj-page {
+        padding: 0.5rem;
+    }
+
+    .ai-dj-title {
+        font-size: 1.1rem;
+    }
+
+    .dashboard-card {
+        padding: 0.75rem;
+    }
+
+    .dj-list-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .dj-table-wrap {
+        overflow-x: visible;
+    }
+
+    .dj-table {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        tr {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            padding: 0.75rem;
+            background: var(--bs-tertiary-bg, #16181f);
+            border: 1px solid var(--bs-border-color, #2d3140);
+            border-radius: 8px;
+
+            &:hover td {
+                background: transparent;
+            }
+        }
+
+        td {
+            display: flex;
+            align-items: center;
+            padding: 0.2rem 0;
+            border-bottom: none;
+        }
+    }
+
+    .dj-name {
+        font-size: 1rem;
+    }
+
+    .dj-actions-col {
+        width: auto;
+    }
+
+    .dj-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        white-space: normal;
+        padding-top: 0.3rem;
+    }
+
+    .dj-schedule {
+        .schedule-summary {
+            font-size: 0.75rem;
+        }
     }
 }
 </style>

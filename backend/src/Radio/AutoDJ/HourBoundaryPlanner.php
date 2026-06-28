@@ -34,7 +34,7 @@ final class HourBoundaryPlanner
 
     public const int MIN_FINISH_BUFFER_SECONDS = 0;
 
-    public const int MAX_FINISH_BUFFER_SECONDS = 30;
+    public const int MAX_FINISH_BUFFER_SECONDS = 120;
 
     public const int MIN_COMPLIANCE_TOLERANCE_SECONDS = 1;
 
@@ -226,7 +226,13 @@ final class HourBoundaryPlanner
         $targetHourStart = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
         $targetLocal = CarbonImmutable::instance($targetHourStart)->setTimezone($tz);
 
-        if ($local->format('Y-m-d H:i:s') !== $targetLocal->format('Y-m-d H:i:s')) {
+        $secondsUntil = $this->secondsUntilNextTopOfHour($expectedPlayTime, $tz);
+        $buffer = $this->getFinishBufferSeconds($station) + $this->getIdMaxSeconds($station);
+
+        // Trigger ID when expected play time falls in the buffer window before
+        // the hour boundary. This prevents dead air between music ending and
+        // the old :00-only trigger. E.g. with buffer=120s, ID fires at :58.
+        if ($secondsUntil > $buffer || $secondsUntil > self::HOUR_SECONDS / 2) {
             return false;
         }
 

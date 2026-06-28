@@ -37,7 +37,7 @@ use Psr\Http\Message\ResponseInterface;
         new OpenApi\Response\GenericError(),
     ]
 )]
-final readonly class DeleteAction implements SingleActionInterface
+final class DeleteAction implements SingleActionInterface
 {
     use EntityManagerAwareTrait;
 
