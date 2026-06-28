@@ -64,6 +64,9 @@ final class GetAction implements SingleActionInterface
             'shift_intro_template' => $dj->getShiftIntroTemplate(),
             'shift_outro_template' => $dj->getShiftOutroTemplate(),
             'talk_frequency' => $dj->getTalkFrequency(),
+            'voice_speed' => $dj->getVoiceSpeed(),
+            'use_background_audio' => $dj->useBackgroundAudio(),
+            'weather_city' => $dj->getWeatherCity(),
             'schedules' => array_map(
                 static fn(\App\Entity\AiDjSchedule $s): array => $s->api(),
                 $dj->getSchedules()->toArray()

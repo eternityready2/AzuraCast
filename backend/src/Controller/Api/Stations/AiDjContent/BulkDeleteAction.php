@@ -54,7 +54,7 @@ use Psr\Http\Message\ResponseInterface;
         new OpenApi\Response\GenericError(),
     ]
 )]
-final readonly class BulkDeleteAction implements SingleActionInterface
+final class BulkDeleteAction implements SingleActionInterface
 {
     use EntityManagerAwareTrait;
 

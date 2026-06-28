@@ -23,6 +23,9 @@ enum StationPermissions: string implements PermissionInterface
     case Automation = 'manage station automation';
     case WebHooks = 'manage station web hooks';
     case Podcasts = 'manage station podcasts';
+    case AiDj = 'manage station ai-dj';
+    case AiDjSchedule = 'manage station ai-dj-schedule';
+    case AiDjContent = 'manage station ai-dj-content';
 
     public function getName(): string
     {
@@ -41,6 +44,9 @@ enum StationPermissions: string implements PermissionInterface
             self::Automation => __('Manage Station Automation'),
             self::WebHooks => __('Manage Station Web Hooks'),
             self::Podcasts => __('Manage Station Podcasts'),
+            self::AiDj => __('Manage AI DJ Profiles'),
+            self::AiDjSchedule => __('Manage AI DJ Schedules'),
+            self::AiDjContent => __('Manage AI DJ Content Library'),
         };
     }
 

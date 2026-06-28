@@ -59,7 +59,9 @@ final class AiDjGenerator
     public function generateAudio(
         string $text,
         ?string $voiceModelPath,
-        string $outputPath
+        string $outputPath,
+        float $voiceSpeed = 1.0,
+        bool $useBackgroundAudio = false
     ): ?string {
         $tempDir = dirname($outputPath);
 
@@ -74,17 +76,24 @@ final class AiDjGenerator
         $isKokoro = $voiceModelPath && str_starts_with($voiceModelPath, self::KOKORO_PREFIX);
 
         if ($isKokoro) {
-            return $this->generateWithKokoro($text, $voiceModelPath, $outputPath, $tempDir);
+            $result = $this->generateWithKokoro($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed);
+        } else {
+            $result = $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed);
         }
 
-        return $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir);
+        if ($result !== null && $useBackgroundAudio) {
+            $result = $this->mixWithBackgroundAudio($result, $tempDir);
+        }
+
+        return $result;
     }
 
     private function generateWithKokoro(
         string $text,
         string $voiceModelPath,
         string $outputPath,
-        string $tempDir
+        string $tempDir,
+        float $voiceSpeed = 1.0
     ): ?string {
         $voiceId = substr($voiceModelPath, strlen(self::KOKORO_PREFIX));
         $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
@@ -97,6 +106,7 @@ final class AiDjGenerator
                 $text,
                 $voiceId,
                 $wavFile,
+                (string) $voiceSpeed,
             ]);
             $kokoro->setTimeout(self::TTS_TIMEOUT);
             $kokoro->run();
@@ -109,12 +119,14 @@ final class AiDjGenerator
                 return null;
             }
 
-            // Add 0.5s silence padding at end to prevent crossfade cutoff
+            // Pad to minimum 6s total to exceed station crossfade duration (3s).
+            // Without this, Liquidsoap's cross() operator errors when the clip
+            // is shorter than the crossfade analysis window.
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
-                '-af', 'apad=pad_dur=0.5',
+                '-af', 'apad=whole_dur=6',
                 '-c:a', 'libmp3lame',
                 '-b:a', '192k',
                 $tmpMp3,
@@ -145,18 +157,24 @@ final class AiDjGenerator
         string $text,
         ?string $voiceModelPath,
         string $outputPath,
-        string $tempDir
+        string $tempDir,
+        float $voiceSpeed = 1.0
     ): ?string {
         $modelPath = $voiceModelPath ?: AiNewsGenerator::AVAILABLE_VOICE_MODELS[0]['path'];
         $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
         $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
 
         try {
-            $piper = new Process([
+            $piperArgs = [
                 self::PIPER_BIN,
                 '--model', $modelPath,
                 '--output_file', $wavFile,
-            ]);
+            ];
+            if ($voiceSpeed !== 1.0) {
+                $piperArgs[] = '--length_scale';
+                $piperArgs[] = (string) (1.0 / $voiceSpeed); // Piper: lower = faster
+            }
+            $piper = new Process($piperArgs);
             $piper->setInput($text);
             $piper->setTimeout(self::TTS_TIMEOUT);
             $piper->run();
@@ -169,12 +187,12 @@ final class AiDjGenerator
                 return null;
             }
 
-            // Add 0.5s silence padding at end to prevent crossfade cutoff
+            // Pad to minimum 6s total to exceed station crossfade duration (3s).
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
-                '-af', 'apad=pad_dur=0.5',
+                '-af', 'apad=whole_dur=6',
                 '-c:a', 'libmp3lame',
                 '-b:a', '128k',
                 $tmpMp3,
@@ -246,7 +264,7 @@ final class AiDjGenerator
         $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
         $outputPath = $outputDir . '/song_intro_' . uniqid() . '.mp3';
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
 
     /**
@@ -287,7 +305,7 @@ final class AiDjGenerator
         $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
         $outputPath = $outputDir . '/post_song_' . uniqid() . '.mp3';
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
 
     /**
@@ -324,7 +342,7 @@ final class AiDjGenerator
         $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
         $outputPath = $outputDir . '/shift_outro_' . uniqid() . '.mp3';
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
 
     /**
@@ -352,7 +370,7 @@ final class AiDjGenerator
         $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
         $outputPath = $outputDir . '/liner_' . uniqid() . '.mp3';
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
 
     /**
@@ -374,7 +392,7 @@ final class AiDjGenerator
             AiDjContent::TYPE_INSPIRATION => sprintf("This is %s on %s, and I want to share something inspiring with you right now. %s.", $djName, $stationName, $text),
             AiDjContent::TYPE_TESTIMONY => sprintf("I'm %s on %s, and I want to share something powerful with you. %s. What an amazing testimony.", $djName, $stationName, $text),
             AiDjContent::TYPE_STORY => sprintf("This is %s on %s, and I've got a story for you. %s.", $djName, $stationName, $text),
-            default => $text,
+            default => sprintf("This is %s on %s, and I want to share something with you. %s.", $djName, $stationName, $text),
         };
     }
 
@@ -473,6 +491,73 @@ final class AiDjGenerator
         }
 
         return strtr($template, $replacements);
+    }
+
+    /**
+     * Mix the DJ voice clip with a soft ambient music bed.
+     * Generates a warm chord pad via FFmpeg's sine source, lowers its volume,
+     * and mixes it under the voice for a cozy overnight-radio feel.
+     */
+    private function mixWithBackgroundAudio(string $voicePath, string $tempDir): ?string
+    {
+        $mixedPath = $tempDir . '/mixed_' . uniqid() . '.mp3';
+
+        try {
+            // Get voice duration so the ambient pad matches it
+            $probe = new Process([
+                self::FFMPEG_BIN, '-i', $voicePath, '-f', 'null', '-',
+            ]);
+            $probe->setTimeout(5);
+            $probe->run();
+            $stderr = $probe->getErrorOutput();
+            $duration = 10;
+            if (preg_match('/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/', $stderr, $m)) {
+                $duration = (int)$m[1] * 3600 + (int)$m[2] * 60 + (int)$m[3] + 1;
+            }
+
+            // Single-pass FFmpeg: generate a warm D-major chord pad (146.8 + 185 + 220 Hz)
+            // with lowpass warmth, then mix it under the DJ voice at ~8% volume.
+            $filterGraph = sprintf(
+                'sine=frequency=146.83:duration=%1$d,volume=0.04[s1];'
+                . 'sine=frequency=185:duration=%1$d,volume=0.03[s2];'
+                . 'sine=frequency=220:duration=%1$d,volume=0.03[s3];'
+                . '[s1][s2][s3]amix=inputs=3:duration=longest,lowpass=f=1200[pad];'
+                . '[0:a][pad]amix=inputs=2:duration=first:dropout_transition=1[out]',
+                $duration
+            );
+
+            $ffmpeg = new Process([
+                self::FFMPEG_BIN, '-y',
+                '-i', $voicePath,
+                '-filter_complex', $filterGraph,
+                '-map', '[out]',
+                '-c:a', 'libmp3lame', '-b:a', '192k',
+                $mixedPath,
+            ]);
+            $ffmpeg->setTimeout(15);
+            $ffmpeg->run();
+
+            if (!$ffmpeg->isSuccessful()) {
+                $this->logger->warning(sprintf(
+                    'Background audio mix failed: %s',
+                    $ffmpeg->getErrorOutput() ?: 'Unknown error'
+                ));
+                return $voicePath; // Fallback to voice-only
+            }
+
+            // Replace voice-only file with mixed version
+            @unlink($voicePath);
+            if (!@rename($mixedPath, $voicePath)) {
+                @unlink($mixedPath);
+                return null;
+            }
+
+            return $voicePath;
+        } catch (Throwable $e) {
+            $this->logger->warning(sprintf('Background audio mixing error: %s', $e->getMessage()));
+            @unlink($mixedPath);
+            return $voicePath; // Fallback to voice-only
+        }
     }
 
     /**

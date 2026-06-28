@@ -33,6 +33,7 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
     public const string TYPE_BIBLE_VERSE = 'bible_verse';
     public const string TYPE_JOKE = 'joke';
     public const string TYPE_ENCOURAGEMENT = 'encouragement';
+    public const string TYPE_INSPIRATION = 'inspiration';
     public const string TYPE_TESTIMONY = 'testimony';
     public const string TYPE_STORY = 'story';
 
@@ -42,6 +43,7 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
         self::TYPE_BIBLE_VERSE,
         self::TYPE_JOKE,
         self::TYPE_ENCOURAGEMENT,
+        self::TYPE_INSPIRATION,
         self::TYPE_TESTIMONY,
         self::TYPE_STORY,
     ];
@@ -56,10 +58,10 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
     public private(set) int $station_id;
 
     #[
-        OA\Property(enum: self::TYPES, example: self::TYPE_SONG_INTRO_TEMPLATE),
+        OA\Property(example: self::TYPE_SONG_INTRO_TEMPLATE),
         ORM\Column(length: 50),
         Assert\NotBlank,
-        Assert\Choice(choices: self::TYPES)
+        Assert\Regex(pattern: '/^[a-z][a-z0-9_]{1,49}$/', message: 'Type must be lowercase letters, numbers, and underscores (2-50 chars).')
     ]
     public string $type = self::TYPE_SONG_INTRO_TEMPLATE {
         set => $this->truncateString($value, 50);

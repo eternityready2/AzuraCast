@@ -1325,7 +1325,7 @@ return static function (RouteCollectorProxy $group) {
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
-                    // AI DJ Profiles
+                    // AI DJ Profiles (settings)
                     $group->group(
                         '/ai-dj',
                         function (RouteCollectorProxy $group) {
@@ -1358,41 +1358,41 @@ return static function (RouteCollectorProxy $group) {
                                 '/{dj_id}/test',
                                 Controller\Api\Stations\AiDj\TestAction::class
                             );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::AiDj, true));
 
-                            // AI DJ Schedules
-                            $group->group(
-                                '/{dj_id}/schedules',
-                                function (RouteCollectorProxy $group) {
-                                    $group->get(
-                                        '',
-                                        Controller\Api\Stations\AiDj\Schedules\IndexAction::class
-                                    )->setName('api:stations:ai-dj:schedules');
+                    // AI DJ Schedules
+                    $group->group(
+                        '/ai-dj/{dj_id}/schedules',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\AiDj\Schedules\IndexAction::class
+                            )->setName('api:stations:ai-dj:schedules');
 
-                                    $group->post(
-                                        '',
-                                        Controller\Api\Stations\AiDj\Schedules\PostAction::class
-                                    );
+                            $group->post(
+                                '',
+                                Controller\Api\Stations\AiDj\Schedules\PostAction::class
+                            );
 
-                                    $group->get(
-                                        '/{schedule_id}',
-                                        Controller\Api\Stations\AiDj\Schedules\GetAction::class
-                                    )->setName('api:stations:ai-dj:schedule');
+                            $group->get(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\GetAction::class
+                            )->setName('api:stations:ai-dj:schedule');
 
-                                    $group->put(
-                                        '/{schedule_id}',
-                                        Controller\Api\Stations\AiDj\Schedules\PutAction::class
-                                    );
+                            $group->put(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\PutAction::class
+                            );
 
-                                    $group->delete(
-                                        '/{schedule_id}',
-                                        Controller\Api\Stations\AiDj\Schedules\DeleteAction::class
-                                    );
-                                }
+                            $group->delete(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\DeleteAction::class
                             );
                         }
-                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    )->add(new Middleware\Permissions(StationPermissions::AiDjSchedule, true));
 
-                    // AI DJ Content
+                    // AI DJ Content Library
                     $group->group(
                         '/ai-dj-content',
                         function (RouteCollectorProxy $group) {
@@ -1405,6 +1405,11 @@ return static function (RouteCollectorProxy $group) {
                                 '',
                                 Controller\Api\Stations\AiDjContent\PostAction::class
                             );
+
+                            $group->get(
+                                '/types',
+                                Controller\Api\Stations\AiDjContent\TypesAction::class
+                            )->setName('api:stations:ai-dj-content:types');
 
                             $group->get(
                                 '/{content_id}',
@@ -1426,7 +1431,7 @@ return static function (RouteCollectorProxy $group) {
                                 Controller\Api\Stations\AiDjContent\BulkDeleteAction::class
                             );
                         }
-                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    )->add(new Middleware\Permissions(StationPermissions::AiDjContent, true));
 
                     // Content-type crossfade profiles (v0.33)
                     $group->group(

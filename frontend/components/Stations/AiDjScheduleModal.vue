@@ -351,7 +351,7 @@ const scheduleUrl = (id: number) =>
 // --- Formatters ---
 
 const formatTime = (s: AiDjSchedule): string => {
-    if (s.start_time && s.end_time) return `${s.start_time}–${s.end_time}`;
+    if (s.start_time && s.end_time) return `${s.start_time} – ${s.end_time}`;
     return $gettext('All day');
 };
 

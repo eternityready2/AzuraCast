@@ -22,10 +22,10 @@ use Psr\Http\Message\ResponseInterface;
         new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
         new OA\Parameter(
             name: 'type',
-            description: 'Filter by content type',
+            description: 'Filter by content type (built-in or custom)',
             in: 'query',
             required: false,
-            schema: new OA\Schema(type: 'string', enum: AiDjContent::TYPES)
+            schema: new OA\Schema(type: 'string')
         ),
         new OA\Parameter(
             name: 'enabled',
@@ -67,13 +67,6 @@ final readonly class IndexAction implements SingleActionInterface
         $type = $queryParams['type'] ?? null;
         $enabled = isset($queryParams['enabled']) ? (bool) $queryParams['enabled'] : null;
         $global = isset($queryParams['global']) ? (bool) $queryParams['global'] : null;
-
-        if (null !== $type && !in_array($type, AiDjContent::TYPES, true)) {
-            return $response->withStatus(400)->withJson([
-                'success' => false,
-                'message' => 'Invalid content type. Valid types: ' . implode(', ', AiDjContent::TYPES),
-            ]);
-        }
 
         $content = $this->contentRepo->findByStation((int) $station->id);
         if (null !== $type) {
