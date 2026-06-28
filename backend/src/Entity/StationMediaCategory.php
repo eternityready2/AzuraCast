@@ -40,9 +40,8 @@ final class StationMediaCategory implements
         $this->station = $station;
     }
 
-    #[ORM\Column(nullable: false, insertable: false, updatable: false)]
-    public private(set) int $station_id;
-
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $station_id = null;
     #[
         OA\Property(example: 'Cinematic'),
         ORM\Column(length: 100, nullable: false),
