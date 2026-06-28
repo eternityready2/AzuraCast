@@ -26,7 +26,15 @@ final class Version20260607065527 extends AbstractMigration
         $this->addSql('ALTER TABLE clock_wheel_events RENAME INDEX fk_cwe_media TO IDX_AE3FB81DEA9FDD75');
         $this->addSql('ALTER TABLE podcast DROP import_sync_before_hours, CHANGE auto_import_enabled auto_import_enabled TINYINT NOT NULL');
         $this->addSql('ALTER TABLE song_history RENAME INDEX idx_song_history_clock_wheel TO IDX_2AD161645D856AB6');
-        $this->addSql('ALTER TABLE station DROP static_stream_url');
+        $stationTable = $schema->getTable('station');
+
+        if ($stationTable->hasColumn('static_stream_url')) {
+            $this->addSql('ALTER TABLE station DROP static_stream_url');
+        }
+
+        if (!$stationTable->hasColumn('enable_liquidsoap')) {
+            $this->addSql('ALTER TABLE station ADD enable_liquidsoap TINYINT DEFAULT 1 NOT NULL');
+        }
         $this->addSql('ALTER TABLE station_clock_dayparts CHANGE start_hour start_hour SMALLINT UNSIGNED NOT NULL, CHANGE end_hour end_hour SMALLINT UNSIGNED NOT NULL, CHANGE is_active is_active TINYINT NOT NULL, CHANGE separation_override_enabled separation_override_enabled TINYINT NOT NULL, CHANGE separation_enabled separation_enabled TINYINT NOT NULL, CHANGE separation_artist_minutes separation_artist_minutes SMALLINT UNSIGNED DEFAULT NULL, CHANGE separation_title_minutes separation_title_minutes SMALLINT UNSIGNED DEFAULT NULL');
         $this->addSql('ALTER TABLE station_clock_dayparts RENAME INDEX idx_clock_daypart_station TO IDX_7B3D483C21BDB235');
         $this->addSql('ALTER TABLE station_clock_dayparts RENAME INDEX idx_clock_daypart_template TO IDX_7B3D483C5DA0FB8');
