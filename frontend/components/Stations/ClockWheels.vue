@@ -37,6 +37,16 @@
                             >
                                 {{ $gettext('Import JSON') }}
                             </button>
+                            <button
+                                type="button"
+                                class="btn btn-warning ms-2"
+                                :disabled="forceReloading"
+                                @click="doForceReload"
+                            >
+                                {{ forceReloading
+                                    ? $gettext('Reloading…')
+                                    : $gettext('Force Reload') }}
+                            </button>
                             <input
                                 ref="$importInput"
                                 type="file"
@@ -284,6 +294,21 @@ const {$gettext} = useTranslate();
 const {notifySuccess, notifyError} = useNotify();
 const {axios} = useAxios();
 const syncingDaypartId = ref<number | null>(null);
+const forceReloading = ref(false);
+
+const backendReloadUrl = getStationApiUrl('/backend/reload');
+
+const doForceReload = async () => {
+    forceReloading.value = true;
+    try {
+        await axios.post(backendReloadUrl.value);
+        notifySuccess($gettext('Station backend reloaded. Clock wheel changes are now live.'));
+    } catch {
+        notifyError($gettext('Could not reload station backend.'));
+    } finally {
+        forceReloading.value = false;
+    }
+};
 
 type ClockWheelRow = {
     id: number;

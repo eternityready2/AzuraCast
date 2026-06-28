@@ -29,20 +29,34 @@
         </div>
 
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-            <div class="small text-muted">
-                <span v-if="lastUpdatedLabel">
-                    {{ $gettext('Updated') }}: {{ lastUpdatedLabel }}
-                </span>
+            <div class="d-flex align-items-center gap-2">
+                <div class="small text-muted">
+                    <span v-if="lastUpdatedLabel">
+                        {{ $gettext('Updated') }}: {{ lastUpdatedLabel }}
+                    </span>
+                </div>
             </div>
-            <button
-                type="button"
-                class="btn btn-sm btn-outline-secondary"
-                :disabled="isLoading"
-                @click="refresh"
-            >
-                <icon-ic-refresh class="me-1" />
-                {{ $gettext('Refresh') }}
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <button
+                    type="button"
+                    class="btn btn-sm btn-warning"
+                    :disabled="skipping"
+                    :title="$gettext('Skip the currently playing track and advance to the next queued item.')"
+                    @click="doSkip"
+                >
+                    <icon-ic-skip-next class="me-1" />
+                    {{ skipping ? $gettext('Skipping…') : $gettext('Skip') }}
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    :disabled="isLoading"
+                    @click="refresh"
+                >
+                    <icon-ic-refresh class="me-1" />
+                    {{ $gettext('Refresh') }}
+                </button>
+            </div>
         </div>
 
         <loading :loading="isLoading" lazy>
@@ -471,12 +485,31 @@ import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue
 import IconIcWarning from '~icons/ic/baseline-warning';
 import IconIcMic from '~icons/ic/baseline-mic';
 import IconIcRefresh from '~icons/ic/baseline-refresh';
+import IconIcSkipNext from '~icons/ic/baseline-skip-next';
 
 const props = defineProps<{
     active: boolean;
 }>();
 
 const {$gettext} = useTranslate();
+
+import {useAxios} from '~/vendor/axios.ts';
+import {useApiRouter} from '~/functions/useApiRouter.ts';
+
+const {axios} = useAxios();
+const {getStationApiUrl} = useApiRouter();
+const backendSkipUrl = getStationApiUrl('/backend/skip');
+const skipping = ref(false);
+
+const doSkip = async () => {
+    skipping.value = true;
+    try {
+        await axios.post(backendSkipUrl.value);
+        setTimeout(() => refresh(), 1500);
+    } finally {
+        skipping.value = false;
+    }
+};
 
 const {
     activeWheel,

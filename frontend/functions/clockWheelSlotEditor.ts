@@ -10,6 +10,9 @@ export interface ClockWheelSlotEditorRow {
     position_seconds: number;
     duration_seconds: number | null;
     category_id: number | null;
+    playlist_id: number | null;
+    pool_mode: string;
+    is_hard_anchor: boolean;
     separation_override_enabled: boolean;
     separation_artist_minutes: number | null;
     separation_title_minutes: number | null;
@@ -17,9 +20,6 @@ export interface ClockWheelSlotEditorRow {
 
 /** Legacy slot fields cleared when loading or saving from the simplified editor. */
 export const CLOCK_WHEEL_SLOT_LEGACY_CLEARED = {
-    playlist_id: null,
-    pool_mode: 'restrict_pool',
-    is_hard_anchor: false,
     research_score: null,
     sound_code: null,
 } as const;
@@ -30,6 +30,9 @@ type ApiSlotInput = {
     position_seconds?: number;
     duration_seconds?: number | null;
     category_id?: number | null;
+    playlist_id?: number | null;
+    pool_mode?: string;
+    is_hard_anchor?: boolean;
     separation_override_enabled?: boolean;
     separation_artist_minutes?: number | null;
     separation_title_minutes?: number | null;
@@ -46,6 +49,9 @@ export function mapApiSlotToEditorRow(slot: ApiSlotInput): ClockWheelSlotEditorR
         position_seconds: slot.position_seconds ?? 0,
         duration_seconds: slot.duration_seconds ?? null,
         category_id: slot.category_id ?? null,
+        playlist_id: slot.playlist_id ?? null,
+        pool_mode: slot.pool_mode ?? 'restrict_pool',
+        is_hard_anchor: Boolean(slot.is_hard_anchor),
         separation_override_enabled: Boolean(slot.separation_override_enabled),
         separation_artist_minutes: slot.separation_artist_minutes ?? null,
         separation_title_minutes: slot.separation_title_minutes ?? null,
@@ -56,6 +62,9 @@ export function mapEditorRowToApiSlot(row: ClockWheelSlotEditorRow): Record<stri
     return {
         type: row.type,
         category_id: row.category_id,
+        playlist_id: row.playlist_id,
+        pool_mode: row.pool_mode,
+        is_hard_anchor: row.is_hard_anchor,
         algorithm: row.algorithm,
         position_seconds: row.position_seconds,
         duration_seconds: row.duration_seconds,
@@ -77,6 +86,9 @@ export function defaultClockWheelSlotEditorRow(positionSeconds: number): ClockWh
         position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
         duration_seconds: null,
         category_id: null,
+        playlist_id: null,
+        pool_mode: 'restrict_pool',
+        is_hard_anchor: false,
         separation_override_enabled: false,
         separation_artist_minutes: null,
         separation_title_minutes: null,

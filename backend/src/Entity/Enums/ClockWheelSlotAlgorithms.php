@@ -50,6 +50,12 @@ enum ClockWheelSlotAlgorithms: string
      */
     case Sequential = 'sequential';
 
+    /**
+     * Weighted composite: least-recently-played + play-count rarity + random jitter.
+     * Balances variety, burn-rate health, and unpredictability.
+     */
+    case SmartWeighted = 'smart_weighted';
+
     public function label(): string
     {
         return match($this) {
@@ -60,6 +66,7 @@ enum ClockWheelSlotAlgorithms: string
             self::MostRecentAlbum  => 'Most Recent Album',
             self::MostRecentArtist => 'Most Recent Artist',
             self::Sequential       => 'Sequential',
+            self::SmartWeighted    => 'Smart Weighted Shuffle',
         };
     }
 }

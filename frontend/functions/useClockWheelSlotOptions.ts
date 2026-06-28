@@ -12,6 +12,7 @@ export function useClockWheelSlotOptions() {
     const {getStationApiUrl} = useApiRouter();
 
     const categories = ref<SelectOption[]>([]);
+    const playlists = ref<SelectOption[]>([]);
     const loaded = ref(false);
 
     const categoryOptions = computed(() => [
@@ -19,16 +20,31 @@ export function useClockWheelSlotOptions() {
         ...categories.value,
     ]);
 
+    const playlistOptions = computed(() => [
+        {value: null, text: '—'},
+        ...playlists.value,
+    ]);
+
     const load = async () => {
         if (loaded.value) {
             return;
         }
 
-        const {data} = await axios.get<Array<{id: number; name: string}>>(
-            getStationApiUrl('/media-categories').value
-        );
+        const [catResp, plResp] = await Promise.all([
+            axios.get<Array<{id: number; name: string}>>(
+                getStationApiUrl('/media-categories').value
+            ),
+            axios.get<Array<{id: number; name: string}>>(
+                getStationApiUrl('/playlists').value
+            ),
+        ]);
 
-        categories.value = data.map((row) => ({
+        categories.value = catResp.data.map((row) => ({
+            value: row.id,
+            text: row.name,
+        }));
+
+        playlists.value = plResp.data.map((row) => ({
             value: row.id,
             text: row.name,
         }));
@@ -38,6 +54,7 @@ export function useClockWheelSlotOptions() {
 
     return {
         categoryOptions,
+        playlistOptions,
         load,
         loaded,
     };

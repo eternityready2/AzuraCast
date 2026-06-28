@@ -50,16 +50,18 @@ final class BestAndWorstAction extends AbstractReportAction
         }
 
         $dateRange = $this->getDateRange($request, $request->getStation()->getTimezoneObject());
+        $excludeIds = '1' === ($request->getQueryParam('exclude_ids') ?? '1');
 
         return $response->withJson([
-            'bestAndWorst' => $this->getBestAndWorst($request, $dateRange),
-            'mostPlayed' => $this->getMostPlayed($request, $dateRange),
+            'bestAndWorst' => $this->getBestAndWorst($request, $dateRange, $excludeIds),
+            'mostPlayed' => $this->getMostPlayed($request, $dateRange, $excludeIds),
         ]);
     }
 
     private function getBestAndWorst(
         ServerRequest $request,
-        DateRange $dateRange
+        DateRange $dateRange,
+        bool $excludeIds = true,
     ): array {
         $station = $request->getStation();
 
@@ -72,10 +74,13 @@ final class BestAndWorstAction extends AbstractReportAction
             ->andWhere('sh.timestamp_start <= :end AND sh.timestamp_end >= :start')
             ->setParameter('start', $dateRange->start)
             ->setParameter('end', $dateRange->end)
-            ->andWhere('sh.is_visible = 1')
             ->andWhere('sh.listeners_start IS NOT NULL')
             ->andWhere('sh.timestamp_end IS NOT NULL')
             ->setMaxResults(5);
+
+        if ($excludeIds) {
+            $baseQuery->andWhere('sh.is_visible = 1');
+        }
 
         $rawStats = [
             'best' => (clone $baseQuery)->orderBy('sh.delta_total', 'DESC')
@@ -107,16 +112,19 @@ final class BestAndWorstAction extends AbstractReportAction
 
     private function getMostPlayed(
         ServerRequest $request,
-        DateRange $dateRange
+        DateRange $dateRange,
+        bool $excludeIds = true,
     ): array {
         $station = $request->getStation();
 
+        $visibleClause = $excludeIds ? 'AND sh.is_visible = 1' : '';
+
         $rawRows = $this->em->createQuery(
-            <<<'DQL'
+            <<<DQL
                 SELECT sh.song_id, sh.text, sh.artist, sh.title, COUNT(sh.id) AS records
                 FROM App\Entity\SongHistory sh
-                WHERE sh.station = :station 
-                AND sh.is_visible = 1
+                WHERE sh.station = :station
+                {$visibleClause}
                 AND sh.timestamp_start <= :end
                 AND sh.timestamp_end >= :start
                 GROUP BY sh.song_id
