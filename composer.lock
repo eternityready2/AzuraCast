@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "46cc43de2d98129a1fea589bb2df4e75",
+    "content-hash": "e761d06d3a0bd22b8c51b60b9290b364",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -10210,6 +10210,69 @@
                 "source": "https://github.com/Codeception/module-doctrine/tree/3.3.0"
             },
             "time": "2025-11-13T08:06:48+00:00"
+        },
+        {
+            "name": "codeception/module-doctrine2",
+            "version": "3.0.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Codeception/module-doctrine2.git",
+                "reference": "1afdd3b6113a6e724ec8f83ce8d30737c4d28fb3"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Codeception/module-doctrine2/zipball/1afdd3b6113a6e724ec8f83ce8d30737c4d28fb3",
+                "reference": "1afdd3b6113a6e724ec8f83ce8d30737c4d28fb3",
+                "shasum": ""
+            },
+            "require": {
+                "codeception/codeception": "^5.0.0-alpha2",
+                "ext-json": "*",
+                "ext-pdo": "*",
+                "php": "^8.0"
+            },
+            "conflict": {
+                "codeception/codeception": "<5.0"
+            },
+            "require-dev": {
+                "codeception/stub": "^4.0",
+                "doctrine/annotations": "^1.13",
+                "doctrine/data-fixtures": "^1.5",
+                "doctrine/orm": "^2.10",
+                "phpstan/phpstan": "^1.0",
+                "ramsey/uuid-doctrine": "^1.6",
+                "symfony/cache": "^4.4 || ^5.4 || ^6.0"
+            },
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "src/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Michael Bodnarchuk"
+                },
+                {
+                    "name": "Alex Kunin"
+                }
+            ],
+            "description": "Doctrine2 module for Codeception",
+            "homepage": "https://codeception.com/",
+            "keywords": [
+                "codeception",
+                "doctrine2"
+            ],
+            "support": {
+                "issues": "https://github.com/Codeception/module-doctrine2/issues",
+                "source": "https://github.com/Codeception/module-doctrine2/tree/3.0.4"
+            },
+            "abandoned": "codeception/module-doctrine",
+            "time": "2024-04-04T16:30:30+00:00"
         },
         {
             "name": "codeception/module-phpbrowser",
