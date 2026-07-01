@@ -215,9 +215,6 @@
                             {{ $gettext('Category') }}
                         </th>
                         <th class="text-uppercase small">
-                            {{ $gettext('Playlist') }}
-                        </th>
-                        <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
                         </th>
                         <th class="text-uppercase small">
@@ -234,7 +231,7 @@
                 <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="8"
+                            colspan="7"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -287,28 +284,6 @@
                                     {{ opt.text }}
                                 </option>
                             </select>
-                            <span
-                                v-if="entry.type === 'music' && !entry.category_id && !entry.playlist_id"
-                                class="badge text-bg-warning mt-1"
-                                :title="$gettext('Music slot has no category or playlist pinned. All media is eligible.')"
-                            >
-                                {{ $gettext('Unfiltered') }}
-                            </span>
-                        </td>
-                        <td>
-                            <select
-                                v-model="entry.playlist_id"
-                                class="form-select form-select-sm"
-                                @change="props.onEntriesChanged()"
-                            >
-                                <option
-                                    v-for="opt in playlistOptions"
-                                    :key="String(opt.value)"
-                                    :value="opt.value"
-                                >
-                                    {{ opt.text }}
-                                </option>
-                            </select>
                         </td>
                         <td>
                             <select
@@ -335,9 +310,6 @@
                                 </option>
                                 <option value="most_recent_artist">
                                     {{ $gettext('Most Recent Artist') }}
-                                </option>
-                                <option value="smart_weighted">
-                                    {{ $gettext('Smart Weighted Shuffle') }}
                                 </option>
                             </select>
                         </td>
@@ -455,7 +427,7 @@ import type {ClockWheelSlotEditorRow} from '~/functions/clockWheelSlotEditor.ts'
 
 const {$gettext} = useTranslate();
 
-const {categoryOptions, playlistOptions, load: loadSlotOptions} = useClockWheelSlotOptions();
+const {categoryOptions, load: loadSlotOptions} = useClockWheelSlotOptions();
 const showSeparationOverrides = ref(false);
 
 export type ClockWheelEntryRow = ClockWheelSlotEditorRow;

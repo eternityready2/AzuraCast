@@ -19,24 +19,6 @@
                         </span>
                     </a>
                 </div>
-                <div class="flex-shrink mt-2 mt-lg-0 ms-lg-2">
-                    <select
-                        v-model="filterPlaylistId"
-                        class="form-select form-select-sm"
-                        style="min-width: 10rem;"
-                    >
-                        <option :value="null">
-                            {{ $gettext('All playlists') }}
-                        </option>
-                        <option
-                            v-for="pl in playlistOptions"
-                            :key="pl.value"
-                            :value="pl.value"
-                        >
-                            {{ pl.text }}
-                        </option>
-                    </select>
-                </div>
                 <div class="flex-shrink buttons ms-lg-2 mt-2 mt-lg-0">
                     <date-range-dropdown
                         v-model="dateRange"
@@ -126,32 +108,9 @@ import IconIcCloudDownload from "~icons/ic/baseline-cloud-download";
 import IconIcTrendingDown from "~icons/ic/baseline-trending-down";
 import IconIcTrendingUp from "~icons/ic/baseline-trending-up";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
-import {useAxios} from "~/vendor/axios.ts";
 
 const {getStationApiUrl} = useApiRouter();
 const baseApiUrl = getStationApiUrl('/history');
-const {axios} = useAxios();
-
-interface PlaylistOption {
-    value: number;
-    text: string;
-}
-
-const filterPlaylistId = ref<number | null>(null);
-const playlistOptions = ref<PlaylistOption[]>([]);
-
-const loadPlaylists = async () => {
-    try {
-        const {data} = await axios.get<Array<{id: number; name: string}>>(
-            getStationApiUrl('/playlists').value
-        );
-        playlistOptions.value = data.map((p) => ({value: p.id, text: p.name}));
-    } catch {
-        // Silently fail — filter will just show "All playlists"
-    }
-};
-
-void loadPlaylists();
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);
@@ -251,10 +210,6 @@ const apiUrl = computed(() => {
         apiUrlParams.set('end', endDate.toISO());
     }
 
-    if (filterPlaylistId.value != null) {
-        apiUrlParams.set('playlist_id', String(filterPlaylistId.value));
-    }
-
     return apiUrl.toString();
 });
 
@@ -272,8 +227,7 @@ const listItemProvider = useApiItemProvider(
     queryKeyWithStation([
         QueryKeys.StationReports,
         'timeline',
-        dateRange,
-        filterPlaylistId
+        dateRange
     ])
 );
 
@@ -285,5 +239,4 @@ const $dataTable = useTemplateRef('$dataTable');
 const {navigate} = useHasDatatable($dataTable);
 
 watch(dateRange, () => void nextTick(navigate));
-watch(filterPlaylistId, () => void nextTick(navigate));
 </script>

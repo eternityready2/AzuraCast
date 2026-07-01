@@ -102,12 +102,6 @@ final class HistoryAction implements SingleActionInterface
             ->setParameter('start', $start)
             ->setParameter('end', $end);
 
-        $playlistId = Types::intOrNull($request->getQueryParam('playlist_id'));
-        if (null !== $playlistId) {
-            $qb->andWhere('sp.id = :playlistId')
-                ->setParameter('playlistId', $playlistId);
-        }
-
         $format = $request->getQueryParam('format', 'json');
 
         if ('csv' === $format) {

@@ -62,10 +62,6 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     #[ORM\Column(options: ['default' => false])]
     private bool $use_background_audio = false;
 
-    /** City name for weather reports (e.g. "Atlanta, Georgia"). Null = weather disabled. */
-    #[ORM\Column(length: 255, nullable: true)]
-    private ?string $weather_city = null;
-
     /** @var Collection<int, AiDjSchedule> */
     #[
         ORM\OneToMany(
@@ -192,16 +188,6 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     public function setUseBackgroundAudio(bool $useBackgroundAudio): void
     {
         $this->use_background_audio = $useBackgroundAudio;
-    }
-
-    public function getWeatherCity(): ?string
-    {
-        return $this->weather_city;
-    }
-
-    public function setWeatherCity(?string $weatherCity): void
-    {
-        $this->weather_city = $weatherCity ? $this->truncateString($weatherCity) : null;
     }
 
     /** @return Collection<int, AiDjSchedule> */

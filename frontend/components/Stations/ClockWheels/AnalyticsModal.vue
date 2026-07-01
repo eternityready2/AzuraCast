@@ -21,12 +21,6 @@
                     <option :value="30">
                         30
                     </option>
-                    <option :value="60">
-                        60
-                    </option>
-                    <option :value="90">
-                        90
-                    </option>
                 </select>
             </div>
 
@@ -66,11 +60,8 @@
                         <div class="fs-4 fw-semibold">
                             {{ analytics?.avg_drift_seconds ?? '—' }}
                         </div>
-                        <div
-                            class="small text-muted"
-                            :title="$gettext('Gap between target anchor position and actual play time. Expected when using graceful transitions (no hard cuts).')"
-                        >
-                            {{ $gettext('Avg Transition Offset') }}
+                        <div class="small text-muted">
+                            {{ $gettext('Avg drift (sec)') }}
                         </div>
                     </div>
                 </div>

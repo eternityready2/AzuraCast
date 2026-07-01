@@ -346,6 +346,42 @@ final class AiDjGenerator
     }
 
     /**
+     * Generate a shift intro (welcome) audio file when a DJ's scheduled block begins.
+     *
+     * @return string|null MP3 path on success, null on failure
+     */
+    public function generateShiftIntro(
+        AiDj $dj,
+        Station $station
+    ): ?string {
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
+        if ($usedMb > self::DISK_LIMIT_MB) {
+            $this->logger->warning(sprintf(
+                'AI DJ generation skipped: disk usage %dMB exceeds limit of %dMB',
+                $usedMb,
+                self::DISK_LIMIT_MB
+            ));
+            return null;
+        }
+
+        $template = $dj->getShiftIntroTemplate()
+            ?? 'Hey, this is {{dj_name}} on {{station_name}}. Welcome to the show!';
+
+        $text = $this->replaceTemplateVariables(
+            $template,
+            [
+                'dj_name' => $dj->getName(),
+                'station_name' => $station->name,
+            ]
+        );
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/shift_intro_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+    }
+
+    /**
      * Generate a content liner (bible verse, joke, encouragement, etc.) audio file.
      *
      * @return string|null MP3 path on success, null on failure

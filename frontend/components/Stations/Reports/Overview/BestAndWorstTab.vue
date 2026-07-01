@@ -3,22 +3,6 @@
         :loading="isLoading"
         lazy
     >
-        <div class="mb-3">
-            <div class="form-check">
-                <input
-                    id="excludeIds"
-                    v-model="excludeIds"
-                    class="form-check-input"
-                    type="checkbox"
-                >
-                <label
-                    class="form-check-label"
-                    for="excludeIds"
-                >
-                    {{ $gettext('Exclude station IDs and jingles') }}
-                </label>
-            </div>
-        </div>
         <div class="row">
             <div class="col-md-6 mb-4">
                 <fieldset>
@@ -143,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import {ref, toRef} from "vue";
+import {toRef} from "vue";
 import {useAxios} from "~/vendor/axios";
 import SongText from "~/components/Stations/Reports/Overview/SongText.vue";
 import Loading from "~/components/Common/Loading.vue";
@@ -153,9 +137,6 @@ import {useQuery} from "@tanstack/vue-query";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
 import IconBiChevronDown from "~icons/bi/chevron-down";
 import IconBiChevronUp from "~icons/bi/chevron-up";
-import {useTranslate} from "~/vendor/gettext";
-
-const {$gettext} = useTranslate();
 
 const props = defineProps<{
     dateRange: DateRange,
@@ -164,7 +145,6 @@ const props = defineProps<{
 
 const dateRange = toRef(props, 'dateRange');
 const {axios} = useAxios();
-const excludeIds = ref(true);
 
 const {DateTime} = useLuxon();
 
@@ -180,16 +160,14 @@ const {data: state, isLoading} = useQuery<StatsData>({
     queryKey: queryKeyWithStation([
         QueryKeys.StationReports,
         'best_and_worst',
-        dateRange,
-        excludeIds
+        dateRange
     ]),
     queryFn: async ({signal}) => {
         const {data} = await axios.get(props.apiUrl, {
             signal,
             params: {
                 start: DateTime.fromJSDate(dateRange.value.startDate).toISO(),
-                end: DateTime.fromJSDate(dateRange.value.endDate).toISO(),
-                exclude_ids: excludeIds.value ? '1' : '0',
+                end: DateTime.fromJSDate(dateRange.value.endDate).toISO()
             }
         });
         return data;

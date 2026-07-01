@@ -1019,10 +1019,6 @@ final class ClockWheelPlaybackPlanner
             return $mediaQueue;
         }
 
-        if ($algorithm === ClockWheelSlotAlgorithms::SmartWeighted) {
-            return $this->applySmartWeighted($mediaQueue, $recentHistory);
-        }
-
         if ($algorithm === ClockWheelSlotAlgorithms::Sequential) {
             $algorithm = ClockWheelSlotAlgorithms::OldestTrack;
         }
@@ -1145,71 +1141,5 @@ final class ClockWheelPlaybackPlanner
         }
 
         return $sorted;
-    }
-
-    /**
-     * Smart Weighted Shuffle: composite score from recency, play-count rarity, and jitter.
-     *
-     * Score per candidate = recencyWeight + rarityWeight + jitter
-     *   recencyWeight  — longer since last play → higher score (0–50)
-     *   rarityWeight   — fewer recent plays → higher score (0–30)
-     *   jitter         — random 0–20 to avoid deterministic patterns
-     *
-     * @param StationPlaylistQueue[] $mediaQueue
-     * @param array<array{song_id: string, timestamp_played: mixed, artist?: string}> $recentHistory
-     * @return StationPlaylistQueue[]
-     */
-    private function applySmartWeighted(array $mediaQueue, array $recentHistory): array
-    {
-        if (count($mediaQueue) <= 1) {
-            return $mediaQueue;
-        }
-
-        $now = time();
-        $lastPlayed = [];
-        $playCounts = [];
-
-        foreach ($recentHistory as $h) {
-            $songId = $h['song_id'];
-            $ts = $h['timestamp_played'];
-            if ($ts instanceof \DateTimeInterface) {
-                $ts = $ts->getTimestamp();
-            }
-            $ts = (int) $ts;
-
-            if (!isset($lastPlayed[$songId]) || $ts > $lastPlayed[$songId]) {
-                $lastPlayed[$songId] = $ts;
-            }
-            $playCounts[$songId] = ($playCounts[$songId] ?? 0) + 1;
-        }
-
-        $maxCount = max(1, ...array_values($playCounts ?: [1]));
-
-        $scored = [];
-        foreach ($mediaQueue as $q) {
-            $sid = $q->song_id;
-
-            // Recency: seconds since last play, capped at 24h. Never-played = max score.
-            $sinceLastPlay = isset($lastPlayed[$sid])
-                ? min(86400, $now - $lastPlayed[$sid])
-                : 86400;
-            $recencyWeight = ($sinceLastPlay / 86400) * 50.0;
-
-            // Rarity: fewer plays in history = higher score.
-            $count = $playCounts[$sid] ?? 0;
-            $rarityWeight = (1 - ($count / max(1, $maxCount + 1))) * 30.0;
-
-            // Jitter: random component for variety.
-            $jitter = mt_rand(0, 2000) / 100.0; // 0–20
-
-            $scored[] = [
-                'queue' => $q,
-                'score' => $recencyWeight + $rarityWeight + $jitter,
-            ];
-        }
-
-        usort($scored, static fn(array $a, array $b): int => $b['score'] <=> $a['score']);
-
-        return array_map(static fn(array $s) => $s['queue'], $scored);
     }
 }

@@ -63,9 +63,6 @@ final class PostAction implements SingleActionInterface
         if (array_key_exists('use_background_audio', $body)) {
             $dj->setUseBackgroundAudio((bool)$body['use_background_audio']);
         }
-        if (array_key_exists('weather_city', $body)) {
-            $dj->setWeatherCity($body['weather_city'] !== null && $body['weather_city'] !== '' ? (string)$body['weather_city'] : null);
-        }
 
         $errors = $this->validator->validate($dj);
         if (count($errors) > 0) {

@@ -285,25 +285,6 @@
                                 </div>
                             </div>
 
-                            <div class="mb-3">
-                                <label
-                                    for="dj_weather_city"
-                                    class="form-label"
-                                >
-                                    {{ $gettext('Weather City') }}
-                                </label>
-                                <input
-                                    id="dj_weather_city"
-                                    v-model="form.weather_city"
-                                    type="text"
-                                    class="form-control form-control-dark"
-                                    :placeholder="$gettext('e.g. Atlanta, Georgia')"
-                                >
-                                <div class="form-text">
-                                    {{ $gettext('City name for weather reports. Leave empty to disable weather segments.') }}
-                                </div>
-                            </div>
-
                             <form-group-field
                                 id="dj_shift_intro_template"
                                 :field="v$.shift_intro_template"
@@ -447,7 +428,6 @@ interface AiDj {
     talk_frequency: number;
     voice_speed: number;
     use_background_audio: boolean;
-    weather_city: string | null;
     schedules?: AiDjSchedule[];
 }
 
@@ -460,7 +440,6 @@ interface AiDjForm {
     talk_frequency: number;
     voice_speed: number;
     use_background_audio: boolean;
-    weather_city: string | null;
 }
 
 interface VoiceOption {
@@ -506,7 +485,6 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     talk_frequency: 0.5,
     voice_speed: 1.0,
     use_background_audio: false,
-    weather_city: null,
 }));
 
 const {r$: v$} = useAppRegle(form, {}, {});
@@ -625,7 +603,6 @@ const openEdit = (dj: AiDj): void => {
         talk_frequency: dj.talk_frequency ?? 0.5,
         voice_speed: dj.voice_speed ?? 1.0,
         use_background_audio: dj.use_background_audio ?? false,
-        weather_city: dj.weather_city ?? null,
     };
     editorOpen.value = true;
     deleteTarget.value = null;

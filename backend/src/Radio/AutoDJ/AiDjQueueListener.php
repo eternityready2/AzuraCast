@@ -17,11 +17,9 @@ use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use App\Entity\AiDjContent;
-use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
 use App\Service\AiDjScheduler;
-use App\Service\AiDjWeatherService;
 use DateTimeImmutable;
 use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -54,8 +52,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly CacheInterface $cache,
         private readonly StationQueueRepository $stationQueueRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
-        private readonly AiDjWeatherService $weatherService,
-        private readonly AiDjArtistHistoryService $artistHistoryService,
     ) {
     }
 
@@ -144,6 +140,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
         }
 
+        // Fire shift intro when a new DJ block begins
+        if ($currentDjId !== null && $previousDjId !== $currentDjId && $dj instanceof AiDj) {
+            $this->pushIntroShiftClip($dj, $station, $backend);
+        }
+
         if (null === $dj) {
             $this->logger->debug('AI DJ: No active DJ for this time slot.');
             return;
@@ -173,25 +174,18 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $prevTitle = $prevSong['title'] ?? null;
 
         // Decide what to play:
-        // pre-intro (25%), post-song (20%), content liner (25%), artist history (15%), weather (15%)
+        // pre-intro (35%), post-song (30%), content liner (35%)
         $roll = mt_rand(1, 100);
 
         // Record cooldown BEFORE generation to prevent parallel attempts
         $this->cache->set($cooldownKey, time(), 120);
 
-        if ($roll <= 25) {
+        if ($roll <= 35) {
             $this->pushIntroClip($dj, $nextArtist, $nextTitle, $station, $backend);
-        } elseif ($roll <= 45 && $prevArtist) {
+        } elseif ($roll <= 65 && $prevArtist) {
             $this->pushPostSongClip($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station, $backend);
-        } elseif ($roll <= 70) {
-            $this->pushContentLiner($dj, $station, $backend);
-        } elseif ($roll <= 85) {
-            // Artist history segment - uses previous or next artist
-            $historyArtist = $prevArtist ?? $nextArtist;
-            $this->pushArtistHistoryClip($dj, $historyArtist, $station, $backend);
         } else {
-            // Weather segment - falls back to content liner if no city configured
-            $this->pushWeatherClip($dj, $station, $backend);
+            $this->pushContentLiner($dj, $station, $backend);
         }
 
         $this->trackCurrentSong($station);
@@ -356,99 +350,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
-    private function pushArtistHistoryClip(
-        AiDj $dj,
-        ?string $artist,
-        Station $station,
-        Liquidsoap $backend
-    ): void {
-        if ($artist === null || $artist === '') {
-            $this->pushContentLiner($dj, $station, $backend);
-            return;
-        }
-
-        try {
-            $historyText = $this->artistHistoryService->getArtistHistory($artist, $dj->getName(), $station->name);
-            if ($historyText === null) {
-                $this->pushContentLiner($dj, $station, $backend);
-                return;
-            }
-
-            $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
-            $outputPath = $outputDir . '/artist_' . uniqid() . '.mp3';
-            $clipPath = $this->generator->generateAudio($historyText, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
-
-            if ($clipPath === null) {
-                $this->pushContentLiner($dj, $station, $backend);
-                return;
-            }
-
-            $track = sprintf('annotate:title="Artist History",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Artist History');
-
-            $this->logger->info(sprintf(
-                'AI DJ: Queued artist history clip for DJ "%s" (artist: %s)',
-                $dj->getName(),
-                $artist
-            ));
-        } catch (\Throwable $e) {
-            $this->logger->error(sprintf('AI DJ: Failed to push artist history clip: %s', $e->getMessage()));
-        }
-    }
-
-    private function pushWeatherClip(
-        AiDj $dj,
-        Station $station,
-        Liquidsoap $backend
-    ): void {
-        $city = $dj->getWeatherCity();
-        if ($city === null || $city === '') {
-            // No weather city configured, fall back to content liner
-            $this->pushContentLiner($dj, $station, $backend);
-            return;
-        }
-
-        // Only do weather once per hour per station
-        $weatherCooldownKey = 'ai_dj_weather_' . $station->id;
-        if ($this->cache->get($weatherCooldownKey)) {
-            $this->pushContentLiner($dj, $station, $backend);
-            return;
-        }
-
-        try {
-            $weatherText = $this->weatherService->getWeatherReport($city, $dj->getName(), $station->name);
-            if ($weatherText === null) {
-                $this->pushContentLiner($dj, $station, $backend);
-                return;
-            }
-
-            $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
-            $outputPath = $outputDir . '/weather_' . uniqid() . '.mp3';
-            $clipPath = $this->generator->generateAudio($weatherText, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
-
-            if ($clipPath === null) {
-                $this->pushContentLiner($dj, $station, $backend);
-                return;
-            }
-
-            $track = sprintf('annotate:title="Weather Update",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Weather Update');
-
-            // Prevent weather more than once per hour
-            $this->cache->set($weatherCooldownKey, true, 3600);
-
-            $this->logger->info(sprintf(
-                'AI DJ: Queued weather clip for DJ "%s" (city: %s)',
-                $dj->getName(),
-                $city
-            ));
-        } catch (\Throwable $e) {
-            $this->logger->error(sprintf('AI DJ: Failed to push weather clip: %s', $e->getMessage()));
-        }
-    }
-
     /**
      * Check if current time is near a scheduled AI Newscaster bulletin.
      * Avoids DJ speech 3 minutes before and after news times (:00 and/or :30).
@@ -467,6 +368,32 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         return false;
+    }
+
+    private function pushIntroShiftClip(
+        AiDj $dj,
+        Station $station,
+        Liquidsoap $backend
+    ): void {
+        try {
+            $clipPath = $this->generator->generateShiftIntro($dj, $station);
+
+            if (null === $clipPath) {
+                return;
+            }
+
+            $track = sprintf('annotate:title="AI DJ Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Welcome');
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued shift intro clip for DJ "%s" (clip: %s)',
+                $dj->getName(),
+                basename($clipPath)
+            ));
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to push shift intro clip: %s', $e->getMessage()));
+        }
     }
 
     private function pushOutroClip(
