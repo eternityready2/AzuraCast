@@ -9,6 +9,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\Api\MediaBatchResult;
 use App\Entity\Interfaces\PathAwareInterface;
+use App\Entity\Repository\StationMediaRepository;
 use App\Entity\Repository\StationPlaylistFolderRepository;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
@@ -78,6 +79,7 @@ final class BatchAction implements SingleActionInterface
         private readonly MessageBus $messageBus,
         private readonly Adapters $adapters,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly StationMediaRepository $mediaRepo,
         private readonly StationPlaylistMediaRepository $playlistMediaRepo,
         private readonly StationPlaylistFolderRepository $playlistFolderRepo,
         private readonly StationQueueRepository $queueRepo,
@@ -539,19 +541,39 @@ final class BatchAction implements SingleActionInterface
         }
 
         foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
-            if ($updateType) {
-                $media->type = $mediaType;
-            }
+            $oldType = $media->type;
+            $oldCategory = $media->category;
+            $oldGenre = $media->genre;
 
-            if ($updateCategory) {
-                $media->category = $category;
-            }
+            try {
+                if ($updateType) {
+                    $media->type = $mediaType;
+                }
 
-            if ($updateGenre) {
-                $media->genre = $genre;
-            }
+                if ($updateCategory) {
+                    $media->category = $category;
+                }
 
-            $this->em->persist($media);
+                if ($updateGenre) {
+                    $media->genre = $genre;
+
+                    if (!$this->mediaRepo->writeToFile($media, $fs)) {
+                        throw new RuntimeException('Could not write media metadata to file.');
+                    }
+                }
+
+                $this->em->persist($media);
+            } catch (Throwable $e) {
+                $media->type = $oldType;
+                $media->category = $oldCategory;
+                $media->genre = $oldGenre;
+
+                $result->errors[] = sprintf(
+                    '%s: %s',
+                    $media->path,
+                    $e->getMessage()
+                );
+            }
         }
 
         $this->em->flush();
