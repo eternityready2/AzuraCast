@@ -510,6 +510,13 @@ final class BatchAction implements SingleActionInterface
             throw new InvalidArgumentException('Invalid media type specified.');
         }
 
+        $updateGenre = array_key_exists('genre', $body);
+        $genre = null;
+
+        if ($updateGenre) {
+            $genre = Types::stringOrNull($body['genre'] ?? null, true);
+        }
+
         $updateCategory = array_key_exists('category_id', $body);
         $category = null;
         if ($updateCategory) {
@@ -527,8 +534,8 @@ final class BatchAction implements SingleActionInterface
             }
         }
 
-        if (!$updateType && !$updateCategory) {
-            throw new InvalidArgumentException('Specify a type and/or category to update.');
+        if (!$updateType && !$updateCategory && !$updateGenre) {
+            throw new InvalidArgumentException('Specify a type, category and/or genre to update.');
         }
 
         foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
@@ -538,6 +545,10 @@ final class BatchAction implements SingleActionInterface
 
             if ($updateCategory) {
                 $media->category = $category;
+            }
+
+            if ($updateGenre) {
+                $media->genre = $genre;
             }
 
             $this->em->persist($media);

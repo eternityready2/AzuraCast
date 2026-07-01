@@ -59,6 +59,26 @@
                 </option>
             </select>
 
+            <input
+                id="bulk_media_genre"
+                v-model="bulkGenre"
+                type="text"
+                class="form-control form-control-sm bulk-classify-select"
+                :disabled="!hasSelectedClassifyItems || classifyPending"
+                :title="$gettext('Set genre on selected files')"
+                :placeholder="$gettext('Set genre…')"
+                @keyup.enter="onBulkGenreApply"
+            >
+
+            <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                :disabled="!hasSelectedClassifyItems || classifyPending || bulkGenre.trim() === ''"
+                @click="onBulkGenreApply"
+            >
+                {{ $gettext('Apply Genre') }}
+            </button>
+
             <div
                 class="btn-group btn-group-sm dropdown allow-focus"
             >
@@ -317,6 +337,7 @@ const mediaTypeOptions = computed(() =>
 );
 
 const classifyPending = ref(false);
+const bulkGenre = ref('');
 
 const checkedPlaylists = ref<(number | string)[]>([]);
 const newPlaylist = ref('');
@@ -395,7 +416,7 @@ const applyClassify = async (payload: Record<string, unknown>) => {
     try {
         await doBatch(
             'classify',
-            $gettext('Updated type/category for files:'),
+            $gettext('Updated metadata for files:'),
             $gettext('Error updating files:'),
             payload,
         );
@@ -432,6 +453,17 @@ const onBulkCategoryChange = async (event: Event) => {
     await applyClassify({
         category_id: category === 'none' ? null : Number(category),
     });
+};
+
+const onBulkGenreApply = async () => {
+    const genre = bulkGenre.value.trim();
+
+    if (!genre || classifyPending.value) {
+        return;
+    }
+
+    await applyClassify({genre});
+    bulkGenre.value = '';
 };
 
 const doImmediateQueue = () => {
