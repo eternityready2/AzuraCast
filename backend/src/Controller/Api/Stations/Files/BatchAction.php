@@ -9,6 +9,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\Api\MediaBatchResult;
 use App\Entity\Interfaces\PathAwareInterface;
+use App\Entity\Repository\StationMediaRepository;
 use App\Entity\Repository\StationPlaylistFolderRepository;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
@@ -78,6 +79,7 @@ final class BatchAction implements SingleActionInterface
         private readonly MessageBus $messageBus,
         private readonly Adapters $adapters,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly StationMediaRepository $mediaRepo,
         private readonly StationPlaylistMediaRepository $playlistMediaRepo,
         private readonly StationPlaylistFolderRepository $playlistFolderRepo,
         private readonly StationQueueRepository $queueRepo,
@@ -510,6 +512,13 @@ final class BatchAction implements SingleActionInterface
             throw new InvalidArgumentException('Invalid media type specified.');
         }
 
+        $updateGenre = array_key_exists('genre', $body);
+        $genre = null;
+
+        if ($updateGenre) {
+            $genre = Types::stringOrNull($body['genre'] ?? null, true);
+        }
+
         $updateCategory = array_key_exists('category_id', $body);
         $category = null;
         if ($updateCategory) {
@@ -527,20 +536,44 @@ final class BatchAction implements SingleActionInterface
             }
         }
 
-        if (!$updateType && !$updateCategory) {
-            throw new InvalidArgumentException('Specify a type and/or category to update.');
+        if (!$updateType && !$updateCategory && !$updateGenre) {
+            throw new InvalidArgumentException('Specify a type, category and/or genre to update.');
         }
 
         foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
-            if ($updateType) {
-                $media->type = $mediaType;
-            }
+            $oldType = $media->type;
+            $oldCategory = $media->category;
+            $oldGenre = $media->genre;
 
-            if ($updateCategory) {
-                $media->category = $category;
-            }
+            try {
+                if ($updateType) {
+                    $media->type = $mediaType;
+                }
 
-            $this->em->persist($media);
+                if ($updateCategory) {
+                    $media->category = $category;
+                }
+
+                if ($updateGenre) {
+                    $media->genre = $genre;
+
+                    if (!$this->mediaRepo->writeToFile($media, $fs)) {
+                        throw new RuntimeException('Could not write media metadata to file.');
+                    }
+                }
+
+                $this->em->persist($media);
+            } catch (Throwable $e) {
+                $media->type = $oldType;
+                $media->category = $oldCategory;
+                $media->genre = $oldGenre;
+
+                $result->errors[] = sprintf(
+                    '%s: %s',
+                    $media->path,
+                    $e->getMessage()
+                );
+            }
         }
 
         $this->em->flush();

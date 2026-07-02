@@ -141,6 +141,7 @@
   "config": {
     "discard-changes": true,
     "preferred-install": "dist",
+    "source-fallback": true,
     "sort-packages": true,
     "allow-plugins": {
       "composer/package-versions-deprecated": true,
