@@ -289,6 +289,43 @@ final class AiDjQueueListener implements EventSubscriberInterface
     }
 
     /**
+     * Content categories the DJ may use as random liners: any ENABLED content
+     * type for this station except the intro/post-song templates. Dynamic (not a
+     * fixed list) so custom categories are used automatically once they have
+     * content, and disabling/emptying a category removes it from rotation.
+     * Falls back to the built-in set if nothing is configured.
+     *
+     * @return string[]
+     */
+    private function getLinerTypes(Station $station): array
+    {
+        $excluded = [
+            AiDjContent::TYPE_SONG_INTRO_TEMPLATE,
+            AiDjContent::TYPE_POST_SONG_TEMPLATE,
+        ];
+
+        try {
+            /** @var string[] $types */
+            $types = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT DISTINCT c.type FROM App\Entity\AiDjContent c
+                    WHERE c.station = :station AND c.is_enabled = true
+                DQL
+            )->setParameter('station', $station)->getSingleColumnResult();
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to load liner categories: %s', $e->getMessage()));
+            return self::LINER_TYPES;
+        }
+
+        $types = array_values(array_filter(
+            $types,
+            static fn(string $t): bool => !in_array($t, $excluded, true)
+        ));
+
+        return $types !== [] ? $types : self::LINER_TYPES;
+    }
+
+    /**
      * True if an AI DJ clip is already queued (unplayed) and waiting to air.
      * DJ clips have no media and their custom URI points at the station's ai_dj dir.
      */
@@ -342,6 +379,19 @@ final class AiDjQueueListener implements EventSubscriberInterface
         Station $station,
         Liquidsoap $backend
     ): void {
+        // Never announce the same song twice in a row (this caused "she named
+        // the same song 2-3 times"). If it would repeat, use a generic liner
+        // with no song name instead of restating a stale/duplicate title.
+        if ($prevArtist !== null && $prevArtist !== '') {
+            $namedKey = 'ai_dj_last_named_' . $station->id;
+            $songKey = strtolower(trim($prevArtist . ' - ' . ($prevTitle ?? '')));
+            if ($this->cache->get($namedKey) === $songKey) {
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+            $this->cache->set($namedKey, $songKey, 1800);
+        }
+
         try {
             $clipPath = $this->generator->generatePostSong(
                 $dj,
@@ -402,7 +452,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         try {
-            $historyText = $this->artistHistoryService->getArtistHistory($artist, $dj->getName(), $station->name);
+            $historyText = $this->artistHistoryService->getArtistHistory(
+                $artist,
+                $this->generator->getSpokenName($dj->getName()),
+                $station->name
+            );
             if ($historyText === null) {
                 // Nothing found — fall back to a content liner so she still talks.
                 $this->pushContentLiner($dj, $station, $backend);
@@ -445,7 +499,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
         Liquidsoap $backend
     ): void {
         try {
-            $type = self::LINER_TYPES[array_rand(self::LINER_TYPES)];
+            $linerTypes = $this->getLinerTypes($station);
+            $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
             if (null === $content) {

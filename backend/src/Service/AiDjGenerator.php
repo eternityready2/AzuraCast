@@ -559,7 +559,7 @@ final class AiDjGenerator
      * full label "Afternoon DJ - Bella".
      * "Afternoon DJ - Bella" -> "Bella"; "Morning DJ - Adam" -> "Adam".
      */
-    private function getSpokenName(string $fullName): string
+    public function getSpokenName(string $fullName): string
     {
         if (str_contains($fullName, ' - ')) {
             $parts = explode(' - ', $fullName);
