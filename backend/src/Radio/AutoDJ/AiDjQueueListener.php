@@ -104,6 +104,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
+        // One DJ break at a time. A DJ clip is queued AHEAD of airtime, so a
+        // time-based cooldown alone can't stop two clips ending up adjacent: a
+        // clip about an earlier song can still be waiting in the queue when a new
+        // one is added, so both air back-to-back ("on air = DJ, up next = DJ").
+        // If a DJ clip is already waiting to air, do not queue another.
+        if ($this->hasUpcomingDjClip($station)) {
+            $this->logger->debug('AI DJ: Skipped - a DJ clip is already queued ahead.');
+            return;
+        }
+
         $expectedPlayTime = $event->getExpectedPlayTime();
 
         // Skip if top-of-hour protection is active and we're in the lookahead zone.
@@ -276,6 +286,22 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         return null;
+    }
+
+    /**
+     * True if an AI DJ clip is already queued (unplayed) and waiting to air.
+     * DJ clips have no media and their custom URI points at the station's ai_dj dir.
+     */
+    private function hasUpcomingDjClip(Station $station): bool
+    {
+        foreach ($this->stationQueueRepo->getUnplayedQueue($station) as $entry) {
+            $uri = $entry->autodj_custom_uri;
+            if ($entry->media === null && $uri !== null && str_contains($uri, 'ai_dj')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function pushIntroClip(
