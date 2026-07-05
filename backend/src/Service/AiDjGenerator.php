@@ -119,14 +119,17 @@ final class AiDjGenerator
                 return null;
             }
 
-            // Pad to minimum 6s total to exceed station crossfade duration (3s).
-            // Without this, Liquidsoap's cross() operator errors when the clip
-            // is shorter than the crossfade analysis window.
+            // Add 2.5s of silence at BOTH ends (regardless of clip length) so the
+            // station's crossfade overlaps silence, not speech. Without leading
+            // silence the previous song's fade-out buried her first words, and
+            // long clips (>6s) previously got no trailing pad, so the next song's
+            // fade-in clipped her last words. This keeps the whole clip audible
+            // and still exceeds the crossfade analysis window (avoids cross() errors).
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
-                '-af', 'apad=whole_dur=6',
+                '-af', 'adelay=delays=2500:all=1,apad=pad_dur=2.5',
                 '-c:a', 'libmp3lame',
                 '-b:a', '192k',
                 $tmpMp3,
@@ -192,7 +195,7 @@ final class AiDjGenerator
                 self::FFMPEG_BIN,
                 '-y',
                 '-i', $wavFile,
-                '-af', 'apad=whole_dur=6',
+                '-af', 'adelay=delays=2500:all=1,apad=pad_dur=2.5',
                 '-c:a', 'libmp3lame',
                 '-b:a', '128k',
                 $tmpMp3,
@@ -254,7 +257,8 @@ final class AiDjGenerator
         $text = $this->replaceTemplateVariables(
             $template,
             [
-                'dj_name' => $dj->getName(),
+                'dj_name' => $this->getSpokenName($dj->getName()),
+                'show_name' => $this->getShowName($dj->getName()),
                 'artist' => $artist ?? 'this artist',
                 'song' => $songTitle ?? 'this song',
                 'station_name' => $station->name,
@@ -286,14 +290,24 @@ final class AiDjGenerator
             return null;
         }
 
-        $template = $this->selectRandomPostSongTemplate($dj->getContents())
+        $hasNext = ($nextArtist !== null && $nextArtist !== '');
+
+        $template = $this->selectRandomPostSongTemplate($dj->getContents(), $hasNext)
             ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE)
-            ?? $this->getDefaultPostSong($nextArtist !== null);
+            ?? $this->getDefaultPostSong($hasNext);
+
+        // Safety net: never let a post-song template mention a "next" song when we
+        // don't actually know it. That produced "coming up next, the next song"
+        // with no name, followed by an awkward pause. Use a prev-only line instead.
+        if (!$hasNext && str_contains($template, '{{next_')) {
+            $template = $this->getDefaultPostSong(false);
+        }
 
         $text = $this->replaceTemplateVariables(
             $template,
             [
-                'dj_name' => $dj->getName(),
+                'dj_name' => $this->getSpokenName($dj->getName()),
+                'show_name' => $this->getShowName($dj->getName()),
                 'prev_artist' => $prevArtist ?? 'that artist',
                 'prev_song' => $prevTitle ?? 'that song',
                 'next_artist' => $nextArtist ?? 'the next artist',
@@ -334,7 +348,8 @@ final class AiDjGenerator
         $text = $this->replaceTemplateVariables(
             $template,
             [
-                'dj_name' => $dj->getName(),
+                'dj_name' => $this->getSpokenName($dj->getName()),
+                'show_name' => $this->getShowName($dj->getName()),
                 'station_name' => $station->name,
             ]
         );
@@ -370,7 +385,8 @@ final class AiDjGenerator
         $text = $this->replaceTemplateVariables(
             $template,
             [
-                'dj_name' => $dj->getName(),
+                'dj_name' => $this->getSpokenName($dj->getName()),
+                'show_name' => $this->getShowName($dj->getName()),
                 'station_name' => $station->name,
             ]
         );
@@ -414,7 +430,7 @@ final class AiDjGenerator
      */
     private function buildLinerText(AiDj $dj, AiDjContent $content, Station $station): string
     {
-        $djName = $dj->getName();
+        $djName = $this->getSpokenName($dj->getName());
         $stationName = $station->name;
         $text = $content->content;
         $reference = $content->reference;
@@ -502,12 +518,21 @@ final class AiDjGenerator
     /**
      * Select a random post_song_template from the DJ's content collection.
      */
-    private function selectRandomPostSongTemplate(Collection $contents): ?string
+    private function selectRandomPostSongTemplate(Collection $contents, bool $allowNext = true): ?string
     {
         $templates = $contents
             ->filter(fn(AiDjContent $c) => $c->is_enabled && $c->type === AiDjContent::TYPE_POST_SONG_TEMPLATE)
             ->map(fn(AiDjContent $c) => $c->content)
             ->toArray();
+
+        // When the next song is unknown, drop templates that reference it so the
+        // DJ never says a hollow "coming up next, the next song".
+        if (!$allowNext) {
+            $templates = array_filter(
+                $templates,
+                static fn(string $t): bool => !str_contains($t, '{{next_')
+            );
+        }
 
         if ([] === $templates) {
             return null;
@@ -527,6 +552,44 @@ final class AiDjGenerator
         }
 
         return strtr($template, $replacements);
+    }
+
+    /**
+     * The DJ's spoken first name, so scripts say "Bella" instead of the robotic
+     * full label "Afternoon DJ - Bella".
+     * "Afternoon DJ - Bella" -> "Bella"; "Morning DJ - Adam" -> "Adam".
+     */
+    private function getSpokenName(string $fullName): string
+    {
+        if (str_contains($fullName, ' - ')) {
+            $parts = explode(' - ', $fullName);
+            $last = trim((string)end($parts));
+            if ($last !== '') {
+                return $last;
+            }
+        }
+
+        $cleaned = preg_replace(
+            '/\b(morning|afternoon|evening|overnight|midday|weekend|night|the)\b|\bDJ\b|\bhost\b/i',
+            '',
+            $fullName
+        );
+        $cleaned = trim((string)preg_replace('/\s+/', ' ', (string)$cleaned), " -");
+
+        return $cleaned !== '' ? $cleaned : $fullName;
+    }
+
+    /**
+     * A natural show name derived from the DJ label, used sparingly in scripts
+     * (e.g. "the afternoon show"). Falls back to "the show".
+     */
+    private function getShowName(string $fullName): string
+    {
+        if (preg_match('/\b(morning|afternoon|evening|overnight|midday|weekend|night)\b/i', $fullName, $m)) {
+            return 'the ' . strtolower($m[1]) . ' show';
+        }
+
+        return 'the show';
     }
 
     /**
@@ -551,26 +614,50 @@ final class AiDjGenerator
                 $duration = (int)$m[1] * 3600 + (int)$m[2] * 60 + (int)$m[3] + 1;
             }
 
-            // Single-pass FFmpeg: generate a warm D-major chord pad (146.8 + 185 + 220 Hz)
-            // with lowpass warmth, then mix it under the DJ voice at ~8% volume.
-            $filterGraph = sprintf(
-                'sine=frequency=146.83:duration=%1$d,volume=0.04[s1];'
-                . 'sine=frequency=185:duration=%1$d,volume=0.03[s2];'
-                . 'sine=frequency=220:duration=%1$d,volume=0.03[s3];'
-                . '[s1][s2][s3]amix=inputs=3:duration=longest,lowpass=f=1200[pad];'
-                . '[0:a][pad]amix=inputs=2:duration=first:dropout_transition=1[out]',
-                $duration
-            );
+            // If a real music-bed file has been dropped at "<ai_dj dir>/bed.mp3",
+            // use it as the bed (looped to cover the clip, low volume so the voice
+            // stays clear, gentle fade in/out). Otherwise fall back to a soft
+            // synthetic chord pad. Gated per-DJ by use_background_audio, so only
+            // DJs with that setting on (e.g. the Overnight DJ) get a bed.
+            $bedFile = dirname($voicePath) . '/bed.mp3';
 
-            $ffmpeg = new Process([
-                self::FFMPEG_BIN, '-y',
-                '-i', $voicePath,
-                '-filter_complex', $filterGraph,
-                '-map', '[out]',
-                '-c:a', 'libmp3lame', '-b:a', '192k',
-                $mixedPath,
-            ]);
-            $ffmpeg->setTimeout(15);
+            if (is_file($bedFile)) {
+                $fadeOutStart = max(1, $duration - 2);
+                $filterGraph = sprintf(
+                    '[1:a]volume=0.18,afade=t=in:st=0:d=1.5,afade=t=out:st=%1$d:d=1.5[bed];'
+                    . '[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0[out]',
+                    $fadeOutStart
+                );
+                $ffmpeg = new Process([
+                    self::FFMPEG_BIN, '-y',
+                    '-i', $voicePath,
+                    '-stream_loop', '-1', '-i', $bedFile,
+                    '-filter_complex', $filterGraph,
+                    '-map', '[out]',
+                    '-c:a', 'libmp3lame', '-b:a', '192k',
+                    $mixedPath,
+                ]);
+            } else {
+                // Synthetic warm D-major chord pad (146.8 + 185 + 220 Hz) with
+                // lowpass warmth, mixed under the DJ voice at low volume.
+                $filterGraph = sprintf(
+                    'sine=frequency=146.83:duration=%1$d,volume=0.04[s1];'
+                    . 'sine=frequency=185:duration=%1$d,volume=0.03[s2];'
+                    . 'sine=frequency=220:duration=%1$d,volume=0.03[s3];'
+                    . '[s1][s2][s3]amix=inputs=3:duration=longest,lowpass=f=1200[pad];'
+                    . '[0:a][pad]amix=inputs=2:duration=first:dropout_transition=1[out]',
+                    $duration
+                );
+                $ffmpeg = new Process([
+                    self::FFMPEG_BIN, '-y',
+                    '-i', $voicePath,
+                    '-filter_complex', $filterGraph,
+                    '-map', '[out]',
+                    '-c:a', 'libmp3lame', '-b:a', '192k',
+                    $mixedPath,
+                ]);
+            }
+            $ffmpeg->setTimeout(20);
             $ffmpeg->run();
 
             if (!$ffmpeg->isSuccessful()) {

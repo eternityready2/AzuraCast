@@ -13,6 +13,8 @@ use App\Radio\Adapters;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use App\Service\AiDjGenerator;
+use App\Doctrine\ReloadableEntityManagerInterface;
+use App\Entity\Station;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
@@ -44,6 +46,7 @@ final class TestAction implements SingleActionInterface
         private readonly AiDjRepository $aiDjRepository,
         private readonly AiDjGenerator $aiDjGenerator,
         private readonly Adapters $adapters,
+        private readonly ReloadableEntityManagerInterface $em,
     ) {
     }
 
@@ -63,7 +66,15 @@ final class TestAction implements SingleActionInterface
             ]);
         }
 
-        $clipPath = $this->aiDjGenerator->generateSongIntro($dj, null, null, $station);
+        // Use the real current/just-played song so the test reflects live
+        // behavior instead of a generic "this song by this artist" placeholder.
+        $current = $this->getCurrentPlayingSong($station);
+        $clipPath = $this->aiDjGenerator->generateSongIntro(
+            $dj,
+            $current['artist'] ?? null,
+            $current['title'] ?? null,
+            $station
+        );
 
         if (null === $clipPath) {
             return $response->withStatus(500)->withJson([
@@ -85,5 +96,42 @@ final class TestAction implements SingleActionInterface
             'clip_path' => basename($clipPath),
             'queued' => $queued,
         ]);
+    }
+
+    /**
+     * Get the real current/just-played song for this station so the test names an
+     * actual track. Returns null values if none found (falls back to placeholder).
+     *
+     * @return array{artist: ?string, title: ?string}|null
+     */
+    private function getCurrentPlayingSong(Station $station): ?array
+    {
+        try {
+            $last = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.is_visible = 1
+                    AND sh.media IS NOT NULL
+                    AND sh.artist IS NOT NULL
+                    AND sh.artist != :empty
+                    ORDER BY sh.timestamp_start DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('empty', '')
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            if ($last === null) {
+                return null;
+            }
+
+            return [
+                'artist' => $last->artist,
+                'title' => $last->title,
+            ];
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

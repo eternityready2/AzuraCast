@@ -1430,6 +1430,11 @@ return static function (RouteCollectorProxy $group) {
                                 '/bulk-delete',
                                 Controller\Api\Stations\AiDjContent\BulkDeleteAction::class
                             );
+
+                            $group->post(
+                                '/delete-by-type',
+                                Controller\Api\Stations\AiDjContent\DeleteByTypeAction::class
+                            );
                         }
                     )->add(new Middleware\Permissions(StationPermissions::AiDjContent, true));
 

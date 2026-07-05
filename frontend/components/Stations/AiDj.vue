@@ -544,6 +544,18 @@ const dayNames: string[] = [
     $gettext('Sun'),
 ];
 
+// Convert a 24-hour "HH:MM" time string to 12-hour "h:MM AM/PM".
+const to12Hour = (t: string): string => {
+    const parts = t.split(':');
+    let h = parseInt(parts[0] ?? '0', 10);
+    const m = parts[1] ?? '00';
+    if (isNaN(h)) return t;
+    const period = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${period}`;
+};
+
 const scheduleSummary = (schedules: AiDjSchedule[]): string => {
     if (!schedules || schedules.length === 0) return $gettext('No schedule');
 
@@ -554,7 +566,7 @@ const scheduleSummary = (schedules: AiDjSchedule[]): string => {
                 : $gettext('Every day');
         const time =
             s.start_time && s.end_time
-                ? `${s.start_time}-${s.end_time}`
+                ? `${to12Hour(s.start_time)} - ${to12Hour(s.end_time)}`
                 : $gettext('All day');
         return `${days} ${time}`;
     }).join(' | ');

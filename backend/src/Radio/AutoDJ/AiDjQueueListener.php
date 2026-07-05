@@ -17,6 +17,7 @@ use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use App\Entity\AiDjContent;
+use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
 use App\Service\AiDjScheduler;
@@ -52,6 +53,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly CacheInterface $cache,
         private readonly StationQueueRepository $stationQueueRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
+        private readonly AiDjArtistHistoryService $artistHistoryService,
     ) {
     }
 
@@ -93,10 +95,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        // Cooldown: prevent rapid-fire TTS calls (min 60s between generations)
+        // Cooldown: minimum gap between DJ talk breaks so she does not talk on
+        // consecutive songs (was 60s, which allowed back-to-back chatter).
         $cooldownKey = 'ai_dj_cooldown_' . $station->id;
         $lastGenTime = $this->cache->get($cooldownKey);
-        if ($lastGenTime && (time() - $lastGenTime) < 60) {
+        if ($lastGenTime && (time() - $lastGenTime) < 180) {
             $this->logger->debug('AI DJ: Skipped - cooldown active.', ['elapsed' => time() - $lastGenTime]);
             return;
         }
@@ -140,9 +143,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
         }
 
-        // Fire shift intro when a new DJ block begins
+        // Fire shift intro when a new DJ block begins. Only ONE clip per break:
+        // push the welcome and stop here so we don't also queue a post-song clip
+        // in the same cycle (that caused "talk ... pause ... talk again").
         if ($currentDjId !== null && $previousDjId !== $currentDjId && $dj instanceof AiDj) {
             $this->pushIntroShiftClip($dj, $station, $backend);
+            $this->cache->set($cooldownKey, time(), 300);
+            $this->trackCurrentSong($station);
+            return;
         }
 
         if (null === $dj) {
@@ -161,30 +169,40 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        // Get next song info from station queue (direct query, since this listener
-        // runs before the main queue builder populates BuildQueue::nextSongs)
+        // The song currently on air, from play history. This is ALWAYS accurate,
+        // and because this DJ clip only airs after the current song finishes, it is
+        // correct to refer to it in the past tense ("that was X by Y").
+        $currentSong = $this->getCurrentPlayingSong($station);
+        $curArtist = $currentSong['artist'] ?? null;
+        $curTitle = $currentSong['title'] ?? null;
+
+        // The next music track is usually NOT queued yet when the DJ fires, so only
+        // use it when it is genuinely known.
         $nextMusicEntry = $this->findNextMusicEntry($station);
         $nextArtist = $nextMusicEntry?->artist;
         $nextTitle = $nextMusicEntry?->title;
 
-        // Get previous song info from cache
-        $prevCacheKey = 'ai_dj_prev_song_' . $station->id;
-        $prevSong = $this->cache->get($prevCacheKey);
-        $prevArtist = $prevSong['artist'] ?? null;
-        $prevTitle = $prevSong['title'] ?? null;
+        // Record cooldown BEFORE generation to prevent parallel attempts
+        $this->cache->set($cooldownKey, time(), 300);
 
-        // Decide what to play:
-        // pre-intro (35%), post-song (30%), content liner (35%)
         $roll = mt_rand(1, 100);
 
-        // Record cooldown BEFORE generation to prevent parallel attempts
-        $this->cache->set($cooldownKey, time(), 120);
-
-        if ($roll <= 35) {
-            $this->pushIntroClip($dj, $nextArtist, $nextTitle, $station, $backend);
-        } elseif ($roll <= 65 && $prevArtist) {
-            $this->pushPostSongClip($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station, $backend);
+        if ($curArtist !== null && $curArtist !== '') {
+            // Announce ONLY the song that just played — one song per break for a clean,
+            // natural flow. Never pass a "next" song, so the DJ can't chain several
+            // song names together in a single break (the "mentioned 3 songs" problem).
+            if ($roll <= 45) {
+                $this->pushPostSongClip($dj, $curArtist, $curTitle, null, null, $station, $backend);
+            } elseif ($roll <= 65) {
+                // A short fun fact about the artist that just played. Fetched
+                // safely (short timeout + cache); falls back to a content liner
+                // if nothing is found so it never delays or stalls playback.
+                $this->pushArtistHistoryClip($dj, $curArtist, $station, $backend);
+            } else {
+                $this->pushContentLiner($dj, $station, $backend);
+            }
         } else {
+            // No reliably known song — play a content liner, never a generic filler.
             $this->pushContentLiner($dj, $station, $backend);
         }
 
@@ -193,13 +211,54 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
     private function trackCurrentSong(Station $station): void
     {
-        $nextMusicEntry = $this->findNextMusicEntry($station);
+        // Record the song that is actually on air (reliable), not the upcoming
+        // queue entry, which is usually empty when the DJ fires.
+        $current = $this->getCurrentPlayingSong($station);
 
-        if ($nextMusicEntry !== null && $nextMusicEntry->artist !== null) {
+        if ($current !== null && ($current['artist'] ?? null) !== null) {
             $this->cache->set('ai_dj_prev_song_' . $station->id, [
-                'artist' => $nextMusicEntry->artist,
-                'title' => $nextMusicEntry->title,
+                'artist' => $current['artist'],
+                'title' => $current['title'],
             ], 600);
+        }
+    }
+
+    /**
+     * Get the song currently (most recently) on air from play history.
+     * Always accurate, unlike the upcoming queue which is typically empty at the
+     * moment the AI DJ decides to speak.
+     *
+     * @return array{artist: ?string, title: ?string}|null
+     */
+    private function getCurrentPlayingSong(Station $station): ?array
+    {
+        try {
+            $last = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.is_visible = 1
+                    AND sh.media IS NOT NULL
+                    AND sh.artist IS NOT NULL
+                    AND sh.artist != :empty
+                    ORDER BY sh.timestamp_start DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('empty', '')
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            if ($last === null) {
+                return null;
+            }
+
+            return [
+                'artist' => $last->artist,
+                'title' => $last->title,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to load current song from history: %s', $e->getMessage()));
+            return null;
         }
     }
 
@@ -302,6 +361,55 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $this->em->flush();
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to create StationQueue entry: %s', $e->getMessage()));
+        }
+    }
+
+    private function pushArtistHistoryClip(
+        AiDj $dj,
+        ?string $artist,
+        Station $station,
+        Liquidsoap $backend
+    ): void {
+        if ($artist === null || $artist === '') {
+            $this->pushContentLiner($dj, $station, $backend);
+            return;
+        }
+
+        try {
+            $historyText = $this->artistHistoryService->getArtistHistory($artist, $dj->getName(), $station->name);
+            if ($historyText === null) {
+                // Nothing found — fall back to a content liner so she still talks.
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+
+            $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+            $outputPath = $outputDir . '/artist_' . uniqid() . '.mp3';
+            $clipPath = $this->generator->generateAudio(
+                $historyText,
+                $dj->getVoiceModelPath(),
+                $outputPath,
+                $dj->getVoiceSpeed(),
+                $dj->useBackgroundAudio()
+            );
+
+            if ($clipPath === null) {
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+
+            $track = sprintf('annotate:title="Artist Spotlight",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Artist Spotlight');
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued artist history clip for DJ "%s" (artist: %s)',
+                $dj->getName(),
+                $artist
+            ));
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to push artist history clip: %s', $e->getMessage()));
+            $this->pushContentLiner($dj, $station, $backend);
         }
     }
 

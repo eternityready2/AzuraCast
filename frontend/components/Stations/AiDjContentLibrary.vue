@@ -24,6 +24,12 @@
                     v-if="countByType(tab.type) > 0"
                     class="cl-tab-count"
                 >{{ countByType(tab.type) }}</span>
+                <span
+                    v-if="!tab.is_builtin"
+                    class="cl-tab-del"
+                    :title="$gettext('Delete category')"
+                    @click.stop="deleteCategory(tab)"
+                >&times;</span>
             </button>
             <button
                 v-if="!showNewCategoryInput"
@@ -128,6 +134,14 @@
                         @click="bulkDelete"
                     >
                         {{ isBulkDeleting ? $gettext('Deleting…') : $gettext('Delete Selected') }} ({{ selectedIds.size }})
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-outline-danger"
+                        :disabled="isBulkDeleting"
+                        @click="deleteAllInCategory"
+                    >
+                        {{ $gettext('Delete All in Category') }} ({{ countByType(activeTab) }})
                     </button>
                     <button
                         type="button"
@@ -726,6 +740,45 @@ const bulkDelete = async (): Promise<void> => {
     }
 };
 
+// --- Delete all in a category / delete a category ---
+
+const deleteByTypeUrl = getStationApiUrl('/ai-dj-content/delete-by-type');
+
+const deleteAllInCategory = async (): Promise<void> => {
+    const label = activeTabLabel.value;
+    const count = countByType(activeTab.value);
+    if (count === 0) return;
+    if (!confirm($gettext('Delete ALL ' + count + ' items in "' + label + '"? This cannot be undone.'))) return;
+    isBulkDeleting.value = true;
+    try {
+        await axios.post(deleteByTypeUrl.value, {type: activeTab.value});
+        notifySuccess($gettext('All items in ' + label + ' were deleted.'));
+        selectedIds.value = new Set();
+        currentPage.value = 1;
+        await loadItems();
+    } catch {
+        notifyError($gettext('Failed to delete category items.'));
+    } finally {
+        isBulkDeleting.value = false;
+    }
+};
+
+const deleteCategory = async (tab: ContentTab): Promise<void> => {
+    if (tab.is_builtin) return;
+    if (!confirm($gettext('Delete the "' + tab.label + '" category and all its content?'))) return;
+    try {
+        await axios.post(deleteByTypeUrl.value, {type: tab.type});
+        notifySuccess($gettext('Category deleted.'));
+        tabs.value = tabs.value.filter(t => t.type !== tab.type);
+        if (activeTab.value === tab.type) {
+            setTab(tabs.value[0]?.type ?? 'song_intro_template');
+        }
+        await loadItems();
+    } catch {
+        notifyError($gettext('Failed to delete category.'));
+    }
+};
+
 // --- Bulk Import ---
 
 const doBulkImport = async (): Promise<void> => {
@@ -892,6 +945,24 @@ onMounted(async () => {
     font-weight: 600;
     background: var(--bs-border-color, #2d3140);
     color: var(--bs-secondary-color, #888);
+}
+
+.cl-tab-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    line-height: 1;
+    color: #e06a6a;
+    cursor: pointer;
+
+    &:hover {
+        background: #e06a6a;
+        color: #fff;
+    }
 }
 
 // Variable help
