@@ -9,6 +9,7 @@ use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Entity\AiDj;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Song;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
@@ -43,6 +44,26 @@ final class AiDjQueueListener implements EventSubscriberInterface
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
     ];
+
+    /**
+     * Minimum seconds the current song must have LEFT for a post-song clip to be
+     * trusted to air right after it (station crossfade prefetch window ~2s + safety
+     * margin). Below this, the DJ names NO specific song (plays a liner) so she can
+     * never be one song stale. Tunable: raise if the live QA still shows any stale
+     * names; lower if she plays too few song-naming breaks.
+     */
+    private const float NAME_SAFE_MIN_REMAINING_SECONDS = 8.0;
+
+    /**
+     * A played item longer than this is treated as a PROGRAM (spoken-word show,
+     * sermon block, long-form segment) and is NEVER announced as if it were a
+     * song. Deliberately generous: real songs — including extended live-worship
+     * medleys — virtually never run past 10 minutes, while station programs
+     * (e.g. the 59:27 "CMS" episode) run 30-60 minutes as one continuous file.
+     * This is a duration-only backstop; the primary detection is the playlist
+     * program-flag check in getCurrentSongIfSafeToName().
+     */
+    private const float MAX_NAMEABLE_SONG_SECONDS = 600.0;
 
     public function __construct(
         private readonly AiDjScheduler $scheduler,
@@ -146,21 +167,35 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         $this->cache->set($cacheKey, $currentDjId, 3600);
 
-        if ($previousDjId !== null && $previousDjId !== $currentDjId) {
-            $previousDj = $this->em->find(AiDj::class, $previousDjId);
-            if ($previousDj instanceof AiDj) {
-                $this->pushOutroClip($previousDj, $station, $backend);
-            }
-        }
+        // NOTE: the previous DJ's sign-off (pushOutroClip) is intentionally NOT
+        // fired here. It only ever triggered on a shift change — the very same
+        // cycle that queues the new DJ's welcome below — so the two clips always
+        // aired back-to-back with no song between them (the client's "talked
+        // twice between songs" report at a shift boundary). Keeping only the
+        // welcome guarantees a break is always a single clip.
 
-        // Fire shift intro when a new DJ block begins. Only ONE clip per break:
-        // push the welcome and stop here so we don't also queue a post-song clip
-        // in the same cycle (that caused "talk ... pause ... talk again").
+        // Fire shift intro when a new DJ block begins. Only ONE clip per break.
         if ($currentDjId !== null && $previousDjId !== $currentDjId && $dj instanceof AiDj) {
-            $this->pushIntroShiftClip($dj, $station, $backend);
-            $this->cache->set($cooldownKey, time(), 300);
-            $this->trackCurrentSong($station);
-            return;
+            // WELCOME ONCE PER SHIFT. 'ai_dj_last_active' (3600s TTL) is only
+            // refreshed when this listener runs on a BuildQueue event. During a long
+            // single-file PROGRAM (~59-min CMS block) no track is requested, no
+            // BuildQueue fires, the key EXPIRES, and on music-resume $previousDjId
+            // reads null while the SAME DJ is still on shift -> the welcome would
+            // fire a 2nd time (the confirmed 10:59 / 12:18 duplicate). This per-DJ
+            // guard survives that gap; a genuine DJ change (different id) has a
+            // different, absent key and so still welcomes.
+            $welcomedKey = 'ai_dj_welcomed_' . $station->id . '_' . $currentDjId;
+            if (null === $this->cache->get($welcomedKey)) {
+                // 6h: longer than any single program gap, shorter than the 24h loop
+                // so the same DJ's next-day shift still gets a fresh welcome.
+                $this->cache->set($welcomedKey, time(), 21600);
+                $this->pushIntroShiftClip($dj, $station, $backend);
+                $this->cache->set($cooldownKey, time(), 300);
+                $this->trackCurrentSong($station);
+                return;
+            }
+            // Same DJ, already welcomed this shift -> do NOT repeat; fall through to
+            // normal post-song / liner handling below.
         }
 
         if (null === $dj) {
@@ -179,10 +214,17 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        // The song currently on air, from play history. This is ALWAYS accurate,
-        // and because this DJ clip only airs after the current song finishes, it is
-        // correct to refer to it in the past tense ("that was X by Y").
-        $currentSong = $this->getCurrentPlayingSong($station);
+        // NAME THE CURRENT SONG ONLY WHEN THE CLIP WILL AIR RIGHT AFTER IT.
+        // The clip goes to the track_sensitive "requests" queue, but the station's
+        // crossfade (enable_crossfade, default_fade ~2s) prefetches the NEXT music
+        // track a couple seconds before a boundary. If this break fires inside that
+        // prefetch window, the next song is already locked in, so the clip airs AFTER
+        // it and "that was <current>" is one song stale (the client's "wrong song"
+        // report). getCurrentSongIfSafeToName() returns the current song ONLY when it
+        // has comfortably more time left than the prefetch window (clip wins the
+        // boundary -> name is correct); otherwise null -> we play a liner below, so
+        // the DJ is never confidently wrong about a song name.
+        $currentSong = $this->getCurrentSongIfSafeToName($station);
         $curArtist = $currentSong['artist'] ?? null;
         $curTitle = $currentSong['title'] ?? null;
 
@@ -230,6 +272,92 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 'artist' => $current['artist'],
                 'title' => $current['title'],
             ], 600);
+        }
+    }
+
+    /**
+     * The current on-air song IF it is safe to name it in a post-song clip — i.e.
+     * the clip will provably air right after it. Returns null when the song is within
+     * the crossfade prefetch window of ending (the next track is likely already
+     * locked in, so the clip would air one song late and name a stale song). On null,
+     * callers play a content liner, so the DJ never speaks a wrong song name.
+     *
+     * @return array{artist: ?string, title: ?string}|null
+     */
+    private function getCurrentSongIfSafeToName(Station $station): ?array
+    {
+        try {
+            /** @var \App\Entity\SongHistory|null $last */
+            $last = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.is_visible = 1
+                    AND sh.media IS NOT NULL
+                    AND sh.artist IS NOT NULL
+                    AND sh.artist != :empty
+                    ORDER BY sh.timestamp_start DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('empty', '')
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            // No reliable timing -> don't risk a stale name; caller uses a liner.
+            if ($last === null || $last->duration === null || $last->duration <= 0.0) {
+                return null;
+            }
+
+            // A PROGRAM is not a song and must never be named as one — even a
+            // short episode. Detect it exactly the way the Liquidsoap config does
+            // (ConfigWriter: remote-URL feed, "play single track", or merged
+            // block). This is the confirmed CMS / Altered Stories / Faith Horizons
+            // case and needs no station-specific playlist-ID list.
+            $playlist = $last->playlist;
+            if (
+                null !== $playlist
+                && (
+                    PlaylistSources::RemoteUrl === $playlist->source
+                    || $playlist->backendPlaySingleTrack()
+                    || $playlist->backendMerge()
+                )
+            ) {
+                $this->logger->debug(
+                    'AI DJ: current item is a program playlist; using a liner instead of naming it.',
+                    ['playlist_id' => $last->playlist_id]
+                );
+                return null;
+            }
+
+            // Backstop for items with no usable playlist metadata (playlist_id
+            // nulled on delete, request/manual plays): a very long single item is
+            // a program, not a song. See MAX_NAMEABLE_SONG_SECONDS.
+            if ($last->duration > self::MAX_NAMEABLE_SONG_SECONDS) {
+                $this->logger->debug(
+                    'AI DJ: current item exceeds max song length; treating as a program, using a liner.',
+                    ['duration' => $last->duration, 'cap' => self::MAX_NAMEABLE_SONG_SECONDS]
+                );
+                return null;
+            }
+
+            $elapsed = time() - $last->timestamp_start->getTimestamp();
+            $remaining = $last->duration - (float) $elapsed;
+
+            if ($remaining <= self::NAME_SAFE_MIN_REMAINING_SECONDS) {
+                $this->logger->debug(
+                    'AI DJ: current song near its end; using a liner to avoid naming a stale song.',
+                    ['remaining' => $remaining, 'threshold' => self::NAME_SAFE_MIN_REMAINING_SECONDS]
+                );
+                return null;
+            }
+
+            return [
+                'artist' => $last->artist,
+                'title' => $last->title,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: safe-name check failed: %s', $e->getMessage()));
+            return null;
         }
     }
 

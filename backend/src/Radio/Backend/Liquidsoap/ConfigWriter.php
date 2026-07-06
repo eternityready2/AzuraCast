@@ -535,8 +535,18 @@ final class ConfigWriter implements EventSubscriberInterface
             <<<LIQ
             news_bulletin_path = {$bulletinPath}
             news_bulletin_request = {$newsBulletinRequest}
+            # Guard: the hourly cron can occasionally double-fire within the same
+            # minute, which pushed the bulletin twice and aired the news back-to-back.
+            # A short cooldown makes a second push within 120s a no-op.
+            last_news_bulletin_push = ref(0.)
             def queue_news_bulletin() =
-              requests.push(request.create(news_bulletin_request))
+              now = time()
+              if now - last_news_bulletin_push() >= 120. then
+                last_news_bulletin_push := now
+                requests.push(request.create(news_bulletin_request))
+              else
+                log("AI News: skipped duplicate news bulletin within cooldown.")
+              end
             end
             cron.add("{$cronMinutes} * * * {$cronDays}", {queue_news_bulletin()})
             LIQ

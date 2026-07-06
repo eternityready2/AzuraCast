@@ -350,8 +350,20 @@ const scheduleUrl = (id: number) =>
 
 // --- Formatters ---
 
+// Render a 24h "HH:MM" backend time as 12-hour "h:MM AM/PM" so the schedule
+// surface matches the rest of the UI (client asked for no military time).
+const to12Hour = (t: string): string => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(t);
+    if (!m) return t;
+    let h = parseInt(m[1], 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m[2]} ${ampm}`;
+};
+
 const formatTime = (s: AiDjSchedule): string => {
-    if (s.start_time && s.end_time) return `${s.start_time} – ${s.end_time}`;
+    if (s.start_time && s.end_time) return `${to12Hour(s.start_time)} – ${to12Hour(s.end_time)}`;
     return $gettext('All day');
 };
 
