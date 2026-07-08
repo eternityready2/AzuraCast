@@ -294,7 +294,7 @@
                                     {{ $gettext('Random') }}
                                 </option>
                                 <option value="sequential">
-                                    {{ $gettext('Sequential (rotate evenly)') }}
+                                    {{ $gettext('Sequential (oldest first)') }}
                                 </option>
                                 <option value="oldest_album">
                                     {{ $gettext('Oldest Album') }}
