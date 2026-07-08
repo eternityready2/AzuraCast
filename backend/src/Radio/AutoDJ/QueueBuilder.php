@@ -525,13 +525,48 @@ final class QueueBuilder implements EventSubscriberInterface
             return $selectedTrack;
         }
 
-        $this->logger->info(
-            'Hour boundary: no track fits before top of hour; using shortest available with playback cap.',
+        // No candidate fits the remaining time before the hour. Fail LOUDLY — this
+        // usually means the finish buffer / ID max seconds are tighter than the
+        // playlist's shortest track — then fall back to the least-bad option: the
+        // shortest tracks, run through duplicate prevention so we never silently
+        // lock onto the same single file every hour ("AI keeps repeating songs").
+        $this->logger->warning(
+            'Hour boundary: NO track fits before top of hour (check finish buffer / ID max seconds vs shortest track length). Falling back to shortest non-recent track.',
             [
                 'playlist_id' => $playlist->id,
                 'max_duration_seconds' => $maxDuration,
             ]
         );
+
+        $byLength = [];
+        foreach ($mediaQueue as $queueItem) {
+            $candidate = $this->em->find(StationMedia::class, $queueItem->media_id);
+            if (!$candidate instanceof StationMedia) {
+                continue;
+            }
+            $byLength[] = [$queueItem, $candidate->getCalculatedLength()];
+        }
+        usort($byLength, static fn(array $a, array $b): int => $a[1] <=> $b[1]);
+
+        if ($byLength !== []) {
+            // Consider the few shortest, prefer one not recently played.
+            $shortestFew = array_map(
+                static fn(array $row): StationPlaylistQueue => $row[0],
+                array_slice($byLength, 0, 5)
+            );
+            $nonRepeat = $this->duplicatePrevention->preventDuplicates(
+                $shortestFew,
+                $recentSongHistory,
+                false
+            );
+            if (null !== $nonRepeat) {
+                return $nonRepeat;
+            }
+
+            if ($byLength[0][1] < $media->getCalculatedLength()) {
+                return $byLength[0][0];
+            }
+        }
 
         return $selectedTrack;
     }
