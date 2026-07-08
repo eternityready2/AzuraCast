@@ -413,6 +413,43 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set (int|string|null $value) => Types::int($value, 60);
     }
 
+    // ── DMCA Compliance Settings ──────────────────────────────────────────────
+
+    #[OA\Property(description: 'Enable DMCA compliance enforcement at the queue level.')]
+    public bool $dmca_compliance_enabled = false {
+        set (bool|string|int|null $value) => Types::bool($value, false);
+    }
+
+    #[OA\Property(description: 'Rolling window in minutes for DMCA play-count checks. Default: 180 (3 hours).')]
+    public int $dmca_window_minutes = 180 {
+        set (int|string|null $value) => Types::int($value, 180);
+    }
+
+    #[OA\Property(description: 'Max plays of the same song in the rolling window. DMCA default: 3.')]
+    public int $dmca_max_song_plays = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
+    #[OA\Property(description: 'Max consecutive plays of the same song. DMCA default: 2.')]
+    public int $dmca_max_consecutive_song = 2 {
+        set (int|string|null $value) => Types::int($value, 2);
+    }
+
+    #[OA\Property(description: 'Max plays from the same album in the rolling window. DMCA default: 3.')]
+    public int $dmca_max_album_plays = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
+    #[OA\Property(description: 'Max plays by the same artist in the rolling window. DMCA default: 4.')]
+    public int $dmca_max_artist_plays = 4 {
+        set (int|string|null $value) => Types::int($value, 4);
+    }
+
+    #[OA\Property(description: 'Max consecutive plays by the same artist. DMCA default: 3.')]
+    public int $dmca_max_consecutive_artist = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
     #[OA\Property]
     public bool $analytics_exclude_bots = true {
         set (bool|string|null $value) => Types::bool($value, true, true);
