@@ -30,6 +30,8 @@ use App\Radio\StereoTool;
 use App\Utilities\ScheduleRecurrence;
 use App\Utilities\Types;
 use Carbon\CarbonImmutable;
+use DateTimeImmutable;
+use DateTimeZone;
 use RuntimeException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -516,31 +518,103 @@ final class ConfigWriter implements EventSubscriberInterface
         $scheduleMinutes = [];
 
         if ($backendConfig->ai_news_top_of_hour ?? true) {
-            $scheduleMinutes[] = 0;
+            $scheduleMinutes[] = 59;  // Changed from 0 to 59 - play 1 minute before hour
         }
 
         if ($backendConfig->ai_news_bottom_of_hour ?? false) {
-            $scheduleMinutes[] = 30;
+            $scheduleMinutes[] = 29;  // Changed from 30 to 29
         }
 
         if ([] === $scheduleMinutes) {
-            $scheduleMinutes[] = 0;
+            $scheduleMinutes[] = 59;
         }
 
         $cronMinutes = implode(',', $scheduleMinutes);
         $cronDays = self::buildAiNewsCronDays($backendConfig->ai_news_active_days ?? []);
+
+        // Parse active_hours for Liquidsoap time check
+        $activeHoursStr = $backendConfig->ai_news_active_hours ?? '';
+        $activeHoursCheck = self::buildActiveHoursCheck($activeHoursStr, $station->getTimezoneObject());
 
         $newsBulletinQueueName = 'requests';
         $event->appendBlock(
             <<<LIQ
             news_bulletin_path = {$bulletinPath}
             news_bulletin_request = {$newsBulletinRequest}
+            # Guard: the hourly cron can occasionally double-fire within the same
+            # minute, which pushed the bulletin twice and aired the news back-to-back.
+            # A short cooldown makes a second push within 120s a no-op.
+            last_news_bulletin_push = ref(0.)
+            {$activeHoursCheck}
             def queue_news_bulletin() =
-              requests.push(request.create(news_bulletin_request))
+              now = time()
+              if now - last_news_bulletin_push() >= 120. then
+                if is_within_active_hours() then
+                  last_news_bulletin_push := now
+                  requests.push(request.create(news_bulletin_request))
+                  log("AI News: Queued news bulletin for playback.")
+                else
+                  log("AI News: Skipped - outside active hours window.")
+                end
+              else
+                log("AI News: skipped duplicate news bulletin within cooldown.")
+              end
             end
             cron.add("{$cronMinutes} * * * {$cronDays}", {queue_news_bulletin()})
             LIQ
         );
+    }
+
+    /**
+     * Build Liquidsoap code to check if current time is within active_hours.
+     * Returns empty string if no active_hours configured (always active).
+     */
+    private static function buildActiveHoursCheck(?string $activeHours, DateTimeZone $timezone): string
+    {
+        if (empty($activeHours)) {
+            // No active_hours configured - always active
+            return 'def is_within_active_hours() = true end';
+        }
+
+        // Parse "HH:MM-HH:MM" format
+        if (!preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
+            return 'def is_within_active_hours() = true end';
+        }
+
+        $startHour = (int) $matches[1];
+        $startMin = (int) $matches[2];
+        $endHour = (int) $matches[3];
+        $endMin = (int) $matches[4];
+
+        // Convert to minutes for easier comparison
+        $startMinutes = $startHour * 60 + $startMin;
+        $endMinutes = $endHour * 60 + $endMin;
+
+        if ($startMinutes <= $endMinutes) {
+            // Normal range (e.g., 06:00-22:00)
+            return <<<LIQ
+def is_within_active_hours() =
+  # Get current hour and minute in local time (station timezone)
+  local_time = time()
+  hour = int_of_float(local_time / 3600.0) mod 24
+  minute = int_of_float(local_time / 60.0) mod 60
+  current = hour * 60 + minute
+  current >= {$startMinutes} and current < {$endMinutes}
+end
+LIQ;
+        } else {
+            // Overnight range (e.g., 22:00-06:00)
+            return <<<LIQ
+def is_within_active_hours() =
+  # Get current hour and minute in local time (station timezone)
+  local_time = time()
+  hour = int_of_float(local_time / 3600.0) mod 24
+  minute = int_of_float(local_time / 60.0) mod 60
+  current = hour * 60 + minute
+  current >= {$startMinutes} or current < {$endMinutes}
+end
+LIQ;
+        }
     }
 
     private static function buildAiNewsCronDays(array $activeDays): string
