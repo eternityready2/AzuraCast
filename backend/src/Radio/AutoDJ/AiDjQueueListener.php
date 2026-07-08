@@ -65,6 +65,13 @@ final class AiDjQueueListener implements EventSubscriberInterface
      */
     private const float MAX_NAMEABLE_SONG_SECONDS = 600.0;
 
+    /**
+     * Percent of eligible breaks that become a "combo": TWO segments chained into
+     * ONE clip that sounds like a short conversation (single self-intro, never a
+     * double introduction). Set to 0 to fully disable and restore prior behavior.
+     */
+    private const int COMBO_PROBABILITY_PCT = 30;
+
     public function __construct(
         private readonly AiDjScheduler $scheduler,
         private readonly AiDjGenerator $generator,
@@ -238,8 +245,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $this->cache->set($cooldownKey, time(), 300);
 
         $roll = mt_rand(1, 100);
+        $wantCombo = (mt_rand(1, 100) <= self::COMBO_PROBABILITY_PCT);
 
-        if ($curArtist !== null && $curArtist !== '') {
+        if ($wantCombo) {
+            // Occasionally chain TWO segments into ONE clip so the DJ sounds like
+            // she's having a short conversation (single self-intro, no double
+            // introduction). Fails open to the single-segment paths on any error.
+            $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend);
+        } elseif ($curArtist !== null && $curArtist !== '') {
             // Announce ONLY the song that just played — one song per break for a clean,
             // natural flow. Never pass a "next" song, so the DJ can't chain several
             // song names together in a single break (the "mentioned 3 songs" problem).
@@ -622,6 +635,112 @@ final class AiDjQueueListener implements EventSubscriberInterface
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to push artist history clip: %s', $e->getMessage()));
             $this->pushContentLiner($dj, $station, $backend);
+        }
+    }
+
+    /**
+     * Pick one enabled liner content item, optionally excluding a type so the two
+     * halves of a combo are different categories. Returns null if none available.
+     */
+    private function selectLinerContent(AiDj $dj, Station $station, ?string $excludeType): ?AiDjContent
+    {
+        $linerTypes = $this->getLinerTypes($station);
+        if ($excludeType !== null) {
+            $linerTypes = array_values(array_filter(
+                $linerTypes,
+                static fn(string $t): bool => $t !== $excludeType
+            ));
+        }
+        if ($linerTypes === []) {
+            return null;
+        }
+        $type = $linerTypes[array_rand($linerTypes)];
+        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
+    }
+
+    /**
+     * Queue a COMBO break: two segments rendered as ONE clip. Segment 1 carries
+     * the only self-intro (post-song mention OR artist history OR an intro-bearing
+     * liner); segment 2 is a DIFFERENT, intro-free liner. Any failure falls open
+     * to a normal single-segment content liner. One enqueue + one queue entry, so
+     * the "one clip per break" invariant the cooldown/dedup guards rely on holds.
+     */
+    private function pushComboClip(
+        AiDj $dj,
+        ?string $curArtist,
+        ?string $curTitle,
+        Station $station,
+        Liquidsoap $backend
+    ): void {
+        $enqueued = false;
+        try {
+            $introText = null;
+            $usedType = null;
+            $haveSong = ($curArtist !== null && $curArtist !== '');
+
+            // Segment 1, option A: post-song mention (respect the "don't name the
+            // same song twice" guard — same cache key as pushPostSongClip).
+            if ($haveSong && mt_rand(0, 1) === 1) {
+                $namedKey = 'ai_dj_last_named_' . $station->id;
+                $songKey = strtolower(trim($curArtist . ' - ' . ($curTitle ?? '')));
+                if ($this->cache->get($namedKey) !== $songKey) {
+                    $this->cache->set($namedKey, $songKey, 1800);
+                    $introText = $this->generator->buildPostSongText($dj, $curArtist, $curTitle, null, null, $station);
+                }
+            }
+
+            // Segment 1, option B: artist history (self-IDs); only ever segment 1.
+            if ($introText === null && $haveSong) {
+                $historyText = $this->artistHistoryService->getArtistHistory(
+                    $curArtist,
+                    $this->generator->getSpokenName($dj->getName()),
+                    $station->name
+                );
+                if ($historyText !== null && trim($historyText) !== '') {
+                    $introText = $historyText;
+                }
+            }
+
+            // Segment 1, fallback: an intro-bearing content liner.
+            if ($introText === null) {
+                $c1 = $this->selectLinerContent($dj, $station, null);
+                if ($c1 === null) {
+                    $this->pushContentLiner($dj, $station, $backend);
+                    return;
+                }
+                $introText = $this->generator->buildLinerText($dj, $c1, $station, true);
+                $usedType = $c1->type;
+            }
+
+            // Segment 2: a DIFFERENT liner type, rendered intro-free. If none is
+            // available the combo degrades to a valid single-segment clip.
+            $c2 = $this->selectLinerContent($dj, $station, $usedType);
+            $payloadText = $c2 !== null ? $this->generator->buildLinerText($dj, $c2, $station, false) : '';
+
+            $clipPath = $this->generator->generateComboBreak($dj, $introText, $payloadText, $station);
+            if (null === $clipPath) {
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+
+            $track = sprintf('annotate:title="AI DJ",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $enqueued = true;
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ');
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued COMBO clip for DJ "%s" (segment2: %s, clip: %s)',
+                $dj->getName(),
+                $c2?->type ?? 'single',
+                basename($clipPath)
+            ));
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to push combo clip: %s', $e->getMessage()));
+            // Only fail open if we never enqueued — otherwise a post-enqueue throw
+            // would air a SECOND clip (the "talked twice between songs" bug).
+            if (!$enqueued) {
+                $this->pushContentLiner($dj, $station, $backend);
+            }
         }
     }
 

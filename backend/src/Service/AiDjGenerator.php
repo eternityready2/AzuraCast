@@ -27,6 +27,10 @@ final class AiDjGenerator
     private const string KOKORO_PREFIX = 'kokoro:';
     private const int MAX_TTS_CHARS = 500; // Max characters for TTS to prevent timeouts
 
+    // Per-segment character budget for a two-part combo break. 2*230 + a joining
+    // space = 461 < MAX_TTS_CHARS (500), so a combined clip never hits the cap.
+    private const int COMBO_SEGMENT_CHARS = 230;
+
     public const array KOKORO_VOICES = [
         ['name' => 'Adam (Morning Host)',     'id' => 'kokoro:am_adam',    'gender' => 'male',   'style' => 'calm-energetic'],
         ['name' => 'Michael (Warm Male)',      'id' => 'kokoro:am_michael', 'gender' => 'male',   'style' => 'warm'],
@@ -290,6 +294,27 @@ final class AiDjGenerator
             return null;
         }
 
+        $text = $this->buildPostSongText($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station);
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/post_song_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+    }
+
+    /**
+     * Assemble the spoken post-song text (no rendering). Extracted so a combo
+     * break can use it as its intro-bearing first segment without generating a
+     * separate audio clip. Behavior identical to the previous inline block.
+     */
+    public function buildPostSongText(
+        AiDj $dj,
+        ?string $prevArtist,
+        ?string $prevTitle,
+        ?string $nextArtist,
+        ?string $nextTitle,
+        Station $station
+    ): string {
         $hasNext = ($nextArtist !== null && $nextArtist !== '');
 
         $template = $this->selectRandomPostSongTemplate($dj->getContents(), $hasNext)
@@ -303,7 +328,7 @@ final class AiDjGenerator
             $template = $this->getDefaultPostSong(false);
         }
 
-        $text = $this->replaceTemplateVariables(
+        return $this->replaceTemplateVariables(
             $template,
             [
                 'dj_name' => $this->getSpokenName($dj->getName()),
@@ -315,11 +340,6 @@ final class AiDjGenerator
                 'station_name' => $station->name,
             ]
         );
-
-        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
-        $outputPath = $outputDir . '/post_song_' . uniqid() . '.mp3';
-
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
 
     /**
@@ -426,14 +446,59 @@ final class AiDjGenerator
     }
 
     /**
+     * Render a "combo break": two already-built text segments joined into ONE
+     * TTS clip. Segment 1 carries the single self-intro; segment 2 is intro-free.
+     * One render, one mp3 (no ffmpeg concat -> no mid-clip dead air). An empty
+     * payload degrades cleanly to a valid single-segment clip.
+     */
+    public function generateComboBreak(AiDj $dj, string $introText, string $payloadText, Station $station): ?string
+    {
+        $usedMb = $this->cleanup->checkDiskUsage($station->id);
+        if ($usedMb > self::DISK_LIMIT_MB) {
+            return null;
+        }
+
+        $intro = $this->truncateForTts(trim($introText), self::COMBO_SEGMENT_CHARS);
+        $payload = trim($payloadText);
+        $combined = $payload === ''
+            ? $intro
+            : $intro . ' ' . $this->truncateForTts($payload, self::COMBO_SEGMENT_CHARS);
+
+        if ($combined === '') {
+            return null;
+        }
+
+        $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
+        $outputPath = $outputDir . '/combo_' . uniqid() . '.mp3';
+
+        return $this->generateAudio($combined, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+    }
+
+    /**
      * Build spoken text for a content liner based on its type.
      */
-    private function buildLinerText(AiDj $dj, AiDjContent $content, Station $station): string
+    public function buildLinerText(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro = true): string
     {
         $djName = $this->getSpokenName($dj->getName());
         $stationName = $station->name;
         $text = $content->content;
         $reference = $content->reference;
+
+        if (!$includeIntro) {
+            // Intro-free variant for the SECOND segment of a combo break. Payload
+            // only, with a light connector — NO "This is <dj> on <station>" prefix —
+            // so the DJ never re-introduces herself mid-conversation.
+            return match ($content->type) {
+                AiDjContent::TYPE_BIBLE_VERSE => $reference
+                    ? sprintf("Here's a scripture from %s. %s. Let that truth settle in your heart today.", $reference, $text)
+                    : sprintf("%s. Stay blessed.", $text),
+                AiDjContent::TYPE_JOKE => sprintf("Here's a little something to brighten your day. %s. Hope that put a smile on your face!", $text),
+                AiDjContent::TYPE_ENCOURAGEMENT => sprintf("%s. Remember, you are loved and you are not alone.", $text),
+                AiDjContent::TYPE_TESTIMONY => sprintf("%s. What an amazing testimony.", $text),
+                AiDjContent::TYPE_INSPIRATION, AiDjContent::TYPE_STORY => sprintf("And here's something worth sharing. %s.", $text),
+                default => sprintf("And here's something for you. %s.", $text),
+            };
+        }
 
         return match ($content->type) {
             AiDjContent::TYPE_BIBLE_VERSE => $reference
@@ -686,13 +751,15 @@ final class AiDjGenerator
     /**
      * Truncate text to MAX_TTS_CHARS, breaking at sentence boundary.
      */
-    private function truncateForTts(string $text): string
+    private function truncateForTts(string $text, ?int $limit = null): string
     {
-        if (mb_strlen($text) <= self::MAX_TTS_CHARS) {
+        $max = $limit ?? self::MAX_TTS_CHARS;
+
+        if (mb_strlen($text) <= $max) {
             return $text;
         }
 
-        $truncated = mb_substr($text, 0, self::MAX_TTS_CHARS);
+        $truncated = mb_substr($text, 0, $max);
         // Break at last sentence-ending punctuation
         $lastPeriod = max(
             (int) mb_strrpos($truncated, '.'),
