@@ -167,6 +167,19 @@ final class AiDjArtistHistoryService
 
         $mb = $data['artists'][0];
 
+        // MusicBrainz search is fuzzy and ranks by score, so a query for a Christian
+        // artist can return a high-scoring but WRONG act (e.g. "Steve Green" -> "Green
+        // Day", score 100). Only trust a result whose name matches the artist playing.
+        $normName = static function (string $s): string {
+            $s = (string) preg_replace('/^the\\s+/', '', strtolower(trim($s)));
+            return (string) preg_replace('/[^a-z0-9]+/', '', $s);
+        };
+        if ($normName($artist) === '' || $normName((string)($mb['name'] ?? '')) !== $normName($artist)) {
+            $this->logger->debug('AI DJ Artist: MusicBrainz name mismatch for "' . $artist . '" -> "' . ($mb['name'] ?? '') . '"');
+            $this->cache->set($cacheKey, 'none', 86400);
+            return null;
+        }
+
         // Only trust a strong match.
         if ((int)($mb['score'] ?? 0) < 85) {
             $this->cache->set($cacheKey, 'none', 86400);

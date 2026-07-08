@@ -592,7 +592,7 @@ final class QueueBuilder implements EventSubscriberInterface
             }
 
             $media = $this->em->find(StationMedia::class, $item->media_id);
-            if ($media instanceof StationMedia && MediaPlayability::isEligibleForPlayback($media, $expectedPlayTime)) {
+            if (!$media instanceof StationMedia || MediaPlayability::isEligibleForPlayback($media, $expectedPlayTime)) {
                 $filtered[] = $item;
             }
         }

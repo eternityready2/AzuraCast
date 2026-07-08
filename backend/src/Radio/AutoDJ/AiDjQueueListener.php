@@ -188,7 +188,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             if (null === $this->cache->get($welcomedKey)) {
                 // 6h: longer than any single program gap, shorter than the 24h loop
                 // so the same DJ's next-day shift still gets a fresh welcome.
-                $this->cache->set($welcomedKey, time(), 21600);
+                $this->cache->set($welcomedKey, time(), 72000);
                 $this->pushIntroShiftClip($dj, $station, $backend);
                 $this->cache->set($cooldownKey, time(), 300);
                 $this->trackCurrentSong($station);
@@ -560,6 +560,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $queueEntry = new StationQueue($station, $song);
             $queueEntry->is_visible = true;
             $queueEntry->autodj_custom_uri = $clipPath;
+            // Already played via the Requests queue (enqueue above) -> mark sent/played
+            // so the main next_song queue does NOT play it a SECOND time (client's "said
+            // the same Bible verse twice" duplicate). Still visible for now-playing/history.
+            $queueEntry->is_played = true;
 
             $this->em->persist($queueEntry);
             $this->em->flush();
