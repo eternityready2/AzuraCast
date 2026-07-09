@@ -183,6 +183,20 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         // Fire shift intro when a new DJ block begins. Only ONE clip per break.
         if ($currentDjId !== null && $previousDjId !== $currentDjId && $dj instanceof AiDj) {
+            // STRICT SCHEDULE: the queue is built several minutes ahead, so
+            // $expectedPlayTime can cross a shift boundary before the clip actually
+            // airs. That made a DJ welcome herself EARLY (client: "Bella welcomes 6
+            // min early"). Require the shift to have ACTUALLY begun in real time
+            // before welcoming; if not, revert the transition marker and wait so
+            // nothing airs before the DJ's appointed start. The welcome then fires
+            // on a later build cycle once the shift has truly started.
+            $djNow = $this->scheduler->findActiveDj($station->id, new \DateTimeImmutable('now'));
+            if (!$djNow instanceof AiDj || $djNow->getId() !== $currentDjId) {
+                $this->cache->set($cacheKey, $previousDjId, 3600);
+                $this->trackCurrentSong($station);
+                return;
+            }
+
             // WELCOME ONCE PER SHIFT. 'ai_dj_last_active' (3600s TTL) is only
             // refreshed when this listener runs on a BuildQueue event. During a long
             // single-file PROGRAM (~59-min CMS block) no track is requested, no
