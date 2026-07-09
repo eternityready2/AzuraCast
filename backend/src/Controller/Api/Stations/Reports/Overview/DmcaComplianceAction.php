@@ -11,17 +11,6 @@ use App\OpenApi;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
-/**
- * FILE LOCATION: backend/src/Controller/Api/Stations/Reports/Overview/DmcaComplianceAction.php
- *
- * REGISTER ROUTE in backend/config/routes/api_station.php
- * Add this block alongside the other /overview/* routes:
- *
- *   $group->get(
- *       '/overview/dmca-compliance',
- *       Controller\Api\Stations\Reports\Overview\DmcaComplianceAction::class
- *   )->setName('api:stations:reports:overview-dmca-compliance');
- */
 #[OA\Get(
     path: '/station/{station_id}/reports/overview/dmca-compliance',
     operationId: 'getStationReportDmcaCompliance',
@@ -52,39 +41,25 @@ final class DmcaComplianceAction extends AbstractReportAction
         $station   = $request->getStation();
         $config    = $station->backend_config;
 
-        // Pull recent play history for the rolling DMCA window — MUSIC ONLY.
-        // DMCA § 114 limits apply to music sound recordings, so station IDs,
-        // promos/ads, spoken-word (talk), DJ/news clips (no media), and long-form
-        // programs are excluded so they never appear "at limit" in the report.
-        $windowMinutes = $config->dmca_window_minutes ?? 180;
-        $now       = new \DateTimeImmutable('now', $station->getTimezoneObject());
-        $threshold = $now->sub(new \DateInterval('PT' . $windowMinutes . 'M'));
-        try {
-            $history = $this->em->createQuery(
-                <<<'DQL'
-                    SELECT sq.song_id AS song_id, sq.title AS title, sq.artist AS artist
-                    FROM App\Entity\StationQueue sq
-                    JOIN sq.media sm
-                    WHERE sq.station = :station
-                    AND (sq.is_played = 0 OR sq.timestamp_played >= :threshold)
-                    AND sm.type = 'music' AND sm.length <= 600
-                    ORDER BY sq.timestamp_played DESC
-                DQL
-            )->setParameter('station', $station)
-                ->setParameter('threshold', $threshold)
-                ->getArrayResult();
-        } catch (\Throwable $e) {
-            // Fail-safe: if the music-only query errors, fall back to the shared
-            // method so the report still renders.
-            $history = $this->queueRepo->getRecentlyPlayedByTimeRange($station, $now, $windowMinutes);
-        }
+        // Pull recent play history for the date range window.
+        $now     = new \DateTimeImmutable('now', $station->getTimezoneObject());
+        $history = $this->queueRepo->getRecentlyPlayedByTimeRange(
+            $station,
+            $now,
+            $config->dmca_window_minutes ?? 180
+        );
 
-        // Build play counts per song, album, artist.
+        // Build play counts per song, album, artist — music only.
         $songCounts   = [];
         $albumCounts  = [];
         $artistCounts = [];
 
         foreach ($history as $row) {
+            // Skip non-music content (IDs, talk, promos, ads)
+            if (($row['media_type'] ?? 'music') !== 'music') {
+                continue;
+            }
+
             $songId = $row['song_id'] ?? null;
             $album  = strtolower(trim($row['album'] ?? ''));
             $artist = strtolower(trim($row['artist'] ?? ''));
@@ -104,9 +79,14 @@ final class DmcaComplianceAction extends AbstractReportAction
         $maxAlbum  = $config->dmca_max_album_plays   ?? 3;
         $maxArtist = $config->dmca_max_artist_plays  ?? 4;
 
-        // Songs approaching or exceeding limits.
+        // Songs approaching or exceeding limits — music only.
         $warnings = [];
         foreach ($history as $row) {
+            // Skip non-music content
+            if (($row['media_type'] ?? 'music') !== 'music') {
+                continue;
+            }
+
             $songId = $row['song_id'] ?? null;
             $title  = $row['title'] ?? '';
             $artist = $row['artist'] ?? '';
@@ -116,9 +96,9 @@ final class DmcaComplianceAction extends AbstractReportAction
                 continue;
             }
 
-            $plays         = $songCounts[$songId]                          ?? 0;
-            $albumPlays    = $albumCounts[strtolower(trim($album))]        ?? 0;
-            $artistPlays   = $artistCounts[strtolower(trim($artist))]      ?? 0;
+            $plays       = $songCounts[$songId]                     ?? 0;
+            $albumPlays  = $albumCounts[strtolower(trim($album))]   ?? 0;
+            $artistPlays = $artistCounts[strtolower(trim($artist))] ?? 0;
 
             $issues = [];
 
@@ -155,14 +135,14 @@ final class DmcaComplianceAction extends AbstractReportAction
         }
 
         return $response->withJson([
-            'enabled'       => $config->dmca_compliance_enabled ?? false,
+            'enabled'        => $config->dmca_compliance_enabled ?? false,
             'window_minutes' => $config->dmca_window_minutes ?? 180,
-            'limits'        => [
-                'max_song_plays'            => $maxSong,
-                'max_consecutive_song'      => $config->dmca_max_consecutive_song    ?? 2,
-                'max_album_plays'           => $maxAlbum,
-                'max_artist_plays'          => $maxArtist,
-                'max_consecutive_artist'    => $config->dmca_max_consecutive_artist  ?? 3,
+            'limits'         => [
+                'max_song_plays'         => $maxSong,
+                'max_consecutive_song'   => $config->dmca_max_consecutive_song   ?? 2,
+                'max_album_plays'        => $maxAlbum,
+                'max_artist_plays'       => $maxArtist,
+                'max_consecutive_artist' => $config->dmca_max_consecutive_artist ?? 3,
             ],
             'total_plays_in_window' => count($history),
             'warnings'      => array_values($warnings),
