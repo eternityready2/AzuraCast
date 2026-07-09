@@ -300,6 +300,8 @@
 
                 </div>
             </form-fieldset>
+
+            <dmca-compliance-form v-model="form.backend_config" />
         </template>
     </tab>
 </template>
@@ -318,6 +320,7 @@ import {AudioProcessingMethods, BackendAdapters, CrossfadeModes, MasterMePresets
 import {storeToRefs} from "pinia";
 import {useAdminStationsForm} from "~/components/Admin/Stations/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
+import DmcaComplianceForm from "~/components/Admin/Stations/Form/DmcaComplianceForm.vue";
 
 const props = defineProps<{
     isStereoToolInstalled: boolean
