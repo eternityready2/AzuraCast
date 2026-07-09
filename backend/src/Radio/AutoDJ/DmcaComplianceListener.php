@@ -28,7 +28,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * playback due to its own errors. All rejections are logged with full detail.
  *
  * Priority -5: runs AFTER QueueBuilder selects the song, BEFORE Annotations
- * writes it to Liquidsoap. Works with standard playlists AND custom clock wheels.
+ * writes it to Liquidsop. Works with standard playlists AND custom clock wheels.
  */
 final class DmcaComplianceListener implements EventSubscriberInterface
 {
@@ -95,6 +95,8 @@ final class DmcaComplianceListener implements EventSubscriberInterface
         Station $station,
         \DateTimeImmutable $expectedPlayTime,
     ): bool {
+
+         if ($entry->media?->type !== 'music') { return true; }
         $config = $station->backend_config;
 
         $windowMinutes           = $config->dmca_window_minutes           ?? self::DEFAULT_WINDOW_MINUTES;

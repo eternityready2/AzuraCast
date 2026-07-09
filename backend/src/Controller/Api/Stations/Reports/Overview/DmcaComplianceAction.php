@@ -52,13 +52,32 @@ final class DmcaComplianceAction extends AbstractReportAction
         $station   = $request->getStation();
         $config    = $station->backend_config;
 
-        // Pull recent play history for the date range window.
-        $now     = new \DateTimeImmutable('now', $station->getTimezoneObject());
-        $history = $this->queueRepo->getRecentlyPlayedByTimeRange(
-            $station,
-            $now,
-            $config->dmca_window_minutes ?? 180
-        );
+        // Pull recent play history for the rolling DMCA window — MUSIC ONLY.
+        // DMCA § 114 limits apply to music sound recordings, so station IDs,
+        // promos/ads, spoken-word (talk), DJ/news clips (no media), and long-form
+        // programs are excluded so they never appear "at limit" in the report.
+        $windowMinutes = $config->dmca_window_minutes ?? 180;
+        $now       = new \DateTimeImmutable('now', $station->getTimezoneObject());
+        $threshold = $now->sub(new \DateInterval('PT' . $windowMinutes . 'M'));
+        try {
+            $history = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sq.song_id AS song_id, sq.title AS title, sq.artist AS artist
+                    FROM App\Entity\StationQueue sq
+                    JOIN sq.media sm
+                    WHERE sq.station = :station
+                    AND (sq.is_played = 0 OR sq.timestamp_played >= :threshold)
+                    AND sm.type = 'music' AND sm.length <= 600
+                    ORDER BY sq.timestamp_played DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('threshold', $threshold)
+                ->getArrayResult();
+        } catch (\Throwable $e) {
+            // Fail-safe: if the music-only query errors, fall back to the shared
+            // method so the report still renders.
+            $history = $this->queueRepo->getRecentlyPlayedByTimeRange($station, $now, $windowMinutes);
+        }
 
         // Build play counts per song, album, artist.
         $songCounts   = [];
