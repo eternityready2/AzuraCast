@@ -70,7 +70,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * ONE clip that sounds like a short conversation (single self-intro, never a
      * double introduction). Set to 0 to fully disable and restore prior behavior.
      */
-    private const int COMBO_PROBABILITY_PCT = 0;
+    private const int COMBO_PROBABILITY_PCT = 35;
 
     public function __construct(
         private readonly AiDjScheduler $scheduler,
