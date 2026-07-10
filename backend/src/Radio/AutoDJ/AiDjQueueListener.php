@@ -712,19 +712,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 }
             }
 
-            // Segment 1, option B: artist history (self-IDs); only ever segment 1.
-            if ($introText === null && $haveSong) {
-                $historyText = $this->artistHistoryService->getArtistHistory(
-                    $curArtist,
-                    $this->generator->getSpokenName($dj->getName()),
-                    $station->name
-                );
-                if ($historyText !== null && trim($historyText) !== '') {
-                    $introText = $historyText;
-                }
-            }
-
             // Segment 1, fallback: an intro-bearing content liner.
+            // NOTE: artist history is deliberately NOT used as a combo segment. Its
+            // full script (intro + facts + closer) runs ~250-320 chars, over the
+            // per-segment budget, and truncateForTts keeps only COMPLETE sentences -
+            // so the long facts sentence gets dropped and only the bare "here's a
+            // little music history for you" PROMISE survives, with no history behind
+            // it, followed by an unrelated payload. That is exactly the client's
+            // "said music history but gave none, then encouragement" bug. Artist
+            // history stays a full STANDALONE break (pushArtistHistoryClip), where it
+            // airs untruncated with the real facts intact.
             if ($introText === null) {
                 $c1 = $this->selectLinerContent($dj, $station, null);
                 if ($c1 === null) {
