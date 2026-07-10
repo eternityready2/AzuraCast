@@ -70,7 +70,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * ONE clip that sounds like a short conversation (single self-intro, never a
      * double introduction). Set to 0 to fully disable and restore prior behavior.
      */
-    private const int COMBO_PROBABILITY_PCT = 35;
+    private const int COMBO_PROBABILITY_PCT = 50;
 
     public function __construct(
         private readonly AiDjScheduler $scheduler,
@@ -157,6 +157,15 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $minute = (int) $now->format('i');
         if ($minute <= 3) {
             $this->logger->debug('AI DJ: Skipped - post-hour buffer (minute ' . $minute . ').');
+            return;
+        }
+
+        // DJ QUIET WINDOW (client request): no DJ talk in the last 5 minutes before
+        // the top of the hour (:55-:00), so a DJ never speaks over the top-of-hour
+        // station ID. Check the projected airtime minute too, since clips queue ahead.
+        $playMinute = (int) $expectedPlayTime->setTimezone($station->getTimezoneObject())->format('i');
+        if ($minute >= 55 || $playMinute >= 55) {
+            $this->logger->debug('AI DJ: Skipped - DJ quiet window :55-:00 before top of hour.');
             return;
         }
 
