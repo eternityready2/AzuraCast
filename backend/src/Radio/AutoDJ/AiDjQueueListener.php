@@ -160,20 +160,20 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        // DJ QUIET WINDOW (client request): no DJ talk in the last 5 minutes before
-        // the top of the hour (:55-:00). A DJ clip is enqueued AHEAD and airs when the
-        // CURRENT song ends, which can be several minutes after expectedPlayTime (queue
-        // drift) - the minute-gate alone once let a clip air at :58. So check THREE times:
-        //   1. current clock minute already in the window;
-        //   2. the queue's own estimate lands in the window;
-        //   3. the REAL airtime (current song's end) lands in the window.
+        // DJ QUIET WINDOW (client request): keep a DJ off the air before the top of the
+        // hour so she never steps on the station ID / news. A DJ clip is enqueued AHEAD
+        // and airs when the current (or a queued) song ends, which can be several minutes
+        // after it's decided - a 7-minute song once pushed a break to :55:48, a long song
+        // once to :58. Because that drift can exceed a single song, she WINDS DOWN at :50
+        // (stops STARTING new breaks); we ALSO block on the queue's estimate and on the
+        // current song's real end time. Net effect: nothing airs in :55-:00.
         $playMinute = (int) $expectedPlayTime->setTimezone($station->getTimezoneObject())->format('i');
         $songEnd = $this->getCurrentSongEndTime($station);
         $endMinute = $songEnd !== null
             ? (int) $songEnd->setTimezone($station->getTimezoneObject())->format('i')
             : -1;
-        if ($minute >= 55 || $playMinute >= 55 || $endMinute >= 55) {
-            $this->logger->debug('AI DJ: Skipped - DJ quiet window :55-:00 before top of hour.', [
+        if ($minute >= 50 || $playMinute >= 55 || $endMinute >= 55) {
+            $this->logger->debug('AI DJ: Skipped - DJ winding down before top of hour.', [
                 'now_min' => $minute, 'queue_min' => $playMinute, 'song_end_min' => $endMinute,
             ]);
             return;
