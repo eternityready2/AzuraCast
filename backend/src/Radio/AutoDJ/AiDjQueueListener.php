@@ -161,11 +161,21 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         // DJ QUIET WINDOW (client request): no DJ talk in the last 5 minutes before
-        // the top of the hour (:55-:00), so a DJ never speaks over the top-of-hour
-        // station ID. Check the projected airtime minute too, since clips queue ahead.
+        // the top of the hour (:55-:00). A DJ clip is enqueued AHEAD and airs when the
+        // CURRENT song ends, which can be several minutes after expectedPlayTime (queue
+        // drift) - the minute-gate alone once let a clip air at :58. So check THREE times:
+        //   1. current clock minute already in the window;
+        //   2. the queue's own estimate lands in the window;
+        //   3. the REAL airtime (current song's end) lands in the window.
         $playMinute = (int) $expectedPlayTime->setTimezone($station->getTimezoneObject())->format('i');
-        if ($minute >= 55 || $playMinute >= 55) {
-            $this->logger->debug('AI DJ: Skipped - DJ quiet window :55-:00 before top of hour.');
+        $songEnd = $this->getCurrentSongEndTime($station);
+        $endMinute = $songEnd !== null
+            ? (int) $songEnd->setTimezone($station->getTimezoneObject())->format('i')
+            : -1;
+        if ($minute >= 55 || $playMinute >= 55 || $endMinute >= 55) {
+            $this->logger->debug('AI DJ: Skipped - DJ quiet window :55-:00 before top of hour.', [
+                'now_min' => $minute, 'queue_min' => $playMinute, 'song_end_min' => $endMinute,
+            ]);
             return;
         }
 
@@ -432,6 +442,42 @@ final class AiDjQueueListener implements EventSubscriberInterface
             ];
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to load current song from history: %s', $e->getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * Projected end time (= break airtime) of the song currently on air. A DJ clip
+     * enqueues to Requests and airs when the current song finishes, so this is the
+     * most accurate estimate of when the clip is actually heard - more reliable than
+     * the queue's expectedPlayTime, which under-estimates and once let a clip air at
+     * :58 inside the quiet window. Null when timing is unknown (caller then relies on
+     * the clock-minute + expectedPlayTime checks).
+     */
+    private function getCurrentSongEndTime(Station $station): ?\DateTimeImmutable
+    {
+        try {
+            /** @var \App\Entity\SongHistory|null $last */
+            $last = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.is_visible = 1
+                    AND sh.media IS NOT NULL
+                    ORDER BY sh.timestamp_start DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            if ($last === null || $last->duration === null || $last->duration <= 0.0) {
+                return null;
+            }
+
+            $endTs = $last->timestamp_start->getTimestamp() + (int) ceil($last->duration);
+            return (new \DateTimeImmutable('@' . $endTs))->setTimezone($station->getTimezoneObject());
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: song-end timing check failed: %s', $e->getMessage()));
             return null;
         }
     }
