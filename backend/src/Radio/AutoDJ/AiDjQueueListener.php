@@ -714,12 +714,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
     private function selectLinerContent(AiDj $dj, Station $station, ?string $excludeType): ?AiDjContent
     {
         $linerTypes = $this->getLinerTypes($station);
-        if ($excludeType !== null) {
-            $linerTypes = array_values(array_filter(
-                $linerTypes,
-                static fn(string $t): bool => $t !== $excludeType
-            ));
-        }
+        // Keep LONG, self-contained content OUT of combos. Testimonies avg ~270 chars,
+        // stories ~410, but a combo segment is capped at COMBO_SEGMENT_CHARS (230) and
+        // truncateForTts then drops the payoff - it aired "Jim Vaus, wiretapper for
+        // Mickey Cohen" and cut the conversion before the joke, same failure as artist
+        // history. These still air FULL as standalone liners; combos use short content.
+        $comboExcluded = [AiDjContent::TYPE_TESTIMONY, AiDjContent::TYPE_STORY];
+        $linerTypes = array_values(array_filter(
+            $linerTypes,
+            static fn(string $t): bool => !in_array($t, $comboExcluded, true) && $t !== $excludeType
+        ));
         if ($linerTypes === []) {
             return null;
         }
