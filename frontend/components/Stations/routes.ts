@@ -62,6 +62,21 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:ai_news'
                 },
                 {
+                    path: 'top_of_hour',
+                    component: () => import('~/components/Stations/TopOfHour.vue'),
+                    name: 'stations:top_of_hour'
+                },
+                {
+                    path: 'crossfade_profiles',
+                    component: () => import('~/components/Stations/CrossfadeProfiles.vue'),
+                    name: 'stations:crossfade_profiles'
+                },
+                {
+                    path: 'ai_dj',
+                    component: () => import('~/components/Stations/AiDj.vue'),
+                    name: 'stations:ai_dj'
+                },
+                {
                     path: 'logs',
                     component: () => import('~/components/Stations/Logs.vue'),
                     name: 'stations:logs'

@@ -416,6 +416,32 @@
                     </li>
                 </ul>
             </template>
+
+            <template v-if="recentEvents.length > 0">
+                <h3 class="h5 mt-4 mb-2">
+                    {{ $gettext('Recent wheel events') }}
+                </h3>
+                <ul class="list-group list-group-flush">
+                    <li
+                        v-for="ev in recentEvents"
+                        :key="ev.id"
+                        class="list-group-item px-0 small d-flex justify-content-between gap-2"
+                    >
+                        <span>
+                            <code>{{ ev.event_kind }}</code>
+                            <span v-if="ev.anchor_type"> · {{ ev.anchor_type }}</span>
+                            <span v-if="ev.sound_code"> · {{ ev.sound_code }}</span>
+                            <span
+                                v-if="ev.fallback_reason"
+                                class="text-warning"
+                            > · {{ ev.fallback_reason }}</span>
+                        </span>
+                        <span class="text-muted text-nowrap">
+                            {{ formatIsoAsDateTime(ev.event_timestamp) }}
+                        </span>
+                    </li>
+                </ul>
+            </template>
         </loading>
 
         <analytics-modal ref="$analyticsModal" />
@@ -464,6 +490,7 @@ const {
     analyticsUrl,
     conflictMessage,
     upcomingWheelEvents,
+    recentEvents,
     isLoading,
     lastUpdatedAt,
     refresh,

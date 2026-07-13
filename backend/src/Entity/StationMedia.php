@@ -57,6 +57,19 @@ final class StationMedia implements
     #[ORM\Column(length: 20, nullable: false, options: ['default' => 'music'])]
     public string $type = 'music';
 
+    /** When true, AutoDJ and clock wheels skip this track. */
+    #[ORM\Column]
+    public bool $do_not_play = false;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    public ?string $do_not_play_reason = null {
+        set => $this->truncateNullableString($value, 255);
+    }
+
+    /** When set, DNP expires at this time (station-local semantics via API). */
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    public ?\DateTimeImmutable $do_not_play_until = null;
+
     #[
         ORM\ManyToOne,
         ORM\JoinColumn(name: 'category_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')

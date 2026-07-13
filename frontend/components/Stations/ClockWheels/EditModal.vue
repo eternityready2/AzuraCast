@@ -29,7 +29,14 @@
         >
             <button
                 type="button"
-                class="btn btn-danger me-auto"
+                class="btn btn-outline-secondary me-auto"
+                @click="doExportJson"
+            >
+                {{ $gettext('Export JSON') }}
+            </button>
+            <button
+                type="button"
+                class="btn btn-danger"
                 @click="doDeleteFromModal"
             >
                 {{ $gettext('Delete') }}
@@ -70,14 +77,14 @@ import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
 } from '~/functions/clockWheelPosition.ts';
-import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {
+    defaultClockWheelSlotEditorRow,
+    mapApiSlotToEditorRow,
+    mapEditorRowToApiSlot,
+    type ClockWheelSlotEditorRow,
+} from '~/functions/clockWheelSlotEditor.ts';
 
-interface ClockWheelEntry {
-    type: MediaTypeValue;
-    algorithm: string;
-    position_seconds: number;
-    duration_seconds: number | null;
-}
+interface ClockWheelEntry extends ClockWheelSlotEditorRow {}
 
 const props = defineProps<BaseEditModalProps & {
     templatesUrl: string;
@@ -85,7 +92,7 @@ const props = defineProps<BaseEditModalProps & {
 const emit = defineEmits<BaseEditModalEmits>();
 
 const $modal = useTemplateRef('$modal');
-const {notifySuccess} = useNotify();
+const {notifySuccess, notifyError} = useNotify();
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
@@ -127,12 +134,8 @@ const {r$} = useAppRegle(form, {
     burn_rate_max_plays_24h: {},
 });
 
-const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
-    type: 'music',
-    algorithm: 'random',
-    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
-    duration_seconds: null,
-});
+const defaultEntry = (positionSeconds: number): ClockWheelEntry =>
+    defaultClockWheelSlotEditorRow(positionSeconds);
 
 const addEntry = () => {
     sortClockWheelEntries(entries);
@@ -206,11 +209,6 @@ const resetForm = () => {
     entries.splice(0, entries.length);
 };
 
-const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
-    const allowed: MediaTypeValue[] = ['music', 'talk', 'id', 'promo', 'ad'];
-    return allowed.includes(type as MediaTypeValue) ? (type as MediaTypeValue) : 'music';
-};
-
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, {
         ...data,
@@ -219,18 +217,8 @@ const populateForm = (data: Record<string, unknown>) => {
         daypart_id: data.daypart_id != null ? Number(data.daypart_id) : null,
     });
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {
-            type?: string | null;
-            algorithm?: string;
-            position_seconds?: number;
-            duration_seconds?: number | null;
-        }[]).map(
-            (s) => ({
-                type: normalizeSlotType(s.type),
-                algorithm: s.algorithm ?? 'random',
-                position_seconds: s.position_seconds ?? 0,
-                duration_seconds: s.duration_seconds ?? null,
-            })
+        const converted = (data.slots as Record<string, unknown>[]).map((s) =>
+            mapApiSlotToEditorRow(s)
         );
         entries.splice(0, entries.length, ...converted);
         sortClockWheelEntries(entries);
@@ -253,13 +241,7 @@ const validateForm = async () => {
     };
 
     if (!inheritSlots) {
-        payload.slots = entries.map((e) => ({
-            type: e.type,
-            category_id: null,
-            algorithm: e.algorithm,
-            position_seconds: e.position_seconds,
-            duration_seconds: e.duration_seconds,
-        }));
+        payload.slots = entries.map((e) => mapEditorRowToApiSlot(e));
     }
 
     return {valid, data: payload};
@@ -306,6 +288,26 @@ const doDeleteFromModal = () => {
     if (editUrl.value) {
         $modal.value?.hide();
         void doDelete(editUrl.value);
+    }
+};
+
+const doExportJson = async () => {
+    if (!editUrl.value) {
+        return;
+    }
+
+    try {
+        const exportUrl = editUrl.value.replace(/\/?$/, '') + '/export';
+        const {data} = await axios.get<Record<string, unknown>>(exportUrl);
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${form.value.name || 'clock-wheel'}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    } catch {
+        notifyError($gettext('Could not export clock wheel.'));
     }
 };
 

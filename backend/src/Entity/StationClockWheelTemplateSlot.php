@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
+use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use Doctrine\ORM\Mapping as ORM;
@@ -60,6 +61,21 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
     public ClockWheelSlotAlgorithms $algorithm = ClockWheelSlotAlgorithms::Random;
 
     #[
+        OA\Property(example: 'restrict_pool'),
+        ORM\Column(type: 'string', length: 30, enumType: ClockWheelSlotPoolModes::class)
+    ]
+    public ClockWheelSlotPoolModes $pool_mode = ClockWheelSlotPoolModes::RestrictPool;
+
+    #[ORM\Column]
+    public bool $separation_override_enabled = false;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_artist_minutes = null;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_title_minutes = null;
+
+    #[
         OA\Property(example: 0),
         ORM\Column(type: 'smallint', options: ['unsigned' => true]),
         Assert\Range(min: 0, max: 3599)
@@ -78,6 +94,21 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
         Assert\PositiveOrZero
     ]
     public ?int $duration_seconds = null;
+
+    #[ORM\Column]
+    public bool $is_hard_anchor = false;
+
+    #[
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 100)
+    ]
+    public ?int $research_score = null;
+
+    #[
+        ORM\Column(length: 20, nullable: true),
+        Assert\Length(max: 20)
+    ]
+    public ?string $sound_code = null;
 
     public function __construct(StationClockWheelTemplate $template)
     {

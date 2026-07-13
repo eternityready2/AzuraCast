@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ\ClockWheel;
 
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
@@ -18,7 +19,10 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
-            AnnotateNextSong::class => ['applyClockWheelCap', 11],
+            AnnotateNextSong::class => [
+                ['applyClockWheelCap', 11],
+                ['applyLegalIdQuickCut', 9],
+            ],
         ];
     }
 
@@ -34,7 +38,13 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         }
 
         if (null === $queue->clock_wheel || !$queue->clock_wheel_enforce_cap) {
-            return;
+            if (!$queue->hour_boundary_enforce_cap) {
+                return;
+            }
+
+            $maxSeconds = $queue->hour_boundary_max_play_seconds;
+        } else {
+            $maxSeconds = $queue->clock_wheel_max_play_seconds;
         }
 
         $media = $event->getMedia();
@@ -42,7 +52,6 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
             return;
         }
 
-        $maxSeconds = $queue->clock_wheel_max_play_seconds;
         if (null === $maxSeconds || $maxSeconds <= 0) {
             return;
         }
@@ -65,5 +74,32 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         ]);
 
         $queue->duration = $cueOut;
+    }
+
+    public function applyLegalIdQuickCut(AnnotateNextSong $event): void
+    {
+        if (!$event->isAsAutoDj()) {
+            return;
+        }
+
+        $queue = $event->getQueue();
+        if (!$queue instanceof StationQueue) {
+            return;
+        }
+
+        $media = $event->getMedia();
+        $isLegalId = ($queue->top_of_hour_legal_id ?? false)
+            || ($queue->clock_wheel_legal_id_substitute ?? false)
+            || ($media instanceof StationMedia && StationMediaTypes::isStationId($media->type));
+
+        if (!$isLegalId) {
+            return;
+        }
+
+        $event->addAnnotations([
+            'autocue_fade_in' => 0.0,
+            'autocue_fade_out' => 0.0,
+            'autocue_start_next' => null,
+        ]);
     }
 }

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\StationClockWheel;
+use App\Entity\StationClockWheelSlot;
 use App\Entity\StationClockWheelTemplate;
+use DateTimeImmutable;
 
 /**
  * Per-wheel separation and burn-rate limits (PR9), with optional daypart overrides (PR10).
@@ -18,6 +20,23 @@ final class ClockWheelSeparationSettings
         public int $titleMinutes = 90,
         public ?int $burnRateMaxPlays24h = null,
     ) {
+    }
+
+    /**
+     * Resolve effective settings: slot override → daypart → wheel → template.
+     */
+    public static function resolveForSlot(StationClockWheelSlot $slot, StationClockWheel $wheel): self
+    {
+        if ($slot->separation_override_enabled) {
+            return new self(
+                enabled: true,
+                artistMinutes: max(1, $slot->separation_artist_minutes ?? 45),
+                titleMinutes: max(1, $slot->separation_title_minutes ?? 90),
+                burnRateMaxPlays24h: null,
+            );
+        }
+
+        return self::resolveForWheel($wheel);
     }
 
     /**
@@ -77,5 +96,60 @@ final class ClockWheelSeparationSettings
         }
 
         return $minutes;
+    }
+
+    /**
+     * Resolve daypart separation for playlist-only AutoDJ when no clock wheel is active (Phase E).
+     */
+    public static function resolveForStationHour(
+        \App\Entity\Station $station,
+        DateTimeImmutable $when,
+    ): ?self {
+        $tz = $station->getTimezoneObject();
+        $hour = (int)\Carbon\CarbonImmutable::instance($when)->setTimezone($tz)->format('G');
+
+        foreach ($station->clock_dayparts as $daypart) {
+            if (!$daypart->is_active || !$daypart->separation_override_enabled) {
+                continue;
+            }
+
+            $hours = self::hoursInDaypartRange($daypart->start_hour, $daypart->end_hour);
+            if (!in_array($hour, $hours, true)) {
+                continue;
+            }
+
+            return new self(
+                enabled: $daypart->separation_enabled,
+                artistMinutes: max(1, $daypart->separation_artist_minutes ?? 45),
+                titleMinutes: max(1, $daypart->separation_title_minutes ?? 90),
+                burnRateMaxPlays24h: $daypart->burn_rate_max_plays_24h,
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * @return int[]
+     */
+    private static function hoursInDaypartRange(int $startHour, int $endHour): array
+    {
+        $hours = [];
+        if ($startHour <= $endHour) {
+            for ($h = $startHour; $h <= $endHour; $h++) {
+                $hours[] = $h;
+            }
+
+            return $hours;
+        }
+
+        for ($h = $startHour; $h <= 23; $h++) {
+            $hours[] = $h;
+        }
+        for ($h = 0; $h <= $endHour; $h++) {
+            $hours[] = $h;
+        }
+
+        return $hours;
     }
 }

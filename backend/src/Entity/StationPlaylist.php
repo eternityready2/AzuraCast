@@ -103,6 +103,50 @@ final class StationPlaylist implements
     ]
     public PlaylistOrders $order;
 
+    /**
+     * @deprecated Unused — Smart Shuffle removed; kept for existing DB rows.
+     * NULL uses the default (5).
+     */
+    #[
+        OA\Property(example: 5, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $smart_shuffle_distance = null;
+
+    /**
+     * Minimum days between repeats of the same track from this playlist (positive rotation goal).
+     * NULL disables rotation goal enforcement.
+     */
+    #[
+        OA\Property(example: 7, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $rotation_goal_days = null {
+        set (int|string|null $value) {
+            if (null === $value || '' === $value) {
+                $this->rotation_goal_days = null;
+                return;
+            }
+
+            $days = (int)$value;
+            $this->rotation_goal_days = $days > 0 ? $days : null;
+        }
+    }
+
+    /**
+     * Optional named crossfade profile (see station crossfade_profiles in backend_config).
+     */
+    #[
+        OA\Property(example: 'quick_id', nullable: true),
+        ORM\Column(length: 50, nullable: true)
+    ]
+    public ?string $crossfade_profile = null {
+        set (string|null $value) {
+            $value = null !== $value ? trim($value) : null;
+            $this->crossfade_profile = ('' === $value) ? null : $value;
+        }
+    }
+
     #[
         OA\Property(example: "https://remote-url.example.com/stream.mp3"),
         ORM\Column(length: 255, nullable: true)

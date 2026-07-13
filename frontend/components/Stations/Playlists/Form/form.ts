@@ -39,6 +39,8 @@ export const useStationsPlaylistsForm = defineStore(
             play_per_hour_minute: 0,
             include_in_requests: true,
             avoid_duplicates: true,
+            rotation_goal_days: null as number | null,
+            crossfade_profile: null as string | null,
             backend_options: [],
             schedule_items: []
         });
@@ -68,6 +70,8 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.play_per_hour_minute,
                         fields.include_in_requests,
                         fields.avoid_duplicates,
+                        fields.rotation_goal_days,
+                        fields.crossfade_profile,
                     ],
                     advancedTab: [
                         fields.backend_options

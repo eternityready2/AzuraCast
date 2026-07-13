@@ -37,6 +37,9 @@ export const useStationsMediaForm = defineStore(
                 isrc: null,
                 type: 'music',
                 category_id: null,
+                do_not_play: false,
+                do_not_play_reason: null as string | null,
+                do_not_play_until: null as string | null,
                 custom_fields: {},
                 extra_metadata: {
                     amplify: null,

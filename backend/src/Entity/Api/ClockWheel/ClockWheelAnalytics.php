@@ -38,4 +38,37 @@ final class ClockWheelAnalytics
         additionalProperties: new OA\AdditionalProperties(type: 'integer')
     )]
     public array $fallback_reasons = [];
+
+    #[OA\Property(example: 10)]
+    public int $legal_id_tolerance_seconds = 10;
+
+    #[OA\Property(example: 168)]
+    public int $legal_id_hours_logged = 0;
+
+    #[OA\Property(example: 160)]
+    public int $legal_id_on_time_count = 0;
+
+    #[OA\Property(example: 8)]
+    public int $legal_id_late_count = 0;
+
+    #[OA\Property(example: 95.2, nullable: true)]
+    public ?float $legal_id_compliance_percent = null;
+
+    /**
+     * @var array<int, array{expected_play_at: string, actual_play_at: string|null, drift_seconds: int|null, media_id: int|null}>
+     */
+    #[OA\Property(type: 'array', items: new OA\Items(type: 'object'))]
+    public array $legal_id_late_events = [];
+
+    #[OA\Property(example: 92.5, nullable: true)]
+    public ?float $effectiveness_score = null;
+
+    #[OA\Property(example: 'A', nullable: true)]
+    public ?string $effectiveness_grade = null;
+
+    #[OA\Property(example: 42, nullable: true)]
+    public ?int $avg_listeners = null;
+
+    #[OA\Property(example: 128, nullable: true)]
+    public ?int $peak_listeners = null;
 }

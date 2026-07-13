@@ -12,6 +12,8 @@ use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
+use App\Entity\StationPlaylist;
+use App\Radio\AutoDJ\Scheduler;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
@@ -31,6 +33,7 @@ final class ClockWheelPreviewSimulator
 
     public function __construct(
         private readonly EntityManagerInterface $em,
+        private readonly Scheduler $scheduler,
     ) {
     }
 
@@ -72,17 +75,23 @@ final class ClockWheelPreviewSimulator
 
             $nextAnchor = $this->getNextAnchorSeconds($slots, $index);
             $availableSeconds = max(1, $nextAnchor - $cursor);
-            $item = $this->projectSlot($wheel, $slot, $availableSeconds, $cursor, $simulatedSongIds);
+            $item = $this->projectSlot($wheel, $slot, $availableSeconds, $cursor, $simulatedSongIds, $hourStart);
 
             if ($item === null) {
                 continue;
             }
+
+            $playAt = $hourStart->modify('+' . $cursor . ' seconds');
+            $item->projected_play_at = $playAt->format(DateTimeImmutable::ATOM);
 
             $response->items[] = $item;
 
             $playSeconds = $item->duration_seconds ?? $availableSeconds;
             $cursor += max(1, min($playSeconds, $availableSeconds));
         }
+
+        $response->estimated_loop_seconds = min($cursor, self::HOUR_SECONDS);
+        $response->is_valid = $response->warnings === [] && $cursor <= self::HOUR_SECONDS;
 
         return $response;
     }
@@ -93,12 +102,23 @@ final class ClockWheelPreviewSimulator
         int $availableSeconds,
         int $cursor,
         array &$simulatedSongIds,
+        DateTimeImmutable $hourStart,
     ): ?ClockWheelPreviewItem {
         $item = new ClockWheelPreviewItem();
         $item->position_seconds = $slot->position_seconds;
         $item->position_label = $this->formatPosition($slot->position_seconds);
         $item->slot_type = $slot->type?->value ?? 'unknown';
         $item->drift_seconds = $cursor - $slot->position_seconds;
+
+        if ($slot->playlist_id !== null && $slot->playlist_id > 0) {
+            $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
+            if ($playlist instanceof StationPlaylist) {
+                $scheduleWarning = $this->getPlaylistScheduleWarning($playlist, $hourStart);
+                if ($scheduleWarning !== null) {
+                    $item->warnings[] = $scheduleWarning;
+                }
+            }
+        }
 
         $type = $slot->type;
         if ($type === null) {
@@ -324,5 +344,28 @@ final class ClockWheelPreviewSimulator
         }
 
         return $pool[0] ?? null;
+    }
+
+    private function getPlaylistScheduleWarning(
+        StationPlaylist $playlist,
+        DateTimeImmutable $hourStart,
+    ): ?string {
+        if ($playlist->schedule_items->isEmpty()) {
+            return null;
+        }
+
+        $checkpoints = [0, 1800, 3540];
+        foreach ($checkpoints as $offsetSeconds) {
+            $at = $hourStart->modify('+' . $offsetSeconds . ' seconds');
+            if (!$this->scheduler->shouldPlaylistPlayNow($playlist, $at)) {
+                return sprintf(
+                    'Pinned playlist "%s" is not scheduled for the full wheel hour (check at +%ds).',
+                    $playlist->name,
+                    $offsetSeconds
+                );
+            }
+        }
+
+        return null;
     }
 }

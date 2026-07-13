@@ -290,7 +290,7 @@ final class StationPlaylistMediaRepository extends Repository
                 DQL
             )->setParameter('playlist', $playlist)
                 ->execute();
-        } elseif (PlaylistOrders::Shuffle === $playlist->order) {
+        } elseif (PlaylistOrders::Shuffle === $playlist->order || PlaylistOrders::SmartShuffle === $playlist->order) {
             $this->em->wrapInTransaction(
                 function () use ($playlist): void {
                     $allSpmRecordsQuery = $this->em->createQuery(

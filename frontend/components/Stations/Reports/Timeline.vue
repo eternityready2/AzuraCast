@@ -74,14 +74,6 @@
                 <template v-if="row.item.is_request">
                     {{ $gettext('Listener Request') }}
                 </template>
-                <template v-else-if="row.item.playlist">
-                    {{ $gettext('Playlist:') }}
-                    {{ row.item.playlist }}
-                </template>
-                <template v-else-if="row.item.clock_wheel">
-                    {{ $gettext('Clock Wheel:') }}
-                    {{ row.item.clock_wheel }}
-                </template>
                 <template v-else-if="row.item.streamer">
                     {{ $gettext('Live Streamer:') }}
                     {{ row.item.streamer }}
@@ -89,6 +81,12 @@
                 <template v-else>
                     &nbsp;
                 </template>
+            </template>
+            <template #cell(playlist)="row">
+                {{ row.item.playlist || '—' }}
+            </template>
+            <template #cell(clock_wheel)="row">
+                {{ row.item.clock_wheel || '—' }}
             </template>
         </data-table>
     </div>
@@ -174,6 +172,18 @@ const fields: DataTableField[] = [
         key: 'song',
         isRowHeader: true,
         label: $gettext('Song Title'),
+        selectable: true,
+        sortable: false
+    },
+    {
+        key: 'playlist',
+        label: $gettext('Playlist'),
+        selectable: true,
+        sortable: false
+    },
+    {
+        key: 'clock_wheel',
+        label: $gettext('Clock Wheel'),
         selectable: true,
         sortable: false
     },

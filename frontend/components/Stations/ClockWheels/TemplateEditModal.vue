@@ -69,14 +69,14 @@ import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
 } from '~/functions/clockWheelPosition.ts';
-import type {MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {
+    defaultClockWheelSlotEditorRow,
+    mapApiSlotToEditorRow,
+    mapEditorRowToApiSlot,
+    type ClockWheelSlotEditorRow,
+} from '~/functions/clockWheelSlotEditor.ts';
 
-interface ClockWheelEntry {
-    type: MediaTypeValue;
-    algorithm: string;
-    position_seconds: number;
-    duration_seconds: number | null;
-}
+interface ClockWheelEntry extends ClockWheelSlotEditorRow {}
 
 const props = defineProps<BaseEditModalProps>();
 const emit = defineEmits<BaseEditModalEmits>();
@@ -106,12 +106,8 @@ const {r$} = useAppRegle(form, {
     burn_rate_max_plays_24h: {},
 });
 
-const defaultEntry = (positionSeconds: number): ClockWheelEntry => ({
-    type: 'music',
-    algorithm: 'random',
-    position_seconds: Math.min(3599, Math.max(0, positionSeconds)),
-    duration_seconds: null,
-});
+const defaultEntry = (positionSeconds: number): ClockWheelEntry =>
+    defaultClockWheelSlotEditorRow(positionSeconds);
 
 const addEntry = () => {
     sortClockWheelEntries(entries);
@@ -158,11 +154,6 @@ const resetForm = () => {
     entries.splice(0, entries.length);
 };
 
-const normalizeSlotType = (type: string | null | undefined): MediaTypeValue => {
-    const allowed: MediaTypeValue[] = ['music', 'talk', 'id', 'promo', 'ad'];
-    return allowed.includes(type as MediaTypeValue) ? (type as MediaTypeValue) : 'music';
-};
-
 const populateForm = (data: Record<string, unknown>) => {
     form.value = mergeExisting(form.value, {
         ...data,
@@ -174,17 +165,9 @@ const populateForm = (data: Record<string, unknown>) => {
             : null,
     });
     if (Array.isArray(data.slots)) {
-        const converted = (data.slots as {
-            type?: string | null;
-            algorithm?: string;
-            position_seconds?: number;
-            duration_seconds?: number | null;
-        }[]).map((s) => ({
-            type: normalizeSlotType(s.type),
-            algorithm: s.algorithm ?? 'random',
-            position_seconds: s.position_seconds ?? 0,
-            duration_seconds: s.duration_seconds ?? null,
-        }));
+        const converted = (data.slots as Record<string, unknown>[]).map((s) =>
+            mapApiSlotToEditorRow(s)
+        );
         entries.splice(0, entries.length, ...converted);
         sortClockWheelEntries(entries);
     }
@@ -192,13 +175,7 @@ const populateForm = (data: Record<string, unknown>) => {
 
 const validateForm = async () => {
     const {valid} = await r$.$validate();
-    const slots = entries.map((e) => ({
-        type: e.type,
-        category_id: null,
-        algorithm: e.algorithm,
-        position_seconds: e.position_seconds,
-        duration_seconds: e.duration_seconds,
-    }));
+    const slots = entries.map((e) => mapEditorRowToApiSlot(e));
     return {valid, data: {...form.value, slots}};
 };
 

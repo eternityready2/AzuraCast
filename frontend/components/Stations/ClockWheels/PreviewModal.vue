@@ -29,6 +29,7 @@
                     <thead>
                         <tr>
                             <th>{{ $gettext('Position') }}</th>
+                            <th>{{ $gettext('Wall clock') }}</th>
                             <th>{{ $gettext('Type') }}</th>
                             <th>{{ $gettext('Projected track') }}</th>
                             <th>{{ $gettext('Drift') }}</th>
@@ -40,6 +41,15 @@
                             :key="idx"
                         >
                             <td>{{ row.position_label }}</td>
+                            <td>
+                                <span v-if="row.projected_play_at">
+                                    {{ formatIsoAsTime(row.projected_play_at) }}
+                                </span>
+                                <span
+                                    v-else
+                                    class="text-muted"
+                                >—</span>
+                            </td>
                             <td>{{ row.slot_type }}</td>
                             <td>
                                 <template v-if="row.title">
@@ -69,7 +79,7 @@
                         </tr>
                         <tr v-if="!preview?.items?.length && !loading">
                             <td
-                                colspan="4"
+                                colspan="5"
                                 class="text-muted text-center"
                             >
                                 {{ $gettext('No projected slots for this hour.') }}
@@ -100,6 +110,7 @@ import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter
 export interface ClockWheelPreviewItem {
     position_seconds: number;
     position_label: string;
+    projected_play_at: string | null;
     slot_type: string;
     title: string | null;
     artist: string | null;
@@ -118,7 +129,7 @@ export interface ClockWheelPreviewResponse {
 const {$gettext} = useTranslate();
 const previewUrl = ref('');
 const {axios} = useAxios();
-const {formatIsoAsDateTime} = useStationDateTimeFormatter();
+const {formatIsoAsDateTime, formatIsoAsTime} = useStationDateTimeFormatter();
 
 const $modal = useTemplateRef('$modal');
 const loading = ref(false);

@@ -40,6 +40,8 @@ final readonly class StationQueueApiGenerator
             $response->clock_wheel = '';
         }
 
+        $response->top_of_hour_legal_id = $record->top_of_hour_legal_id ?? false;
+
         $recordMedia = $record->media;
         if (null !== $recordMedia) {
             $response->song = ($this->songApiGenerator)(

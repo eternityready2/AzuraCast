@@ -9,10 +9,12 @@ use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\Api\MediaBatchResult;
 use App\Entity\Interfaces\PathAwareInterface;
+use App\Entity\Repository\StationMediaRepository;
 use App\Entity\Repository\StationPlaylistFolderRepository;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\StationMedia;
 use App\Entity\StationMediaCategory;
 use App\Entity\StationPlaylist;
@@ -77,6 +79,7 @@ final class BatchAction implements SingleActionInterface
         private readonly MessageBus $messageBus,
         private readonly Adapters $adapters,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly StationMediaRepository $mediaRepo,
         private readonly StationPlaylistMediaRepository $playlistMediaRepo,
         private readonly StationPlaylistFolderRepository $playlistFolderRepo,
         private readonly StationQueueRepository $queueRepo,
@@ -492,7 +495,10 @@ final class BatchAction implements SingleActionInterface
     ): MediaBatchResult {
         $result = $this->parseRequest($request, $fs, true);
 
-        $allowedTypes = ['music', 'talk', 'id', 'promo', 'ad'];
+        $allowedTypes = array_map(
+            static fn (ClockWheelSlotTypes $case): string => $case->value,
+            ClockWheelSlotTypes::cases()
+        );
 
         $body = $request->getParsedBody();
         if (!is_array($body)) {
@@ -504,6 +510,13 @@ final class BatchAction implements SingleActionInterface
 
         if ($updateType && !in_array($mediaType, $allowedTypes, true)) {
             throw new InvalidArgumentException('Invalid media type specified.');
+        }
+
+        $updateGenre = array_key_exists('genre', $body);
+        $genre = null;
+
+        if ($updateGenre) {
+            $genre = Types::stringOrNull($body['genre'] ?? null, true);
         }
 
         $updateCategory = array_key_exists('category_id', $body);
@@ -523,20 +536,44 @@ final class BatchAction implements SingleActionInterface
             }
         }
 
-        if (!$updateType && !$updateCategory) {
-            throw new InvalidArgumentException('Specify a type and/or category to update.');
+        if (!$updateType && !$updateCategory && !$updateGenre) {
+            throw new InvalidArgumentException('Specify a type, category and/or genre to update.');
         }
 
         foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
-            if ($updateType) {
-                $media->type = $mediaType;
-            }
+            $oldType = $media->type;
+            $oldCategory = $media->category;
+            $oldGenre = $media->genre;
 
-            if ($updateCategory) {
-                $media->category = $category;
-            }
+            try {
+                if ($updateType) {
+                    $media->type = $mediaType;
+                }
 
-            $this->em->persist($media);
+                if ($updateCategory) {
+                    $media->category = $category;
+                }
+
+                if ($updateGenre) {
+                    $media->genre = $genre;
+
+                    if (!$this->mediaRepo->writeToFile($media, $fs)) {
+                        throw new RuntimeException('Could not write media metadata to file.');
+                    }
+                }
+
+                $this->em->persist($media);
+            } catch (Throwable $e) {
+                $media->type = $oldType;
+                $media->category = $oldCategory;
+                $media->genre = $oldGenre;
+
+                $result->errors[] = sprintf(
+                    '%s: %s',
+                    $media->path,
+                    $e->getMessage()
+                );
+            }
         }
 
         $this->em->flush();

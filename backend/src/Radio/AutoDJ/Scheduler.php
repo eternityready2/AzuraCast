@@ -26,9 +26,13 @@ final class Scheduler
     use LoggerAwareTrait;
     use EntityManagerAwareTrait;
 
+    /** Legacy fuzzy window for once-per-hour playlists when top-of-hour protection is off. */
+    private const int ONCE_PER_HOUR_FUZZY_WINDOW_MINUTES = 15;
+
     public function __construct(
         private readonly StationPlaylistMediaRepository $spmRepo,
-        private readonly StationQueueRepository $queueRepo
+        private readonly StationQueueRepository $queueRepo,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
     ) {
     }
 
@@ -135,8 +139,38 @@ final class Scheduler
         StationPlaylist $playlist,
         DateTimeImmutable $now
     ): bool {
+        if ($this->hourBoundaryPlanner->shouldSuppressOncePerHourPlaylist($playlist)) {
+            $this->logger->debug(
+                'Once-per-hour playlist at :00 suppressed; station top-of-hour protection handles legal ID.'
+            );
+
+            return false;
+        }
+
         $now = CarbonImmutable::instance($now);
 
+        if ($this->hourBoundaryPlanner->isTopOfHourProtectionEnabled($playlist->station)) {
+            return $this->shouldPlaylistPlayNowPerHourStrict($playlist, $now);
+        }
+
+        return $this->shouldPlaylistPlayNowPerHourFuzzy($playlist, $now);
+    }
+
+    private function shouldPlaylistPlayNowPerHourStrict(
+        StationPlaylist $playlist,
+        CarbonImmutable $now,
+    ): bool {
+        if ($now->minute !== $playlist->play_per_hour_minute) {
+            return false;
+        }
+
+        return !$this->wasPlaylistPlayedInLastXMinutes($playlist, $now, 30);
+    }
+
+    private function shouldPlaylistPlayNowPerHourFuzzy(
+        StationPlaylist $playlist,
+        CarbonImmutable $now,
+    ): bool {
         $currentMinute = $now->minute;
         $targetMinute = $playlist->play_per_hour_minute;
 
@@ -148,7 +182,7 @@ final class Scheduler
 
         $playlistDiff = $targetTime->diffInMinutes($now);
 
-        if ($playlistDiff < 0 || $playlistDiff > 15) {
+        if ($playlistDiff < 0 || $playlistDiff > self::ONCE_PER_HOUR_FUZZY_WINDOW_MINUTES) {
             return false;
         }
 

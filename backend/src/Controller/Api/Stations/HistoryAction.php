@@ -156,6 +156,7 @@ final class HistoryAction implements SingleActionInterface
             'Track',
             'Artist',
             'Playlist',
+            'Clock Wheel',
             'Streamer',
         ]);
 
@@ -168,6 +169,11 @@ final class HistoryAction implements SingleActionInterface
             $playlist = $sh->playlist;
             $playlistName = (null !== $playlist)
                 ? $playlist->name
+                : '';
+
+            $clockWheel = $sh->clock_wheel;
+            $clockWheelName = (null !== $clockWheel)
+                ? $clockWheel->name
                 : '';
 
             $streamer = $sh->streamer;
@@ -183,6 +189,7 @@ final class HistoryAction implements SingleActionInterface
                 $sh->title ?: $sh->text,
                 $sh->artist,
                 $playlistName,
+                $clockWheelName,
                 $streamerName,
             ]);
         }

@@ -121,6 +121,22 @@ final class StationQueue implements
     #[ORM\Column]
     public bool $clock_wheel_enforce_cap = false;
 
+    /** True when a legal_id slot queued a promo (or other) substitute. */
+    #[ORM\Column]
+    public bool $clock_wheel_legal_id_substitute = false;
+
+    /** True when queued by station-wide top-of-hour protection (v0.29). */
+    #[ORM\Column]
+    public bool $top_of_hour_legal_id = false;
+
+    /** Whether AnnotateNextSong should apply a cue_out cap for hour-boundary protection. */
+    #[ORM\Column]
+    public bool $hour_boundary_enforce_cap = false;
+
+    /** Max on-air seconds for hour-boundary playback cap. */
+    #[ORM\Column(nullable: true)]
+    public ?int $hour_boundary_max_play_seconds = null;
+
     public function __construct(Station $station, Interfaces\SongInterface $song)
     {
         $this->setSong($song);

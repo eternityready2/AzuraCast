@@ -30,6 +30,20 @@
                                 :text="$gettext('Add Clock Wheel')"
                                 @click="doCreate"
                             />
+                            <button
+                                type="button"
+                                class="btn btn-secondary ms-2"
+                                @click="triggerImport"
+                            >
+                                {{ $gettext('Import JSON') }}
+                            </button>
+                            <input
+                                ref="$importInput"
+                                type="file"
+                                accept="application/json,.json"
+                                class="d-none"
+                                @change="onImportFile"
+                            >
                         </div>
 
                         <data-table
@@ -197,6 +211,14 @@
                         </data-table>
                     </div>
                 </tab>
+
+                <tab :label="$gettext('Program Grid')">
+                    <program-grid-tab :grid-url="programGridUrl" />
+                </tab>
+
+                <tab :label="$gettext('Reconciliation')">
+                    <reconciliation-log-tab :log-url="reconciliationLogUrl" />
+                </tab>
             </tabs>
         </div>
     </section>
@@ -243,6 +265,8 @@ import TemplateEditModal from '~/components/Stations/ClockWheels/TemplateEditMod
 import DaypartEditModal from '~/components/Stations/ClockWheels/DaypartEditModal.vue';
 import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
 import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue';
+import ProgramGridTab from '~/components/Stations/ClockWheels/ProgramGridTab.vue';
+import ReconciliationLogTab from '~/components/Stations/ClockWheels/ReconciliationLogTab.vue';
 import IconBiChevronRight from '~icons/bi/chevron-right';
 import {formatHourOfDayToAmPm} from '~/functions/amPmTime.ts';
 
@@ -250,6 +274,11 @@ const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/clock-wheels');
 const templatesUrl = getStationApiUrl('/clock-wheel-templates');
 const daypartsUrl = getStationApiUrl('/clock-dayparts');
+const programGridUrl = getStationApiUrl('/clock-wheels/program-grid');
+const reconciliationLogUrl = getStationApiUrl('/clock-wheels/reconciliation-log');
+const importUrl = getStationApiUrl('/clock-wheels/import');
+
+const $importInput = useTemplateRef('$importInput');
 
 const {$gettext} = useTranslate();
 const {notifySuccess, notifyError} = useNotify();
@@ -361,6 +390,30 @@ const doSyncDaypart = async (item: DaypartRow) => {
         notifyError($gettext('Could not re-sync daypart wheels.'));
     } finally {
         syncingDaypartId.value = null;
+    }
+};
+
+const triggerImport = () => {
+    $importInput.value?.click();
+};
+
+const onImportFile = async (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+
+    if (!file) {
+        return;
+    }
+
+    try {
+        const text = await file.text();
+        const payload = JSON.parse(text) as Record<string, unknown>;
+        await axios.post(importUrl.value, payload);
+        notifySuccess($gettext('Clock wheel imported.'));
+        relistWheels();
+    } catch {
+        notifyError($gettext('Could not import clock wheel JSON.'));
     }
 };
 </script>

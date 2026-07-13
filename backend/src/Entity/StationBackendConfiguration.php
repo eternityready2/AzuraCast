@@ -379,6 +379,112 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     }
 
     #[OA\Property]
+    public bool $top_of_hour_id_enabled = false {
+        set (bool|string|null $value) => Types::bool($value, false, true);
+    }
+
+    #[OA\Property]
+    public string $top_of_hour_id_mode = 'strict' {
+        set (string|null $value) {
+            $value = Types::string($value, 'strict', true);
+            $this->top_of_hour_id_mode = in_array($value, ['strict', 'interrupt'], true)
+                ? $value
+                : 'strict';
+        }
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_lookahead_minutes = 10 {
+        set (int|string|null $value) => Types::int($value, 10);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_compliance_tolerance_seconds = 10 {
+        set (int|string|null $value) => Types::int($value, 10);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_finish_buffer_seconds = 15 {
+        set (int|string|null $value) => Types::int($value, 15);
+    }
+
+    #[OA\Property]
+    public int $top_of_hour_id_max_seconds = 60 {
+        set (int|string|null $value) => Types::int($value, 60);
+    }
+
+    // ── DMCA Compliance Settings ──────────────────────────────────────────────
+
+    #[OA\Property(description: 'Enable DMCA compliance enforcement at the queue level.')]
+    public bool $dmca_compliance_enabled = false {
+        set (bool|string|int|null $value) => Types::bool($value, false);
+    }
+
+    #[OA\Property(description: 'Rolling window in minutes for DMCA play-count checks. Default: 180 (3 hours).')]
+    public int $dmca_window_minutes = 180 {
+        set (int|string|null $value) => Types::int($value, 180);
+    }
+
+    #[OA\Property(description: 'Max plays of the same song in the rolling window. DMCA default: 3.')]
+    public int $dmca_max_song_plays = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
+    #[OA\Property(description: 'Max consecutive plays of the same song. DMCA default: 2.')]
+    public int $dmca_max_consecutive_song = 2 {
+        set (int|string|null $value) => Types::int($value, 2);
+    }
+
+    #[OA\Property(description: 'Max plays from the same album in the rolling window. DMCA default: 3.')]
+    public int $dmca_max_album_plays = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
+    #[OA\Property(description: 'Max plays by the same artist in the rolling window. DMCA default: 4.')]
+    public int $dmca_max_artist_plays = 4 {
+        set (int|string|null $value) => Types::int($value, 4);
+    }
+
+    #[OA\Property(description: 'Max consecutive plays by the same artist. DMCA default: 3.')]
+    public int $dmca_max_consecutive_artist = 3 {
+        set (int|string|null $value) => Types::int($value, 3);
+    }
+
+    #[OA\Property]
+    public bool $analytics_exclude_bots = true {
+        set (bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    #[OA\Property]
+    public bool $content_type_crossfade_enabled = true {
+        set (bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    /**
+     * Transition keys: "from_type:to_type" → {fade_in, fade_out} or null for station default.
+     *
+     * @var array<string, array{fade_in: float, fade_out: float}|null>
+     */
+    #[OA\Property(type: 'object')]
+    public array $content_type_crossfade_matrix = [] {
+        set (array|string|null $value) {
+            $this->content_type_crossfade_matrix = is_array($value) ? $value : [];
+        }
+    }
+
+    /**
+     * Named profile overrides merged on top of the station matrix.
+     *
+     * @var array<string, array<string, array{fade_in: float, fade_out: float}|null>>
+     */
+    #[OA\Property(type: 'object')]
+    public array $crossfade_profiles = [] {
+        set (array|string|null $value) {
+            $this->crossfade_profiles = is_array($value) ? $value : [];
+        }
+    }
+
+    #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
     }

@@ -19,6 +19,7 @@
                 </div>
             </div>
         </div>
+
         <div class="card-body pb-0">
             <nav
                 class="nav nav-tabs"
@@ -39,6 +40,7 @@
                         {{ $gettext('Calendar') }}
                     </button>
                 </div>
+
                 <div
                     class="nav-item"
                     role="presentation"
@@ -54,8 +56,25 @@
                         {{ $gettext('Live Clock Wheel') }}
                     </button>
                 </div>
+
+                <div
+                    class="nav-item"
+                    role="presentation"
+                >
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: activeTab === 'holidays'}"
+                        role="tab"
+                        :aria-selected="activeTab === 'holidays'"
+                        @click="activeTab = 'holidays'"
+                    >
+                        {{ $gettext('Holidays') }}
+                    </button>
+                </div>
             </nav>
         </div>
+
         <div class="card-body">
             <schedule-calendar
                 v-show="activeTab === 'calendar'"
@@ -65,21 +84,33 @@
                 @click="doCalendarClick"
                 @create="doCreateEvent"
             />
+
             <clock-wheel-live-tab
                 v-show="activeTab === 'live'"
                 :active="activeTab === 'live'"
             />
+
+            <holiday-overrides-tab
+                v-show="activeTab === 'holidays'"
+                :list-url="holidayOverridesUrl"
+                :wheels-url="clockWheelsListUrl"
+                :playlists-url="listUrl"
+            />
         </div>
+
         <edit-modal
             ref="$editModal"
             :create-url="listUrl"
             @relist="relist"
         />
+
         <clock-wheel-edit-modal
             ref="$clockWheelEditModal"
             :create-url="clockWheelsListUrl"
+            :templates-url="clockWheelTemplatesUrl"
             @relist="relist"
         />
+
         <create-event-modal
             ref="$createEventModal"
             @relist="relist"
@@ -90,12 +121,13 @@
 <script setup lang="ts">
 import ScheduleCalendar from "~/components/Stations/Common/ScheduleCalendar.vue";
 import ClockWheelLiveTab from "~/components/Stations/Schedule/ClockWheelLiveTab.vue";
+import HolidayOverridesTab from "~/components/Stations/Schedule/HolidayOverridesTab.vue";
 import EditModal from "~/components/Stations/Playlists/EditModal.vue";
 import ClockWheelEditModal from "~/components/Stations/ClockWheels/EditModal.vue";
 import CreateEventModal from "~/components/Stations/Common/CreateEventModal.vue";
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
-import {ref, useTemplateRef} from "vue";
+import {nextTick, ref, useTemplateRef, watch} from "vue";
 import {EventImpl} from "@fullcalendar/core/internal";
 import useHasEditModal from "~/functions/useHasEditModal";
 import {useTranslate} from "~/vendor/gettext";
@@ -103,10 +135,12 @@ import {useTranslate} from "~/vendor/gettext";
 const {$gettext} = useTranslate();
 const {getStationApiUrl} = useApiRouter();
 
-const activeTab = ref<'calendar' | 'live'>('calendar');
+const activeTab = ref<'calendar' | 'live' | 'holidays'>('calendar');
 
 const listUrl = getStationApiUrl('/playlists');
 const clockWheelsListUrl = getStationApiUrl('/clock-wheels');
+const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheel-templates');
+const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
 
@@ -118,6 +152,13 @@ const {doEdit: doEditClockWheel} = useHasEditModal($clockWheelEditModal);
 
 const $scheduleTab = useTemplateRef('$scheduleTab');
 const $createEventModal = useTemplateRef('$createEventModal');
+
+watch(activeTab, async (newTab) => {
+    if (newTab === 'calendar') {
+        await nextTick();
+        $scheduleTab.value?.updateSize();
+    }
+});
 
 const doCalendarClick = (event: EventImpl) => {
     $createEventModal.value?.openForEdit(event);

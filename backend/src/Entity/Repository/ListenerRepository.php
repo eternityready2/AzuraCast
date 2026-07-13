@@ -63,20 +63,382 @@ final class ListenerRepository extends Repository
     public function getUniqueListeners(
         Station $station,
         DateTimeImmutable $start,
-        DateTimeImmutable $end
+        DateTimeImmutable $end,
+        bool $excludeBots = false,
     ): int {
-        return (int)$this->em->createQuery(
-            <<<'DQL'
+        $dql = <<<'DQL'
                 SELECT COUNT(DISTINCT l.listener_hash)
                 FROM App\Entity\Listener l
                 WHERE l.station = :station
                 AND l.timestamp_start <= :time_end
                 AND l.timestamp_end >= :time_start
-            DQL
-        )->setParameter('station', $station)
+            DQL;
+
+        if ($excludeBots) {
+            $dql .= ' AND l.device.is_bot = 0';
+        }
+
+        return (int)$this->em->createQuery($dql)
+            ->setParameter('station', $station)
             ->setParameter('time_end', $end)
             ->setParameter('time_start', $start)
             ->getSingleScalarResult();
+    }
+
+    /**
+     * @return array{
+     *     total_sessions: int,
+     *     human_sessions: int,
+     *     bot_sessions: int,
+     *     bot_percent: float|null
+     * }
+     */
+    public function getSessionBreakdown(
+        Station $station,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): array {
+        $statsRaw = $this->conn->fetchAssociative(
+            <<<'SQL'
+                SELECT COUNT(l.id) AS total_sessions,
+                       SUM(CASE WHEN l.device_is_bot = 1 THEN 1 ELSE 0 END) AS bot_sessions
+                FROM listener l
+                WHERE l.station_id = :station_id
+                AND l.timestamp_start <= :time_end
+                AND l.timestamp_end >= :time_start
+            SQL,
+            [
+                'station_id' => $station->id,
+                'time_end' => $end,
+                'time_start' => $start,
+            ],
+        );
+
+        $total = (int)($statsRaw['total_sessions'] ?? 0);
+        $bots = (int)($statsRaw['bot_sessions'] ?? 0);
+        $human = max(0, $total - $bots);
+
+        return [
+            'total_sessions' => $total,
+            'human_sessions' => $human,
+            'bot_sessions' => $bots,
+            'bot_percent' => $total > 0 ? round(($bots / $total) * 100, 1) : null,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     unique_listeners: int,
+     *     repeat_listeners: int,
+     *     loyalty_rate_percent: float|null,
+     *     avg_sessions_per_listener: float|null
+     * }
+     */
+    public function getListenerLoyaltyStats(
+        Station $station,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        bool $excludeBots = false,
+    ): array {
+        $botFilter = $excludeBots ? ' AND l.device_is_bot = 0' : '';
+
+        $rows = $this->conn->fetchAllAssociative(
+            <<<SQL
+                SELECT l.listener_hash, COUNT(l.id) AS session_count
+                FROM listener l
+                WHERE l.station_id = :station_id
+                AND l.timestamp_start <= :time_end
+                AND l.timestamp_end >= :time_start
+                {$botFilter}
+                GROUP BY l.listener_hash
+            SQL,
+            [
+                'station_id' => $station->id,
+                'time_end' => $end,
+                'time_start' => $start,
+            ],
+        );
+
+        $unique = count($rows);
+        $repeat = 0;
+        $totalSessions = 0;
+
+        foreach ($rows as $row) {
+            $sessions = (int)$row['session_count'];
+            $totalSessions += $sessions;
+            if ($sessions > 1) {
+                $repeat++;
+            }
+        }
+
+        return [
+            'unique_listeners' => $unique,
+            'repeat_listeners' => $repeat,
+            'loyalty_rate_percent' => $unique > 0 ? round(($repeat / $unique) * 100, 1) : null,
+            'avg_sessions_per_listener' => $unique > 0
+                ? round($totalSessions / $unique, 2)
+                : null,
+        ];
+    }
+
+    /**
+     * @return array<int, array{hour: int, first_period: int, second_period: int, growth_percent: float|null}>
+     */
+    public function getHourlyGrowthTrend(
+        Station $station,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        bool $excludeBots = false,
+    ): array {
+        $midpoint = $start->add(
+            new \DateInterval('PT' . (int) floor(($end->getTimestamp() - $start->getTimestamp()) / 2) . 'S'),
+        );
+
+        $botFilter = $excludeBots ? ' AND l.device_is_bot = 0' : '';
+        $stationId = $station->id;
+
+        $tz = $station->getTimezoneObject();
+        $tzOffset = $tz->getOffset($start);
+        $tzFormatted = sprintf(
+            '%+03d:%02d',
+            intdiv($tzOffset, 3600),
+            abs(intdiv($tzOffset % 3600, 60)),
+        );
+
+        $fetchWithTz = function (DateTimeImmutable $periodStart, DateTimeImmutable $periodEnd) use (
+            $stationId,
+            $botFilter,
+            $tzFormatted,
+        ): array {
+            $rows = $this->conn->fetchAllAssociative(
+                <<<SQL
+                    SELECT HOUR(CONVERT_TZ(l.timestamp_start, '+00:00', :tz)) AS hour,
+                           COUNT(DISTINCT l.listener_hash) AS listeners
+                    FROM listener l
+                    WHERE l.station_id = :station_id
+                    AND l.timestamp_start <= :time_end
+                    AND l.timestamp_end >= :time_start
+                    {$botFilter}
+                    GROUP BY hour
+                SQL,
+                [
+                    'station_id' => $stationId,
+                    'time_start' => $periodStart,
+                    'time_end' => $periodEnd,
+                    'tz' => $tzFormatted,
+                ],
+            );
+
+            $byHour = array_fill(0, 24, 0);
+            foreach ($rows as $row) {
+                $hour = (int)$row['hour'];
+                if ($hour >= 0 && $hour <= 23) {
+                    $byHour[$hour] = (int)$row['listeners'];
+                }
+            }
+
+            return $byHour;
+        };
+
+        $firstPeriod = $fetchWithTz($start, $midpoint);
+        $secondPeriod = $fetchWithTz($midpoint, $end);
+
+        $trend = [];
+        for ($hour = 0; $hour < 24; $hour++) {
+            $first = $firstPeriod[$hour];
+            $second = $secondPeriod[$hour];
+            $growth = null;
+            if ($first > 0) {
+                $growth = round((($second - $first) / $first) * 100, 1);
+            } elseif ($second > 0) {
+                $growth = 100.0;
+            }
+
+            $trend[] = [
+                'hour' => $hour,
+                'first_period' => $first,
+                'second_period' => $second,
+                'growth_percent' => $growth,
+            ];
+        }
+
+        return $trend;
+    }
+
+    /**
+     * @return array{
+     *     total_sessions: int,
+     *     checkpoints: array<int, array{minute: int, listeners: int, percent: float|null}>
+     * }
+     */
+    public function getRetentionCurve(
+        Station $station,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        bool $excludeBots = false,
+    ): array {
+        $botFilter = $excludeBots ? ' AND l.device_is_bot = 0' : '';
+
+        $rows = $this->conn->fetchAllAssociative(
+            <<<SQL
+                SELECT TIMESTAMPDIFF(SECOND, l.timestamp_start, l.timestamp_end) AS duration_seconds
+                FROM listener l
+                WHERE l.station_id = :station_id
+                AND l.timestamp_end IS NOT NULL
+                AND l.timestamp_start <= :time_end
+                AND l.timestamp_end >= :time_start
+                {$botFilter}
+            SQL,
+            [
+                'station_id' => $station->id,
+                'time_start' => $start,
+                'time_end' => $end,
+            ],
+        );
+
+        $total = count($rows);
+        $checkpoints = [1, 5, 10, 15, 30, 45, 60, 90, 120];
+        $curve = [];
+
+        foreach ($checkpoints as $minute) {
+            $threshold = $minute * 60;
+            $surviving = 0;
+
+            foreach ($rows as $row) {
+                if ((int)$row['duration_seconds'] >= $threshold) {
+                    $surviving++;
+                }
+            }
+
+            $curve[] = [
+                'minute' => $minute,
+                'listeners' => $surviving,
+                'percent' => $total > 0 ? round(($surviving / $total) * 100, 1) : null,
+            ];
+        }
+
+        return [
+            'total_sessions' => $total,
+            'checkpoints' => $curve,
+        ];
+    }
+
+    /**
+     * @param array<int, array{
+     *     id: int,
+     *     name: string,
+     *     start_hour: int,
+     *     end_hour: int,
+     *     is_active: bool
+     * }> $dayparts
+     *
+     * @return array<int, array{
+     *     daypart_id: int,
+     *     name: string,
+     *     start_hour: int,
+     *     end_hour: int,
+     *     unique_listeners: int,
+     *     session_count: int,
+     *     avg_session_seconds: float|null
+     * }>
+     */
+    public function getDaypartAudienceStats(
+        Station $station,
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+        array $dayparts,
+        bool $excludeBots = false,
+    ): array {
+        if ($dayparts === []) {
+            return [];
+        }
+
+        $botFilter = $excludeBots ? ' AND l.device_is_bot = 0' : '';
+        $tz = $station->getTimezoneObject();
+        $tzOffset = $tz->getOffset($start);
+        $tzFormatted = sprintf(
+            '%+03d:%02d',
+            intdiv($tzOffset, 3600),
+            abs(intdiv($tzOffset % 3600, 60)),
+        );
+
+        $results = [];
+
+        foreach ($dayparts as $daypart) {
+            $hours = $this->hoursInDaypartRange(
+                (int)$daypart['start_hour'],
+                (int)$daypart['end_hour'],
+            );
+
+            if ($hours === []) {
+                continue;
+            }
+
+            $hourList = implode(',', $hours);
+
+            $stats = $this->conn->fetchAssociative(
+                <<<SQL
+                    SELECT COUNT(l.id) AS session_count,
+                           COUNT(DISTINCT l.listener_hash) AS unique_listeners,
+                           AVG(TIMESTAMPDIFF(SECOND, l.timestamp_start, l.timestamp_end)) AS avg_seconds
+                    FROM listener l
+                    WHERE l.station_id = :station_id
+                    AND l.timestamp_end IS NOT NULL
+                    AND l.timestamp_start <= :time_end
+                    AND l.timestamp_end >= :time_start
+                    AND HOUR(CONVERT_TZ(l.timestamp_start, '+00:00', :tz)) IN ({$hourList})
+                    {$botFilter}
+                SQL,
+                [
+                    'station_id' => $station->id,
+                    'time_start' => $start,
+                    'time_end' => $end,
+                    'tz' => $tzFormatted,
+                ],
+            );
+
+            $results[] = [
+                'daypart_id' => (int)$daypart['id'],
+                'name' => $daypart['name'],
+                'start_hour' => (int)$daypart['start_hour'],
+                'end_hour' => (int)$daypart['end_hour'],
+                'unique_listeners' => (int)($stats['unique_listeners'] ?? 0),
+                'session_count' => (int)($stats['session_count'] ?? 0),
+                'avg_session_seconds' => is_numeric($stats['avg_seconds'] ?? null)
+                    ? round((float)$stats['avg_seconds'], 1)
+                    : null,
+            ];
+        }
+
+        usort(
+            $results,
+            static fn (array $a, array $b): int => $b['unique_listeners'] <=> $a['unique_listeners'],
+        );
+
+        return $results;
+    }
+
+    /**
+     * @return int[]
+     */
+    private function hoursInDaypartRange(int $startHour, int $endHour): array
+    {
+        $hours = [];
+
+        if ($startHour <= $endHour) {
+            for ($h = $startHour; $h <= $endHour; $h++) {
+                $hours[] = $h;
+            }
+        } else {
+            for ($h = $startHour; $h <= 23; $h++) {
+                $hours[] = $h;
+            }
+            for ($h = 0; $h <= $endHour; $h++) {
+                $hours[] = $h;
+            }
+        }
+
+        return $hours;
     }
 
     public function iterateLiveListenersArray(Station $station): iterable

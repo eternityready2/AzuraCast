@@ -7,6 +7,8 @@ namespace App\Entity\Repository;
 use App\Doctrine\Repository;
 use App\Entity\ClockWheelEvent;
 use App\Entity\Enums\ClockWheelEventKind;
+use App\Entity\Enums\ClockWheelFallbackReason;
+use BackedEnum;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use DateTimeImmutable;
@@ -111,7 +113,7 @@ final class ClockWheelEventRepository extends Repository
             ->setParameter('since', $since)
             ->getSingleScalarResult();
 
-        /** @var array<array{reason: string|null, cnt: string}> $reasonRows */
+        /** @var array<array{reason: ClockWheelFallbackReason|string|null, cnt: string}> $reasonRows */
         $reasonRows = $this->em->createQuery(
             <<<'DQL'
                 SELECT e.fallback_reason AS reason, COUNT(e.id) AS cnt
@@ -127,9 +129,13 @@ final class ClockWheelEventRepository extends Repository
 
         $fallbackReasons = [];
         foreach ($reasonRows as $row) {
-            if ($row['reason'] !== null) {
-                $fallbackReasons[$row['reason']] = (int)$row['cnt'];
+            $reason = $row['reason'] ?? null;
+            if ($reason === null) {
+                continue;
             }
+
+            $key = $reason instanceof BackedEnum ? $reason->value : (string)$reason;
+            $fallbackReasons[$key] = (int)$row['cnt'];
         }
 
         return [
@@ -141,5 +147,620 @@ final class ClockWheelEventRepository extends Repository
             'burn_rate_warning' => $burnRateWarning,
             'fallback_reasons' => $fallbackReasons,
         ];
+    }
+
+    /**
+     * @return array{
+     *     tracks_queued: int,
+     *     deferred: int,
+     *     fallbacks: int,
+     *     avg_drift: float|null,
+     *     separation_relaxed: int,
+     *     burn_rate_warning: int,
+     *     fallback_reasons: array<string, int>
+     * }
+     */
+    public function getStationAnalyticsSummary(Station $station, DateTimeImmutable $since): array
+    {
+        $tracksQueued = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->getSingleScalarResult();
+
+        $deferred = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::Deferred)
+            ->getSingleScalarResult();
+
+        $fallbacks = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getSingleScalarResult();
+
+        $avgDrift = $this->em->createQuery(
+            <<<'DQL'
+                SELECT AVG(ABS(e.drift_seconds)) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind AND e.drift_seconds IS NOT NULL
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->getSingleScalarResult();
+
+        $separationRelaxed = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.separation_relaxed = 1
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->getSingleScalarResult();
+
+        $burnRateWarning = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.burn_rate_warning = 1
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->getSingleScalarResult();
+
+        /** @var array<array{reason: ClockWheelFallbackReason|string|null, cnt: string}> $reasonRows */
+        $reasonRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e.fallback_reason AS reason, COUNT(e.id) AS cnt
+                FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind AND e.fallback_reason IS NOT NULL
+                GROUP BY e.fallback_reason
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getArrayResult();
+
+        $fallbackReasons = [];
+        foreach ($reasonRows as $row) {
+            $reason = $row['reason'] ?? null;
+            if ($reason === null) {
+                continue;
+            }
+
+            $key = $reason instanceof BackedEnum ? $reason->value : (string)$reason;
+            $fallbackReasons[$key] = (int)$row['cnt'];
+        }
+
+        return [
+            'tracks_queued' => $tracksQueued,
+            'deferred' => $deferred,
+            'fallbacks' => $fallbacks,
+            'avg_drift' => is_numeric($avgDrift) ? round((float)$avgDrift, 1) : null,
+            'separation_relaxed' => $separationRelaxed,
+            'burn_rate_warning' => $burnRateWarning,
+            'fallback_reasons' => $fallbackReasons,
+        ];
+    }
+
+    /**
+     * @return array<int, array{
+     *     wheel_id: int|null,
+     *     name: string,
+     *     tracks_queued: int,
+     *     fallbacks: int,
+     *     deferred: int
+     * }>
+     */
+    public function getStationAnalyticsByWheel(Station $station, DateTimeImmutable $since): array
+    {
+        /** @var array<array{wheel_id: int|null, cnt: string}> $queuedRows */
+        $queuedRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT IDENTITY(e.clock_wheel) AS wheel_id, COUNT(e.id) AS cnt
+                FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+                GROUP BY e.clock_wheel
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->getArrayResult();
+
+        /** @var array<array{wheel_id: int|null, cnt: string}> $fallbackRows */
+        $fallbackRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT IDENTITY(e.clock_wheel) AS wheel_id, COUNT(e.id) AS cnt
+                FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+                GROUP BY e.clock_wheel
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getArrayResult();
+
+        /** @var array<array{wheel_id: int|null, cnt: string}> $deferredRows */
+        $deferredRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT IDENTITY(e.clock_wheel) AS wheel_id, COUNT(e.id) AS cnt
+                FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station AND e.event_timestamp >= :since
+                AND e.event_kind = :kind
+                GROUP BY e.clock_wheel
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('kind', ClockWheelEventKind::Deferred)
+            ->getArrayResult();
+
+        $wheelIds = [];
+        foreach ([$queuedRows, $fallbackRows, $deferredRows] as $rows) {
+            foreach ($rows as $row) {
+                if (null !== $row['wheel_id']) {
+                    $wheelIds[(int)$row['wheel_id']] = true;
+                }
+            }
+        }
+
+        $wheelNames = [];
+        if ($wheelIds !== []) {
+            /** @var array<array{id: int, name: string}> $wheels */
+            $wheels = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT w.id, w.name FROM App\Entity\StationClockWheel w
+                    WHERE w.id IN (:ids)
+                DQL
+            )->setParameter('ids', array_keys($wheelIds))
+                ->getArrayResult();
+
+            foreach ($wheels as $wheel) {
+                $wheelNames[(int)$wheel['id']] = $wheel['name'];
+            }
+        }
+
+        $indexed = [];
+
+        foreach ($queuedRows as $row) {
+            $wheelId = null !== $row['wheel_id'] ? (int)$row['wheel_id'] : null;
+            $indexed[$wheelId ?? 0] ??= [
+                'wheel_id' => $wheelId,
+                'name' => $this->resolveWheelDisplayName($wheelId, $wheelNames),
+                'tracks_queued' => 0,
+                'fallbacks' => 0,
+                'deferred' => 0,
+            ];
+            $indexed[$wheelId ?? 0]['tracks_queued'] = (int)$row['cnt'];
+        }
+
+        foreach ($fallbackRows as $row) {
+            $wheelId = null !== $row['wheel_id'] ? (int)$row['wheel_id'] : null;
+            $indexed[$wheelId ?? 0] ??= [
+                'wheel_id' => $wheelId,
+                'name' => $this->resolveWheelDisplayName($wheelId, $wheelNames),
+                'tracks_queued' => 0,
+                'fallbacks' => 0,
+                'deferred' => 0,
+            ];
+            $indexed[$wheelId ?? 0]['fallbacks'] = (int)$row['cnt'];
+        }
+
+        foreach ($deferredRows as $row) {
+            $wheelId = null !== $row['wheel_id'] ? (int)$row['wheel_id'] : null;
+            $indexed[$wheelId ?? 0] ??= [
+                'wheel_id' => $wheelId,
+                'name' => $this->resolveWheelDisplayName($wheelId, $wheelNames),
+                'tracks_queued' => 0,
+                'fallbacks' => 0,
+                'deferred' => 0,
+            ];
+            $indexed[$wheelId ?? 0]['deferred'] = (int)$row['cnt'];
+        }
+
+        $result = array_values($indexed);
+        usort(
+            $result,
+            static fn (array $a, array $b): int => $b['tracks_queued'] <=> $a['tracks_queued'],
+        );
+
+        return $result;
+    }
+
+    /**
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>,
+     *     fallback_count: int
+     * }
+     */
+    public function getStationLegalIdComplianceSummary(
+        Station $station,
+        DateTimeImmutable $since,
+        int $toleranceSeconds = 10,
+    ): array {
+        $compliance = $this->getLegalIdComplianceForQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+                AND e.actual_play_at IS NOT NULL
+                ORDER BY e.actual_play_at DESC
+            DQL,
+            [
+                'station' => $station,
+                'since' => $since,
+                'anchor' => 'legal_id',
+                'kind' => ClockWheelEventKind::TrackQueued,
+            ],
+            $toleranceSeconds,
+        );
+
+        $fallbackCount = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getSingleScalarResult();
+
+        $compliance['fallback_count'] = $fallbackCount;
+
+        return $compliance;
+    }
+
+    /**
+     * @param array<int, string> $wheelNames
+     */
+    private function resolveWheelDisplayName(?int $wheelId, array $wheelNames): string
+    {
+        if (null === $wheelId) {
+            return __('Top of Hour (station-wide)');
+        }
+
+        return $wheelNames[$wheelId] ?? sprintf(__('Clock Wheel #%d'), $wheelId);
+    }
+
+    public function findLatestUnplayedLegalIdQueued(
+        StationClockWheel $wheel,
+        int $queueId,
+    ): ?ClockWheelEvent {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.clock_wheel = :wheel
+                AND e.event_kind = :kind
+                AND e.anchor_type = :anchor
+                AND e.actual_play_at IS NULL
+                AND e.station_queue_id = :queueId
+                ORDER BY e.id DESC
+            DQL
+        )->setParameter('wheel', $wheel)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('queueId', $queueId)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+    }
+
+    public function findLatestUnplayedTopOfHourLegalIdQueued(
+        Station $station,
+        int $queueId,
+    ): ?ClockWheelEvent {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_kind = :kind
+                AND e.anchor_type = :anchor
+                AND e.actual_play_at IS NULL
+                AND e.station_queue_id = :queueId
+                ORDER BY e.id DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('kind', ClockWheelEventKind::TrackQueued)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('queueId', $queueId)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+    }
+
+    /**
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>,
+     *     fallback_count: int
+     * }
+     */
+    public function getStationTopOfHourLegalIdComplianceSummary(
+        Station $station,
+        DateTimeImmutable $since,
+        int $toleranceSeconds = 10,
+    ): array {
+        $compliance = $this->getLegalIdComplianceForQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+                AND e.actual_play_at IS NOT NULL
+                ORDER BY e.actual_play_at DESC
+            DQL,
+            [
+                'station' => $station,
+                'since' => $since,
+                'anchor' => 'legal_id',
+                'kind' => ClockWheelEventKind::TrackQueued,
+            ],
+            $toleranceSeconds,
+        );
+
+        $fallbackCount = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT COUNT(e.id) FROM App\Entity\ClockWheelEvent e
+                WHERE e.station = :station
+                AND e.clock_wheel IS NULL
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('since', $since)
+            ->setParameter('anchor', 'legal_id')
+            ->setParameter('kind', ClockWheelEventKind::Fallback)
+            ->getSingleScalarResult();
+
+        $compliance['fallback_count'] = $fallbackCount;
+
+        return $compliance;
+    }
+
+    /**
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>
+     * }
+     */
+    public function getLegalIdComplianceSummary(
+        StationClockWheel $wheel,
+        DateTimeImmutable $since,
+        int $toleranceSeconds = 10,
+    ): array {
+        return $this->getLegalIdComplianceForQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\ClockWheelEvent e
+                WHERE e.clock_wheel = :wheel
+                AND e.event_timestamp >= :since
+                AND e.anchor_type = :anchor
+                AND e.event_kind = :kind
+                AND e.actual_play_at IS NOT NULL
+                ORDER BY e.actual_play_at DESC
+            DQL,
+            [
+                'wheel' => $wheel,
+                'since' => $since,
+                'anchor' => 'legal_id',
+                'kind' => ClockWheelEventKind::TrackQueued,
+            ],
+            $toleranceSeconds,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $parameters
+     *
+     * @return array{
+     *     tolerance_seconds: int,
+     *     hours_with_legal_id: int,
+     *     on_time_count: int,
+     *     late_count: int,
+     *     compliance_percent: float|null,
+     *     late_events: array<int, array{
+     *         expected_play_at: string,
+     *         actual_play_at: string|null,
+     *         drift_seconds: int|null,
+     *         media_id: int|null
+     *     }>
+     * }
+     */
+    private function getLegalIdComplianceForQuery(
+        string $dql,
+        array $parameters,
+        int $toleranceSeconds,
+    ): array {
+        $query = $this->em->createQuery($dql);
+        foreach ($parameters as $key => $value) {
+            $query->setParameter($key, $value);
+        }
+
+        /** @var ClockWheelEvent[] $events */
+        $events = $query->getResult();
+
+        $onTime = 0;
+        $late = 0;
+        $lateEvents = [];
+
+        foreach ($events as $event) {
+            $drift = $event->drift_seconds ?? 0;
+            if (abs($drift) <= $toleranceSeconds) {
+                $onTime++;
+            } else {
+                $late++;
+                if (count($lateEvents) < 50) {
+                    $lateEvents[] = [
+                        'expected_play_at' => $event->expected_play_at?->format(DateTimeImmutable::ATOM) ?? '',
+                        'actual_play_at' => $event->actual_play_at?->format(DateTimeImmutable::ATOM),
+                        'drift_seconds' => $event->drift_seconds,
+                        'media_id' => $event->media_id,
+                    ];
+                }
+            }
+        }
+
+        $total = count($events);
+
+        return [
+            'tolerance_seconds' => $toleranceSeconds,
+            'hours_with_legal_id' => $total,
+            'on_time_count' => $onTime,
+            'late_count' => $late,
+            'compliance_percent' => $total > 0
+                ? round(($onTime / $total) * 100, 1)
+                : null,
+            'late_events' => $lateEvents,
+        ];
+    }
+
+    /**
+     * @return array{avg_listeners: int|null, peak_listeners: int|null}
+     */
+    public function getListenerOverlayForWheel(
+        StationClockWheel $wheel,
+        DateTimeImmutable $since,
+    ): array {
+        $result = $this->em->createQuery(
+            <<<'DQL'
+                SELECT AVG(a.number_avg), MAX(a.number_max)
+                FROM App\Entity\Analytics a
+                WHERE a.station = :station
+                AND a.moment >= :since
+                AND a.type = :type
+            DQL
+        )->setParameter('station', $wheel->station)
+            ->setParameter('since', $since)
+            ->setParameter('type', \App\Entity\Enums\AnalyticsIntervals::Hourly)
+            ->getSingleResult();
+
+        if (!is_array($result) || ($result[0] === null && $result[1] === null)) {
+            return ['avg_listeners' => null, 'peak_listeners' => null];
+        }
+
+        return [
+            'avg_listeners' => $result[0] !== null ? (int)round((float)$result[0]) : null,
+            'peak_listeners' => $result[1] !== null ? (int)$result[1] : null,
+        ];
+    }
+
+    /**
+     * @return array{rows: list<array<string, mixed>>, total: int}
+     */
+    public function getReconciliationLog(
+        Station $station,
+        int $limit = 50,
+        int $offset = 0,
+        ?int $wheelId = null,
+        ?ClockWheelEventKind $eventKind = null,
+    ): array {
+        $limit = max(1, min(200, $limit));
+        $offset = max(0, $offset);
+
+        $qb = $this->em->createQueryBuilder()
+            ->select('e', 'w', 's', 'm')
+            ->from(ClockWheelEvent::class, 'e')
+            ->leftJoin('e.clock_wheel', 'w')
+            ->leftJoin('e.slot', 's')
+            ->leftJoin('e.media', 'm')
+            ->where('e.station = :station')
+            ->setParameter('station', $station)
+            ->orderBy('e.event_timestamp', 'DESC');
+
+        if ($wheelId !== null) {
+            $qb->andWhere('IDENTITY(e.clock_wheel) = :wheelId')
+                ->setParameter('wheelId', $wheelId);
+        }
+
+        if ($eventKind instanceof ClockWheelEventKind) {
+            $qb->andWhere('e.event_kind = :kind')
+                ->setParameter('kind', $eventKind);
+        }
+
+        $countQb = clone $qb;
+        $total = (int)$countQb->select('COUNT(e.id)')->getQuery()->getSingleScalarResult();
+
+        /** @var ClockWheelEvent[] $events */
+        $events = $qb->setFirstResult($offset)
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->execute();
+
+        $rows = [];
+        foreach ($events as $event) {
+            $rows[] = [
+                'id' => $event->id,
+                'event_timestamp' => $event->event_timestamp->format(DateTimeImmutable::ATOM),
+                'event_kind' => $event->event_kind->value,
+                'fallback_reason' => $event->fallback_reason?->value,
+                'clock_wheel_id' => $event->clock_wheel_id,
+                'clock_wheel_name' => $event->clock_wheel?->name,
+                'slot_id' => $event->slot_id,
+                'anchor_type' => $event->anchor_type,
+                'sound_code' => $event->slot?->sound_code,
+                'research_score' => $event->slot?->research_score,
+                'drift_seconds' => $event->drift_seconds,
+                'expected_play_at' => $event->expected_play_at?->format(DateTimeImmutable::ATOM),
+                'actual_play_at' => $event->actual_play_at?->format(DateTimeImmutable::ATOM),
+                'media_id' => $event->media_id,
+            ];
+        }
+
+        return ['rows' => $rows, 'total' => $total];
     }
 }

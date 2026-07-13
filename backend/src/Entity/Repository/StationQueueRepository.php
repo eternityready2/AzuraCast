@@ -124,8 +124,9 @@ final class StationQueueRepository extends AbstractStationBasedRepository
 
         return $this->em->createQuery(
             <<<'DQL'
-                SELECT sq.song_id, sq.timestamp_played, sq.title, sq.artist
+                SELECT sq.song_id, sq.timestamp_played, sq.title, sq.artist, sq.album, COALESCE(sm.type, 'music') as media_type
                 FROM App\Entity\StationQueue sq
+                LEFT JOIN sq.media sm
                 WHERE sq.station = :station
                 AND (sq.is_played = 0 OR sq.timestamp_played >= :threshold)
                 ORDER BY sq.timestamp_played DESC

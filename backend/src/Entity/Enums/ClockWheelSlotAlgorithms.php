@@ -45,6 +45,11 @@ enum ClockWheelSlotAlgorithms: string
      */
     case MostRecentArtist = 'most_recent_artist';
 
+    /**
+     * Rotate evenly through candidates (oldest-played first). Used for legal IDs.
+     */
+    case Sequential = 'sequential';
+
     public function label(): string
     {
         return match($this) {
@@ -54,6 +59,7 @@ enum ClockWheelSlotAlgorithms: string
             self::OldestTrack      => 'Oldest Track',
             self::MostRecentAlbum  => 'Most Recent Album',
             self::MostRecentArtist => 'Most Recent Artist',
+            self::Sequential       => 'Sequential',
         };
     }
 }

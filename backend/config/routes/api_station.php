@@ -754,6 +754,21 @@ return static function (RouteCollectorProxy $group) {
                                 Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':scheduleAction'
                             )->setName('api:stations:clock-wheels:schedule');
 
+                            $group->get(
+                                '/clock-wheels/program-grid',
+                                Controller\Api\Stations\ClockWheels\ProgramGridAction::class
+                            )->setName('api:stations:clock-wheels:program-grid');
+
+                            $group->get(
+                                '/clock-wheels/reconciliation-log',
+                                Controller\Api\Stations\ClockWheels\ReconciliationLogAction::class
+                            )->setName('api:stations:clock-wheels:reconciliation-log');
+
+                            $group->post(
+                                '/clock-wheels/import',
+                                Controller\Api\Stations\ClockWheels\ImportAction::class
+                            )->setName('api:stations:clock-wheels:import');
+
                             $group->post(
                                 '/clock-wheels',
                                 Controller\Api\Stations\ClockWheels\ClockWheelsController::class . ':createAction'
@@ -871,6 +886,41 @@ return static function (RouteCollectorProxy $group) {
                                         '/analytics',
                                         Controller\Api\Stations\ClockWheels\AnalyticsAction::class
                                     )->setName('api:stations:clock-wheel:analytics');
+
+                                    $group->get(
+                                        '/export',
+                                        Controller\Api\Stations\ClockWheels\ExportAction::class
+                                    )->setName('api:stations:clock-wheel:export');
+                                }
+                            );
+
+                            $group->get(
+                                '/holiday-overrides',
+                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':listAction'
+                            )->setName('api:stations:holiday-overrides');
+
+                            $group->post(
+                                '/holiday-overrides',
+                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':createAction'
+                            );
+
+                            $group->group(
+                                '/holiday-override/{id}',
+                                function (RouteCollectorProxy $group) {
+                                    $group->get(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':getAction'
+                                    )->setName('api:stations:holiday-override');
+
+                                    $group->put(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':editAction'
+                                    );
+
+                                    $group->delete(
+                                        '',
+                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':deleteAction'
+                                    );
                                 }
                             );
 
@@ -916,6 +966,11 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:overview-charts');
 
                             $group->get(
+                                '/overview/dmca-compliance',
+                                Controller\Api\Stations\Reports\Overview\DmcaComplianceAction::class
+                            )->setName('api:stations:reports:overview-dmca-compliance');
+
+                            $group->get(
                                 '/overview/best-and-worst',
                                 Controller\Api\Stations\Reports\Overview\BestAndWorstAction::class
                             )->setName('api:stations:reports:best-and-worst');
@@ -944,6 +999,51 @@ return static function (RouteCollectorProxy $group) {
                                 '/overview/by-listening-time',
                                 Controller\Api\Stations\Reports\Overview\ByListeningTime::class
                             )->setName('api:stations:reports:by-listening-time');
+
+                            $group->get(
+                                '/overview/heatmap',
+                                Controller\Api\Stations\Reports\Overview\HeatmapAction::class
+                            )->setName('api:stations:reports:overview-heatmap');
+
+                            $group->get(
+                                '/overview/clock-performance',
+                                Controller\Api\Stations\Reports\Overview\ClockPerformanceAction::class
+                            )->setName('api:stations:reports:overview-clock-performance');
+
+                            $group->get(
+                                '/overview/playlist-performance',
+                                Controller\Api\Stations\Reports\Overview\PlaylistPerformanceAction::class
+                            )->setName('api:stations:reports:overview-playlist-performance');
+
+                            $group->get(
+                                '/overview/dropout',
+                                Controller\Api\Stations\Reports\Overview\DropoutAction::class
+                            )->setName('api:stations:reports:overview-dropout');
+
+                            $group->get(
+                                '/overview/listener-insights',
+                                Controller\Api\Stations\Reports\Overview\ListenerInsightsAction::class
+                            )->setName('api:stations:reports:overview-listener-insights');
+
+                            $group->get(
+                                '/overview/growth-trend',
+                                Controller\Api\Stations\Reports\Overview\GrowthTrendAction::class
+                            )->setName('api:stations:reports:overview-growth-trend');
+
+                            $group->get(
+                                '/overview/retention-curve',
+                                Controller\Api\Stations\Reports\Overview\RetentionCurveAction::class
+                            )->setName('api:stations:reports:overview-retention-curve');
+
+                            $group->get(
+                                '/overview/daypart-audience',
+                                Controller\Api\Stations\Reports\Overview\DaypartAudienceAction::class
+                            )->setName('api:stations:reports:overview-daypart-audience');
+
+                            $group->get(
+                                '/overview/health',
+                                Controller\Api\Stations\Reports\Overview\HealthAction::class
+                            )->setName('api:stations:reports:overview-health');
 
                             $group->get(
                                 '/soundexchange',
@@ -1211,6 +1311,151 @@ return static function (RouteCollectorProxy $group) {
                                 '/bulletin',
                                 Controller\Api\Stations\AiNews\BulletinGetAction::class
                             )->setName('api:stations:ai-news:bulletin');
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    // Top-of-hour legal ID protection (v0.29)
+                    $group->group(
+                        '/top-of-hour',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\TopOfHour\GetAction::class
+                            )->setName('api:stations:top-of-hour');
+
+                            $group->put(
+                                '',
+                                Controller\Api\Stations\TopOfHour\PutAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    // AI DJ Profiles (settings)
+                    $group->group(
+                        '/ai-dj',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\AiDj\IndexAction::class
+                            )->setName('api:stations:ai-dj');
+
+                            $group->post(
+                                '',
+                                Controller\Api\Stations\AiDj\PostAction::class
+                            );
+
+                            $group->get(
+                                '/{id}',
+                                Controller\Api\Stations\AiDj\GetAction::class
+                            )->setName('api:stations:ai-dj:detail');
+
+                            $group->put(
+                                '/{id}',
+                                Controller\Api\Stations\AiDj\PutAction::class
+                            );
+
+                            $group->delete(
+                                '/{id}',
+                                Controller\Api\Stations\AiDj\DeleteAction::class
+                            );
+
+                            $group->get(
+                                '/{dj_id}/test',
+                                Controller\Api\Stations\AiDj\TestAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::AiDj, true));
+
+                    // AI DJ Schedules
+                    $group->group(
+                        '/ai-dj/{dj_id}/schedules',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\AiDj\Schedules\IndexAction::class
+                            )->setName('api:stations:ai-dj:schedules');
+
+                            $group->post(
+                                '',
+                                Controller\Api\Stations\AiDj\Schedules\PostAction::class
+                            );
+
+                            $group->get(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\GetAction::class
+                            )->setName('api:stations:ai-dj:schedule');
+
+                            $group->put(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\PutAction::class
+                            );
+
+                            $group->delete(
+                                '/{schedule_id}',
+                                Controller\Api\Stations\AiDj\Schedules\DeleteAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::AiDjSchedule, true));
+
+                    // AI DJ Content Library
+                    $group->group(
+                        '/ai-dj-content',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\AiDjContent\IndexAction::class
+                            )->setName('api:stations:ai-dj-content');
+
+                            $group->post(
+                                '',
+                                Controller\Api\Stations\AiDjContent\PostAction::class
+                            );
+
+                            $group->get(
+                                '/types',
+                                Controller\Api\Stations\AiDjContent\TypesAction::class
+                            )->setName('api:stations:ai-dj-content:types');
+
+                            $group->get(
+                                '/{content_id}',
+                                Controller\Api\Stations\AiDjContent\GetAction::class
+                            )->setName('api:stations:ai-dj-content:get');
+
+                            $group->put(
+                                '/{content_id}',
+                                Controller\Api\Stations\AiDjContent\PutAction::class
+                            );
+
+                            $group->delete(
+                                '/{content_id}',
+                                Controller\Api\Stations\AiDjContent\DeleteAction::class
+                            );
+
+                            $group->post(
+                                '/bulk-delete',
+                                Controller\Api\Stations\AiDjContent\BulkDeleteAction::class
+                            );
+
+                            $group->post(
+                                '/delete-by-type',
+                                Controller\Api\Stations\AiDjContent\DeleteByTypeAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::AiDjContent, true));
+
+                    // Content-type crossfade profiles (v0.33)
+                    $group->group(
+                        '/crossfade-profiles',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\CrossfadeProfiles\GetAction::class
+                            )->setName('api:stations:crossfade-profiles');
+
+                            $group->put(
+                                '',
+                                Controller\Api\Stations\CrossfadeProfiles\PutAction::class
+                            );
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 

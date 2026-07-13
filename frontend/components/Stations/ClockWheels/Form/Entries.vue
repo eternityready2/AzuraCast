@@ -132,6 +132,39 @@
 
             <div
                 v-if="entries.length > 0"
+                class="clock-wheel-hour-distribution mb-3"
+            >
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-1">
+                    <span class="fw-semibold small">{{ $gettext('Hour distribution') }}</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span
+                            class="badge"
+                            :class="layoutValid ? 'text-bg-success' : 'text-bg-warning'"
+                        >
+                            {{ layoutValid ? $gettext('Valid layout') : $gettext('Needs review') }}
+                        </span>
+                        <span class="small text-muted">
+                            {{ $gettext('Est. loop') }}: {{ formatLoopTime(estimatedLoopSeconds) }}
+                        </span>
+                    </div>
+                </div>
+                <div
+                    class="clock-wheel-hour-distribution__bars d-flex gap-1 align-items-end"
+                    role="img"
+                    :aria-label="$gettext('Anchor density across the hour')"
+                >
+                    <div
+                        v-for="bucket in hourDistribution"
+                        :key="bucket.segment"
+                        class="clock-wheel-hour-distribution__bar flex-grow-1 rounded-top"
+                        :style="{ height: barHeight(bucket.count) + 'px' }"
+                        :title="bucket.label + ': ' + bucket.count"
+                    />
+                </div>
+            </div>
+
+            <div
+                v-if="entries.length > 0"
                 class="clock-wheel-timeline mb-3"
                 role="img"
                 :aria-label="$gettext('Hour timeline showing anchor positions')"
@@ -179,6 +212,9 @@
                             {{ $gettext('Type') }}
                         </th>
                         <th class="text-uppercase small">
+                            {{ $gettext('Category') }}
+                        </th>
+                        <th class="text-uppercase small">
                             {{ $gettext('Algorithm') }}
                         </th>
                         <th class="text-uppercase small">
@@ -195,7 +231,7 @@
                 <tbody ref="$tbody">
                     <tr v-if="entries.length === 0">
                         <td
-                            colspan="6"
+                            colspan="7"
                             class="text-center text-muted py-3"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
@@ -236,11 +272,29 @@
                         </td>
                         <td>
                             <select
+                                v-model="entry.category_id"
+                                class="form-select form-select-sm"
+                                @change="props.onEntriesChanged()"
+                            >
+                                <option
+                                    v-for="opt in categoryOptions"
+                                    :key="String(opt.value)"
+                                    :value="opt.value"
+                                >
+                                    {{ opt.text }}
+                                </option>
+                            </select>
+                        </td>
+                        <td>
+                            <select
                                 v-model="entry.algorithm"
                                 class="form-select form-select-sm"
                             >
                                 <option value="random">
                                     {{ $gettext('Random') }}
+                                </option>
+                                <option value="sequential">
+                                    {{ $gettext('Sequential (oldest first)') }}
                                 </option>
                                 <option value="oldest_album">
                                     {{ $gettext('Oldest Album') }}
@@ -268,6 +322,29 @@
                                 class="form-control form-control-sm"
                                 :placeholder="$gettext('Auto')"
                             >
+                            <div
+                                v-if="showSeparationOverrides"
+                                class="mt-1"
+                            >
+                                <label class="form-check form-check-inline small mb-0">
+                                    <input
+                                        v-model="entry.separation_override_enabled"
+                                        type="checkbox"
+                                        class="form-check-input"
+                                        @change="props.onEntriesChanged()"
+                                    >
+                                    {{ $gettext('Sep.') }}
+                                </label>
+                                <input
+                                    v-if="entry.separation_override_enabled"
+                                    v-model.number="entry.separation_artist_minutes"
+                                    type="number"
+                                    min="1"
+                                    class="form-control form-control-sm mt-1"
+                                    :placeholder="$gettext('Artist min')"
+                                    @change="props.onEntriesChanged()"
+                                >
+                            </div>
                         </td>
                         <td class="text-center align-middle">
                             <div class="btn-group btn-group-sm w-100 justify-content-center">
@@ -303,6 +380,18 @@
 
             <button
                 type="button"
+                class="btn btn-outline-secondary btn-sm mb-2 me-2"
+                @click="showSeparationOverrides = !showSeparationOverrides"
+            >
+                {{
+                    showSeparationOverrides
+                        ? $gettext('Hide per-slot separation')
+                        : $gettext('Show per-slot separation')
+                }}
+            </button>
+
+            <button
+                type="button"
                 class="btn btn-secondary w-100 mt-2"
                 @click="props.addEntry()"
             >
@@ -317,28 +406,31 @@ import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupSelect from '~/components/Form/FormGroupSelect.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {computed, onMounted, useTemplateRef} from 'vue';
+import {computed, onMounted, ref, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
 import {useDraggable} from 'vue-draggable-plus';
+import {useClockWheelSlotOptions} from '~/functions/useClockWheelSlotOptions.ts';
 import IconIcDelete from '~icons/ic/baseline-delete';
 import IconIcAdd from '~icons/ic/baseline-add';
 import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
+    getClockWheelHourDistribution,
+    estimateClockWheelLoopSeconds,
+    isClockWheelLayoutValid,
     parseClockWheelPosition,
     timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
-import {formatMediaType, getMediaTypeOptions, type MediaTypeValue} from '~/functions/mediaTypes.ts';
+import {formatMediaType, getMediaTypeOptions} from '~/functions/mediaTypes.ts';
+import type {ClockWheelSlotEditorRow} from '~/functions/clockWheelSlotEditor.ts';
 
 const {$gettext} = useTranslate();
 
-export interface ClockWheelEntryRow {
-    type: MediaTypeValue;
-    algorithm: string;
-    position_seconds: number;
-    duration_seconds: number | null;
-}
+const {categoryOptions, load: loadSlotOptions} = useClockWheelSlotOptions();
+const showSeparationOverrides = ref(false);
+
+export type ClockWheelEntryRow = ClockWheelSlotEditorRow;
 
 const fillStrategyOptions = computed(() => [
     {value: 'conservative', text: $gettext('Conservative (defer tight windows)')},
@@ -421,9 +513,32 @@ const timelineWarnings = computed(() =>
     getClockWheelTimelineWarnings(entries.value, $gettext)
 );
 
+const hourDistribution = computed(() => getClockWheelHourDistribution(entries.value));
+
+const estimatedLoopSeconds = computed(() =>
+    estimateClockWheelLoopSeconds(entries.value)
+);
+
+const layoutValid = computed(() => isClockWheelLayoutValid(entries.value));
+
+const maxBucketCount = computed(() =>
+    Math.max(1, ...hourDistribution.value.map((b) => b.count))
+);
+
+const barHeight = (count: number) =>
+    count === 0 ? 2 : Math.max(4, Math.round((count / maxBucketCount.value) * 28));
+
+const formatLoopTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+};
+
 const $tbody = useTemplateRef('$tbody');
 
 onMounted(() => {
+    void loadSlotOptions();
+
     if ($tbody.value === null) {
         return;
     }
@@ -525,5 +640,17 @@ const focusRow = (index: number) => {
     justify-content: center;
     padding-left: 0;
     padding-right: 0;
+}
+
+.clock-wheel-hour-distribution__bars {
+    min-height: 2rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.clock-wheel-hour-distribution__bar {
+    min-width: 3px;
+    background: var(--bs-primary);
+    opacity: 0.75;
 }
 </style>

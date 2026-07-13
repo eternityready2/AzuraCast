@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Entity\Enums\ClockWheelSlotAlgorithms;
+use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Interfaces\IdentifiableEntityInterface;
 use Doctrine\ORM\Mapping as ORM;
@@ -127,6 +128,26 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
     ]
     public ClockWheelSlotAlgorithms $algorithm = ClockWheelSlotAlgorithms::Random;
 
+    /**
+     * When a playlist is pinned: restrict_pool filters then uses slot algorithm;
+     * playlist_rotation follows the playlist's AutoDJ order.
+     */
+    #[
+        OA\Property(example: 'restrict_pool'),
+        ORM\Column(type: 'string', length: 30, enumType: ClockWheelSlotPoolModes::class)
+    ]
+    public ClockWheelSlotPoolModes $pool_mode = ClockWheelSlotPoolModes::RestrictPool;
+
+    /** Optional per-slot separation override (artist/title windows). */
+    #[ORM\Column]
+    public bool $separation_override_enabled = false;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_artist_minutes = null;
+
+    #[ORM\Column(nullable: true)]
+    public ?int $separation_title_minutes = null;
+
     // ------------------------------------------------------------------
     // Scheduling fields
     // ------------------------------------------------------------------
@@ -168,6 +189,29 @@ final class StationClockWheelSlot implements IdentifiableEntityInterface
         Assert\PositiveOrZero
     ]
     public ?int $duration_seconds = null;
+
+    /** When true, this anchor must play at position_seconds; misses are logged. */
+    #[
+        OA\Property(example: false),
+        ORM\Column
+    ]
+    public bool $is_hard_anchor = false;
+
+    /** Optional research / test score (0–100) for PD analytics. */
+    #[
+        OA\Property(example: 85, nullable: true),
+        ORM\Column(type: 'smallint', nullable: true, options: ['unsigned' => true]),
+        Assert\Range(min: 0, max: 100)
+    ]
+    public ?int $research_score = null;
+
+    /** Optional sound-code label (e.g. P1, G2) for reconciliation exports. */
+    #[
+        OA\Property(example: 'P1', nullable: true),
+        ORM\Column(length: 20, nullable: true),
+        Assert\Length(max: 20)
+    ]
+    public ?string $sound_code = null;
 
     // ------------------------------------------------------------------
     // Constructor
