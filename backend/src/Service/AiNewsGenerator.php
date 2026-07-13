@@ -352,26 +352,12 @@ final class AiNewsGenerator
             }
         }
 
-        if ($isSupportedWebsite) {
-            $websiteHeadlines = $this->extractSupportedWebsiteHeadlines($body, $url, $maxHeadlines);
-            if ([] !== $websiteHeadlines) {
-                return [
-                    'headlines' => $websiteHeadlines,
-                    'source_type' => 'website',
-                ];
-            }
-        }
-
         $feedHeadlines = $this->extractFeedHeadlines($body, $maxHeadlines);
         if ([] !== $feedHeadlines) {
             return [
                 'headlines' => $feedHeadlines,
                 'source_type' => 'feed',
             ];
-        }
-
-        if ($isSupportedWebsite) {
-            throw new RuntimeException('Supported website scraper found no usable headlines for this source.');
         }
 
         if ($this->isLikelyHtmlDocument($body, $contentType)) {
@@ -448,19 +434,7 @@ final class AiNewsGenerator
 
     private function getWebsiteScraperTargetUrl(string $url): ?string
     {
-        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-        if ('' === $host) {
-            return null;
-        }
-
-        if (str_ends_with($host, 'worthynews.com')) {
-            return 'https://worthynews.com/';
-        }
-
-        if (str_ends_with($host, 'raptureready.com')) {
-            return self::RAPTURE_READY_NEWS_URL;
-        }
-
+        // All URLs pass through - RSS feeds get XML parsing, others get feed parsing fallback
         return null;
     }
 
@@ -478,294 +452,13 @@ final class AiNewsGenerator
     }
 
     /**
-     * @return list<array{title: string, description: string}>
-     */
-    private function extractSupportedWebsiteHeadlines(string $body, string $sourceUrl, int $maxHeadlines): array
-    {
-        $host = strtolower((string) parse_url($sourceUrl, PHP_URL_HOST));
-        if (str_ends_with($host, 'worthynews.com')) {
-            return $this->extractWorthyNewsHeadlines($body, $maxHeadlines);
-        }
-
-        if (str_ends_with($host, 'raptureready.com')) {
-            return $this->extractRaptureReadyHeadlines($body, $maxHeadlines);
-        }
-
-        return [];
-    }
-
-    /**
-     * @return list<array{title: string, description: string}>
+     * Extract article content from a URL (used by HTML scraper, now unused for RSS-only mode).
+     * @deprecated RSS-only mode - this function is no longer called
      */
     private function extractArticleContentByUrl(string $articleUrl): string
     {
-        try {
-            $body = (string) $this->fetchUrl($articleUrl)->getBody();
-        } catch (Throwable) {
-            return '';
-        }
-
-        if (!preg_match('/<(html|body|article|main|p)\b/i', $body)) {
-            return '';
-        }
-
-        $previousUseInternalErrors = libxml_use_internal_errors(true);
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $loaded = $dom->loadHTML('<?xml encoding="utf-8" ?>' . $body, LIBXML_NOWARNING | LIBXML_NOERROR);
-        libxml_clear_errors();
-        libxml_use_internal_errors($previousUseInternalErrors);
-
-        if (!$loaded) {
-            return '';
-        }
-
-        $xpath = new DOMXPath($dom);
-        $paragraphQueries = [
-            '//article//p[normalize-space()]',
-            '//main//p[normalize-space()]',
-            '//div[contains(@class, "entry-content")]//p[normalize-space()]',
-            '//div[contains(@class, "post-content")]//p[normalize-space()]',
-        ];
-
-        foreach ($paragraphQueries as $query) {
-            $paragraphs = $xpath->query($query);
-            if (false === $paragraphs || 0 === $paragraphs->length) {
-                continue;
-            }
-
-            $parts = [];
-            foreach ($paragraphs as $paragraph) {
-                $text = $this->normalizeHtmlText($paragraph->textContent ?? '');
-                if (!$this->isUsableSummary($text)) {
-                    continue;
-                }
-
-                $parts[] = $text;
-                if (count($parts) >= 2) {
-                    break;
-                }
-            }
-
-            if ([] !== $parts) {
-                return implode(' ', $parts);
-            }
-        }
-
+        // Dead code - RSS feeds don't need article content extraction
         return '';
-    }
-
-    /**
-     * @return list<array{title: string, description: string}>
-     */
-    private function extractWorthyNewsHeadlines(string $body, int $maxHeadlines): array
-    {
-        return $this->extractHeadlinesFromHtml(
-            $body,
-            [
-                '//article',
-                '//main//a[contains(@href, "worthynews.com/")][normalize-space()]',
-                '//h2/a[contains(@href, "worthynews.com/")][normalize-space()]',
-                '//h3/a[contains(@href, "worthynews.com/")][normalize-space()]',
-            ],
-            $maxHeadlines,
-            static function (string $href): bool {
-                return str_contains($href, 'worthynews.com/')
-                    && preg_match('#worthynews\.com/\d+#', $href)
-                    && !str_contains($href, '/category/')
-                    && !str_contains($href, '/tag/');
-            },
-            'worthynews.com'
-        );
-    }
-
-    /**
-     * @return list<array{title: string, description: string}>
-     */
-    private function extractRaptureReadyHeadlines(string $body, int $maxHeadlines): array
-    {
-        if (str_starts_with(ltrim($body), 'Title: Rapture Ready End Times News Archives')) {
-            return $this->extractRaptureReadyHeadlinesFromMarkdown($body, $maxHeadlines);
-        }
-
-        $digestHeadlines = $this->extractRaptureReadyDigestHeadlines($body, $maxHeadlines);
-        if ([] !== $digestHeadlines) {
-            return $digestHeadlines;
-        }
-
-        return $this->extractHeadlinesFromHtml(
-            $body,
-            [
-                '//article',
-                '//main//a[contains(@href, "raptureready.com/")][normalize-space()]',
-                '//h2/a[contains(@href, "raptureready.com/")][normalize-space()]',
-                '//h3/a[contains(@href, "raptureready.com/")][normalize-space()]',
-            ],
-            $maxHeadlines,
-            static function (string $href): bool {
-                return str_contains($href, 'raptureready.com/')
-                    && preg_match('#/20\d{2}/\d{2}/\d{2}/#', $href)
-                    && !str_contains($href, '/category/')
-                    && !str_contains($href, '/wp-content/');
-            },
-            'raptureready.com'
-        );
-    }
-
-    /**
-     * @return list<array{title: string, description: string}>
-     */
-    private function extractRaptureReadyDigestHeadlines(string $body, int $maxHeadlines): array
-    {
-        if (!preg_match('/<(html|body|article|main|p|a)\b/i', $body)) {
-            return [];
-        }
-
-        $previousUseInternalErrors = libxml_use_internal_errors(true);
-        $dom = new DOMDocument('1.0', 'UTF-8');
-        $loaded = $dom->loadHTML('<?xml encoding="utf-8" ?>' . $body, LIBXML_NOWARNING | LIBXML_NOERROR);
-        libxml_clear_errors();
-        libxml_use_internal_errors($previousUseInternalErrors);
-
-        if (!$loaded) {
-            return [];
-        }
-
-        $xpath = new DOMXPath($dom);
-        $paragraphs = $xpath->query('//article//p[.//a[@href][normalize-space()]] | //main//p[.//a[@href][normalize-space()]]');
-        if (false === $paragraphs) {
-            return [];
-        }
-
-        $headlines = [];
-        $seenTitles = [];
-
-        foreach ($paragraphs as $paragraph) {
-            if (!$paragraph instanceof DOMElement) {
-                continue;
-            }
-
-            $headline = $this->buildRaptureReadyDigestHeadline($paragraph, $xpath);
-            if (null === $headline) {
-                continue;
-            }
-
-            $dedupeKey = mb_strtolower($headline['title']);
-            if (isset($seenTitles[$dedupeKey])) {
-                continue;
-            }
-
-            $seenTitles[$dedupeKey] = true;
-            $headlines[] = $headline;
-
-            if (count($headlines) >= $maxHeadlines) {
-                break;
-            }
-        }
-
-        return $headlines;
-    }
-
-    /**
-     * @return array{title: string, description: string}|null
-     */
-    private function buildRaptureReadyDigestHeadline(DOMElement $paragraph, DOMXPath $xpath): ?array
-    {
-        $links = $xpath->query('.//a[@href][normalize-space()]', $paragraph);
-        if (false === $links) {
-            return null;
-        }
-
-        foreach ($links as $link) {
-            if (!$link instanceof DOMElement) {
-                continue;
-            }
-
-            $href = trim((string) $link->getAttribute('href'));
-            if (!$this->isRaptureReadyDigestArticleUrl($href)) {
-                continue;
-            }
-
-            $title = $this->normalizeHtmlText($link->textContent ?? '');
-            if (!$this->isUsableHeadline($title)) {
-                continue;
-            }
-
-            $summary = $this->normalizeHtmlText($paragraph->textContent ?? '');
-            if ('' !== $summary) {
-                $pattern = '/^' . preg_quote($title, '/') . '(?:\s*[:\-–—]\s*|\s+)/u';
-                // Guard against invalid UTF-8 in the built pattern (e.g. from DOMDocument
-                // replacement chars that survived normalisation in the paragraph text).
-                if (false !== @preg_match($pattern, '')) {
-                    $summary = preg_replace($pattern, '', $summary, 1) ?? $summary;
-                }
-                $summary = $this->normalizeHtmlText($summary);
-            }
-
-            if (!$this->isUsableSummary($summary)) {
-                $summary = '';
-            }
-
-            return [
-                'title' => $title,
-                'description' => $summary,
-            ];
-        }
-
-        return null;
-    }
-
-    private function isRaptureReadyDigestArticleUrl(string $href): bool
-    {
-        if (!preg_match('#^https?://#i', $href)) {
-            return false;
-        }
-
-        $host = strtolower((string) parse_url($href, PHP_URL_HOST));
-        if ('' === $host) {
-            return false;
-        }
-
-        if (str_ends_with($host, 'raptureready.com')) {
-            return false;
-        }
-
-        return !str_contains($href, '/wp-content/')
-            && !str_contains($href, '/web/')
-            && !str_contains($href, 'pixel.wp.com');
-    }
-
-    /**
-     * @return list<array{title: string, description: string}>
-     */
-    private function extractRaptureReadyHeadlinesFromMarkdown(string $body, int $maxHeadlines): array
-    {
-        preg_match_all('/^\[(.+?)\]\((https?:\/\/[^)]+)\)\n\n\s*(.+)$/m', $body, $matches, PREG_SET_ORDER);
-
-        $headlines = [];
-        foreach ($matches as $match) {
-            $title = $this->normalizeHtmlText($match[1] ?? '');
-            $href = trim($match[2] ?? '');
-            $summary = $this->normalizeHtmlText($match[3] ?? '');
-
-            if (!$this->isUsableHeadline($title)) {
-                continue;
-            }
-
-            if (!preg_match('#^https?://#', $href) || !$this->isUsableSummary($summary)) {
-                $summary = '';
-            }
-
-            $headlines[] = [
-                'title' => $title,
-                'description' => $summary,
-            ];
-
-            if (count($headlines) >= $maxHeadlines) {
-                break;
-            }
-        }
-
-        return $headlines;
     }
 
     /**

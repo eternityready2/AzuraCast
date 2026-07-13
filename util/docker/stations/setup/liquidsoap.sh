@@ -19,7 +19,6 @@ if [[ "$(uname -m)" = "aarch64" ]]; then
 fi
 
 wget -O /tmp/liquidsoap.deb "https://github.com/savonet/liquidsoap-release-assets/releases/download/v2.4.5/liquidsoap_2.4.5-debian-trixie-ocaml4.14.2-1_${ARCHITECTURE}.deb"
-# wget -O /tmp/liquidsoap.deb "https://github.com/savonet/liquidsoap-release-assets/releases/download/rolling-release-v2.4.x/liquidsoap-15181c6_2.4.5-debian-trixie-ocaml4.14.2-1_${ARCHITECTURE}.deb"
 
 dpkg -i /tmp/liquidsoap.deb
 apt-get install -y -f --no-install-recommends
