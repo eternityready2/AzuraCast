@@ -169,12 +169,17 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // current song's real end time. Net effect: nothing airs in :55-:00.
         $playMinute = (int) $expectedPlayTime->setTimezone($station->getTimezoneObject())->format('i');
         $songEnd = $this->getCurrentSongEndTime($station);
-        $endMinute = $songEnd !== null
-            ? (int) $songEnd->setTimezone($station->getTimezoneObject())->format('i')
-            : -1;
-        if ($minute >= 50 || $playMinute >= 55 || $endMinute >= 55) {
+        $endSecOfHour = -1;
+        if ($songEnd !== null) {
+            $endLocal = $songEnd->setTimezone($station->getTimezoneObject());
+            $endSecOfHour = ((int) $endLocal->format('i')) * 60 + (int) $endLocal->format('s');
+        }
+        // A DJ clip airs when the current song ends and then runs ~15-30s. To keep even
+        // the clip's TAIL out of the :55-:00 window, block from :54:30 (3270s into the
+        // hour) onward - a break that aired at :54:55 once bled ~19s past :55.
+        if ($minute >= 50 || $playMinute >= 55 || $endSecOfHour >= 3270) {
             $this->logger->debug('AI DJ: Skipped - DJ winding down before top of hour.', [
-                'now_min' => $minute, 'queue_min' => $playMinute, 'song_end_min' => $endMinute,
+                'now_min' => $minute, 'queue_min' => $playMinute, 'song_end_sec' => $endSecOfHour,
             ]);
             return;
         }
