@@ -24,11 +24,11 @@ tar -xzf /tmp/piper.tar.gz -C /usr/local/share/piper/ --strip-components=1
 ln -sf /usr/local/share/piper/piper /usr/local/bin/piper
 chmod a+x /usr/local/share/piper/piper
 
-# Download voice models using huggingface-cli (handles CDN auth/retries automatically)
+# Download voice models using hf CLI (handles CDN auth/retries automatically)
 # This fixes 403 Forbidden errors from HuggingFace CDN in GitHub Actions
 export HF_HOME=/tmp/hf_cache
 
-huggingface-cli download rhasspy/piper-voices \
+hf download rhasspy/piper-voices \
   en/en_US/lessac/medium/en_US-lessac-medium.onnx \
   en/en_US/lessac/medium/en_US-lessac-medium.onnx.json \
   en/en_US/joe/medium/en_US-joe-medium.onnx \
