@@ -425,6 +425,7 @@ final class ClockWheelPlaybackPlanner
             $slot,
             $strictSchedule || $isEndOfHour,
             $isEndOfHour,
+            $availableSeconds,
         );
 
         if ($isEndOfHour && $candidates !== []) {
@@ -951,6 +952,7 @@ final class ClockWheelPlaybackPlanner
         StationClockWheelSlot $slot,
         bool $strictSchedule,
         bool $isEndOfHour = false,
+        ?float $availableSeconds = null,
     ): array {
         $fitting = array_values(array_filter(
             $candidates,
@@ -977,13 +979,42 @@ final class ClockWheelPlaybackPlanner
             return [];
         }
 
+        // The user's configured Max Sec for this slot may be tighter than the
+        // actual time available before the next anchor. Before collapsing down
+        // to a single shortest track (which repeats the same song every time
+        // this slot fires), retry against the full available window.
+        if ($availableSeconds !== null && $availableSeconds > $maxDuration) {
+            $widened = array_values(array_filter(
+                $candidates,
+                static fn (StationMedia $m): bool => $m->getCalculatedLength() <= $availableSeconds
+            ));
+
+            if ($widened !== []) {
+                $this->logger->warning(
+                    'Clock Wheel: configured Max Sec too tight for this category; used full available window instead.',
+                    [
+                        'configured_max_duration' => $maxDuration,
+                        'available_seconds' => $availableSeconds,
+                        'slot_type' => $slot->type?->value,
+                    ]
+                );
+
+                return $widened;
+            }
+        }
+
         usort(
             $candidates,
             static fn (StationMedia $a, StationMedia $b): int =>
                 $a->getCalculatedLength() <=> $b->getCalculatedLength()
         );
 
-        $shortest = $candidates[0];
+        // Still nothing fits. Rather than deterministically locking onto the
+        // exact same shortest track every time this slot falls back, pick
+        // randomly among the few shortest candidates so it doesn't repeat
+        // identically on every hour.
+        $shortlist = array_slice($candidates, 0, min(3, count($candidates)));
+        $shortest = $shortlist[array_rand($shortlist)];
         $logKey = $this->isFlexibleMusicSlot($slot)
             ? 'Clock Wheel: no track fits the available window; using shortest music/talk candidate.'
             : 'Clock Wheel: no short-form track fits the available window; using shortest candidate with playback cap.';
