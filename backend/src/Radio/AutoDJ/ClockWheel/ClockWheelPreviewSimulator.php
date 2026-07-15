@@ -149,12 +149,24 @@ final class ClockWheelPreviewSimulator
         }
 
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
-        $candidates = $this->filterCandidates($candidates, $maxDuration, $slot, $wheel->fill_strategy);
 
+        $fittingCount = count(array_filter(
+            $candidates,
+            static fn (StationMedia $m): bool => $m->getCalculatedLength() <= $maxDuration
+        ));
+
+        $candidates = $this->filterCandidates($candidates, $maxDuration, $slot, $wheel->fill_strategy);
         if ($candidates === []) {
             $item->warnings[] = 'No media fits the available window.';
-
             return $item;
+        }
+
+        if ($fittingCount === 0) {
+            $item->warnings[] = sprintf(
+                'No track in this category fits the %ds window at this position — using the shortest available instead. '
+                . 'Consider widening the spacing between anchors here, or check this category\'s typical track lengths.',
+                (int)$maxDuration
+            );
         }
 
         $media = $this->pickCandidate($candidates, $slot->algorithm ?? ClockWheelSlotAlgorithms::Random, $simulatedSongIds);
