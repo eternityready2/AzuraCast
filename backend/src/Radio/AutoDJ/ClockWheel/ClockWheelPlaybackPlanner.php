@@ -425,6 +425,7 @@ final class ClockWheelPlaybackPlanner
             $slot,
             $strictSchedule || $isEndOfHour,
             $isEndOfHour,
+            $availableSeconds,
         );
 
         if ($isEndOfHour && $candidates !== []) {
