@@ -675,7 +675,15 @@ LIQ;
             <<<LS
             # Log current metadata for debugging.
             source.methods(radio).on_metadata(synchronous=false, azuracast.log_meta)
-            
+
+            # Clock Wheel stretch/squeeze: pitch-preserving time-stretch, ratio computed
+            # in PHP (safe +/-5%), passed through the 'liq_stretch_ratio' request annotation.
+            clock_wheel_stretch_ratio = ref(1.0)
+            source.methods(radio).on_track(synchronous=false, fun (m) -> begin
+              clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
+            end)
+            radio = stretch(ratio={clock_wheel_stretch_ratio()}, radio)
+
             # Apply crossfade.
             radio = azuracast.apply_crossfade(radio)
             LS

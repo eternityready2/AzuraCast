@@ -121,6 +121,10 @@ final class StationQueue implements
     #[ORM\Column]
     public bool $clock_wheel_enforce_cap = false;
 
+    /** Safe pitch-preserving stretch ratio (0.95-1.05) to hit the next anchor exactly. Null = no stretch. */
+    #[ORM\Column(type: 'float', nullable: true)]
+    public ?float $clock_wheel_stretch_ratio = null;
+
     /** True when a legal_id slot queued a promo (or other) substitute. */
     #[ORM\Column]
     public bool $clock_wheel_legal_id_substitute = false;

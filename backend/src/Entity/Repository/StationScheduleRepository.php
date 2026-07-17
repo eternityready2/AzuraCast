@@ -86,9 +86,11 @@ final class StationScheduleRepository extends Repository
             )));
             $record->loop_once = $item['loop_once'] ?? false;
             $record->is_emergency = (bool)($item['is_emergency'] ?? false);
+            $record->strict_start = (bool)($item['strict_start'] ?? false);
 
             if ($relation instanceof StationClockWheel) {
                 $record->loop_once = false;
+                $record->strict_start = false;
                 $modeRaw = $item['clock_wheel_mode'] ?? ClockWheelScheduleMode::Flexible->value;
                 $record->clock_wheel_mode = is_string($modeRaw)
                     ? (ClockWheelScheduleMode::tryFrom($modeRaw) ?? ClockWheelScheduleMode::Flexible)

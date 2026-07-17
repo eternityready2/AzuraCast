@@ -20,10 +20,32 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
     {
         return [
             AnnotateNextSong::class => [
+                ['applyClockWheelStretch', 12],
                 ['applyClockWheelCap', 11],
                 ['applyLegalIdQuickCut', 9],
             ],
         ];
+    }
+
+    public function applyClockWheelStretch(AnnotateNextSong $event): void
+    {
+        if (!$event->isAsAutoDj()) {
+            return;
+        }
+
+        $queue = $event->getQueue();
+        if (!$queue instanceof StationQueue) {
+            return;
+        }
+
+        $ratio = $queue->clock_wheel_stretch_ratio;
+        if (null === $ratio) {
+            return;
+        }
+
+        $event->addAnnotations([
+            'liq_stretch_ratio' => $ratio,
+        ]);
     }
 
     public function applyClockWheelCap(AnnotateNextSong $event): void

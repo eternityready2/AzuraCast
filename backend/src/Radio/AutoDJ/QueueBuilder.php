@@ -22,6 +22,7 @@ use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelStretchCalculator;
 use App\Radio\PlaylistParser;
 use App\Service\HolidayOverrideService;
 use DateTimeImmutable;
@@ -46,6 +47,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly StationQueueRepository $queueRepo,
         private readonly SongHistoryRepository $historyRepo,
         private readonly HolidayOverrideService $holidayOverrideService,
+        private readonly ClockWheelStretchCalculator $stretchCalculator,
     ) {
     }
 
@@ -74,10 +76,16 @@ final class QueueBuilder implements EventSubscriberInterface
         $station = $event->getStation();
         $expectedPlayTime = $event->getExpectedPlayTime();
 
+        $tz = $station->getTimezoneObject();
+
         $activePlaylistsByType = [];
         foreach ($station->playlists as $playlist) {
             /** @var StationPlaylist $playlist */
-            if ($playlist->isPlayable($event->isInterrupting())) {
+            $isEligible = $playlist->isPlayable($event->isInterrupting())
+                || ($event->isInterrupting()
+                    && $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $expectedPlayTime));
+
+            if ($isEligible) {
                 $type = $playlist->type->value;
 
                 $subType = ($playlist->schedule_items->count() > 0) ? 'scheduled' : 'unscheduled';
@@ -374,6 +382,33 @@ final class QueueBuilder implements EventSubscriberInterface
         if (null !== $maxDuration && $mediaToPlay->getCalculatedLength() > $maxDuration) {
             $stationQueueEntry->hour_boundary_enforce_cap = true;
             $stationQueueEntry->hour_boundary_max_play_seconds = (int)floor($maxDuration);
+        }
+
+        // Stretch target: whichever comes sooner -- the top-of-hour boundary, or the
+        // next scheduled playlist start anywhere in the station. This lets stretch
+        // help close gaps throughout the whole hour, not just right before :00.
+        $stretchTargetSeconds = null;
+
+        $secondsToNextScheduledStart = $this->scheduler->secondsUntilNextScheduledStart(
+            $playlist->station,
+            $expectedPlayTime,
+        );
+
+        if (null !== $maxDuration) {
+            $stretchTargetSeconds = (int)floor($maxDuration);
+        }
+
+        if (null !== $secondsToNextScheduledStart
+            && (null === $stretchTargetSeconds || $secondsToNextScheduledStart < $stretchTargetSeconds)
+        ) {
+            $stretchTargetSeconds = $secondsToNextScheduledStart;
+        }
+
+        if (null !== $stretchTargetSeconds) {
+            $stationQueueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                $mediaToPlay->getCalculatedLength(),
+                $stretchTargetSeconds,
+            );
         }
 
         $this->em->persist($stationQueueEntry);

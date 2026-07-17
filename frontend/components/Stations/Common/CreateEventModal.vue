@@ -114,7 +114,7 @@
                         min="0"
                         max="23"
                         placeholder="HH"
-                        @change="updateDurationFromHours"
+                        @input="updateDurationFromHours"
                     >
                     <span class="input-group-text">:</span>
                     <input
@@ -124,7 +124,7 @@
                         min="0"
                         max="59"
                         placeholder="MM"
-                        @change="updateDurationFromMinutes"
+                        @input="updateDurationFromMinutes"
                     >
                 </div>
             </form-markup>
@@ -144,7 +144,7 @@
                 :field="r$.start_date"
                 input-type="date"
                 :label="$gettext('Start Date')"
-                :description="$gettext('Required. Use with End date to limit when the schedule runs.')"
+                :description="isRecurring ? $gettext('Required. First date this schedule becomes active; combine with End Date/Repeat below to control when it runs.') : $gettext('Required. This is a one-time event -- it plays only on this date.')"
             />
 
             <form-group-field
@@ -153,9 +153,13 @@
                 :field="r$.end_date"
                 input-type="date"
                 :label="$gettext('End Date')"
-                :description="$gettext('Use with Start date to limit when the schedule runs. Recurrence uses this as the last day.')"
-                :required="scheduleRow.recurrence_end_type !== 'after'"
-                :input-attrs="{ disabled: scheduleRow.recurrence_end_type === 'after' }"
+                :description="!isRecurring
+                    ? $gettext('Locked to Start Date -- this is a one-time event. Check Recurring above to enable a different End Date.')
+                    : (scheduleRow.recurrence_end_type === 'after'
+                        ? $gettext('Not used when stopping after a number of occurrences (see below).')
+                        : $gettext('Use with Start date to limit when the schedule runs. Recurrence uses this as the last day.'))"
+                :required="isRecurring && scheduleRow.recurrence_end_type !== 'after'"
+                :input-attrs="{ disabled: !isRecurring || scheduleRow.recurrence_end_type === 'after' }"
             />
 
             <form-markup
@@ -199,13 +203,13 @@
                 v-if="isPlaylistSchedule"
                 id="edit_form_scheduling"
                 class="col-md-4"
-                :label="$gettext('Scheduling')"
+                :label="$gettext('Start Timing')"
             >
                 <div class="d-flex flex-wrap gap-3">
                     <div class="form-check mb-0">
                         <input
                             id="scheduling_flexible"
-                            v-model="schedulingMode"
+                            v-model="startTimingMode"
                             class="form-check-input"
                             type="radio"
                             value="flexible"
@@ -217,7 +221,7 @@
                     <div class="form-check mb-0">
                         <input
                             id="scheduling_strict"
-                            v-model="schedulingMode"
+                            v-model="startTimingMode"
                             class="form-check-input"
                             type="radio"
                             value="strict"
@@ -227,18 +231,23 @@
                         </label>
                     </div>
                 </div>
-                <div class="form-check mt-2">
+                <small class="form-text text-muted d-block mt-2">
+                    {{ $gettext('Flexible waits for the currently playing track to finish before starting. Strict cuts the current track to start exactly on time.') }}
+                </small>
+                <div class="form-check mt-3">
                     <input
                         id="scheduling_loop_once"
-                        v-model="schedulingMode"
+                        v-model="scheduleRow.loop_once"
                         class="form-check-input"
-                        type="radio"
-                        value="loop_once"
+                        type="checkbox"
                     >
                     <label class="form-check-label" for="scheduling_loop_once">
                         {{ $gettext('Loop Once') }}
                     </label>
                 </div>
+                <small class="form-text text-muted d-block">
+                    {{ $gettext('Independent of Start Timing above -- controls whether this playlist loops back through its media during its window, rather than playing through once.') }}
+                </small>
             </form-markup>
         </div>
 
@@ -255,7 +264,7 @@
                 </label>
             </div>
             <small class="form-text text-muted">
-                {{ $gettext('Schedule this event on a recurring basis.') }}
+                {{ $gettext('Check this to repeat the event on a schedule (weekly by default, or bi-weekly/monthly/custom below). Leave unchecked for a one-time event that only plays on its exact Start/End Date.') }}
             </small>
         </div>
 
@@ -431,7 +440,7 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 
-const schedulingMode = ref<'flexible' | 'strict' | 'loop_once'>('flexible');
+const startTimingMode = ref<'flexible' | 'strict'>('flexible');
 const clockWheelScheduleMode = ref<'flexible' | 'strict'>('flexible');
 
 // Schedule row state - matches PlaylistScheduleRow interface
@@ -448,6 +457,39 @@ const durationMinutes = ref(0);
 // Recurring toggle
 const isRecurring = ref(false);
 
+// Checking "Recurring" requires an explicit repeat pattern (defaults to Weekly)
+// rather than silently staying null. Unchecking clears it back to plain,
+// non-recurring behavior (event only plays on its exact Start/End Date).
+watch(isRecurring, (recurring) => {
+    if (recurring) {
+        if (!scheduleRow.value.recurrence_type) {
+            scheduleRow.value.recurrence_type = 'weekly';
+        }
+    } else {
+        scheduleRow.value.recurrence_type = null;
+        scheduleRow.value.recurrence_monthly_pattern = null;
+        scheduleRow.value.recurrence_monthly_day = null;
+        scheduleRow.value.recurrence_monthly_week = null;
+        scheduleRow.value.recurrence_monthly_day_of_week = null;
+        scheduleRow.value.recurrence_end_type = 'never';
+        scheduleRow.value.recurrence_end_after = null;
+        scheduleRow.value.days = [];
+        scheduleRow.value.end_date = scheduleRow.value.start_date;
+    }
+});
+
+// Keep End Date locked to Start Date for one-time (non-recurring) events at all
+// times -- not just at the moment Recurring is unchecked -- so later changing
+// Start Date can never leave a stale End Date that predates it.
+watch(
+    () => scheduleRow.value.start_date,
+    (newStartDate) => {
+        if (!isRecurring.value) {
+            scheduleRow.value.end_date = newStartDate;
+        }
+    }
+);
+
 // Update end_time from duration inputs
 const updateDuration = () => {
     const startTime = scheduleRow.value.start_time;
@@ -458,11 +500,34 @@ const updateDuration = () => {
     endTotalMinutes = endTotalMinutes % (24 * 60);
     const endHours = Math.floor(endTotalMinutes / 60);
     const endMinutes = endTotalMinutes % 60;
-    scheduleRow.value.end_time = endHours * 100 + endMinutes;
+    const newEndTime = endHours * 100 + endMinutes;
+
+    // Write through r$.end_time.$model (the same path the End Time field itself
+    // writes to) rather than the raw scheduleRow object directly -- the field's
+    // validation wrapper may not reactively pick up a direct object mutation.
+    r$.end_time.$model = newEndTime;
+    scheduleRow.value.end_time = newEndTime;
 };
 
 const updateDurationFromHours = () => updateDuration();
 const updateDurationFromMinutes = () => updateDuration();
+
+// Compute Duration display (hours/minutes) from the actual loaded start/end times,
+// so editing an existing event shows its real duration instead of the 1:00 default.
+const syncDurationFromTimes = () => {
+    const startTime = scheduleRow.value.start_time;
+    const endTime = scheduleRow.value.end_time;
+    const startTotalMinutes = Math.floor(startTime / 100) * 60 + (startTime % 100);
+    let endTotalMinutes = Math.floor(endTime / 100) * 60 + (endTime % 100);
+
+    if (endTotalMinutes < startTotalMinutes) {
+        endTotalMinutes += 24 * 60;
+    }
+
+    const diffMinutes = endTotalMinutes - startTotalMinutes;
+    durationHours.value = Math.floor(diffMinutes / 60);
+    durationMinutes.value = diffMinutes % 60;
+};
 
 const applyClockWheelHourToSchedule = (entityId: number | null) => {
     if (entityId == null) {
@@ -517,11 +582,11 @@ watch(
     }
 );
 
-watch(schedulingMode, (mode) => {
+watch(startTimingMode, (mode) => {
     if (!isPlaylistSchedule.value) {
         return;
     }
-    scheduleRow.value.loop_once = mode !== 'flexible';
+    scheduleRow.value.strict_start = mode === 'strict';
 });
 
 watch(
@@ -529,6 +594,7 @@ watch(
     (source) => {
         if (source === 'clock_wheel') {
             scheduleRow.value.loop_once = false;
+            scheduleRow.value.strict_start = false;
             scheduleRow.value.clock_wheel_mode = clockWheelScheduleMode.value;
             scheduleRow.value.is_emergency = false;
         }
@@ -550,7 +616,7 @@ const isMonthlyDayOfWeekPattern = computed(
     () => scheduleRow.value.recurrence_type === 'monthly' && scheduleRow.value.recurrence_monthly_pattern === 'day_of_week'
 );
 
-const requiresDaysOfWeek = computed(() => !isMonthlyDatePattern.value);
+const requiresDaysOfWeek = computed(() => isRecurring.value && !isMonthlyDatePattern.value);
 
 const daysOfWeekFieldDescription = computed(() => {
     if (isMonthlyDatePattern.value) {
@@ -569,7 +635,7 @@ const {r$} = useAppScopedRegle(
         end_time: {required},
         start_date: {required},
         end_date: {
-            required: requiredIf(() => scheduleRow.value.recurrence_end_type !== 'after'),
+            required: requiredIf(() => isRecurring.value && scheduleRow.value.recurrence_end_type !== 'after'),
         },
         days: {
             minLength: withMessage(
@@ -591,6 +657,18 @@ const {r$} = useAppScopedRegle(
         namespace: 'stations-playlists'
     }
 );
+
+// Keep Duration display live and consistent: whenever Start Time or End Time
+// is edited directly (not via the Duration boxes themselves), recalculate
+// Duration to reflect the new gap. Duration only ever drives End Time in the
+// other direction (see updateDuration above) -- this just mirrors that so
+// editing any one of the three fields keeps the other two in sync.
+watch(() => scheduleRow.value.start_time, () => {
+    syncDurationFromTimes();
+});
+watch(() => scheduleRow.value.end_time, () => {
+    syncDurationFromTimes();
+});
 
 // Sync recurrence_interval when type changes
 watch(
@@ -623,6 +701,7 @@ const onSourceChange = () => {
     form.value.entity_id = null;
     if (form.value.source === 'clock_wheel') {
         scheduleRow.value.loop_once = false;
+        scheduleRow.value.strict_start = false;
         clockWheelScheduleMode.value = scheduleRow.value.clock_wheel_mode ?? 'flexible';
     }
 };
@@ -697,6 +776,7 @@ const apiScheduleItemToRow = (item: Record<string, unknown>): PlaylistScheduleRo
         days: normalizeStationScheduleDays(item.days),
         loop_once: Boolean(item.loop_once),
         is_emergency: Boolean(item.is_emergency),
+        strict_start: Boolean(item.strict_start),
         clock_wheel_mode: (item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible') as 'flexible' | 'strict',
         recurrence_type: recurrenceType ?? null,
         recurrence_interval: Number(item.recurrence_interval ?? 1),
@@ -769,7 +849,7 @@ const buildSchedulePayload = (
 
 const clearForm = () => {
     form.value = blankForm();
-    schedulingMode.value = 'flexible';
+    startTimingMode.value = 'flexible';
     clockWheelScheduleMode.value = 'flexible';
     scheduleRow.value = createScheduleItemDefaults();
     error.value = null;
@@ -828,21 +908,24 @@ const openForEdit = async (event: EventImpl) => {
 
             if (existing) {
                 scheduleRow.value = apiScheduleItemToRow(existing);
+                syncDurationFromTimes();
                 isRecurring.value = existing.recurrence_type != null && existing.recurrence_type !== '';
                 if (form.value.source === 'clock_wheel') {
                     scheduleRow.value.loop_once = false;
                     clockWheelScheduleMode.value = scheduleRow.value.clock_wheel_mode ?? 'flexible';
                 } else {
-                    schedulingMode.value = scheduleRow.value.loop_once ? 'loop_once' : 'flexible';
+                    startTimingMode.value = scheduleRow.value.strict_start ? 'strict' : 'flexible';
                 }
             } else if (start) {
                 applyCalendarTimesToRow(start, end);
+                syncDurationFromTimes();
             }
         } catch (e: unknown) {
             const err = e as {response?: {data?: {message?: string}}};
             error.value = err?.response?.data?.message ?? $gettext('An error occurred.');
             if (start) {
                 applyCalendarTimesToRow(start, end);
+                syncDurationFromTimes();
             }
         } finally {
             loading.value = false;
@@ -873,6 +956,7 @@ const doSave = async () => {
         );
         if (form.value.source === 'clock_wheel') {
             newScheduleItem.loop_once = false;
+            newScheduleItem.strict_start = false;
             newScheduleItem.clock_wheel_mode = scheduleRow.value.clock_wheel_mode ?? 'flexible';
         }
 

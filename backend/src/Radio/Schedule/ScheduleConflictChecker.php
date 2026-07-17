@@ -10,6 +10,7 @@ use App\Entity\Enums\RecurrenceMonthlyPattern;
 use App\Entity\Enums\RecurrenceType;
 use App\Entity\Station;
 use App\Entity\Enums\ClockWheelScheduleMode;
+use App\Entity\Enums\PlaylistTypes;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
@@ -45,6 +46,22 @@ final class ScheduleConflictChecker
         StationPlaylist|StationStreamer|StationClockWheel $relation,
         array $items,
     ): void {
+        // Jingles/promos and frequency-based playlists (Once per Hour, Once per X Songs,
+        // Once per X Minutes) are designed to interject during other scheduled content,
+        // not claim an exclusive time slot -- so they should never be blocked from
+        // overlapping a regularly scheduled show.
+        if ($relation instanceof StationPlaylist) {
+            $frequencyBasedTypes = [
+                PlaylistTypes::OncePerHour,
+                PlaylistTypes::OncePerXSongs,
+                PlaylistTypes::OncePerXMinutes,
+            ];
+
+            if ($relation->is_jingle || in_array($relation->type, $frequencyBasedTypes, true)) {
+                return;
+            }
+        }
+
         $existing = $this->getAllScheduledItemsForStation($station);
 
         $candidates = [];

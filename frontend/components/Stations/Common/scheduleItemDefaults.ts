@@ -7,6 +7,8 @@ export interface PlaylistScheduleRow {
     loop_once: boolean,
     /** When true, this window overrides clock wheel AutoDJ. */
     is_emergency?: boolean,
+    /** Playlist schedule only: holds rigidly to start time, cutting the current track if needed. */
+    strict_start?: boolean,
     /** Clock wheel schedule only: flexible | strict (not loop_once). */
     clock_wheel_mode?: 'flexible' | 'strict',
     recurrence_type: string | null,
@@ -37,6 +39,7 @@ export function createScheduleItemDefaults(): PlaylistScheduleRow {
         days: [],
         loop_once: false,
         is_emergency: false,
+        strict_start: false,
         clock_wheel_mode: 'flexible',
         recurrence_type: null,
         recurrence_interval: 1,

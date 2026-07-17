@@ -36,6 +36,65 @@ final class Scheduler
     ) {
     }
 
+    /**
+     * Seconds until the next playlist OR clock wheel is scheduled to start,
+     * station-wide, within the next hour. Used so stretch/squeeze has a real
+     * target throughout the whole hour, not just at the top-of-hour boundary.
+     * Checks both today's and tomorrow's occurrence of each schedule item, so
+     * a start time just after midnight is not missed late at night. Returns
+     * null if nothing starts within the next hour.
+     */
+    public function secondsUntilNextScheduledStart(
+        \App\Entity\Station $station,
+        DateTimeImmutable $now,
+    ): ?int {
+        $tz = $station->getTimezoneObject();
+        $nowLocal = CarbonImmutable::instance($now)->setTimezone($tz);
+
+        $best = null;
+
+        $allScheduleItems = [];
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled) {
+                continue;
+            }
+            foreach ($playlist->schedule_items as $scheduleItem) {
+                $allScheduleItems[] = $scheduleItem;
+            }
+        }
+        foreach ($station->clock_wheels as $clockWheel) {
+            foreach ($clockWheel->schedule_items as $scheduleItem) {
+                $allScheduleItems[] = $scheduleItem;
+            }
+        }
+
+        foreach ($allScheduleItems as $scheduleItem) {
+            $days = $scheduleItem->days;
+
+            // Check both today's and tomorrow's occurrence so a start time
+            // just after midnight isn't missed when checking late at night.
+            foreach ([$nowLocal, $nowLocal->addDay()] as $candidateDay) {
+                $isoDay = (int)$candidateDay->dayOfWeekIso;
+                if ([] !== $days && !in_array($isoDay, $days, true)) {
+                    continue;
+                }
+
+                $startTime = StationSchedule::getDateTime($scheduleItem->start_time, $tz, $candidateDay);
+                $deltaSeconds = $startTime->getTimestamp() - $nowLocal->getTimestamp();
+
+                if ($deltaSeconds <= 0 || $deltaSeconds > HourBoundaryPlanner::HOUR_SECONDS) {
+                    continue;
+                }
+
+                if (null === $best || $deltaSeconds < $best) {
+                    $best = $deltaSeconds;
+                }
+            }
+        }
+
+        return $best;
+    }
+
     public function shouldPlaylistPlayNow(
         StationPlaylist $playlist,
         ?DateTimeImmutable $now = null
@@ -533,5 +592,42 @@ final class Scheduler
         $playOnceDays = $schedule->days;
         return empty($playOnceDays)
             || in_array($dayToCheck, $playOnceDays, false);
+    }
+
+    /**
+     * True exactly once, during the single minute a playlist's "Strict" schedule
+     * item is due to start -- used to trigger a hard interrupt via the existing
+     * interrupting-queue mechanism, rather than waiting for the current track
+     * to finish naturally.
+     */
+    public function isPlaylistStrictStartDueNow(
+        StationPlaylist $playlist,
+        DateTimeZone $tz,
+        ?DateTimeImmutable $now = null
+    ): bool {
+        $now = CarbonImmutable::instance(Time::nowInTimezone($tz, $now));
+        $nowMinute = $now->hour * 100 + $now->minute;
+
+        foreach ($playlist->schedule_items as $schedule) {
+            if (!$schedule->strict_start) {
+                continue;
+            }
+
+            if ($schedule->start_time !== $nowMinute) {
+                continue;
+            }
+
+            if (!$this->shouldSchedulePlayOnCurrentDate($schedule, $tz, $now)) {
+                continue;
+            }
+
+            if (!$this->isScheduleScheduledToPlayToday($schedule, $now->dayOfWeekIso)) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 }

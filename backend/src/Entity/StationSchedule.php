@@ -123,6 +123,18 @@ final class StationSchedule implements IdentifiableEntityInterface
     public bool $loop_once = false;
 
     /**
+     * When true, this playlist schedule holds rigidly to its exact start time,
+     * cutting the currently playing track if needed rather than waiting for it
+     * to finish. Only meaningful for playlist schedules -- ignored for clock
+     * wheel and streamer schedules (clock wheels use clock_wheel_mode instead).
+     */
+    #[
+        OA\Property(example: false),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $strict_start = false;
+
+    /**
      * When true, this schedule takes priority over clock wheel AutoDJ during its window.
      */
     #[
