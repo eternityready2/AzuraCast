@@ -590,28 +590,34 @@ final class ConfigWriter implements EventSubscriberInterface
         $startMinutes = $startHour * 60 + $startMin;
         $endMinutes = $endHour * 60 + $endMin;
 
-        if ($startMinutes <= $endMinutes) {
+        // Liquidsoap's time() always returns UTC, so the embedded minute
+        // values must be adjusted from the station's local timezone to UTC.
+        $tzOffsetMinutes = (int)($timezone->getOffset(new \DateTimeImmutable('now', $timezone)) / 60);
+        $utcStart = ($startMinutes - $tzOffsetMinutes + 1440) % 1440;
+        $utcEnd   = ($endMinutes   - $tzOffsetMinutes + 1440) % 1440;
+
+        if ($utcStart <= $utcEnd) {
             // Normal range (e.g., 06:00-22:00)
             return <<<LIQ
 def is_within_active_hours() =
-  # Get current hour and minute in local time (station timezone)
+  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
   local_time = time()
   hour = int_of_float(local_time / 3600.0) mod 24
   minute = int_of_float(local_time / 60.0) mod 60
   current = hour * 60 + minute
-  current >= {$startMinutes} and current < {$endMinutes}
+  current >= {$utcStart} and current < {$utcEnd}
 end
 LIQ;
         } else {
-            // Overnight range (e.g., 22:00-06:00)
+            // Overnight range (e.g., 22:00-06:00, or TZ-adjusted wrap)
             return <<<LIQ
 def is_within_active_hours() =
-  # Get current hour and minute in local time (station timezone)
+  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
   local_time = time()
   hour = int_of_float(local_time / 3600.0) mod 24
   minute = int_of_float(local_time / 60.0) mod 60
   current = hour * 60 + minute
-  current >= {$startMinutes} or current < {$endMinutes}
+  current >= {$utcStart} or current < {$utcEnd}
 end
 LIQ;
         }
