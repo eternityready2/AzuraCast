@@ -50,16 +50,19 @@ final class BestAndWorstAction extends AbstractReportAction
         }
 
         $dateRange = $this->getDateRange($request, $request->getStation()->getTimezoneObject());
+        $contentType = $request->getQueryParam('content_type');
+        $contentType = is_string($contentType) && $contentType !== '' ? $contentType : null;
 
         return $response->withJson([
-            'bestAndWorst' => $this->getBestAndWorst($request, $dateRange),
-            'mostPlayed' => $this->getMostPlayed($request, $dateRange),
+            'bestAndWorst' => $this->getBestAndWorst($request, $dateRange, $contentType),
+            'mostPlayed' => $this->getMostPlayed($request, $dateRange, $contentType),
         ]);
     }
 
     private function getBestAndWorst(
         ServerRequest $request,
-        DateRange $dateRange
+        DateRange $dateRange,
+        ?string $contentType = null,
     ): array {
         $station = $request->getStation();
 
@@ -67,6 +70,7 @@ final class BestAndWorstAction extends AbstractReportAction
         $baseQuery = $this->em->createQueryBuilder()
             ->select('sh')
             ->from(SongHistory::class, 'sh')
+            ->leftJoin('sh.media', 'sm')
             ->where('sh.station = :station')
             ->setParameter('station', $station)
             ->andWhere('sh.timestamp_start <= :end AND sh.timestamp_end >= :start')
@@ -76,6 +80,17 @@ final class BestAndWorstAction extends AbstractReportAction
             ->andWhere('sh.listeners_start IS NOT NULL')
             ->andWhere('sh.timestamp_end IS NOT NULL')
             ->setMaxResults(5);
+
+        if (null !== $contentType) {
+            if ('music' === $contentType) {
+                // "Music only" also includes rows with no linked media record.
+                $baseQuery->andWhere('sm.type = :contentType OR sm.id IS NULL')
+                    ->setParameter('contentType', $contentType);
+            } else {
+                $baseQuery->andWhere('sm.type = :contentType')
+                    ->setParameter('contentType', $contentType);
+            }
+        }
 
         $rawStats = [
             'best' => (clone $baseQuery)->orderBy('sh.delta_total', 'DESC')
@@ -107,26 +122,41 @@ final class BestAndWorstAction extends AbstractReportAction
 
     private function getMostPlayed(
         ServerRequest $request,
-        DateRange $dateRange
+        DateRange $dateRange,
+        ?string $contentType = null,
     ): array {
         $station = $request->getStation();
 
-        $rawRows = $this->em->createQuery(
-            <<<'DQL'
+        $typeFilter = '';
+        if (null !== $contentType) {
+            $typeFilter = ('music' === $contentType)
+                ? 'AND (sm.type = :contentType OR sm.id IS NULL)'
+                : 'AND sm.type = :contentType';
+        }
+
+        $query = $this->em->createQuery(
+            <<<DQL
                 SELECT sh.song_id, sh.text, sh.artist, sh.title, COUNT(sh.id) AS records
                 FROM App\Entity\SongHistory sh
+                LEFT JOIN sh.media sm
                 WHERE sh.station = :station 
                 AND sh.is_visible = 1
                 AND sh.timestamp_start <= :end
                 AND sh.timestamp_end >= :start
+                {$typeFilter}
                 GROUP BY sh.song_id
                 ORDER BY records DESC
             DQL
         )->setParameter('station', $request->getStation())
             ->setParameter('start', $dateRange->start)
             ->setParameter('end', $dateRange->end)
-            ->setMaxResults(10)
-            ->getArrayResult();
+            ->setMaxResults(10);
+
+        if (null !== $contentType) {
+            $query->setParameter('contentType', $contentType);
+        }
+
+        $rawRows = $query->getArrayResult();
 
         return array_map(
             function ($row) use ($station) {

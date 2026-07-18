@@ -32,6 +32,14 @@
                     {{ $gettext('Refresh') }}
                 </button>
             </div>
+            <div class="col-md-2">
+                <a
+                    :href="exportHref"
+                    class="btn btn-sm btn-outline-secondary w-100"
+                >
+                    {{ $gettext('Export CSV') }}
+                </a>
+            </div>
         </div>
 
         <loading :loading="loading">
@@ -104,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import {ref, watch} from 'vue';
+import {computed, ref, watch} from 'vue';
 import Loading from '~/components/Common/Loading.vue';
 import {useAxios} from '~/vendor/axios.ts';
 import {useTranslate} from '~/vendor/gettext';
@@ -123,6 +131,7 @@ interface ReconciliationRow {
 
 const props = defineProps<{
     logUrl: string;
+    exportUrl: string;
 }>();
 
 const {$gettext} = useTranslate();
@@ -133,6 +142,14 @@ const loading = ref(false);
 const rows = ref<ReconciliationRow[]>([]);
 const total = ref(0);
 const eventKind = ref('');
+
+const exportHref = computed(() => {
+    const url = new URL(props.exportUrl, document.location.href);
+    if (eventKind.value) {
+        url.searchParams.set('event_kind', eventKind.value);
+    }
+    return url.toString();
+});
 
 const formatTime = (iso: string) => formatIsoAsDateTime(iso);
 

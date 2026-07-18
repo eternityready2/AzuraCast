@@ -1,14 +1,4 @@
 <template>
-    <!--
-        FILE LOCATION: frontend/components/Admin/Stations/Form/DmcaComplianceForm.vue
-
-        ADD TO: frontend/components/Admin/Stations/Form/BackendForm.vue
-        1. Import at the top of <script setup>:
-           import DmcaComplianceForm from './DmcaComplianceForm.vue';
-
-        2. Add the component inside the form, after the crossfade section:
-           <dmca-compliance-form v-model="form" />
-    -->
     <fieldset>
         <legend>{{ $gettext('DMCA Compliance') }}</legend>
 

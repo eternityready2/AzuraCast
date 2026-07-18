@@ -224,6 +224,7 @@ final class ClockWheelsController extends AbstractScheduledEntityController
         Serializer $serializer,
         ValidatorInterface $validator,
         private readonly ClockWheelSlotWriter $slotWriter,
+        private readonly \App\Radio\AutoDJ\ClockWheel\ClockWheelAnalyticsService $analyticsService,
     ) {
         parent::__construct($scheduleRepo, $scheduler, $serializer, $validator);
     }
@@ -468,7 +469,7 @@ final class ClockWheelsController extends AbstractScheduledEntityController
      */
     protected function toArray(object $record, array $context = []): array
     {
-        return parent::toArray(
+        $result = parent::toArray(
             $record,
             array_merge(
                 $context,
@@ -482,6 +483,21 @@ final class ClockWheelsController extends AbstractScheduledEntityController
                 ]
             )
         );
+
+        if ($record instanceof StationClockWheel) {
+            try {
+                $analytics = $this->analyticsService->getForWheel($record, 7);
+                $result['effectiveness_grade'] = $analytics->effectiveness_grade;
+                $result['effectiveness_score'] = $analytics->effectiveness_score;
+            } catch (\Throwable $e) {
+                // Never let a grade-computation failure for one wheel break the
+                // entire list/view response -- just omit the grade for this wheel.
+                $result['effectiveness_grade'] = null;
+                $result['effectiveness_score'] = null;
+            }
+        }
+
+        return $result;
     }
 
     // ------------------------------------------------------------------

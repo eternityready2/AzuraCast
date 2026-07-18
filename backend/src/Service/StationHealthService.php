@@ -103,19 +103,17 @@ final class StationHealthService
         $report->media_tracks = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(m.id) FROM App\Entity\StationMedia m
-                JOIN m.storage_location sl
-                WHERE sl.station = :station
+                WHERE m.storage_location = :storageLocation
             DQL
-        )->setParameter('station', $station)
+        )->setParameter('storageLocation', $station->media_storage_location)
             ->getSingleScalarResult();
 
         $report->do_not_play_count = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(m.id) FROM App\Entity\StationMedia m
-                JOIN m.storage_location sl
-                WHERE sl.station = :station AND m.do_not_play = 1
+                WHERE m.storage_location = :storageLocation AND m.do_not_play = 1
             DQL
-        )->setParameter('station', $station)
+        )->setParameter('storageLocation', $station->media_storage_location)
             ->getSingleScalarResult();
 
         $report->empty_playlists = (int)$this->em->createQuery(

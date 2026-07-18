@@ -125,6 +125,15 @@
                     />
 
                     <form-group-field
+                        id="form_edit_aging_threshold_days"
+                        class="col-md-6"
+                        :field="r$.aging_threshold_days"
+                        type="number"
+                        :label="$gettext('Library aging threshold (days)')"
+                        :description="$gettext('Gradually boost tracks that haven\'t played in this many days to the front of the rotation. Distinct from Rotation Goal\'s hard floor. Leave empty to disable.')"
+                    />
+
+                    <form-group-field
                         id="form_edit_crossfade_profile"
                         class="col-md-6"
                         :field="r$.crossfade_profile"

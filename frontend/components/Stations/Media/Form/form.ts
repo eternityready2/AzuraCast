@@ -40,6 +40,9 @@ export const useStationsMediaForm = defineStore(
                 do_not_play: false,
                 do_not_play_reason: null as string | null,
                 do_not_play_until: null as string | null,
+                allowed_days: [] as number[],
+                allowed_start_minute: null as number | null,
+                allowed_end_minute: null as number | null,
                 custom_fields: {},
                 extra_metadata: {
                     amplify: null,

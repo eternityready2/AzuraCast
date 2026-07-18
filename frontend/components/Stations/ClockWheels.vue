@@ -33,6 +33,13 @@
                             <button
                                 type="button"
                                 class="btn btn-secondary ms-2"
+                                @click="$generateModal?.open()"
+                            >
+                                {{ $gettext('Auto-Generate') }}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-secondary ms-2"
                                 @click="triggerImport"
                             >
                                 {{ $gettext('Import JSON') }}
@@ -89,6 +96,16 @@
                                             class="badge text-bg-secondary ms-1"
                                         >
                                             {{ $gettext('Template') }}
+                                        </span>
+                                        <span
+                                            v-if="item.effectiveness_grade"
+                                            class="badge ms-1"
+                                            :class="gradeBadgeClass(item.effectiveness_grade)"
+                                            :title="item.effectiveness_score != null
+                                                ? $gettext('Effectiveness score') + ': ' + item.effectiveness_score
+                                                : $gettext('Effectiveness grade')"
+                                        >
+                                            {{ item.effectiveness_grade }}
                                         </span>
                                     </h5>
                                     <span
@@ -217,7 +234,10 @@
                 </tab>
 
                 <tab :label="$gettext('Reconciliation')">
-                    <reconciliation-log-tab :log-url="reconciliationLogUrl" />
+                    <reconciliation-log-tab
+                        :log-url="reconciliationLogUrl"
+                        :export-url="reconciliationLogExportUrl"
+                    />
                 </tab>
             </tabs>
         </div>
@@ -245,6 +265,11 @@
 
     <preview-modal ref="$previewModal" />
     <analytics-modal ref="$analyticsModal" />
+    <generate-modal
+        ref="$generateModal"
+        :generate-url="generateUrl"
+        @generated="relistWheels"
+    />
 </template>
 
 <script setup lang="ts">
@@ -265,6 +290,7 @@ import TemplateEditModal from '~/components/Stations/ClockWheels/TemplateEditMod
 import DaypartEditModal from '~/components/Stations/ClockWheels/DaypartEditModal.vue';
 import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
 import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue';
+import GenerateModal from '~/components/Stations/ClockWheels/GenerateModal.vue';
 import ProgramGridTab from '~/components/Stations/ClockWheels/ProgramGridTab.vue';
 import ReconciliationLogTab from '~/components/Stations/ClockWheels/ReconciliationLogTab.vue';
 import IconBiChevronRight from '~icons/bi/chevron-right';
@@ -276,6 +302,8 @@ const templatesUrl = getStationApiUrl('/clock-wheel-templates');
 const daypartsUrl = getStationApiUrl('/clock-dayparts');
 const programGridUrl = getStationApiUrl('/clock-wheels/program-grid');
 const reconciliationLogUrl = getStationApiUrl('/clock-wheels/reconciliation-log');
+const reconciliationLogExportUrl = getStationApiUrl('/clock-wheels/reconciliation-log/export');
+const generateUrl = getStationApiUrl('/clock-wheels/generate');
 const importUrl = getStationApiUrl('/clock-wheels/import');
 
 const $importInput = useTemplateRef('$importInput');
@@ -290,6 +318,8 @@ type ClockWheelRow = {
     name: string;
     color?: string;
     inherits_template_slots?: boolean;
+    effectiveness_grade?: string | null;
+    effectiveness_score?: number | null;
     links: {self: string};
 };
 
@@ -316,6 +346,22 @@ const wheelFields: DataTableField<ClockWheelRow>[] = [
     {key: 'actions', label: $gettext('Actions'), sortable: false},
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
 ];
+
+const gradeBadgeClass = (grade: string): string => {
+    switch (grade.toUpperCase()) {
+        case 'A':
+            return 'text-bg-success';
+        case 'B':
+            return 'text-bg-info';
+        case 'C':
+            return 'text-bg-warning';
+        case 'D':
+        case 'F':
+            return 'text-bg-danger';
+        default:
+            return 'text-bg-secondary';
+    }
+};
 
 const templateFields: DataTableField<TemplateRow>[] = [
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
@@ -361,6 +407,7 @@ const $templateEditModal = useTemplateRef('$templateEditModal');
 const $daypartEditModal = useTemplateRef('$daypartEditModal');
 const $previewModal = useTemplateRef('$previewModal');
 const $analyticsModal = useTemplateRef('$analyticsModal');
+const $generateModal = useTemplateRef('$generateModal');
 
 const {doCreate, doEdit} = useHasEditModal($editModal);
 const {doCreate: doCreateTemplate, doEdit: doEditTemplate} = useHasEditModal($templateEditModal);

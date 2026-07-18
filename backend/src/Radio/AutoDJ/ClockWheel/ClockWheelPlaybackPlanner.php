@@ -880,7 +880,7 @@ final class ClockWheelPlaybackPlanner
 
         return array_values(array_filter(
             $result,
-            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media),
+            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media, null, $station->getTimezoneObject()),
         ));
     }
 
@@ -921,7 +921,7 @@ final class ClockWheelPlaybackPlanner
 
         return array_values(array_filter(
             $result,
-            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media),
+            static fn (StationMedia $media): bool => MediaPlayability::isEligibleForPlayback($media, null, $station->getTimezoneObject()),
         ));
     }
 

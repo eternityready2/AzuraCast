@@ -175,7 +175,21 @@ final class Station implements Stringable, IdentifiableEntityInterface
                 $value
             );
 
-            if ($this->backend_config_raw !== $newConfig) {
+            // Use a normalized comparison (both sides key-sorted, then
+            // JSON-encoded) rather than a strict array (!==) comparison.
+            // The old strict comparison was sensitive to key order --
+            // AbstractArrayEntity::toArray() always ksort()s its output for
+            // $newConfig, but the previously-stored $backend_config_raw from
+            // the database is not guaranteed to already be in that same
+            // sorted order. That mismatch could make the comparison
+            // unreliably report "no change" even when a value genuinely
+            // changed, silently skipping the needs_restart flag.
+            $oldForCompare = (array)($this->backend_config_raw ?? []);
+            $newForCompare = (array)($newConfig ?? []);
+            ksort($oldForCompare);
+            ksort($newForCompare);
+
+            if (json_encode($oldForCompare) !== json_encode($newForCompare)) {
                 $this->needs_restart = true;
             }
             $this->backend_config_raw = $newConfig;

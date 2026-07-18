@@ -70,6 +70,20 @@ final class StationMedia implements
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     public ?\DateTimeImmutable $do_not_play_until = null;
 
+    /**
+     * Per-song time restrictions: empty array = allowed every day (ISO weekday 1-7).
+     */
+    #[ORM\Column(type: 'json', nullable: false, options: ['default' => '[]'])]
+    public array $allowed_days = [];
+
+    /** Allowed window start, minutes since midnight (station-local). NULL = no start restriction. */
+    #[ORM\Column(nullable: true)]
+    public ?int $allowed_start_minute = null;
+
+    /** Allowed window end, minutes since midnight (station-local). NULL = no end restriction. */
+    #[ORM\Column(nullable: true)]
+    public ?int $allowed_end_minute = null;
+
     #[
         ORM\ManyToOne,
         ORM\JoinColumn(name: 'category_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')

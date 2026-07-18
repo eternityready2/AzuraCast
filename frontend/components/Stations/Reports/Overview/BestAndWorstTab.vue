@@ -3,6 +3,43 @@
         :loading="isLoading"
         lazy
     >
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <label class="form-label" for="content_type_filter">
+                    {{ $gettext('Content Type') }}
+                </label>
+                <select
+                    id="content_type_filter"
+                    v-model="contentType"
+                    class="form-select"
+                >
+                    <option value="">
+                        {{ $gettext('All Content') }}
+                    </option>
+                    <option value="music">
+                        {{ $gettext('Music Only') }}
+                    </option>
+                    <option value="legal_id">
+                        {{ $gettext('Legal IDs') }}
+                    </option>
+                    <option value="id">
+                        {{ $gettext('IDs') }}
+                    </option>
+                    <option value="promo">
+                        {{ $gettext('Promos') }}
+                    </option>
+                    <option value="ad">
+                        {{ $gettext('Ads') }}
+                    </option>
+                    <option value="talk">
+                        {{ $gettext('Talk') }}
+                    </option>
+                </select>
+                <small class="text-muted">
+                    {{ $gettext('Filter out station IDs and promos so they don\'t mix with music in these rankings.') }}
+                </small>
+            </div>
+        </div>
         <div class="row">
             <div class="col-md-6 mb-4">
                 <fieldset>
@@ -127,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import {toRef} from "vue";
+import {ref, toRef} from "vue";
 import {useAxios} from "~/vendor/axios";
 import SongText from "~/components/Stations/Reports/Overview/SongText.vue";
 import Loading from "~/components/Common/Loading.vue";
@@ -144,6 +181,7 @@ const props = defineProps<{
 }>();
 
 const dateRange = toRef(props, 'dateRange');
+const contentType = ref('');
 const {axios} = useAxios();
 
 const {DateTime} = useLuxon();
@@ -160,14 +198,16 @@ const {data: state, isLoading} = useQuery<StatsData>({
     queryKey: queryKeyWithStation([
         QueryKeys.StationReports,
         'best_and_worst',
-        dateRange
+        dateRange,
+        contentType
     ]),
     queryFn: async ({signal}) => {
         const {data} = await axios.get(props.apiUrl, {
             signal,
             params: {
                 start: DateTime.fromJSDate(dateRange.value.startDate).toISO(),
-                end: DateTime.fromJSDate(dateRange.value.endDate).toISO()
+                end: DateTime.fromJSDate(dateRange.value.endDate).toISO(),
+                content_type: contentType.value || undefined
             }
         });
         return data;

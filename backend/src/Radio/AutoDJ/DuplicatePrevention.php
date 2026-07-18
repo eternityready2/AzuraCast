@@ -41,7 +41,8 @@ final class DuplicatePrevention
     public function preventDuplicates(
         array $eligibleTracks = [],
         array $playedTracks = [],
-        bool $allowDuplicates = false
+        bool $allowDuplicates = false,
+        ?int $agingThresholdDays = null,
     ): ?StationPlaylistQueue {
         if (empty($eligibleTracks)) {
             $this->logger->debug('Eligible song queue is empty!');
@@ -76,6 +77,30 @@ final class DuplicatePrevention
             }
 
             $notPlayedEligibleTracks[$mediaId] = $track;
+        }
+
+        // Library Aging: when enabled for this playlist, tracks that haven't
+        // played in longer than the configured threshold get pulled to the
+        // front of the candidate order, so they get first crack at selection
+        // instead of gradually being buried by more frequently-played tracks.
+        if (null !== $agingThresholdDays && $agingThresholdDays > 0) {
+            $thresholdTimestamp = time() - ($agingThresholdDays * 86400);
+
+            usort(
+                $eligibleTracks,
+                function (StationPlaylistQueue $a, StationPlaylistQueue $b) use ($thresholdTimestamp) {
+                    $aAged = ($a->last_played ?? 0) < $thresholdTimestamp;
+                    $bAged = ($b->last_played ?? 0) < $thresholdTimestamp;
+
+                    if ($aAged !== $bAged) {
+                        // Aged tracks (true) sort before non-aged tracks (false).
+                        return $aAged ? -1 : 1;
+                    }
+
+                    // Among equally-aged (or equally-fresh) tracks, oldest first.
+                    return ($a->last_played ?? 0) <=> ($b->last_played ?? 0);
+                }
+            );
         }
 
         $validTrack = $this->getDistinctTrack($notPlayedEligibleTracks, $playedTracks);

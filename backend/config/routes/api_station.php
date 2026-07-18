@@ -764,6 +764,16 @@ return static function (RouteCollectorProxy $group) {
                                 Controller\Api\Stations\ClockWheels\ReconciliationLogAction::class
                             )->setName('api:stations:clock-wheels:reconciliation-log');
 
+                            $group->get(
+                                '/clock-wheels/reconciliation-log/export',
+                                Controller\Api\Stations\ClockWheels\ReconciliationLogExportAction::class
+                            )->setName('api:stations:clock-wheels:reconciliation-log:export');
+
+                            $group->post(
+                                '/clock-wheels/generate',
+                                Controller\Api\Stations\ClockWheels\GenerateAction::class
+                            )->setName('api:stations:clock-wheels:generate');
+
                             $group->post(
                                 '/clock-wheels/import',
                                 Controller\Api\Stations\ClockWheels\ImportAction::class

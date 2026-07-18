@@ -134,6 +134,26 @@ final class StationPlaylist implements
     }
 
     /**
+     * Library Aging: gradually boosts a track's selection priority the longer
+     * it goes unplayed, rather than Rotation Goal's hard floor. NULL disables it.
+     */
+    #[
+        OA\Property(example: 14, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $aging_threshold_days = null {
+        set (int|string|null $value) {
+            if (null === $value || '' === $value) {
+                $this->aging_threshold_days = null;
+                return;
+            }
+
+            $days = (int)$value;
+            $this->aging_threshold_days = $days > 0 ? $days : null;
+        }
+    }
+
+    /**
      * Optional named crossfade profile (see station crossfade_profiles in backend_config).
      */
     #[

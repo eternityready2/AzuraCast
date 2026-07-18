@@ -16,6 +16,7 @@ import IconIcSettingsApplication from "~icons/ic/baseline-settings-applications"
 import IconIcPsychology from "~icons/ic/baseline-psychology";
 import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
+import IconIcGavel from "~icons/ic/baseline-gavel";
 import IconIcGraphicEq from "~icons/ic/baseline-graphic-eq";
 import IconIcCategory from "~icons/ic/baseline-category";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
@@ -315,6 +316,15 @@ export function useStationsMenu() {
             icon: () => IconIcSchedule,
             url: {
                 name: 'stations:top_of_hour'
+            },
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+        },
+        {
+            key: 'dmca_compliance',
+            label: $gettext('DMCA Compliance'),
+            icon: () => IconIcGavel,
+            url: {
+                name: 'stations:dmca_compliance'
             },
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
