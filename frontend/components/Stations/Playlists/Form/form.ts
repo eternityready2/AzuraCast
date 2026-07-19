@@ -40,7 +40,11 @@ export const useStationsPlaylistsForm = defineStore(
             include_in_requests: true,
             avoid_duplicates: true,
             rotation_goal_days: null as number | null,
+            aging_threshold_days: null as number | null,
             crossfade_profile: null as string | null,
+            is_sponsor: false,
+            sponsor_name: null as string | null,
+            sponsor_guaranteed_plays_per_day: null as number | null,
             backend_options: [],
             schedule_items: []
         });
@@ -71,10 +75,14 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.include_in_requests,
                         fields.avoid_duplicates,
                         fields.rotation_goal_days,
+                        fields.aging_threshold_days,
                         fields.crossfade_profile,
                     ],
                     advancedTab: [
-                        fields.backend_options
+                        fields.backend_options,
+                        fields.is_sponsor,
+                        fields.sponsor_name,
+                        fields.sponsor_guaranteed_plays_per_day,
                     ]
                 })
             }

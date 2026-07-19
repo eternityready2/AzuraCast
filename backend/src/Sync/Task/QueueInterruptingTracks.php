@@ -9,6 +9,7 @@ use App\Event\Radio\AnnotateNextSong;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\Queue;
 use App\Radio\AutoDJ\Scheduler;
+use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use Monolog\LogRecord;
@@ -21,6 +22,7 @@ final class QueueInterruptingTracks extends AbstractTask
         private readonly Adapters $adapters,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly Scheduler $scheduler,
+        private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
     ) {
     }
 
@@ -72,6 +74,10 @@ final class QueueInterruptingTracks extends AbstractTask
                 $hasInterruptingPlaylist = true;
                 break;
             }
+        }
+
+        if (!$hasInterruptingPlaylist && !empty($this->sponsorGuarantee->getPlaylistsBehindPace($station))) {
+            $hasInterruptingPlaylist = true;
         }
 
         if (!$hasInterruptingPlaylist) {

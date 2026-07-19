@@ -46,6 +46,14 @@
             <template #cell(connected_seconds_calc)="row">
                 {{ formatTime(row.item.connected_seconds) }}
             </template>
+            <template #[`cell(${fieldKey})`]="row">
+                <slot
+                    :name="`cell_${fieldKey}`"
+                    v-bind="row"
+                >
+                    {{ row.item[fieldKey] }}
+                </slot>
+            </template>
         </data-table>
     </loading>
 </template>

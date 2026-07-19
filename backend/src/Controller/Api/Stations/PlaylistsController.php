@@ -214,6 +214,7 @@ final class PlaylistsController extends AbstractScheduledEntityController
                 return [
                     'id' => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
                     'schedule_id' => $scheduleItem->id,
+                    'playlist_id' => $playlist->id,
                     'title' => $playlist->name,
                     'start' => $dateRange->start->toIso8601String(),
                     'end' => $dateRange->end->toIso8601String(),

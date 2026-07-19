@@ -40,6 +40,7 @@ final class QueueBuilder implements EventSubscriberInterface
 
     public function __construct(
         private readonly Scheduler $scheduler,
+        private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly DuplicatePrevention $duplicatePrevention,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly CacheInterface $cache,
@@ -79,12 +80,20 @@ final class QueueBuilder implements EventSubscriberInterface
 
         $tz = $station->getTimezoneObject();
 
+        $sponsorPlaylistIdsBehindPace = [];
+        if ($event->isInterrupting()) {
+            foreach ($this->sponsorGuarantee->getPlaylistsBehindPace($station, $expectedPlayTime) as $sponsorPlaylist) {
+                $sponsorPlaylistIdsBehindPace[$sponsorPlaylist->id] = true;
+            }
+        }
+
         $activePlaylistsByType = [];
         foreach ($station->playlists as $playlist) {
             /** @var StationPlaylist $playlist */
             $isEligible = $playlist->isPlayable($event->isInterrupting())
                 || ($event->isInterrupting()
-                    && $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $expectedPlayTime));
+                    && $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $expectedPlayTime))
+                || ($event->isInterrupting() && isset($sponsorPlaylistIdsBehindPace[$playlist->id]));
 
             if ($isEligible) {
                 $type = $playlist->type->value;

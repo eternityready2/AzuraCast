@@ -132,34 +132,55 @@
 
             <div
                 v-if="entries.length > 0"
-                class="clock-wheel-hour-distribution mb-3"
+                class="clock-wheel-hour-distribution-card mb-3"
             >
-                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-1">
-                    <span class="fw-semibold small">{{ $gettext('Hour distribution') }}</span>
-                    <div class="d-flex align-items-center gap-2">
-                        <span
-                            class="badge"
-                            :class="layoutValid ? 'text-bg-success' : 'text-bg-warning'"
-                        >
-                            {{ layoutValid ? $gettext('Valid layout') : $gettext('Needs review') }}
-                        </span>
-                        <span class="small text-muted">
-                            {{ $gettext('Est. loop') }}: {{ formatLoopTime(estimatedLoopSeconds) }}
-                        </span>
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <span class="clock-wheel-hour-distribution-card__icon">&#9679;</span>
+                    <span class="fw-semibold">{{ $gettext('Hour Distribution') }}</span>
+                </div>
+
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>{{ $gettext('Music Density') }}</span>
+                        <span class="text-primary fw-semibold">{{ contentDensity.musicPercent }}%</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div
+                            class="progress-bar bg-primary"
+                            :style="{ width: contentDensity.musicPercent + '%' }"
+                        />
                     </div>
                 </div>
-                <div
-                    class="clock-wheel-hour-distribution__bars d-flex gap-1 align-items-end"
-                    role="img"
-                    :aria-label="$gettext('Anchor density across the hour')"
-                >
-                    <div
-                        v-for="bucket in hourDistribution"
-                        :key="bucket.segment"
-                        class="clock-wheel-hour-distribution__bar flex-grow-1 rounded-top"
-                        :style="{ height: barHeight(bucket.count) + 'px' }"
-                        :title="bucket.label + ': ' + bucket.count"
-                    />
+
+                <div>
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>{{ $gettext('Ads/Station ID') }}</span>
+                        <span class="text-info fw-semibold">{{ contentDensity.otherPercent }}%</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div
+                            class="progress-bar bg-info"
+                            :style="{ width: contentDensity.otherPercent + '%' }"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <div
+                v-if="entries.length > 0"
+                class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"
+            >
+                <span class="fw-semibold small">{{ $gettext('Clockwheel entries') }} ({{ entries.length }})</span>
+                <div class="d-flex align-items-center gap-2">
+                    <span
+                        class="badge"
+                        :class="layoutValid ? 'text-bg-success' : 'text-bg-warning'"
+                    >
+                        {{ layoutValid ? $gettext('Valid layout') : $gettext('Needs review') }}
+                    </span>
+                    <span class="small text-muted">
+                        {{ $gettext('Est. loop') }}: {{ formatLoopTime(estimatedLoopSeconds) }}
+                    </span>
                 </div>
             </div>
 
@@ -169,6 +190,9 @@
                 role="img"
                 :aria-label="$gettext('Hour timeline showing anchor positions')"
             >
+                <small class="text-muted d-block mb-1">
+                    {{ $gettext('Each dot below is one of your slots, positioned where it falls in the hour. Click a dot to jump straight to that slot in the list below.') }}
+                </small>
                 <div class="clock-wheel-timeline__track">
                     <span class="clock-wheel-timeline__label clock-wheel-timeline__label--start">0:00</span>
                     <span class="clock-wheel-timeline__label clock-wheel-timeline__label--end">59:59</span>
@@ -417,6 +441,7 @@ import {
     formatClockWheelPosition,
     getClockWheelTimelineWarnings,
     getClockWheelHourDistribution,
+    getClockWheelContentDensity,
     estimateClockWheelLoopSeconds,
     isClockWheelLayoutValid,
     parseClockWheelPosition,
@@ -514,6 +539,7 @@ const timelineWarnings = computed(() =>
 );
 
 const hourDistribution = computed(() => getClockWheelHourDistribution(entries.value));
+const contentDensity = computed(() => getClockWheelContentDensity(entries.value));
 
 const estimatedLoopSeconds = computed(() =>
     estimateClockWheelLoopSeconds(entries.value)
@@ -642,15 +668,18 @@ const focusRow = (index: number) => {
     padding-right: 0;
 }
 
-.clock-wheel-hour-distribution__bars {
-    min-height: 2rem;
-    padding: 0.25rem 0;
-    border-bottom: 1px solid var(--bs-border-color);
+.clock-wheel-hour-distribution-card {
+    background: var(--bs-tertiary-bg, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
-.clock-wheel-hour-distribution__bar {
-    min-width: 3px;
-    background: var(--bs-primary);
-    opacity: 0.75;
+.clock-wheel-hour-distribution-card__icon {
+    color: var(--bs-primary);
+    font-size: 0.6rem;
 }
 </style>

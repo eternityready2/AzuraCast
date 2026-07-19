@@ -203,6 +203,49 @@ final class StationPlaylist implements
     ]
     public bool $is_jingle = false;
 
+    /**
+     * Sponsor guaranteed playout: when enabled, this playlist represents a paid
+     * sponsor spot that MUST air its guaranteed number of plays per day --
+     * never silently skipped by normal rotation/fallback logic, same class of
+     * guarantee as the Top of Hour legal ID. Reused for the Sponsor Play Report.
+     */
+    #[
+        OA\Property(example: false),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $is_sponsor = false;
+
+    #[
+        OA\Property(example: 'Acme Hardware'),
+        ORM\Column(length: 255, nullable: true)
+    ]
+    public ?string $sponsor_name = null {
+        set => $this->truncateNullableString($value, 255);
+    }
+
+    /** Guaranteed plays per day for this sponsor. NULL = no guarantee tracked. */
+    #[
+        OA\Property(example: 4, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $sponsor_guaranteed_plays_per_day = null {
+        set (int|string|null $value) {
+            if (null === $value || '' === $value) {
+                $this->sponsor_guaranteed_plays_per_day = null;
+                return;
+            }
+            $days = (int)$value;
+            $this->sponsor_guaranteed_plays_per_day = $days > 0 ? $days : null;
+        }
+    }
+
+    /** Optional contract window -- outside this range, the guarantee is not enforced. */
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    public ?\DateTimeImmutable $sponsor_contract_start = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    public ?\DateTimeImmutable $sponsor_contract_end = null;
+
     #[
         OA\Property(example: 5),
         ORM\Column(type: 'smallint')

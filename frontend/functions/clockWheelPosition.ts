@@ -145,3 +145,58 @@ export function isClockWheelLayoutValid(entries: ClockWheelTimelineEntry[]): boo
     return getClockWheelTimelineWarnings(entries, (m) => m).length === 0;
 }
 
+export interface ClockWheelContentDensity {
+    musicPercent: number;
+    musicSeconds: number;
+    otherPercent: number;
+    otherSeconds: number;
+}
+
+/**
+ * Content-type density across the hour (Music vs everything else -- IDs,
+ * promos, ads, talk). Uses the same per-slot duration estimate as the loop
+ * time calculation, so the two stay consistent with each other.
+ */
+export function getClockWheelContentDensity(
+    entries: Array<ClockWheelTimelineEntry & {duration_seconds?: number | null; type?: string}>,
+): ClockWheelContentDensity {
+    const sorted = [...entries].sort((a, b) => a.position_seconds - b.position_seconds);
+
+    let musicSeconds = 0;
+    let otherSeconds = 0;
+
+    for (let i = 0; i < sorted.length; i++) {
+        const entry = sorted[i];
+        const next = sorted[i + 1];
+        const window = next
+            ? Math.max(1, next.position_seconds - entry.position_seconds)
+            : CLOCK_WHEEL_HOUR_SECONDS - entry.position_seconds;
+
+        let duration: number;
+        if (entry.duration_seconds != null && entry.duration_seconds > 0) {
+            duration = Math.min(entry.duration_seconds, window);
+        } else if (entry.type === 'legal_id' || entry.type === 'id' || entry.type === 'sweeper') {
+            duration = Math.min(30, window);
+        } else {
+            duration = Math.min(210, window);
+        }
+
+        if (entry.type === 'music' || entry.type === undefined) {
+            musicSeconds += duration;
+        } else {
+            otherSeconds += duration;
+        }
+    }
+
+    const totalSeconds = musicSeconds + otherSeconds;
+    if (totalSeconds === 0) {
+        return {musicPercent: 0, musicSeconds: 0, otherPercent: 0, otherSeconds: 0};
+    }
+
+    return {
+        musicPercent: Math.round((musicSeconds / totalSeconds) * 100),
+        musicSeconds,
+        otherPercent: Math.round((otherSeconds / totalSeconds) * 100),
+        otherSeconds,
+    };
+}

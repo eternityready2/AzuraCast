@@ -981,6 +981,11 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:reports:overview-dmca-compliance');
 
                             $group->get(
+                                '/overview/sponsor-plays',
+                                Controller\Api\Stations\Reports\Overview\SponsorPlaysAction::class
+                            )->setName('api:stations:reports:overview-sponsor-plays');
+
+                            $group->get(
                                 '/overview/best-and-worst',
                                 Controller\Api\Stations\Reports\Overview\BestAndWorstAction::class
                             )->setName('api:stations:reports:best-and-worst');

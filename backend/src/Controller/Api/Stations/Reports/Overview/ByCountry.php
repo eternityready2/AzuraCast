@@ -71,6 +71,29 @@ final class ByCountry extends AbstractReportAction
 
         $countryNames = Countries::getNames($request->getLocale()->getLocaleWithoutEncoding());
 
+        // Geography Alert: flag any country in this range that has never
+        // appeared before the range started -- a genuinely new audience.
+        $countryCodes = array_column($statsRaw, 'country_code');
+        $newCountryCodes = [];
+
+        if (!empty($countryCodes)) {
+            $priorCountryCodes = $this->em->getConnection()->fetchFirstColumn(
+                <<<'SQL'
+                    SELECT DISTINCT location_country
+                    FROM listener
+                    WHERE station_id = :station_id
+                    AND location_country IS NOT NULL
+                    AND timestamp_start < :range_start
+                SQL,
+                [
+                    'station_id' => $station->id,
+                    'range_start' => $dateRange->start,
+                ]
+            );
+
+            $newCountryCodes = array_diff($countryCodes, $priorCountryCodes);
+        }
+
         $listenersByCountry = [];
         $connectedTimeByCountry = [];
         $stats = [];
@@ -81,6 +104,7 @@ final class ByCountry extends AbstractReportAction
             }
 
             $stat['country'] = $countryNames[$stat['country_code']];
+            $stat['is_new_country'] = in_array($stat['country_code'], $newCountryCodes, true);
             $stats[] = $stat;
 
             $listenersByCountry[$stat['country']] = $stat['listeners'];

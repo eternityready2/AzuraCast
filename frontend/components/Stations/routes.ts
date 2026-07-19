@@ -72,6 +72,11 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                     name: 'stations:dmca_compliance'
                 },
                 {
+                    path: 'sponsor_plays',
+                    component: () => import('~/components/Stations/SponsorPlays.vue'),
+                    name: 'stations:sponsor_plays'
+                },
+                {
                     path: 'crossfade_profiles',
                     component: () => import('~/components/Stations/CrossfadeProfiles.vue'),
                     name: 'stations:crossfade_profiles'
