@@ -10,6 +10,7 @@
     >
         <tabs>
             <form-basic-info/>
+            <form-schedule v-model:schedule-items="form.schedule_items" />
             <form-advanced/>
         </tabs>
     </modal-form>
@@ -17,6 +18,7 @@
 
 <script setup lang="ts">
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
+import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
 import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
@@ -69,6 +71,8 @@ const {
                 const endType = item.recurrence_end_type ?? 'never';
                 const merged: Record<string, unknown> = {
                     ...item,
+                    loop_once: Boolean(item.loop_once),
+                    strict_start: Boolean(item.strict_start),
                     recurrence_type: item.recurrence_type ?? 'weekly',
                     recurrence_interval: item.recurrence_interval ?? 1,
                     recurrence_end_type: (endType === 'on_date' ? 'never' : endType) as string,
@@ -81,6 +85,12 @@ const {
                 if (merged.recurrence_type === 'monthly' && merged.recurrence_monthly_pattern === 'day_of_week' && merged.recurrence_monthly_day_of_week != null && (!merged.days || (merged.days as number[]).length === 0)) {
                     merged.days = [Number(merged.recurrence_monthly_day_of_week)];
                 }
+                if (merged.id == null) {
+                    delete merged.id;
+                }
+                delete merged.playlist;
+                delete merged.streamer;
+                delete merged.clock_wheel;
                 return merged;
             });
         }
@@ -90,10 +100,16 @@ const {
     },
     async () => {
         const {valid} = await validatedr$.$validate();
-        const data = { ...form.value };
-        if (data.schedule_items?.length) {
+        const data = { ...form.value } as Record<string, unknown>;
+
+        // Never send a null playlist id on create — serializer requires int.
+        if (data.id == null) {
+            delete data.id;
+        }
+
+        if (Array.isArray(data.schedule_items) && data.schedule_items.length) {
             data.schedule_items = data.schedule_items.map((item: Record<string, unknown>) => {
-                const out = { ...item };
+                const out: Record<string, unknown> = { ...item };
                 out.recurrence_type = item.recurrence_type ?? 'weekly';
                 out.recurrence_interval = (item.recurrence_type === 'biweekly' ? 2 : Number(item.recurrence_interval)) || 1;
                 out.recurrence_end_type = item.recurrence_end_type ?? 'never';
@@ -112,6 +128,16 @@ const {
                 if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'day_of_week' && normalizedDays.length > 0) {
                     out.recurrence_monthly_day_of_week = normalizedDays[0];
                 }
+
+                // New/unsaved rows must omit id entirely (not send id: null).
+                if (out.id == null) {
+                    delete out.id;
+                }
+                // API GET may embed relation shortcuts; never post them back.
+                delete out.playlist;
+                delete out.streamer;
+                delete out.clock_wheel;
+
                 return out;
             });
         }

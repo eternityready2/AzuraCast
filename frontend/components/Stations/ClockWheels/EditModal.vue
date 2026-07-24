@@ -8,7 +8,10 @@
         @submit="doSubmit"
         @hidden="clearContents"
     >
-        <tabs>
+        <tabs
+            :key="tabsKey"
+            v-model="activeTab"
+        >
             <ClockWheelsFormEntries
                 :form="form"
                 :r$="r$"
@@ -21,42 +24,8 @@
                 :on-entries-reordered="onEntriesReordered"
                 :on-entries-changed="onEntriesChanged"
             />
+            <FormSchedule v-model:schedule-items="scheduleItems" />
         </tabs>
-
-        <template
-            v-if="isEditMode"
-            #modal-footer
-        >
-            <button
-                type="button"
-                class="btn btn-outline-secondary me-auto"
-                @click="doExportJson"
-            >
-                {{ $gettext('Export JSON') }}
-            </button>
-            <button
-                type="button"
-                class="btn btn-danger"
-                @click="doDeleteFromModal"
-            >
-                {{ $gettext('Delete') }}
-            </button>
-            <button
-                type="button"
-                class="btn btn-secondary"
-                @click="close"
-            >
-                {{ $gettext('Close') }}
-            </button>
-            <button
-                type="button"
-                class="btn btn-primary"
-                :disabled="r$.$invalid"
-                @click="doSubmit"
-            >
-                {{ $gettext('Save Changes') }}
-            </button>
-        </template>
     </modal-form>
 </template>
 
@@ -64,15 +33,17 @@
 import ModalForm from '~/components/Common/ModalForm.vue';
 import Tabs from '~/components/Common/Tabs.vue';
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from '~/functions/useBaseEditModal';
-import {computed, onMounted, reactive, ref, useTemplateRef, watch} from 'vue';
+import {computed, onMounted, reactive, ref, useTemplateRef} from 'vue';
 import {useAxios} from '~/vendor/axios';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAppRegle} from '~/vendor/regle.ts';
 import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
-import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
 import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
+import FormSchedule from '~/components/Stations/ClockWheels/Form/Schedule.vue';
+import type {ClockWheelScheduleRow} from '~/components/Stations/ClockWheels/Form/ScheduleRow.vue';
+import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
 import {
     applyDragOrderToPositions,
     sortClockWheelEntries,
@@ -92,7 +63,7 @@ const props = defineProps<BaseEditModalProps & {
 const emit = defineEmits<BaseEditModalEmits>();
 
 const $modal = useTemplateRef('$modal');
-const {notifySuccess, notifyError} = useNotify();
+const {notifySuccess} = useNotify();
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
 
@@ -122,6 +93,9 @@ const blankForm = {
 
 const form = ref({...blankForm});
 const entries = reactive<ClockWheelEntry[]>([]);
+const scheduleItems = ref<ClockWheelScheduleRow[]>([]);
+const activeTab = ref('basic-info');
+const tabsKey = ref(0);
 
 const {r$} = useAppRegle(form, {
     name: {required},
@@ -207,6 +181,9 @@ const onEntriesChanged = () => {
 const resetForm = () => {
     form.value = {...blankForm};
     entries.splice(0, entries.length);
+    scheduleItems.value.splice(0, scheduleItems.value.length);
+    activeTab.value = 'basic-info';
+    tabsKey.value += 1;
 };
 
 const populateForm = (data: Record<string, unknown>) => {
@@ -223,6 +200,28 @@ const populateForm = (data: Record<string, unknown>) => {
         entries.splice(0, entries.length, ...converted);
         sortClockWheelEntries(entries);
     }
+    if (Array.isArray(data.schedule_items)) {
+        scheduleItems.value.splice(
+            0,
+            scheduleItems.value.length,
+            ...(data.schedule_items as Record<string, unknown>[]).map((item) => {
+                const endType = (item.recurrence_end_type as string | undefined) ?? 'never';
+                return {
+                    ...item,
+                    loop_once: false,
+                    clock_wheel_mode: item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible',
+                    recurrence_type: (item.recurrence_type as string | null) ?? 'weekly',
+                    recurrence_interval: Number(item.recurrence_interval ?? 1),
+                    recurrence_end_type: endType === 'on_date' ? 'never' : endType,
+                    recurrence_end_after: endType === 'after' ? (item.recurrence_end_after ?? null) : null,
+                    recurrence_end_date: null,
+                    days: normalizeStationScheduleDays(item.days),
+                } as ClockWheelScheduleRow;
+            })
+        );
+    } else {
+        scheduleItems.value.splice(0, scheduleItems.value.length);
+    }
 };
 
 const validateForm = async () => {
@@ -232,12 +231,34 @@ const validateForm = async () => {
         && form.value.template_id > 0
         && (form.value.daypart_id == null || form.value.daypart_id <= 0);
 
+    const schedule_items = scheduleItems.value.map((item) => {
+        const normalizedDays = normalizeStationScheduleDays(item.days);
+        const out: Record<string, unknown> = {
+            ...item,
+            loop_once: false,
+            clock_wheel_mode: item.clock_wheel_mode === 'strict' ? 'strict' : 'flexible',
+            end_date: item.recurrence_end_type === 'after' ? '' : (item.end_date || item.start_date),
+            days: item.recurrence_type === 'monthly' && item.recurrence_monthly_pattern === 'date'
+                ? []
+                : normalizedDays,
+        };
+        if (
+            out.recurrence_type === 'monthly'
+            && out.recurrence_monthly_pattern === 'day_of_week'
+            && normalizedDays.length > 0
+        ) {
+            out.recurrence_monthly_day_of_week = normalizedDays[0];
+        }
+        return out;
+    });
+
     const payload: Record<string, unknown> = {
         ...form.value,
         template_id: form.value.template_id != null && form.value.template_id > 0
             ? Number(form.value.template_id)
             : null,
         inherits_template_slots: inheritSlots,
+        schedule_items,
     };
 
     if (!inheritSlots) {
@@ -255,7 +276,6 @@ const {
     loading,
     error,
     isEditMode,
-    editUrl,
     clearContents,
     create,
     edit,
@@ -276,40 +296,6 @@ const {
         },
     }
 );
-
-const {doDelete} = useConfirmAndDelete(
-    $gettext('Delete Clock Wheel?'),
-    () => {
-        emit('relist');
-    }
-);
-
-const doDeleteFromModal = () => {
-    if (editUrl.value) {
-        $modal.value?.hide();
-        void doDelete(editUrl.value);
-    }
-};
-
-const doExportJson = async () => {
-    if (!editUrl.value) {
-        return;
-    }
-
-    try {
-        const exportUrl = editUrl.value.replace(/\/?$/, '') + '/export';
-        const {data} = await axios.get<Record<string, unknown>>(exportUrl);
-        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `${form.value.name || 'clock-wheel'}.json`;
-        anchor.click();
-        URL.revokeObjectURL(url);
-    } catch {
-        notifyError($gettext('Could not export clock wheel.'));
-    }
-};
 
 defineExpose({create, edit});
 </script>

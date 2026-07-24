@@ -25,24 +25,32 @@
             >
                 <tab :label="$gettext('Wheels')">
                     <div class="card-body-flush">
-                        <div class="card-body buttons">
+                        <div class="card-body buttons d-flex flex-wrap align-items-center">
                             <add-button
                                 :text="$gettext('Add Clock Wheel')"
                                 @click="doCreate"
                             />
                             <button
                                 type="button"
-                                class="btn btn-secondary ms-2"
+                                class="btn btn-secondary"
                                 @click="$generateModal?.open()"
                             >
                                 {{ $gettext('Auto-Generate') }}
                             </button>
                             <button
                                 type="button"
-                                class="btn btn-secondary ms-2"
+                                class="btn btn-secondary"
                                 @click="triggerImport"
                             >
                                 {{ $gettext('Import JSON') }}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-danger"
+                                :disabled="!hasSelectedWheels"
+                                @click="doDeleteSelected"
+                            >
+                                {{ $gettext('Delete Selected') }}
                             </button>
                             <input
                                 ref="$importInput"
@@ -55,9 +63,11 @@
 
                         <data-table
                             id="station_clock_wheels"
+                            selectable
                             paginated
                             :fields="wheelFields"
                             :provider="listItemProvider"
+                            @row-selected="onWheelRowSelected"
                         >
                             <template #cell(actions)="{ item }">
                                 <div
@@ -80,6 +90,14 @@
                                     >
                                         {{ $gettext('Analytics') }}
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary"
+                                        :title="$gettext('Export JSON')"
+                                        @click="doExportJson(item)"
+                                    >
+                                        {{ $gettext('Export') }}
+                                    </button>
                                 </div>
                             </template>
                             <template #cell(name)="{ item }">
@@ -96,16 +114,6 @@
                                             class="badge text-bg-secondary ms-1"
                                         >
                                             {{ $gettext('Template') }}
-                                        </span>
-                                        <span
-                                            v-if="item.effectiveness_grade"
-                                            class="badge ms-1"
-                                            :class="gradeBadgeClass(item.effectiveness_grade)"
-                                            :title="item.effectiveness_score != null
-                                                ? $gettext('Effectiveness score') + ': ' + item.effectiveness_score
-                                                : $gettext('Effectiveness grade')"
-                                        >
-                                            {{ item.effectiveness_grade }}
                                         </span>
                                     </h5>
                                     <span
@@ -234,10 +242,7 @@
                 </tab>
 
                 <tab :label="$gettext('Reconciliation')">
-                    <reconciliation-log-tab
-                        :log-url="reconciliationLogUrl"
-                        :export-url="reconciliationLogExportUrl"
-                    />
+                    <reconciliation-log-tab :log-url="reconciliationLogUrl" />
                 </tab>
             </tabs>
         </div>
@@ -278,9 +283,10 @@ import AddButton from '~/components/Common/AddButton.vue';
 import Tabs from '~/components/Common/Tabs.vue';
 import Tab from '~/components/Common/Tab.vue';
 import {useTranslate} from '~/vendor/gettext';
-import {ref, useTemplateRef} from 'vue';
+import {computed, ref, shallowRef, useTemplateRef} from 'vue';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAxios} from '~/vendor/axios';
+import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
 import useHasEditModal from '~/functions/useHasEditModal';
 import {useApiItemProvider} from '~/functions/dataTable/useApiItemProvider.ts';
 import {QueryKeys, queryKeyWithStation} from '~/entities/Queries.ts';
@@ -302,15 +308,15 @@ const templatesUrl = getStationApiUrl('/clock-wheel-templates');
 const daypartsUrl = getStationApiUrl('/clock-dayparts');
 const programGridUrl = getStationApiUrl('/clock-wheels/program-grid');
 const reconciliationLogUrl = getStationApiUrl('/clock-wheels/reconciliation-log');
-const reconciliationLogExportUrl = getStationApiUrl('/clock-wheels/reconciliation-log/export');
 const generateUrl = getStationApiUrl('/clock-wheels/generate');
 const importUrl = getStationApiUrl('/clock-wheels/import');
 
 const $importInput = useTemplateRef('$importInput');
 
-const {$gettext} = useTranslate();
+const {$gettext, $ngettext} = useTranslate();
 const {notifySuccess, notifyError} = useNotify();
 const {axios} = useAxios();
+const {confirmDelete} = useDialog();
 const syncingDaypartId = ref<number | null>(null);
 
 type ClockWheelRow = {
@@ -318,8 +324,6 @@ type ClockWheelRow = {
     name: string;
     color?: string;
     inherits_template_slots?: boolean;
-    effectiveness_grade?: string | null;
-    effectiveness_score?: number | null;
     links: {self: string};
 };
 
@@ -342,26 +346,17 @@ type DaypartRow = {
     links: {self: string};
 };
 
+const selectedWheels = shallowRef<ClockWheelRow[]>([]);
+const hasSelectedWheels = computed(() => selectedWheels.value.length > 0);
+
+const onWheelRowSelected = (rows: ClockWheelRow[]) => {
+    selectedWheels.value = rows;
+};
+
 const wheelFields: DataTableField<ClockWheelRow>[] = [
-    {key: 'actions', label: $gettext('Actions'), sortable: false},
+    {key: 'actions', label: $gettext('Actions'), sortable: false, class: 'shrink'},
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
 ];
-
-const gradeBadgeClass = (grade: string): string => {
-    switch (grade.toUpperCase()) {
-        case 'A':
-            return 'text-bg-success';
-        case 'B':
-            return 'text-bg-info';
-        case 'C':
-            return 'text-bg-warning';
-        case 'D':
-        case 'F':
-            return 'text-bg-danger';
-        default:
-            return 'text-bg-secondary';
-    }
-};
 
 const templateFields: DataTableField<TemplateRow>[] = [
     {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
@@ -423,6 +418,60 @@ const openPreview = (item: ClockWheelRow) => {
 const openAnalytics = (item: ClockWheelRow) => {
     const url = getStationApiUrl(`/clock-wheel/${item.id}/analytics`).value;
     void $analyticsModal.value?.open(item.name, url);
+};
+
+const doDeleteSelected = async () => {
+    const count = selectedWheels.value.length;
+    if (count === 0) {
+        return;
+    }
+
+    const {value} = await confirmDelete({
+        title: $ngettext(
+            'Delete %{num} clock wheel?',
+            'Delete %{num} clock wheels?',
+            count,
+            {num: String(count)}
+        ),
+    });
+
+    if (!value) {
+        return;
+    }
+
+    try {
+        await Promise.all(
+            selectedWheels.value.map((item) => axios.delete(item.links.self))
+        );
+        notifySuccess(
+            $ngettext(
+                'Clock wheel deleted.',
+                'Clock wheels deleted.',
+                count
+            )
+        );
+        selectedWheels.value = [];
+        relistWheels();
+    } catch {
+        notifyError($gettext('Could not delete selected clock wheels.'));
+        relistWheels();
+    }
+};
+
+const doExportJson = async (item: ClockWheelRow) => {
+    try {
+        const exportUrl = item.links.self.replace(/\/?$/, '') + '/export';
+        const {data} = await axios.get<Record<string, unknown>>(exportUrl);
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${item.name || 'clock-wheel'}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    } catch {
+        notifyError($gettext('Could not export clock wheel.'));
+    }
 };
 
 const doSyncDaypart = async (item: DaypartRow) => {

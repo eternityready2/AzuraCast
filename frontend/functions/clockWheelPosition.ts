@@ -148,14 +148,19 @@ export function isClockWheelLayoutValid(entries: ClockWheelTimelineEntry[]): boo
 export interface ClockWheelContentDensity {
     musicPercent: number;
     musicSeconds: number;
-    otherPercent: number;
-    otherSeconds: number;
+    talkPercent: number;
+    talkSeconds: number;
+    idPercent: number;
+    idSeconds: number;
+    promoAdPercent: number;
+    promoAdSeconds: number;
 }
 
 /**
- * Content-type density across the hour (Music vs everything else -- IDs,
- * promos, ads, talk). Uses the same per-slot duration estimate as the loop
- * time calculation, so the two stay consistent with each other.
+ * Content-type density across the hour, broken out by category: Music, Talk,
+ * ID (station identification/legal ID), and a combined Promo/Ad bucket. Uses
+ * the same per-slot duration estimate as the loop time calculation, so the
+ * two stay consistent with each other.
  */
 export function getClockWheelContentDensity(
     entries: Array<ClockWheelTimelineEntry & {duration_seconds?: number | null; type?: string}>,
@@ -163,7 +168,9 @@ export function getClockWheelContentDensity(
     const sorted = [...entries].sort((a, b) => a.position_seconds - b.position_seconds);
 
     let musicSeconds = 0;
-    let otherSeconds = 0;
+    let talkSeconds = 0;
+    let idSeconds = 0;
+    let promoAdSeconds = 0;
 
     for (let i = 0; i < sorted.length; i++) {
         const entry = sorted[i];
@@ -181,22 +188,44 @@ export function getClockWheelContentDensity(
             duration = Math.min(210, window);
         }
 
-        if (entry.type === 'music' || entry.type === undefined) {
-            musicSeconds += duration;
-        } else {
-            otherSeconds += duration;
+        const entryType = (entry.type ?? 'music') as string;
+
+        switch (entryType) {
+            case 'talk':
+                talkSeconds += duration;
+                break;
+            case 'id':
+            case 'legal_id':
+            case 'sweeper':
+                idSeconds += duration;
+                break;
+            case 'promo':
+            case 'ad':
+                promoAdSeconds += duration;
+                break;
+            case 'music':
+            default:
+                musicSeconds += duration;
+                break;
         }
     }
 
-    const totalSeconds = musicSeconds + otherSeconds;
+    const totalSeconds = musicSeconds + talkSeconds + idSeconds + promoAdSeconds;
     if (totalSeconds === 0) {
-        return {musicPercent: 0, musicSeconds: 0, otherPercent: 0, otherSeconds: 0};
+        return {
+            musicPercent: 0, musicSeconds: 0,
+            talkPercent: 0, talkSeconds: 0,
+            idPercent: 0, idSeconds: 0,
+            promoAdPercent: 0, promoAdSeconds: 0,
+        };
     }
 
+    const pct = (s: number) => Math.round((s / totalSeconds) * 100);
+
     return {
-        musicPercent: Math.round((musicSeconds / totalSeconds) * 100),
-        musicSeconds,
-        otherPercent: Math.round((otherSeconds / totalSeconds) * 100),
-        otherSeconds,
+        musicPercent: pct(musicSeconds), musicSeconds,
+        talkPercent: pct(talkSeconds), talkSeconds,
+        idPercent: pct(idSeconds), idSeconds,
+        promoAdPercent: pct(promoAdSeconds), promoAdSeconds,
     };
 }

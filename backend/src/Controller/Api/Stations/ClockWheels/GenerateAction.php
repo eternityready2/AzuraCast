@@ -6,7 +6,6 @@ namespace App\Controller\Api\Stations\ClockWheels;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
-use App\Entity\Api\Status;
 use App\Entity\StationClockWheel;
 use App\Http\Response;
 use App\Http\ServerRequest;

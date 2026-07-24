@@ -9,7 +9,7 @@
         @hidden="clearForm"
     >
         <!-- Source -->
-        <div class="mb-3">
+        <div v-if="!isScopedMode" class="mb-3">
             <label class="form-label fw-semibold">{{ $gettext('Source') }}</label>
             <select
                 v-model="form.source"
@@ -26,7 +26,7 @@
         </div>
 
         <!-- Entity selection -->
-        <div class="mb-3">
+        <div v-if="!isScopedMode" class="mb-3">
             <label class="form-label fw-semibold">
                 {{ form.source === 'playlist' ? $gettext('Playlist') : $gettext('Clock Wheel') }}
             </label>
@@ -847,6 +847,8 @@ const buildSchedulePayload = (
     return out;
 };
 
+const isScopedMode = ref(false);
+
 const clearForm = () => {
     form.value = blankForm();
     startTimingMode.value = 'flexible';
@@ -854,6 +856,7 @@ const clearForm = () => {
     scheduleRow.value = createScheduleItemDefaults();
     error.value = null;
     editingScheduleId.value = null;
+    isScopedMode.value = false;
 };
 
 const open = () => {
@@ -935,6 +938,59 @@ const openForEdit = async (event: EventImpl) => {
     }
 };
 
+// Used from the Playlist/Clock Wheel edit modals' own "Schedule" tab, where
+// we already know exactly which item we're scheduling -- no FullCalendar
+// event object involved, so no Source/Entity dropdown needed at all.
+const openScopedForCreate = (source: 'playlist' | 'clock_wheel', entityId: number) => {
+    clearForm();
+    isScopedMode.value = true;
+    form.value.source = source;
+    form.value.entity_id = entityId;
+    ($modal.value as any)?.show();
+};
+
+const openScopedForEdit = async (
+    source: 'playlist' | 'clock_wheel',
+    entityId: number,
+    scheduleId: number,
+) => {
+    clearForm();
+    isScopedMode.value = true;
+    form.value.source = source;
+    form.value.entity_id = entityId;
+    editingScheduleId.value = scheduleId;
+
+    ($modal.value as any)?.show();
+
+    loading.value = true;
+    error.value = null;
+
+    try {
+        const entityType = source === 'playlist' ? 'playlist' : 'clock-wheel';
+        const entityApiUrl = getStationApiUrl(`/${entityType}/${entityId}`).value;
+        const {data: entityData} = await axios.get(entityApiUrl);
+        const items = (entityData.schedule_items as Record<string, unknown>[] | undefined) ?? [];
+        const existing = items.find((row) => Number(row.id) === scheduleId);
+
+        if (existing) {
+            scheduleRow.value = apiScheduleItemToRow(existing);
+            syncDurationFromTimes();
+            isRecurring.value = existing.recurrence_type != null && existing.recurrence_type !== '';
+            if (source === 'clock_wheel') {
+                scheduleRow.value.loop_once = false;
+                clockWheelScheduleMode.value = scheduleRow.value.clock_wheel_mode ?? 'flexible';
+            } else {
+                startTimingMode.value = scheduleRow.value.strict_start ? 'strict' : 'flexible';
+            }
+        }
+    } catch (e: unknown) {
+        const err = e as {response?: {data?: {message?: string}}};
+        error.value = err?.response?.data?.message ?? $gettext('An error occurred.');
+    } finally {
+        loading.value = false;
+    }
+};
+
 const doSave = async () => {
     if (!form.value.entity_id) return;
 
@@ -997,5 +1053,5 @@ const doSave = async () => {
     }
 };
 
-defineExpose({open, openForEdit});
+defineExpose({open, openForEdit, openScopedForCreate, openScopedForEdit});
 </script>

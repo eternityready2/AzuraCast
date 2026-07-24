@@ -21,6 +21,8 @@
         </div>
 
         <div class="col-lg-5">
+            <profile-stats/>
+
             <profile-requests v-if="hasActiveBackend"/>
 
             <profile-streamers v-if="hasActiveBackend"/>
@@ -42,6 +44,7 @@
 <script setup lang="ts">
 import ProfileStreams from "~/components/Stations/Profile/StreamsPanel.vue";
 import ProfileHeader from "~/components/Stations/Profile/HeaderPanel.vue";
+import ProfileStats from "~/components/Stations/Profile/StatsPanel.vue";
 import ProfileNowPlaying from "~/components/Stations/Profile/NowPlayingPanel.vue";
 import ProfileSchedule from "~/components/Stations/Profile/SchedulePanel.vue";
 import ProfileRequests from "~/components/Stations/Profile/RequestsPanel.vue";

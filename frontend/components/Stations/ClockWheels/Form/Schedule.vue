@@ -9,12 +9,12 @@
             </template>
             <p>
                 {{
-                    $gettext('This playlist currently has no scheduled times. It will play at all times. To add a new scheduled time, click the button below.')
+                    $gettext('This clock wheel currently has no scheduled times. To add a new scheduled time, click the button below.')
                 }}
             </p>
         </form-markup>
 
-        <playlists-form-schedule-row
+        <clock-wheels-form-schedule-row
             v-for="(row, index) in scheduleItems"
             :key="index"
             v-model:row="scheduleItems[index]"
@@ -38,24 +38,25 @@
 </template>
 
 <script setup lang="ts">
-import PlaylistsFormScheduleRow from "~/components/Stations/Playlists/Form/ScheduleRow.vue";
+import ClockWheelsFormScheduleRow from "~/components/Stations/ClockWheels/Form/ScheduleRow.vue";
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import Tab from "~/components/Common/Tab.vue";
 import IconIcAdd from "~icons/ic/baseline-add";
+import type {ClockWheelScheduleRow} from "~/components/Stations/ClockWheels/Form/ScheduleRow.vue";
 
-const scheduleItems = defineModel<Array<any>>('scheduleItems', {
+const scheduleItems = defineModel<ClockWheelScheduleRow[]>('scheduleItems', {
     default: () => []
-})
+});
 
 const add = () => {
     scheduleItems.value.push({
-        start_time: null,
-        end_time: null,
-        start_date: null,
-        end_date: null,
+        start_time: null as unknown as number,
+        end_time: null as unknown as number,
+        start_date: null as unknown as string,
+        end_date: null as unknown as string,
         days: [],
         loop_once: false,
-        strict_start: false,
+        clock_wheel_mode: 'flexible',
         recurrence_type: 'weekly',
         recurrence_interval: 1,
         recurrence_monthly_pattern: null,
@@ -64,7 +65,7 @@ const add = () => {
         recurrence_monthly_day_of_week: null,
         recurrence_end_type: 'never',
         recurrence_end_after: null,
-        recurrence_end_date: null
+        recurrence_end_date: null,
     });
 };
 

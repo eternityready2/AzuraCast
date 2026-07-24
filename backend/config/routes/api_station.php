@@ -172,6 +172,11 @@ return static function (RouteCollectorProxy $group) {
                             );
 
                             $group->get(
+                                '/overview-stats',
+                                Controller\Api\Stations\OverviewStatsAction::class
+                            )->setName('api:stations:overview-stats');
+
+                            $group->get(
                                 '/custom_assets/{type}',
                                 Controller\Api\Stations\CustomAssets\GetCustomAssetAction::class
                             )->setName('api:stations:custom_assets');

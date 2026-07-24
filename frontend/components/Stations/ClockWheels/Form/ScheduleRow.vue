@@ -23,7 +23,7 @@
         <div class="card-body">
             <div class="row g-3">
                 <form-group-field
-                    :id="'edit_form_start_time_'+index"
+                    :id="'cw_edit_form_start_time_'+index"
                     class="col-md-4"
                     :field="r$.start_time"
                     :label="$gettext('Start Time')"
@@ -39,7 +39,7 @@
                 </form-group-field>
 
                 <form-group-field
-                    :id="'edit_form_end_time_'+index"
+                    :id="'cw_edit_form_end_time_'+index"
                     class="col-md-4"
                     :field="r$.end_time"
                     :label="$gettext('End Time')"
@@ -55,7 +55,7 @@
                 </form-group-field>
 
                 <form-markup
-                    id="station_time_zone"
+                    :id="'cw_station_time_zone_'+index"
                     class="col-md-4"
                     :label="$gettext('Station Time Zone')"
                 >
@@ -63,7 +63,7 @@
                 </form-markup>
 
                 <form-group-field
-                    :id="'edit_form_start_date_'+index"
+                    :id="'cw_edit_form_start_date_'+index"
                     class="col-md-4"
                     :field="r$.start_date"
                     input-type="date"
@@ -72,7 +72,7 @@
                 />
 
                 <form-group-field
-                    :id="'edit_form_end_date_'+index"
+                    :id="'cw_edit_form_end_date_'+index"
                     class="col-md-4"
                     :field="r$.end_date"
                     input-type="date"
@@ -83,37 +83,37 @@
                 />
 
                 <form-markup
-                    :id="'edit_form_scheduling_'+index"
+                    :id="'cw_edit_form_timing_'+index"
                     class="col-12"
-                    :label="$gettext('Scheduling')"
+                    :label="$gettext('Clock Wheel Timing')"
                 >
                     <div class="d-flex flex-wrap gap-3">
                         <div class="form-check mb-0">
                             <input
-                                :id="'scheduling_flexible_'+index"
-                                v-model="schedulingMode"
+                                :id="'cw_timing_flexible_'+index"
+                                v-model="row.clock_wheel_mode"
                                 class="form-check-input"
                                 type="radio"
                                 value="flexible"
                             >
                             <label
                                 class="form-check-label"
-                                :for="'scheduling_flexible_'+index"
+                                :for="'cw_timing_flexible_'+index"
                             >
                                 {{ $gettext('Flexible') }}
                             </label>
                         </div>
                         <div class="form-check mb-0">
                             <input
-                                :id="'scheduling_strict_'+index"
-                                v-model="schedulingMode"
+                                :id="'cw_timing_strict_'+index"
+                                v-model="row.clock_wheel_mode"
                                 class="form-check-input"
                                 type="radio"
                                 value="strict"
                             >
                             <label
                                 class="form-check-label"
-                                :for="'scheduling_strict_'+index"
+                                :for="'cw_timing_strict_'+index"
                             >
                                 {{ $gettext('Strict') }}
                             </label>
@@ -122,27 +122,10 @@
                     <small class="form-text text-muted d-block mt-2">
                         {{ $gettext('Flexible prefers full songs when they fit; AutoDJ may cut at anchors only when selection cannot guarantee timing (short slots, strict mode, or no track fits the window).') }}
                     </small>
-                    <div class="form-check mt-2">
-                        <input
-                            :id="'scheduling_loop_once_'+index"
-                            v-model="row.loop_once"
-                            class="form-check-input"
-                            type="checkbox"
-                        >
-                        <label
-                            class="form-check-label"
-                            :for="'scheduling_loop_once_'+index"
-                        >
-                            {{ $gettext('Loop Once') }}
-                        </label>
-                    </div>
-                    <small class="form-text text-muted d-block mt-1">
-                        {{ $gettext('Independent of Strict/Flexible above') }}
-                    </small>
                 </form-markup>
 
                 <form-group-multi-check
-                    :id="'edit_form_days_'+index"
+                    :id="'cw_edit_form_days_'+index"
                     class="col-md-12"
                     :field="r$.days"
                     :label="$gettext('Scheduled Play Days of Week')"
@@ -160,7 +143,7 @@
                     </h6>
                 </div>
                 <form-group-select
-                    :id="'edit_form_recurrence_type_'+index"
+                    :id="'cw_edit_form_recurrence_type_'+index"
                     class="col-md-4"
                     :field="r$.recurrence_type"
                     :label="$gettext('Repeat')"
@@ -169,7 +152,7 @@
                 />
                 <form-group-field
                     v-if="row.recurrence_type === 'custom'"
-                    :id="'edit_form_recurrence_interval_'+index"
+                    :id="'cw_edit_form_recurrence_interval_'+index"
                     class="col-md-4"
                     :field="r$.recurrence_interval"
                     input-type="number"
@@ -180,7 +163,7 @@
                 />
                 <template v-if="row.recurrence_type === 'monthly'">
                     <form-group-select
-                        :id="'edit_form_recurrence_monthly_pattern_'+index"
+                        :id="'cw_edit_form_recurrence_monthly_pattern_'+index"
                         class="col-md-4"
                         :field="r$.recurrence_monthly_pattern"
                         :label="$gettext('Monthly Pattern')"
@@ -188,7 +171,7 @@
                     />
                     <form-group-field
                         v-if="row.recurrence_monthly_pattern === 'date'"
-                        :id="'edit_form_recurrence_monthly_day_'+index"
+                        :id="'cw_edit_form_recurrence_monthly_day_'+index"
                         class="col-md-4"
                         :field="r$.recurrence_monthly_day"
                         input-type="number"
@@ -199,7 +182,7 @@
                     />
                     <template v-if="row.recurrence_monthly_pattern === 'day_of_week'">
                         <form-group-select
-                            :id="'edit_form_recurrence_monthly_week_'+index"
+                            :id="'cw_edit_form_recurrence_monthly_week_'+index"
                             class="col-md-4"
                             :field="r$.recurrence_monthly_week"
                             :label="$gettext('Week of Month')"
@@ -209,7 +192,7 @@
                     </template>
                 </template>
                 <form-group-select
-                    :id="'edit_form_recurrence_end_type_'+index"
+                    :id="'cw_edit_form_recurrence_end_type_'+index"
                     class="col-md-4"
                     :field="r$.recurrence_end_type"
                     :label="$gettext('Stop Recurrence')"
@@ -218,7 +201,7 @@
                 />
                 <form-group-field
                     v-if="row.recurrence_end_type === 'after'"
-                    :id="'edit_form_recurrence_end_after_'+index"
+                    :id="'cw_edit_form_recurrence_end_after_'+index"
                     class="col-md-4"
                     :field="r$.recurrence_end_after"
                     input-type="number"
@@ -243,15 +226,14 @@ import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useAppScopedRegle} from "~/vendor/regle.ts";
 import IconIcRemove from "~icons/ic/baseline-remove";
 
-interface PlaylistScheduleRow {
+export interface ClockWheelScheduleRow {
     start_time: number,
     end_time: number,
     start_date: string,
     end_date: string,
     days: number[],
     loop_once: boolean,
-    /** Playlist Flexible/Strict scheduling (independent of loop_once). */
-    strict_start: boolean,
+    clock_wheel_mode: 'flexible' | 'strict',
     recurrence_type: string | null,
     recurrence_interval: number,
     recurrence_monthly_pattern: string | null,
@@ -263,12 +245,11 @@ interface PlaylistScheduleRow {
     recurrence_end_date: string | null,
 }
 
-const props = defineProps<{
+defineProps<{
     index: number,
 }>();
 
-/** v-model:row from parent — required so recurrence and other fields mutate the form store on submit */
-const row = defineModel<PlaylistScheduleRow>('row', {required: true});
+const row = defineModel<ClockWheelScheduleRow>('row', {required: true});
 
 const emit = defineEmits<{
     (e: 'remove'): void
@@ -285,16 +266,6 @@ const isMonthlyDayOfWeekPattern = computed(
 const requiresDaysOfWeek = computed(() => !isMonthlyDatePattern.value);
 
 const {$gettext} = useTranslate();
-
-/** Flexible/Strict controls strict_start; Loop Once is a separate checkbox on loop_once. */
-const schedulingMode = computed({
-    get: (): 'flexible' | 'strict' => {
-        return row.value.strict_start ? 'strict' : 'flexible';
-    },
-    set: (mode: 'flexible' | 'strict') => {
-        row.value.strict_start = mode === 'strict';
-    },
-});
 
 const daysOfWeekFieldDescription = computed(() => {
     if (isMonthlyDatePattern.value) {
@@ -332,7 +303,7 @@ const {r$} = useAppScopedRegle(
         },
     },
     {
-        namespace: 'stations-playlists'
+        namespace: 'stations-clock-wheels'
     }
 );
 
@@ -354,6 +325,17 @@ watch(
             row.value.days = [];
         }
     }
+);
+
+// Clock wheel schedules never use playlist loop_once.
+watch(
+    () => row.value.loop_once,
+    () => {
+        if (row.value.loop_once) {
+            row.value.loop_once = false;
+        }
+    },
+    {immediate: true}
 );
 
 const dayOptions = [

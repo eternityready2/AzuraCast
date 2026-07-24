@@ -12,15 +12,44 @@ services:
       - "127.0.0.1:6379:6379" # Redis
     cap_add:
       - SYS_PTRACE
-    # environment:
-      # VAR_DUMPER_FORMAT: server
-      # VAR_DUMPER_SERVER: host.docker.internal:9912
+    environment:
+      MYSQL_PASSWORD: tnpdEdDTzDrY
+      MYSQL_ROOT_PASSWORD: qzJyAEmZPhxZyJawKFfA
     volumes:
-      # Uncomment these lines if mounting a custom SSL cert (i.e. mkcert)
-      # - $PWD/util/local_ssl/default.crt:/var/azuracast/storage/acme/custom.crt:ro
-      # - $PWD/util/local_ssl/default.key:/var/azuracast/storage/acme/custom.key:ro
       - $PWD/node_modules:/var/azuracast/www/node_modules
       - $PWD/vendor:/var/azuracast/www/vendor
       - $PWD:/var/azuracast/www
+      - azuracast_www_uploads:/var/azuracast/storage/uploads
+      - azuracast_stereo_tool_install:/var/azuracast/storage/stereo_tool
+      - azuracast_rsas_install:/var/azuracast/storage/rsas
+      - azuracast_db_data:/var/lib/mysql
+      - azuracast_geolite_install:/var/azuracast/storage/geoip
+      - azuracast_backups:/var/azuracast/backups
+      - azuracast_shoutcast2_install:/var/azuracast/storage/shoutcast2
+      - azuracast_station_data:/var/azuracast/stations
+      - azuracast_acme:/var/azuracast/storage/acme
+      - azuracast_sftpgo_data:/var/azuracast/storage/sftpgo
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+volumes:
+  azuracast_www_uploads:
+    external: true
+  azuracast_stereo_tool_install:
+    external: true
+  azuracast_rsas_install:
+    external: true
+  azuracast_db_data:
+    external: true
+  azuracast_geolite_install:
+    external: true
+  azuracast_backups:
+    external: true
+  azuracast_shoutcast2_install:
+    external: true
+  azuracast_station_data:
+    external: true
+  azuracast_acme:
+    external: true
+  azuracast_sftpgo_data:
+    external: true

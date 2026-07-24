@@ -152,15 +152,42 @@
                     </div>
                 </div>
 
-                <div>
+                <div class="mb-2">
                     <div class="d-flex justify-content-between small mb-1">
-                        <span>{{ $gettext('Ads/Station ID') }}</span>
-                        <span class="text-info fw-semibold">{{ contentDensity.otherPercent }}%</span>
+                        <span>{{ $gettext('Talk') }}</span>
+                        <span class="text-warning fw-semibold">{{ contentDensity.talkPercent }}%</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div
+                            class="progress-bar bg-warning"
+                            :style="{ width: contentDensity.talkPercent + '%' }"
+                        />
+                    </div>
+                </div>
+
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>{{ $gettext('Station ID') }}</span>
+                        <span class="text-info fw-semibold">{{ contentDensity.idPercent }}%</span>
                     </div>
                     <div class="progress" style="height: 6px;">
                         <div
                             class="progress-bar bg-info"
-                            :style="{ width: contentDensity.otherPercent + '%' }"
+                            :style="{ width: contentDensity.idPercent + '%' }"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>{{ $gettext('Promo/Ad') }}</span>
+                        <span style="color: #d63ee0;" class="fw-semibold">{{ contentDensity.promoAdPercent }}%</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div
+                            class="progress-bar"
+                            style="background-color: #d63ee0;"
+                            :style="{ width: contentDensity.promoAdPercent + '%' }"
                         />
                     </div>
                 </div>
