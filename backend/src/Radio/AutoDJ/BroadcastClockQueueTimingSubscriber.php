@@ -34,16 +34,16 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
             return;
         }
 
-        $seconds = $this->clockPlanner->secondsUntilNextSoftAnchor(
+        $maxDuration = $this->clockPlanner->maxContentDurationBeforeNextSoftAnchor(
             $event->getStation(),
             $event->getExpectedPlayTime(),
         );
 
-        if (null === $seconds || $seconds <= 0) {
+        if (null === $maxDuration || $maxDuration <= 0) {
             return;
         }
 
-        $targetSeconds = max(1, $seconds);
+        $targetSeconds = max(1, (int)floor($maxDuration));
 
         foreach ($event->getNextSongs() as $queueRow) {
             if (!$queueRow instanceof StationQueue) {
@@ -71,8 +71,9 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
             }
 
             // Non-media queue rows cannot receive AutoCue cue points. Bound
-            // their projected duration so later queue slots still recover to
-            // the station clock rather than propagating the overrun.
+            // their projected duration so later queue slots recover to the
+            // station clock rather than propagating the overrun. Runtime source
+            // switching remains responsible for actually ending a remote source.
             if (null !== $queueRow->duration && $queueRow->duration > $targetSeconds) {
                 $queueRow->duration = (float)$targetSeconds;
             }
