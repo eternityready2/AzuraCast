@@ -30,6 +30,10 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
 
     public function applyClockTarget(BuildQueue $event): void
     {
+        if ($event->isInterrupting()) {
+            return;
+        }
+
         $seconds = $this->clockPlanner->secondsUntilNextSoftAnchor(
             $event->getStation(),
             $event->getExpectedPlayTime(),
