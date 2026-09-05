@@ -455,6 +455,32 @@ final class Queue
         StationQueue $queueRow,
         DateTimeImmutable $expectedPlayTime
     ): bool {
+        // Mandatory top-of-hour content must never be invalidated by a programme
+        // ownership check; it remains the highest-priority broadcast boundary.
+        if ($queueRow->top_of_hour_legal_id || $queueRow->clock_wheel_legal_id_substitute) {
+            return true;
+        }
+
+        if (
+            null !== $queueRow->request
+            && $this->broadcastClockPlanner->areRequestsBlockedBySchedule(
+                $queueRow->station,
+                $expectedPlayTime,
+            )
+        ) {
+            return false;
+        }
+
+        if (
+            null !== $queueRow->clock_wheel
+            && $this->broadcastClockPlanner->isProgramWindowActive(
+                $queueRow->station,
+                $expectedPlayTime,
+            )
+        ) {
+            return false;
+        }
+
         $playlist = $queueRow->playlist;
         if (null === $playlist) {
             return true;
