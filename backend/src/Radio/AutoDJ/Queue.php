@@ -430,15 +430,15 @@ final class Queue
             return;
         }
 
-        $seconds = $this->broadcastClockPlanner->secondsUntilNextSoftAnchor(
+        $maxDuration = $this->broadcastClockPlanner->maxContentDurationBeforeNextSoftAnchor(
             $station,
             $expectedPlayTime,
         );
-        if (null === $seconds || $seconds <= 0) {
+        if (null === $maxDuration || $maxDuration <= 0) {
             return;
         }
 
-        $targetSeconds = max(1, $seconds);
+        $targetSeconds = max(1, (int)floor($maxDuration));
         $queueRow->hour_boundary_max_play_seconds = $targetSeconds;
 
         if ($media->getCalculatedLength() <= $targetSeconds) {
