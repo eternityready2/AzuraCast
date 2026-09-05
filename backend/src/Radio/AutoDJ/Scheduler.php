@@ -252,11 +252,16 @@ final class Scheduler
      * crossfade overlap so Queue::addDurationToTime() projects the following item
      * at the actual wall-clock boundary. Operators can explicitly opt out with
      * Allow Overrun, in which case the original full schedule duration is kept.
+     *
+     * The optional time is the queue's projected airtime. Supplying it keeps live
+     * queue building and Linear Log projection on the same broadcast clock.
      */
-    public function getPlaylistScheduleDuration(StationPlaylist $playlist): int
-    {
+    public function getPlaylistScheduleDuration(
+        StationPlaylist $playlist,
+        ?DateTimeImmutable $now = null,
+    ): int {
         $stationTz = $playlist->station->getTimezoneObject();
-        $now = CarbonImmutable::now($stationTz);
+        $now = CarbonImmutable::instance(Time::nowInTimezone($stationTz, $now));
 
         $scheduleItem = $this->getActiveScheduleFromCollection(
             $playlist->schedule_items,
@@ -271,11 +276,7 @@ final class Scheduler
         $fullDuration = $scheduleItem->getDuration($stationTz);
         if (
             $fullDuration <= 0
-            || in_array(
-                StationPlaylist::OPTION_ALLOW_OVERRUN,
-                $playlist->backend_options,
-                true,
-            )
+            || $playlist->backendAllowOverrun()
         ) {
             return $fullDuration;
         }
