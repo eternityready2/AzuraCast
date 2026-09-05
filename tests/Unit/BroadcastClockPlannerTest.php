@@ -104,8 +104,42 @@ final class BroadcastClockPlannerTest extends Unit
 
         $when = $this->time('2026-09-04 11:30:00');
 
+        self::assertTrue($this->planner->isProgramWindowActive($station, $when));
         self::assertTrue($this->planner->isPlaylistPreemptedByProgram($general, $when));
         self::assertFalse($this->planner->isPlaylistPreemptedByProgram($program, $when));
+        self::assertFalse(
+            $this->planner->isProgramWindowActive(
+                $station,
+                $this->time('2026-09-04 12:30:00'),
+            )
+        );
+    }
+
+    public function testPreventRequestsOnlyBlocksRequestsDuringActiveWindow(): void
+    {
+        [$station, , $schedule] = $this->makeScheduledProgram(1100, 1200);
+        $schedule->prevent_requests = true;
+
+        self::assertTrue(
+            $this->planner->areRequestsBlockedBySchedule(
+                $station,
+                $this->time('2026-09-04 11:30:00'),
+            )
+        );
+        self::assertFalse(
+            $this->planner->areRequestsBlockedBySchedule(
+                $station,
+                $this->time('2026-09-04 10:30:00'),
+            )
+        );
+
+        $schedule->prevent_requests = false;
+        self::assertFalse(
+            $this->planner->areRequestsBlockedBySchedule(
+                $station,
+                $this->time('2026-09-04 11:30:00'),
+            )
+        );
     }
 
     public function testPlayOnceScheduleDoesNotOwnWholeFifteenMinuteWindow(): void
