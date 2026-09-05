@@ -32,11 +32,12 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 call_user_func(include(__DIR__ . '/routes.dev.php'), $app);
             }
 
-            $app->add(Middleware\WrapExceptionsWithRequestData::class);
+            $app->add(Middleware\WrapExceptionsWithRequestData());
 
             $app->add(Middleware\EnforceSecurity::class);
 
             // Request injection middlewares.
+            $app->add(new Middleware\Cache\SetDefaultCache());
             $app->add(Middleware\InjectSettings::class);
             $app->add(Middleware\InjectRouter::class);
             $app->add(Middleware\InjectRateLimit::class);
@@ -46,7 +47,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             $app->addRoutingMiddleware();
 
             // Redirects and updates that should happen before system middleware.
-            $app->add(new Middleware\Cache\SetDefaultCache());
             $app->add(new Middleware\RemoveSlashes());
             $app->add(new Middleware\ApplyXForwarded());
 
@@ -156,6 +156,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Nginx\ConfigWriter::class,
             App\Radio\AutoDJ\ClockWheelScheduler::class,
             App\Radio\AutoDJ\QueueBuilder::class,
+            App\Radio\AutoDJ\BroadcastClockQueueTimingSubscriber::class,
             App\Radio\AutoDJ\StretchSqueezeQueueTiming::class,
             App\Radio\AutoDJ\StationDiagnosticsRuntimeSubscriber::class,
             App\Radio\AutoDJ\Annotations::class,
