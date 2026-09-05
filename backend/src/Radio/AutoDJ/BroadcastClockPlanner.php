@@ -105,7 +105,53 @@ final class BroadcastClockPlanner
             return false;
         }
 
-        $station = $playlist->station;
+        return $this->isProgramWindowActive($playlist->station, $when);
+    }
+
+    /**
+     * Clock Wheel rows are not always associated with a StationPlaylist. They
+     * still have to yield when a scheduled long-form programme owns the clock.
+     */
+    public function isProgramWindowActive(
+        Station $station,
+        DateTimeImmutable $when,
+    ): bool {
+        return null !== $this->findActiveProgramPlaylist($station, $when);
+    }
+
+    /**
+     * Preserve AzuraCast's explicit request-control setting while revalidating
+     * already-planned request rows against the live schedule.
+     */
+    public function areRequestsBlockedBySchedule(
+        Station $station,
+        DateTimeImmutable $when,
+    ): bool {
+        $tz = $station->getTimezoneObject();
+
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled || 0 === $playlist->schedule_items->count()) {
+                continue;
+            }
+
+            foreach ($playlist->schedule_items as $schedule) {
+                if (!$schedule->prevent_requests) {
+                    continue;
+                }
+
+                if ($this->scheduler->shouldSchedulePlayNow($schedule, $tz, $when, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function findActiveProgramPlaylist(
+        Station $station,
+        DateTimeImmutable $when,
+    ): ?StationPlaylist {
         $tz = $station->getTimezoneObject();
 
         foreach ($station->playlists as $scheduledPlaylist) {
@@ -120,18 +166,18 @@ final class BroadcastClockPlanner
 
             foreach ($scheduledPlaylist->schedule_items as $schedule) {
                 // Same-time start/end means "play once", not an exclusive
-                // programme window that should suppress the normal rotation.
+                // programme window that should suppress normal AutoDJ content.
                 if ($schedule->start_time === $schedule->end_time) {
                     continue;
                 }
 
                 if ($this->scheduler->shouldSchedulePlayNow($schedule, $tz, $when, true)) {
-                    return true;
+                    return $scheduledPlaylist;
                 }
             }
         }
 
-        return false;
+        return null;
     }
 
     private function isClockAnchoredPlaylist(StationPlaylist $playlist): bool
