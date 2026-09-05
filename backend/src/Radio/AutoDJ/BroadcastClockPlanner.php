@@ -62,6 +62,29 @@ final class BroadcastClockPlanner
     }
 
     /**
+     * Maximum source duration that makes the next queue item's projected start
+     * land on the next soft anchor.
+     *
+     * Queue::addDurationToTime() subtracts the configured crossfade overlap from
+     * every normal source duration. Using raw wall-clock seconds here would make
+     * the queue cursor land one crossfade early and could allow another general
+     * rotation track to be planned immediately before the scheduled programme.
+     */
+    public function maxContentDurationBeforeNextSoftAnchor(
+        Station $station,
+        DateTimeImmutable $now,
+    ): ?float {
+        $seconds = $this->secondsUntilNextSoftAnchor($station, $now);
+        if (null === $seconds) {
+            return null;
+        }
+
+        $crossfadeOverlap = max(0.0, $station->backend_config->getCrossfadeDuration());
+
+        return max(1.0, (float)$seconds + $crossfadeOverlap);
+    }
+
+    /**
      * True when an ordinary Standard playlist would occupy airtime currently
      * owned by a scheduled long-form Standard playlist.
      */
