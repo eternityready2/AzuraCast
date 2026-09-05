@@ -36,6 +36,19 @@ final class BroadcastClockPlannerTest extends Unit
         self::assertSame(90, $seconds);
     }
 
+    public function testSoftAnchorContentDurationIncludesCrossfadeOverlap(): void
+    {
+        [$station] = $this->makeScheduledProgram(1100, 1200);
+        $station->backend_config->crossfade = 5.0;
+
+        $duration = $this->planner->maxContentDurationBeforeNextSoftAnchor(
+            $station,
+            $this->time('2026-09-04 10:58:30'),
+        );
+
+        self::assertSame(95.0, $duration);
+    }
+
     public function testScheduledProgramEndIsSoftAnchor(): void
     {
         [$station] = $this->makeScheduledProgram(1100, 1200);
