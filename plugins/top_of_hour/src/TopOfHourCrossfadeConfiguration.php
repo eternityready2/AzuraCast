@@ -62,10 +62,8 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
             # Override only the station cross callback before ConfigWriter applies
             # the cross operator. Normal/live crossfade behavior remains identical
             # to the common runtime; only the one-shot broadcast-clock branch is
-            # changed. The hold switch is built inline from `new.source`, then
-            # passed through unity-gain amplify. That last operator deliberately
-            # constrains the result to PCM audio for Liquidsoap 2.4.5's `cross`
-            # callback type while still clocking only the selected switch branch.
+            # changed. Explicit PCM source annotations preserve Liquidsoap 2.4.5's
+            # `cross` callback type while the switch parks new.source itself.
             def azuracast.live_aware_crossfade_impl(old, new) =
                 log.info(label="azuracast.crossfade", "Crossfading")
                 list.iter(
@@ -84,17 +82,17 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
                         "Broadcast-clock clean cut: discarded buffered old crossfade tail and parked fresh successor."
                     )
 
-                    fresh_hold_blank = blank()
-                    fresh_hold_source = switch(
+                    fresh_source = (new.source:source(audio=pcm))
+                    fresh_hold_blank = (blank():source(audio=pcm))
+                    switch(
                         track_sensitive=false,
                         replay_metadata=true,
                         transition_length=0.0,
                         [
-                            ({ not azuracast.autodj_fresh_hold() }, new.source),
+                            ({ not azuracast.autodj_fresh_hold() }, fresh_source),
                             ({ true }, fresh_hold_blank)
                         ]
                     )
-                    amplify(1.0, fresh_hold_source)
                 elsif azuracast.to_live() then
                     log.info(label="azuracast.crossfade", "Fading to live...")
                     sequence([
