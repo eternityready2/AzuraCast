@@ -30,11 +30,19 @@ final class TopOfHourCrossfadeConfigurationTest extends Unit
         self::assertStringContainsString('azuracast.autodj_hard_handoff_epoch = ref(0.0)', $config);
         self::assertStringContainsString('def azuracast.discard_autodj_current_cleanly_and_hold(handoff_epoch)', $config);
         self::assertStringContainsString('source.skip(azuracast.autodj_transport())', $config);
-        self::assertStringContainsString('def azuracast.hold_clean_cut_fresh_source(s)', $config);
-        self::assertStringContainsString('({ not azuracast.autodj_fresh_hold() }, s)', $config);
-        self::assertStringContainsString('azuracast.hold_clean_cut_fresh_source(new.source)', $config);
+        self::assertStringContainsString('fresh_hold_blank = blank()', $config);
+        self::assertStringContainsString(
+            '({ not azuracast.autodj_fresh_hold() }, new.source)',
+            $config,
+        );
+        self::assertStringContainsString('({ true }, fresh_hold_blank)', $config);
         self::assertStringContainsString('discarded buffered old crossfade tail and parked fresh successor.', $config);
         self::assertStringContainsString('azuracast.broadcast_clock_cross_source = radio', $config);
+
+        // The generic helper version is forbidden because Liquidsoap 2.4.5 loses
+        // the cross callback's PCM track typing when the source is passed through
+        // an unconstrained helper function.
+        self::assertStringNotContainsString('def azuracast.hold_clean_cut_fresh_source(s)', $config);
 
         // Normal/live paths are intentionally copied from the common runtime so
         // TOH changes only the forced clean-cut branch.
