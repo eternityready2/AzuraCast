@@ -15,11 +15,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * without rewriting media duration or AutoCue cue-out values.
  *
  * Runtime Liquidsoap remains the final frame-accurate authority. Queue planning
- * only reserves the wall-clock interval so Upcoming Programming cannot cram
- * multiple ordinary songs into seconds that are actually owned by the ID/hard
- * boundary. A future song crossing the target advances the next-play cursor to
- * the end of the reserved interval, while a stale row already inside the window
- * is deferred to that same resume instant.
+ * reserves the wall-clock interval so Upcoming Programming cannot cram multiple
+ * ordinary songs into seconds that are actually owned by the ID/hard boundary.
+ * While inside the configured TOH lookahead, this provider also exposes the ID
+ * start as a protected selection boundary so QueueBuilder can choose the final
+ * music track around the actual :59:ss target instead of creating a tiny slot.
  */
 final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
 {
@@ -49,6 +49,13 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
 
         if ($this->clock->clockWheelOwnsBoundary($station, $plan->boundaryAt)) {
             return;
+        }
+
+        if ($this->clock->isInLookaheadZone($station, $event->getExpectedPlayAt())) {
+            $event->suggestSelectionBoundary(
+                $plan->targetStartAt,
+                'top_of_hour_station_id',
+            );
         }
 
         self::applyPlan($event, $plan);
