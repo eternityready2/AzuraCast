@@ -10,6 +10,7 @@ on:
       - 'util/docker/stations/liquidsoap/**'
       - 'backend/src/Event/Radio/ResolveQueueClockConstraint.php'
       - 'backend/src/Radio/AutoDJ/Queue.php'
+      - 'backend/src/Radio/AutoDJ/QueueBuilder.php'
       - 'backend/src/Radio/AutoDJ/TopOfHour/**'
       - 'backend/src/Radio/AutoDJ/BroadcastClockPlanner.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
@@ -23,6 +24,7 @@ on:
       - 'util/docker/stations/liquidsoap/**'
       - 'backend/src/Event/Radio/ResolveQueueClockConstraint.php'
       - 'backend/src/Radio/AutoDJ/Queue.php'
+      - 'backend/src/Radio/AutoDJ/QueueBuilder.php'
       - 'backend/src/Radio/AutoDJ/TopOfHour/**'
       - 'backend/src/Radio/AutoDJ/BroadcastClockPlanner.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
@@ -68,18 +70,23 @@ jobs:
           grep -q "\['installHoldAwareCrossfade', 26\]" plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q "\['captureCrossSource', 24\]" plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
 
+          # Keep PR #160's real request.dynamic/cross destructive clean cut.
           grep -q 'let azuracast.autodj_clean_cut_pending = ref(false)' util/docker/stations/liquidsoap/azuracast.liq
           grep -q 'def azuracast.discard_autodj_current_cleanly()' util/docker/stations/liquidsoap/azuracast.liq
           grep -q 'source.skip(azuracast.autodj_transport())' util/docker/stations/liquidsoap/azuracast.liq
 
+          # Fresh successor is parked in the cross callback itself. Explicit PCM
+          # annotations are required by Liquidsoap 2.4.5's cross callback type.
           grep -q 'azuracast.autodj_fresh_hold = ref(false)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
-          grep -q 'fresh_hold_blank = blank()' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
-          grep -q 'fresh_hold_source = switch(' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
-          grep -q '({ not azuracast.autodj_fresh_hold() }, new.source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
-          grep -q 'amplify(1.0, fresh_hold_source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'fresh_source = (new.source:source(audio=pcm))' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'fresh_hold_blank = (blank():source(audio=pcm))' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q '({ not azuracast.autodj_fresh_hold() }, fresh_source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           ! grep -q 'def azuracast.hold_clean_cut_fresh_source(s)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          ! grep -q 'amplify(1.0, fresh_hold_source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q 'azuracast.broadcast_clock_cross_source = radio' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
 
+          # TOH clocks only the post-cross AutoDJ graph; rigid/live wrappers are
+          # never advanced under the legal ID.
           grep -q 'source.tracks(azuracast.broadcast_clock_cross_source)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           ! grep -q 'source.tracks(radio_before_top_of_hour)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           grep -q 'azuracast.discard_autodj_current_cleanly_and_hold(hard_handoff_epoch)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
@@ -87,15 +94,28 @@ jobs:
           ! grep -q 'top_of_hour_cleanup_driver' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           ! grep -q 'server.execute("top_of_hour_cleanup_driver' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
 
+          # HARD TOH owns the listener lane through :00 and hands one retirement
+          # to rigid scheduling rather than double-skipping AutoDJ.
           grep -q 'boundary > 0.0 and now < boundary' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           grep -q 'azuracast.autodj_hard_handoff_epoch()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q 'consumed HARD TOH handoff; no second AutoDJ cut.' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
 
+          # Queue projection reserves the ID interval and publishes the same exact
+          # target to final-track selection. No persistent 1-5 second cue-out is
+          # allowed for ordinary TOH music and no full song may be crammed into a
+          # tiny remaining runway like 11:59:00 -> 11:59:21.
+          grep -q 'function suggestSelectionBoundary' backend/src/Event/Radio/ResolveQueueClockConstraint.php
+          grep -q 'getSelectionBoundaryAt' backend/src/Event/Radio/ResolveQueueClockConstraint.php
+          grep -q 'suggestSelectionBoundary' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
           grep -q 'function deferUntil' backend/src/Event/Radio/ResolveQueueClockConstraint.php
           grep -q 'function shouldPersistDurationCap' backend/src/Event/Radio/ResolveQueueClockConstraint.php
           grep -q 'hasDeferral()' backend/src/Radio/AutoDJ/Queue.php
           grep -q 'shouldPersistDurationCap()' backend/src/Radio/AutoDJ/Queue.php
           grep -q 'Deferred AutoDJ projection past external broadcast-clock ownership.' backend/src/Radio/AutoDJ/Queue.php
+          grep -q 'MIN_PROTECTED_BRIDGE_AIR_FRACTION = 0.80' backend/src/Radio/AutoDJ/QueueBuilder.php
+          grep -q 'resolveProtectedSelectionBoundary' backend/src/Radio/AutoDJ/QueueBuilder.php
+          grep -q 'selectTrackForProtectedBoundary' backend/src/Radio/AutoDJ/QueueBuilder.php
+          grep -q 'refusing to cram a full song into the remaining pre-boundary runway' backend/src/Radio/AutoDJ/QueueBuilder.php
           ! grep -q 'if (null !== \$event->getQueueRow())' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
 
           grep -q 'getPlayedMusicHistoryByTimeRange' backend/src/Radio/AutoDJ/Queue.php
@@ -119,7 +139,7 @@ jobs:
             -v "$PWD/util/docker/stations/liquidsoap:/liq:ro" \
             -w /liq savonet/liquidsoap:v2.4.5 --check azuracast.liq
 
-      - name: Liquidsoap 2.4.5 PCM hold and callback override smoke
+      - name: Liquidsoap 2.4.5 typed fresh hold smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -128,18 +148,14 @@ jobs:
           hold = ref(true)
 
           def callback(old, new) =
-            new.source
-          end
-
-          def callback(old, new) =
-            fresh_hold_blank = blank()
-            fresh_hold_source = switch(
+            fresh_source = (new.source:source(audio=pcm))
+            fresh_hold_blank = (blank():source(audio=pcm))
+            switch(
               track_sensitive=false,
               replay_metadata=true,
               transition_length=0.0,
-              [({ not hold() }, new.source), ({ true }, fresh_hold_blank)]
+              [({ not hold() }, fresh_source), ({ true }, fresh_hold_blank)]
             )
-            amplify(1.0, fresh_hold_source)
           end
 
           music = sine(id="music", 880.)
@@ -181,6 +197,7 @@ jobs:
           vendor/bin/phpstan analyze -c phpstan.toph.neon --memory-limit=-1 --no-progress \
             backend/src/Event/Radio/ResolveQueueClockConstraint.php \
             backend/src/Radio/AutoDJ/Queue.php \
+            backend/src/Radio/AutoDJ/QueueBuilder.php \
             plugins/top_of_hour/events.php \
             plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
             plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php \
