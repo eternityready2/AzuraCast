@@ -16,7 +16,10 @@ use Symfony\Contracts\EventDispatcher\Event;
  * Core AutoDJ owns queue construction and timestamp persistence. Plugins may
  * constrain one projected item by supplying the point where ordinary playout
  * must yield and the wall-clock instant when ordinary playout may resume.
- * Core contains no knowledge of the policy that created the constraint.
+ *
+ * A provider may also defer an item whose projected start already falls inside
+ * an externally-owned interval. This lets queue rebuilding recover stale rows
+ * without manufacturing one- or two-second songs inside the reserved window.
  */
 final class ResolveQueueClockConstraint extends Event
 {
@@ -24,7 +27,11 @@ final class ResolveQueueClockConstraint extends Event
 
     private ?DateTimeImmutable $resumeAt = null;
 
+    private ?DateTimeImmutable $deferUntil = null;
+
     private ?string $reason = null;
+
+    private bool $persistDurationCap = true;
 
     public function __construct(
         private readonly Station $station,
@@ -58,6 +65,7 @@ final class ResolveQueueClockConstraint extends Event
         DateTimeImmutable $interruptAt,
         DateTimeImmutable $resumeAt,
         string $reason,
+        bool $persistDurationCap = true,
     ): void {
         if (
             $interruptAt <= $this->expectedPlayAt
@@ -75,12 +83,44 @@ final class ResolveQueueClockConstraint extends Event
 
         $this->interruptAt = $interruptAt;
         $this->resumeAt = $resumeAt;
+        $this->deferUntil = null;
         $this->reason = $reason;
+        $this->persistDurationCap = $persistDurationCap;
+    }
+
+    /**
+     * Move a projected item whose start already falls inside external clock
+     * ownership to the first instant normal AutoDJ may resume.
+     */
+    public function deferUntil(
+        DateTimeImmutable $resumeAt,
+        string $reason,
+    ): void {
+        if ($resumeAt <= $this->expectedPlayAt) {
+            return;
+        }
+
+        // If several providers defer the same stale row, normal playout cannot
+        // resume until all overlapping ownership windows have ended.
+        if (null !== $this->deferUntil && $this->deferUntil >= $resumeAt) {
+            return;
+        }
+
+        $this->interruptAt = null;
+        $this->resumeAt = null;
+        $this->deferUntil = $resumeAt;
+        $this->reason = $reason;
+        $this->persistDurationCap = false;
     }
 
     public function hasConstraint(): bool
     {
         return null !== $this->interruptAt && null !== $this->resumeAt;
+    }
+
+    public function hasDeferral(): bool
+    {
+        return null !== $this->deferUntil;
     }
 
     public function getInterruptAt(): ?DateTimeImmutable
@@ -93,8 +133,18 @@ final class ResolveQueueClockConstraint extends Event
         return $this->resumeAt;
     }
 
+    public function getDeferUntil(): ?DateTimeImmutable
+    {
+        return $this->deferUntil;
+    }
+
     public function getReason(): ?string
     {
         return $this->reason;
+    }
+
+    public function shouldPersistDurationCap(): bool
+    {
+        return $this->persistDurationCap;
     }
 }
