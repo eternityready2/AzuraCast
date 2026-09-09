@@ -24,10 +24,10 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  *     Top-of-Hour ID -> rigid scheduled programme -> live/AutoDJ
  *
- * A rigid takeover uses the same one-shot clean AutoDJ cut as TOH: the real
- * request.dynamic leaf is skipped once and the shared cross operator discards
- * its buffered old tail at that forced boundary. There is no secondary gate or
- * backend quarantine state machine.
+ * A rigid takeover normally uses the shared one-shot clean AutoDJ cut. When a
+ * HARD TOH immediately precedes the rigid boundary, TOH has already retired the
+ * outgoing AutoDJ request; the exact boundary epoch is handed to this runtime so
+ * it cannot accidentally cut the parked fresh successor a second time.
  */
 final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterface
 {
@@ -129,12 +129,25 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
                 rigid_schedule_active := true
 
                 if not azuracast.live_enabled() then
-                    # Arm a one-shot destructive cross boundary and skip exactly
-                    # one real AutoDJ request. If a HARD TOH immediately preceded
-                    # this rigid item, the pending guard makes this a no-op so the
-                    # already-fresh successor cannot be skipped a second time.
-                    azuracast.discard_autodj_current_cleanly()
-                    log("Rigid Schedule: armed clean cross boundary for interrupted AutoDJ request.")
+                    now = time()
+                    handoff_epoch = azuracast.autodj_hard_handoff_epoch()
+
+                    if
+                        handoff_epoch > 0.0
+                        and now >= handoff_epoch - 1.0
+                        and now <= handoff_epoch + 2.0
+                    then
+                        # HARD TOH already performed the one destructive AutoDJ
+                        # retirement for this exact :00 boundary. Consume that
+                        # handoff token and do NOT skip the parked FRESH source.
+                        azuracast.autodj_hard_handoff_epoch := 0.0
+                        log("Rigid Schedule: consumed HARD TOH handoff; no second AutoDJ cut.")
+                    else
+                        # Stale tokens must never suppress a later real rigid cut.
+                        azuracast.autodj_hard_handoff_epoch := 0.0
+                        azuracast.discard_autodj_current_cleanly()
+                        log("Rigid Schedule: armed clean cross boundary for interrupted AutoDJ request.")
+                    end
                 end
 
                 # The PHP strict-start path may have staged a duplicate copy in
