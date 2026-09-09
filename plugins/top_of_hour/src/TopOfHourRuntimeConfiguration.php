@@ -16,12 +16,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * PHP resolves the station-local :59:ss target into an absolute epoch and
  * pre-stages the request. Liquidsoap owns the actual wall-clock switch.
  *
- * The TOH switch itself owns the deadline. At takeover, the plugin tells the
- * shared AutoDJ transport to perform a one-shot clean cut at its next cross
- * boundary, then skips the real request.dynamic leaf. While the ID owns the
- * air, the processed station underlay remains clocked at zero gain so the
- * inner cross operator can actually consume that clean-cut boundary instead
- * of being parked and replaying its buffered old tail after the ID.
+ * PR #160 proved the important invariant: the processed cross source must stay
+ * continuously clocked while the legal ID owns the air so the cross callback can
+ * permanently reject the buffered old.source tail. This implementation keeps
+ * that invariant, but the callback now parks the fresh new.source behind a hold
+ * switch instead of silently consuming it for the full ID duration.
  */
 final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 {
@@ -125,19 +124,15 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 radio
             )
 
-            # Keep the processed underlay alive while the ID owns the air. The
-            # previous implementation switched completely away from this graph,
-            # parking the inner `cross` operator before its clean-cut callback
-            # could consume the skipped AutoDJ request. On release, that parked
-            # cross could therefore replay the buffered tail of the cut song.
-            #
-            # Only the audio track is retained here, then hard-muted to zero.
-            # Metadata and track marks from the underlay cannot leak through the
-            # legal ID, but the complete upstream graph remains clocked.
+            # Preserve the exact live-proven #160 activation continuity, but only
+            # clock the captured processed cross source. Do NOT clock the complete
+            # `radio_before_top_of_hour` graph here: that graph already contains
+            # the rigid-schedule wrapper, and clocking it underneath the ID can
+            # make a scheduled programme advance before its actual :00 takeover.
             let {
                 audio=top_of_hour_underlay_audio,
                 ...top_of_hour_underlay_non_audio
-            } = source.tracks(radio_before_top_of_hour)
+            } = source.tracks(azuracast.broadcast_clock_cross_source)
             ignore(top_of_hour_underlay_non_audio)
             top_of_hour_clocked_underlay = source(
                 id="top_of_hour_clocked_underlay",
@@ -188,13 +183,23 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 top_of_hour_id_active := true
 
                 if not azuracast.live_enabled() then
-                    # The pre-fade has already reached zero. Arm the actual cross
-                    # operator to reject its buffered old tail, then skip exactly
-                    # one request at the real request.dynamic AutoDJ transport.
-                    # The muted underlay keeps that cross operator clocked while
-                    # the ID is on air, so this boundary is consumed immediately.
-                    azuracast.discard_autodj_current_cleanly()
-                    log("Top-of-Hour ID: armed clean cross boundary and discarded interrupted AutoDJ request.")
+                    # Preserve #160's one-shot destructive cross cut. The held
+                    # callback rejects old.source permanently but emits generated
+                    # blank instead of consuming the fresh successor while ID is
+                    # on air. HARD hours also publish the exact :00 handoff epoch
+                    # so the rigid runtime cannot accidentally skip FRESH again.
+                    hard_handoff_epoch =
+                        if top_of_hour_id_hard_boundary() then
+                            top_of_hour_id_boundary_epoch()
+                        else
+                            0.0
+                        end
+
+                    azuracast.discard_autodj_current_cleanly_and_hold(hard_handoff_epoch)
+                    log("Top-of-Hour ID: armed held clean cross boundary and discarded interrupted AutoDJ request.")
+                else
+                    azuracast.release_autodj_fresh_hold()
+                    azuracast.autodj_hard_handoff_epoch := 0.0
                 end
 
                 new
@@ -210,6 +215,16 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
                 {$newsAfterId}
 
+                # Release the parked FRESH source at the exact listener-facing
+                # handoff. On an open hour this makes FRESH audible from its
+                # opening immediately after the ID. On a HARD hour the underlying
+                # rigid switch takes :00 authority; FRESH remains naturally
+                # unclocked underneath that selected rigid branch.
+                azuracast.release_autodj_fresh_hold()
+                if not was_hard then
+                    azuracast.autodj_hard_handoff_epoch := 0.0
+                end
+
                 top_of_hour_id_active := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0
@@ -218,7 +233,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 if was_hard then
                     log("Top-of-Hour ID: HARD lane released exactly at the :00 boundary to rigid authority.")
                 else
-                    log("Top-of-Hour ID: open-hour lane released to clean fresh AutoDJ boundary.")
+                    log("Top-of-Hour ID: open-hour lane released to parked fresh AutoDJ opening.")
                 end
 
                 new
@@ -300,6 +315,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             def top_of_hour_clear_queue(_) =
                 top_of_hour_id.skip()
                 top_of_hour_id.set_queue([])
+                azuracast.release_autodj_fresh_hold()
+                azuracast.autodj_hard_handoff_epoch := 0.0
                 top_of_hour_id_active := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0
