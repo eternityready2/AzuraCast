@@ -15,7 +15,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/TopOfHourRuntimeCon
 
 final class TopOfHourRuntimeConfigurationTest extends Unit
 {
-    public function testTohSwitchArmsHeldCrossfadeAwareCleanAutoDjCut(): void
+    public function testTohClocksPostCrossOnlyUntilCommonCleanCutIsConsumed(): void
     {
         $station = $this->makeStation();
 
@@ -29,31 +29,40 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('Top-of-Hour Station ID exact wall-clock lane (plugin owned)', $config);
         self::assertStringContainsString('def top_of_hour_id_enter(_, new)', $config);
         self::assertStringContainsString('top_of_hour_id_active := true', $config);
-        self::assertStringContainsString('azuracast.discard_autodj_current_cleanly_and_hold(hard_handoff_epoch)', $config);
+        self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
         self::assertStringContainsString(
-            'armed held clean cross boundary and discarded interrupted AutoDJ request.',
+            'armed #160 clean cross boundary and discarded interrupted AutoDJ request.',
             $config,
         );
-        self::assertStringContainsString('azuracast.release_autodj_fresh_hold()', $config);
 
-        // #160 continuity remains, but the zero-gain clock is now attached only
-        // to the post-cross source captured before rigid scheduling/live wrappers.
+        // Exact post-cross source is clocked at zero only while the common
+        // clean-cut marker is pending. Once the callback clears pending, this
+        // OUTER gate switches to generated blank and parks the whole cross graph.
         self::assertStringContainsString(
             'source.tracks(azuracast.broadcast_clock_cross_source)',
             $config,
         );
+        self::assertStringContainsString('top_of_hour_cleanup_gate = switch(', $config);
+        self::assertStringContainsString(
+            '({azuracast.autodj_clean_cut_pending()}, top_of_hour_cleanup_audio)',
+            $config,
+        );
+        self::assertStringContainsString('({true}, top_of_hour_cleanup_idle)', $config);
         self::assertStringNotContainsString('source.tracks(radio_before_top_of_hour)', $config);
 
-        // The old delayed gate, direct post-cross skip, and dummy lifecycle
-        // experiments must not return.
-        self::assertStringNotContainsString('broadcast_clock_autodj_gate', $config);
-        self::assertStringNotContainsString('broadcast_clock_block_autodj()', $config);
-        self::assertStringNotContainsString('broadcast_clock_prefetch_autodj()', $config);
-        self::assertStringNotContainsString('broadcast_clock_release_when_fresh()', $config);
-        self::assertStringNotContainsString('broadcast_clock_retire_outgoing(', $config);
+        // Open-hour listener release must never depend on cleanup state.
+        self::assertStringContainsString(
+            '# Open hour: the ID file itself is the ONLY hold condition.',
+            $config,
+        );
+        self::assertStringNotContainsString('top_of_hour_id.is_ready() or azuracast.autodj_clean_cut_pending()', $config);
+
+        // Failed experimental architectures must stay gone.
+        self::assertStringNotContainsString('azuracast.autodj_fresh_hold', $config);
+        self::assertStringNotContainsString('discard_autodj_current_cleanly_and_hold', $config);
         self::assertStringNotContainsString('top_of_hour_cleanup_driver', $config);
         self::assertStringNotContainsString('server.execute("top_of_hour_cleanup_driver', $config);
-        self::assertStringNotContainsString('source.skip(source.effective(', $config);
+        self::assertStringNotContainsString('source.skip(azuracast.broadcast_clock_cross_source)', $config);
     }
 
     public function testHardTohOwnsEveryFrameUntilExactBoundaryAndPublishesOneHandoff(): void
@@ -71,14 +80,17 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('top_of_hour_lane = fallback(', $config);
         self::assertStringContainsString('[top_of_hour_id, top_of_hour_hard_hold]', $config);
         self::assertStringContainsString('boundary > 0.0 and now < boundary', $config);
-        self::assertStringContainsString('top_of_hour_id_boundary_epoch()', $config);
+        self::assertStringContainsString(
+            'azuracast.autodj_hard_handoff_epoch := top_of_hour_id_boundary_epoch()',
+            $config,
+        );
         self::assertStringContainsString(
             'HARD lane released exactly at the :00 boundary to rigid authority.',
             $config,
         );
     }
 
-    public function testClearReleasesAnyParkedSuccessorAndHandoffToken(): void
+    public function testClearResetsHandoffAndTohTimingState(): void
     {
         $station = $this->makeStation();
 
@@ -90,8 +102,9 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         $config = $event->buildConfiguration();
 
         self::assertStringContainsString('def top_of_hour_clear_queue(_)', $config);
-        self::assertStringContainsString('azuracast.release_autodj_fresh_hold()', $config);
         self::assertStringContainsString('azuracast.autodj_hard_handoff_epoch := 0.0', $config);
+        self::assertStringContainsString('top_of_hour_id_active := false', $config);
+        self::assertStringNotContainsString('azuracast.release_autodj_fresh_hold()', $config);
     }
 
     public function testDisabledPredicateLeavesNormalSourceSelected(): void
@@ -109,7 +122,6 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('if not top_of_hour_id_enabled() then', $config);
         self::assertStringContainsString('false', $config);
         self::assertStringContainsString('({true}, radio_before_top_of_hour)', $config);
-        self::assertStringNotContainsString('broadcast_clock_autodj_gate', $config);
         self::assertStringNotContainsString('autodj_retired_song_id', $config);
         self::assertStringNotContainsString('exclude_song_id', $config);
     }
