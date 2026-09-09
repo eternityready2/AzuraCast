@@ -68,7 +68,7 @@ final class Queue
         // future queue rows.
         $currentSong = $station->current_song;
         if (null !== $currentSong) {
-            [, $expectedPlayTime] = $this->resolveQueueClockConstraint(
+            [, , $expectedPlayTime] = $this->resolveQueueClockConstraint(
                 $station,
                 CarbonImmutable::instance($currentSong->timestamp_start),
                 (float)($currentSong->duration ?? 1.0),
@@ -151,7 +151,7 @@ final class Queue
                 }
             }
 
-            [$effectiveDuration, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
+            [$effectiveDuration, $expectedPlayTime, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
                 $station,
                 CarbonImmutable::instance($expectedPlayTime),
                 $effectiveDuration,
@@ -350,7 +350,7 @@ final class Queue
                     }
                 }
 
-                [$effectiveDuration, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
+                [$effectiveDuration, $expectedPlayTime, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
                     $station,
                     CarbonImmutable::instance($expectedPlayTime),
                     $effectiveDuration,
@@ -454,11 +454,16 @@ final class Queue
 
     /**
      * Resolve a generic absolute clock interruption without teaching core AutoDJ
-     * what produced it. The queue row is capped at the interruption point for
-     * actual playout, while the projected next-play cursor can jump over content
-     * that lives in an external/plugin-owned clock lane.
+     * what produced it. A provider can either interrupt a row and jump the next
+     * play cursor over external occupancy, or defer a stale row whose projected
+     * start already falls inside an externally-owned interval.
      *
-     * @return array{0:float,1:CarbonImmutable}
+     * The returned start time is authoritative for timestamp_played. A provider
+     * may mark an interruption projection-only so core uses the shortened span to
+     * advance its cue cursor without persisting a tiny duration/cue-out into the
+     * StationQueue row itself.
+     *
+     * @return array{0:float,1:CarbonImmutable,2:CarbonImmutable}
      */
     private function resolveQueueClockConstraint(
         Station $station,
@@ -467,9 +472,7 @@ final class Queue
         ?StationQueue $queueRow = null,
     ): array {
         // Clock ownership is about actual on-air extent, not the normal crossfade
-        // overlap used to predict the following music start. This also lets a row
-        // that was previously capped exactly at the clock boundary retain the
-        // external occupancy jump on later queue rebuilds.
+        // overlap used to predict the following music start.
         $projectedEndAt = CarbonImmutable::instance($expectedPlayTime)->addMilliseconds(
             (int)round(max(0.0, $effectiveDuration) * 1000)
         );
@@ -482,19 +485,46 @@ final class Queue
         );
         $this->dispatcher->dispatch($event);
 
+        if ($event->hasDeferral()) {
+            $deferUntil = $event->getDeferUntil();
+            if (null !== $deferUntil) {
+                $deferredStart = CarbonImmutable::instance($deferUntil);
+
+                $this->logger->debug(
+                    'Deferred AutoDJ projection past external broadcast-clock ownership.',
+                    [
+                        'reason' => $event->getReason(),
+                        'original_expected_play_at' => $expectedPlayTime->format(DateTimeInterface::ATOM),
+                        'deferred_play_at' => $deferredStart->format(DateTimeInterface::ATOM),
+                        'queue_id' => $queueRow?->id,
+                    ]
+                );
+
+                return [
+                    $effectiveDuration,
+                    $deferredStart,
+                    $this->addDurationToTime($station, $deferredStart, $effectiveDuration),
+                ];
+            }
+        }
+
         if (!$event->hasConstraint()) {
+            $start = CarbonImmutable::instance($expectedPlayTime);
             return [
                 $effectiveDuration,
-                $this->addDurationToTime($station, $expectedPlayTime, $effectiveDuration),
+                $start,
+                $this->addDurationToTime($station, $start, $effectiveDuration),
             ];
         }
 
         $interruptAt = $event->getInterruptAt();
         $resumeAt = $event->getResumeAt();
         if (null === $interruptAt || null === $resumeAt) {
+            $start = CarbonImmutable::instance($expectedPlayTime);
             return [
                 $effectiveDuration,
-                $this->addDurationToTime($station, $expectedPlayTime, $effectiveDuration),
+                $start,
+                $this->addDurationToTime($station, $start, $effectiveDuration),
             ];
         }
 
@@ -503,11 +533,19 @@ final class Queue
             $interruptAt->getTimestamp() - $expectedPlayTime->getTimestamp(),
         );
 
-        if (null !== $queueRow && !$this->isMandatoryBoundaryContent($queueRow)) {
+        // Even a projection-only reservation needs the shortened effective span
+        // for cue-cursor math, but only providers that explicitly request a
+        // persistent cap may rewrite StationQueue duration/cue-out fields.
+        $effectiveDuration = (float)$capSeconds;
+
+        if (
+            $event->shouldPersistDurationCap()
+            && null !== $queueRow
+            && !$this->isMandatoryBoundaryContent($queueRow)
+        ) {
             $queueRow->hour_boundary_enforce_cap = true;
             $queueRow->hour_boundary_max_play_seconds = $capSeconds;
             $queueRow->duration = (float)$capSeconds;
-            $effectiveDuration = (float)$capSeconds;
         }
 
         $this->logger->debug(
@@ -517,12 +555,14 @@ final class Queue
                 'expected_play_at' => $expectedPlayTime->format(DateTimeInterface::ATOM),
                 'interrupt_at' => $interruptAt->format(DateTimeInterface::ATOM),
                 'resume_at' => $resumeAt->format(DateTimeInterface::ATOM),
+                'persist_duration_cap' => $event->shouldPersistDurationCap(),
                 'queue_id' => $queueRow?->id,
             ]
         );
 
         return [
             $effectiveDuration,
+            CarbonImmutable::instance($expectedPlayTime),
             CarbonImmutable::instance($resumeAt),
         ];
     }
