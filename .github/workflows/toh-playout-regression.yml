@@ -25,8 +25,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'fresh_hold_blank = blank()' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
-          grep -q '({ not azuracast.autodj_fresh_hold() }, new.source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'fresh_source = (new.source:source(audio=pcm))' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'fresh_hold_blank = (blank():source(audio=pcm))' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q '({ not azuracast.autodj_fresh_hold() }, fresh_source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           ! grep -q 'def azuracast.hold_clean_cut_fresh_source(s)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q 'azuracast.broadcast_clock_cross_source = radio' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q 'source.tracks(azuracast.broadcast_clock_cross_source)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
@@ -122,12 +123,13 @@ jobs:
             if clean_cut_pending() then
               clean_cut_pending := false
               log("TOH_OPEN_CROSS clean-cut consumed; fresh parked=#{fresh_hold()}")
-              fresh_hold_blank = blank()
+              fresh_source = (new.source:source(audio=pcm))
+              fresh_hold_blank = (blank():source(audio=pcm))
               switch(
                 track_sensitive=false,
                 replay_metadata=true,
                 transition_length=0.0,
-                [({ not fresh_hold() }, new.source), ({ true }, fresh_hold_blank)]
+                [({ not fresh_hold() }, fresh_source), ({ true }, fresh_hold_blank)]
               )
             else
               cross.simple(old.source, new.source, fade_in=1.0, fade_out=1.0)
@@ -341,12 +343,13 @@ jobs:
             if clean_pending() then
               clean_pending:=false
               log("HARD_CROSS clean-cut consumed")
-              fresh_hold_blank=blank()
+              fresh_source=(new.source:source(audio=pcm))
+              fresh_hold_blank=(blank():source(audio=pcm))
               switch(
                 track_sensitive=false,
                 replay_metadata=true,
                 transition_length=0.,
-                [({not fresh_hold()},new.source),({true},fresh_hold_blank)]
+                [({not fresh_hold()},fresh_source),({true},fresh_hold_blank)]
               )
             else
               cross.simple(old.source,new.source,fade_in=1.,fade_out=1.)
