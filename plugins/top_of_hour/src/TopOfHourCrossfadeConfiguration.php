@@ -59,26 +59,12 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
                 azuracast.autodj_fresh_hold := false
             end
 
-            # The cross callback returns this source after permanently rejecting
-            # old.source. While the hold is true only the generated blank is
-            # clocked; new.source itself remains parked at its opening frame.
-            def azuracast.hold_clean_cut_fresh_source(s) =
-                hold_blank = blank()
-                switch(
-                    track_sensitive=false,
-                    replay_metadata=true,
-                    transition_length=0.0,
-                    [
-                        ({ not azuracast.autodj_fresh_hold() }, s),
-                        ({ true }, hold_blank)
-                    ]
-                )
-            end
-
             # Override only the station cross callback before ConfigWriter applies
             # the cross operator. Normal/live crossfade behavior remains identical
             # to the common runtime; only the one-shot broadcast-clock branch is
-            # changed from `new.source` to the parked fresh-source switch above.
+            # changed. The hold switch is deliberately built inline from
+            # `new.source`: Liquidsoap 2.4.5 then keeps the PCM source type known
+            # to `cross`, while a generic helper loses that track typing.
             def azuracast.live_aware_crossfade_impl(old, new) =
                 log.info(label="azuracast.crossfade", "Crossfading")
                 list.iter(
@@ -96,7 +82,17 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
                         label="azuracast.crossfade",
                         "Broadcast-clock clean cut: discarded buffered old crossfade tail and parked fresh successor."
                     )
-                    azuracast.hold_clean_cut_fresh_source(new.source)
+
+                    fresh_hold_blank = blank()
+                    switch(
+                        track_sensitive=false,
+                        replay_metadata=true,
+                        transition_length=0.0,
+                        [
+                            ({ not azuracast.autodj_fresh_hold() }, new.source),
+                            ({ true }, fresh_hold_blank)
+                        ]
+                    )
                 elsif azuracast.to_live() then
                     log.info(label="azuracast.crossfade", "Fading to live...")
                     sequence([
