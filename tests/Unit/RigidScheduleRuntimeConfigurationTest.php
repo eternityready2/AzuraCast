@@ -17,7 +17,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/RigidScheduleRuntim
 
 final class RigidScheduleRuntimeConfigurationTest extends Unit
 {
-    public function testStrictSongPlaylistGetsDedicatedNativeSourceAndCleanAutoDjCut(): void
+    public function testStrictSongPlaylistGetsDedicatedNativeSourceAndSingleBoundaryCut(): void
     {
         [$station] = $this->makeScheduledProgram(true);
 
@@ -33,10 +33,14 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('mode="randomize"', $config);
         self::assertStringContainsString('11h0m-12h0m', $config);
 
-        // The wall-clock switch owns the handoff. It arms the shared one-shot
-        // cross clean-cut and skips exactly one real AutoDJ request; there is no
-        // nested availability/fallback gate that can wake up afterward.
         self::assertStringContainsString('def rigid_schedule_enter(_, new)', $config);
+        self::assertStringContainsString('azuracast.autodj_hard_handoff_epoch()', $config);
+        self::assertStringContainsString('handoff_epoch - 1.0', $config);
+        self::assertStringContainsString('handoff_epoch + 2.0', $config);
+        self::assertStringContainsString(
+            'Rigid Schedule: consumed HARD TOH handoff; no second AutoDJ cut.',
+            $config,
+        );
         self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
         self::assertStringContainsString('id="rigid_schedule_runtime"', $config);
 
@@ -50,6 +54,21 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         self::assertStringNotContainsString('source.skip(source.effective(', $config);
     }
 
+    public function testStaleTohHandoffCannotSuppressLaterRigidCut(): void
+    {
+        [$station] = $this->makeScheduledProgram(true);
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        self::assertStringContainsString('azuracast.autodj_hard_handoff_epoch := 0.0', $config);
+        self::assertStringContainsString(
+            'Rigid Schedule: armed clean cross boundary for interrupted AutoDJ request.',
+            $config,
+        );
+    }
+
     public function testFlexibleScheduleDoesNotWrapOrdinaryRadioPath(): void
     {
         [$station] = $this->makeScheduledProgram(false);
@@ -58,8 +77,6 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
-        // Helper state is inert. With no rigid schedule this subscriber must not
-        // replace `radio` with any gate/switch/fallback at all.
         self::assertStringContainsString('rigid_schedule_active = ref(false)', $config);
         self::assertStringNotContainsString('id="rigid_schedule_runtime"', $config);
         self::assertStringNotContainsString('azuracast.discard_autodj_current_cleanly()', $config);
