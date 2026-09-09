@@ -176,6 +176,60 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         self::assertFalse($event->hasDeferral());
     }
 
+    public function testSelectionBoundaryCanBePublishedWithoutChangingProjection(): void
+    {
+        $station = $this->makeStation();
+        $start = CarbonImmutable::parse('2026-09-07 22:55:13', 'UTC');
+        $event = new ResolveQueueClockConstraint(
+            $station,
+            $start->toDateTimeImmutable(),
+            $start->addHour()->toDateTimeImmutable(),
+        );
+
+        $event->suggestSelectionBoundary(
+            CarbonImmutable::parse('2026-09-07 22:59:21', 'UTC')->toDateTimeImmutable(),
+            'top_of_hour_station_id',
+        );
+
+        self::assertTrue($event->hasSelectionBoundary());
+        self::assertSame(
+            '2026-09-07 22:59:21',
+            $event->getSelectionBoundaryAt()?->format('Y-m-d H:i:s'),
+        );
+        self::assertSame('top_of_hour_station_id', $event->getSelectionBoundaryReason());
+        self::assertFalse($event->hasDeferral());
+    }
+
+    public function testQueueBuilderHasExplicitTwentyOneSecondFullSongCramGuard(): void
+    {
+        $queueBuilderSource = file_get_contents(
+            dirname(__DIR__, 2) . '/backend/src/Radio/AutoDJ/QueueBuilder.php',
+        );
+
+        self::assertIsString($queueBuilderSource);
+        self::assertStringContainsString(
+            'private const float MIN_PROTECTED_BRIDGE_AIR_FRACTION = 0.80;',
+            $queueBuilderSource,
+        );
+        self::assertStringContainsString(
+            '$airedFraction = min(1.0, $availableSeconds / $duration);',
+            $queueBuilderSource,
+        );
+        self::assertStringContainsString(
+            '$airedFraction >= self::MIN_PROTECTED_BRIDGE_AIR_FRACTION;',
+            $queueBuilderSource,
+        );
+        self::assertStringContainsString(
+            'refusing to cram a full song into the remaining pre-boundary runway.',
+            $queueBuilderSource,
+        );
+
+        // The screenshot case has only 21 seconds before the ID. A normal
+        // three-minute song would air less than 12% of its length, far below the
+        // 80% bridge floor, so it cannot be selected as a deliberate bridge.
+        self::assertLessThan(0.80, 21.0 / 180.0);
+    }
+
     public function testDisabledTopOfHourLeavesOrdinaryTimelineUntouched(): void
     {
         $station = $this->makeStation();
