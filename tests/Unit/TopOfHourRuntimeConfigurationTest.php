@@ -126,7 +126,7 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
             $queueSource,
         );
         self::assertStringContainsString(
-            "$lastSongId = $recentPlayedMusic[0]['song_id'] ?? null;",
+            '$lastSongId = $recentPlayedMusic[0][\'song_id\'] ?? null;',
             $queueSource,
         );
         self::assertStringContainsString(
