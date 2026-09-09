@@ -18,8 +18,10 @@ use Symfony\Contracts\EventDispatcher\Event;
  * must yield and the wall-clock instant when ordinary playout may resume.
  *
  * A provider may also defer an item whose projected start already falls inside
- * an externally-owned interval. This lets queue rebuilding recover stale rows
- * without manufacturing one- or two-second songs inside the reserved window.
+ * an externally-owned interval, and may publish a selection boundary while the
+ * queue is still far enough away to choose a better final track. The selection
+ * hint lets core avoid knowingly launching a full song into a tiny pre-boundary
+ * window without teaching core which plugin owns that wall-clock event.
  */
 final class ResolveQueueClockConstraint extends Event
 {
@@ -32,6 +34,10 @@ final class ResolveQueueClockConstraint extends Event
     private ?string $reason = null;
 
     private bool $persistDurationCap = true;
+
+    private ?DateTimeImmutable $selectionBoundaryAt = null;
+
+    private ?string $selectionBoundaryReason = null;
 
     public function __construct(
         private readonly Station $station,
@@ -89,6 +95,31 @@ final class ResolveQueueClockConstraint extends Event
     }
 
     /**
+     * Publish the next protected start while the queue is still selecting the
+     * final ordinary track before it. This does not alter queue timestamps or
+     * duration by itself; QueueBuilder may use it to choose a track that lands
+     * near the boundary instead of creating a tiny throwaway music slot.
+     */
+    public function suggestSelectionBoundary(
+        DateTimeImmutable $boundaryAt,
+        string $reason,
+    ): void {
+        if ($boundaryAt <= $this->expectedPlayAt) {
+            return;
+        }
+
+        if (
+            null !== $this->selectionBoundaryAt
+            && $this->selectionBoundaryAt <= $boundaryAt
+        ) {
+            return;
+        }
+
+        $this->selectionBoundaryAt = $boundaryAt;
+        $this->selectionBoundaryReason = $reason;
+    }
+
+    /**
      * Move a projected item whose start already falls inside external clock
      * ownership to the first instant normal AutoDJ may resume.
      */
@@ -123,6 +154,11 @@ final class ResolveQueueClockConstraint extends Event
         return null !== $this->deferUntil;
     }
 
+    public function hasSelectionBoundary(): bool
+    {
+        return null !== $this->selectionBoundaryAt;
+    }
+
     public function getInterruptAt(): ?DateTimeImmutable
     {
         return $this->interruptAt;
@@ -141,6 +177,16 @@ final class ResolveQueueClockConstraint extends Event
     public function getReason(): ?string
     {
         return $this->reason;
+    }
+
+    public function getSelectionBoundaryAt(): ?DateTimeImmutable
+    {
+        return $this->selectionBoundaryAt;
+    }
+
+    public function getSelectionBoundaryReason(): ?string
+    {
+        return $this->selectionBoundaryReason;
     }
 
     public function shouldPersistDurationCap(): bool
