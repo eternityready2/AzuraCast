@@ -68,21 +68,18 @@ jobs:
           grep -q "\['installHoldAwareCrossfade', 26\]" plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q "\['captureCrossSource', 24\]" plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
 
-          # Preserve PR #160's real request.dynamic/cross clean-cut ownership.
           grep -q 'let azuracast.autodj_clean_cut_pending = ref(false)' util/docker/stations/liquidsoap/azuracast.liq
           grep -q 'def azuracast.discard_autodj_current_cleanly()' util/docker/stations/liquidsoap/azuracast.liq
           grep -q 'source.skip(azuracast.autodj_transport())' util/docker/stations/liquidsoap/azuracast.liq
 
-          # The forced cross must park new.source inline. A generic helper loses
-          # Liquidsoap 2.4.5 PCM typing and is explicitly forbidden.
           grep -q 'azuracast.autodj_fresh_hold = ref(false)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q 'fresh_hold_blank = blank()' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'fresh_hold_source = switch(' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q '({ not azuracast.autodj_fresh_hold() }, new.source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
+          grep -q 'amplify(1.0, fresh_hold_source)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           ! grep -q 'def azuracast.hold_clean_cut_fresh_source(s)' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
           grep -q 'azuracast.broadcast_clock_cross_source = radio' plugins/top_of_hour/src/TopOfHourCrossfadeConfiguration.php
 
-          # TOH clocks only the post-cross source; rigid/live wrappers cannot be
-          # advanced under the legal ID.
           grep -q 'source.tracks(azuracast.broadcast_clock_cross_source)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           ! grep -q 'source.tracks(radio_before_top_of_hour)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           grep -q 'azuracast.discard_autodj_current_cleanly_and_hold(hard_handoff_epoch)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
@@ -90,13 +87,10 @@ jobs:
           ! grep -q 'top_of_hour_cleanup_driver' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           ! grep -q 'server.execute("top_of_hour_cleanup_driver' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
 
-          # HARD TOH owns through :00 and hands one retirement to the rigid lane.
           grep -q 'boundary > 0.0 and now < boundary' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           grep -q 'azuracast.autodj_hard_handoff_epoch()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q 'consumed HARD TOH handoff; no second AutoDJ cut.' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
 
-          # Queue reservation is projection-only and can defer stale rows out of
-          # the ID window instead of persisting 1-5 second music durations.
           grep -q 'function deferUntil' backend/src/Event/Radio/ResolveQueueClockConstraint.php
           grep -q 'function shouldPersistDurationCap' backend/src/Event/Radio/ResolveQueueClockConstraint.php
           grep -q 'hasDeferral()' backend/src/Radio/AutoDJ/Queue.php
@@ -104,7 +98,6 @@ jobs:
           grep -q 'Deferred AutoDJ projection past external broadcast-clock ownership.' backend/src/Radio/AutoDJ/Queue.php
           ! grep -q 'if (null !== \$event->getQueueRow())' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
 
-          # Existing immediate-repeat protection stays intact.
           grep -q 'getPlayedMusicHistoryByTimeRange' backend/src/Radio/AutoDJ/Queue.php
           grep -q '\$nextSongs\[0\]->song_id === \$lastSongId' backend/src/Radio/AutoDJ/Queue.php
 
@@ -126,7 +119,7 @@ jobs:
             -v "$PWD/util/docker/stations/liquidsoap:/liq:ro" \
             -w /liq savonet/liquidsoap:v2.4.5 --check azuracast.liq
 
-      - name: Liquidsoap 2.4.5 inline hold and callback override smoke
+      - name: Liquidsoap 2.4.5 PCM hold and callback override smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -138,16 +131,15 @@ jobs:
             new.source
           end
 
-          # Deliberately redefine the callback, matching the plugin's priority-26
-          # override before ConfigWriter constructs the cross operator.
           def callback(old, new) =
             fresh_hold_blank = blank()
-            switch(
+            fresh_hold_source = switch(
               track_sensitive=false,
               replay_metadata=true,
               transition_length=0.0,
               [({ not hold() }, new.source), ({ true }, fresh_hold_blank)]
             )
+            amplify(1.0, fresh_hold_source)
           end
 
           music = sine(id="music", 880.)
