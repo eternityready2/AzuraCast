@@ -24,14 +24,17 @@ use App\Entity\StationPlaylistGroup;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
+use App\Event\Radio\ResolveQueueClockConstraint;
 use App\Radio\AutoDJ\ClockWheel;
 use App\Radio\PlaylistParser;
 use App\Radio\SmartBlock\SmartBlockPlaybackPreparer;
 use App\Service\HolidayOverrideService;
 use App\Utilities\UserUrlFilter;
+use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeZone;
 use GuzzleHttp\Client;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -43,11 +46,20 @@ final class QueueBuilder implements EventSubscriberInterface
     use LoggerAwareTrait;
     use EntityManagerAwareTrait;
 
+    /**
+     * A track deliberately bridging a hard broadcast-clock boundary must get a
+     * substantial normal airing. This prevents a full 3-5 minute song from being
+     * launched with only a few seconds left before a mandatory ID.
+     */
+    private const float MIN_PROTECTED_BRIDGE_AIR_FRACTION = 0.80;
+
     public function __construct(
         private readonly Scheduler $scheduler,
         private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly DuplicatePrevention $duplicatePrevention,
         private readonly BroadcastClockPlanner $broadcastClockPlanner,
+        private readonly EventDispatcherInterface $dispatcher,
+        private readonly ClockWheel\ClockWheelStretchCalculator $stretchCalculator,
         private readonly CacheInterface $cache,
         private readonly StationPlaylistRepository $playlistRepo,
         private readonly StationPlaylistMediaRepository $spmRepo,
@@ -562,6 +574,38 @@ final class QueueBuilder implements EventSubscriberInterface
             }
         }
 
+        // A plugin-owned hard boundary may publish a final-track target without
+        // turning that target into a persistent cue-out. If the chosen song can
+        // be safely stretched/squeezed by <=5%, land it exactly on the boundary;
+        // otherwise keep its natural duration and let the runtime hard switch cut
+        // a deliberate bridge. Never stack this on an earlier soft-anchor cap.
+        if (!$stationQueueEntry->hour_boundary_enforce_cap) {
+            $selectionBoundary = $this->resolveProtectedSelectionBoundary(
+                $playlist,
+                $expectedPlayTime,
+            );
+
+            if (null !== $selectionBoundary) {
+                $availableSeconds = self::secondsBetween(
+                    $expectedPlayTime,
+                    $selectionBoundary['boundary'],
+                );
+                $naturalDuration = $mediaToPlay->getCalculatedLength();
+
+                if ($availableSeconds > 0.0 && $naturalDuration > 0.0) {
+                    $ratio = $this->stretchCalculator->calculate(
+                        $naturalDuration,
+                        max(1, (int)round($availableSeconds)),
+                    );
+
+                    if (null !== $ratio) {
+                        $stationQueueEntry->clock_wheel_stretch_ratio = $ratio;
+                        $stationQueueEntry->duration = $naturalDuration / $ratio;
+                    }
+                }
+            }
+        }
+
         if (!$deferQueuePersistence) {
             $this->em->persist($stationQueueEntry);
         }
@@ -654,8 +698,8 @@ final class QueueBuilder implements EventSubscriberInterface
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
         // Reordering is limited to standalone general rotation. Scheduled shows
-        // and playlist groups retain operator ordering and rely on the shared
-        // broadcast-clock stretch/squeeze/cue-out path at the anchor.
+        // and playlist groups retain operator ordering and rely on their own
+        // schedule/clock-wheel ownership rules.
         if (
             PlaylistTypes::Standard !== $playlist->type
             || 0 !== $playlist->schedule_items->count()
@@ -664,16 +708,48 @@ final class QueueBuilder implements EventSubscriberInterface
             return $selectedTrack;
         }
 
-        $maxDuration = $this->broadcastClockPlanner->maxContentDurationBeforeNextSoftAnchor(
+        $softMaxDuration = $this->broadcastClockPlanner->maxContentDurationBeforeNextSoftAnchor(
             $playlist->station,
             $expectedPlayTime,
         );
-        if (null === $maxDuration) {
+        $selectionBoundary = $this->resolveProtectedSelectionBoundary(
+            $playlist,
+            $expectedPlayTime,
+        );
+
+        if (null !== $selectionBoundary) {
+            $availableSeconds = self::secondsBetween(
+                $expectedPlayTime,
+                $selectionBoundary['boundary'],
+            );
+
+            // An earlier ordinary soft anchor retains priority. The external
+            // plugin boundary only controls selection when it is the next owner.
+            if (
+                $availableSeconds > 0.0
+                && (null === $softMaxDuration || $availableSeconds <= $softMaxDuration)
+            ) {
+                return $this->selectTrackForProtectedBoundary(
+                    $playlist,
+                    $selectedTrack,
+                    $recentSongHistory,
+                    $expectedPlayTime,
+                    $allowDuplicates,
+                    $availableSeconds,
+                    $selectionBoundary['reason'],
+                );
+            }
+        }
+
+        // Existing soft-anchor behavior is unchanged. Those anchors intentionally
+        // use the normal stretch/squeeze/cue-out path and may pick the longest
+        // full track that fits before the schedule transition.
+        if (null === $softMaxDuration) {
             return $selectedTrack;
         }
 
         $media = $this->em->find(StationMedia::class, $selectedTrack->media_id);
-        if ($media instanceof StationMedia && $media->getCalculatedLength() <= $maxDuration) {
+        if ($media instanceof StationMedia && $media->getCalculatedLength() <= $softMaxDuration) {
             return $selectedTrack;
         }
 
@@ -686,7 +762,7 @@ final class QueueBuilder implements EventSubscriberInterface
                 continue;
             }
 
-            if ($candidate->getCalculatedLength() <= $maxDuration) {
+            if ($candidate->getCalculatedLength() <= $softMaxDuration) {
                 $fitting[] = $queueItem;
             }
         }
@@ -694,7 +770,7 @@ final class QueueBuilder implements EventSubscriberInterface
         if ($fitting !== []) {
             usort(
                 $fitting,
-                function (StationPlaylistQueue $a, StationPlaylistQueue $b) use ($maxDuration): int {
+                function (StationPlaylistQueue $a, StationPlaylistQueue $b): int {
                     $mediaA = $this->em->find(StationMedia::class, $a->media_id);
                     $mediaB = $this->em->find(StationMedia::class, $b->media_id);
                     $lenA = $mediaA instanceof StationMedia ? $mediaA->getCalculatedLength() : 0.0;
@@ -722,10 +798,10 @@ final class QueueBuilder implements EventSubscriberInterface
         }
 
         $this->logger->warning(
-            'Protected boundary: no track fits before the upcoming broadcast-clock anchor. Falling back to the shortest non-recent track.',
+            'Protected boundary: no track fits before the upcoming soft broadcast-clock anchor. Falling back to the shortest non-recent track.',
             [
                 'playlist_id' => $playlist->id,
-                'max_duration_seconds' => $maxDuration,
+                'max_duration_seconds' => $softMaxDuration,
             ]
         );
 
@@ -759,6 +835,163 @@ final class QueueBuilder implements EventSubscriberInterface
         }
 
         return $selectedTrack;
+    }
+
+    /**
+     * @return array{boundary:CarbonImmutable,reason:string}|null
+     */
+    private function resolveProtectedSelectionBoundary(
+        StationPlaylist $playlist,
+        DateTimeImmutable $expectedPlayTime,
+    ): ?array {
+        // The provider itself decides whether this expected start is inside its
+        // lookahead. A one-hour probe is only a generic search horizon and does
+        // not make the provider active early.
+        $probeEnd = CarbonImmutable::instance($expectedPlayTime)->addHour();
+        $event = new ResolveQueueClockConstraint(
+            $playlist->station,
+            $expectedPlayTime,
+            $probeEnd->toDateTimeImmutable(),
+        );
+        $this->dispatcher->dispatch($event);
+
+        $boundary = $event->getSelectionBoundaryAt();
+        if (!$event->hasSelectionBoundary() || null === $boundary) {
+            return null;
+        }
+
+        return [
+            'boundary' => CarbonImmutable::instance($boundary),
+            'reason' => $event->getSelectionBoundaryReason() ?? 'external_broadcast_clock',
+        ];
+    }
+
+    private function selectTrackForProtectedBoundary(
+        StationPlaylist $playlist,
+        StationPlaylistQueue $selectedTrack,
+        array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
+        bool $allowDuplicates,
+        float $availableSeconds,
+        string $reason,
+    ): ?StationPlaylistQueue {
+        if ($availableSeconds <= 0.0) {
+            return null;
+        }
+
+        $mediaQueue = $this->preparePlaylistQueue(
+            $playlist,
+            $this->spmRepo->getQueue($playlist),
+            $expectedPlayTime,
+        );
+
+        // The selector may already have shifted its first candidate out of the
+        // playlist queue. Put it back exactly once for boundary scoring.
+        $candidatesByMediaId = [$selectedTrack->media_id => $selectedTrack];
+        foreach ($mediaQueue as $queueItem) {
+            $candidatesByMediaId[$queueItem->media_id] = $queueItem;
+        }
+
+        $scored = [];
+        foreach ($candidatesByMediaId as $queueItem) {
+            $candidate = $this->em->find(StationMedia::class, $queueItem->media_id);
+            if (!$candidate instanceof StationMedia) {
+                continue;
+            }
+
+            $duration = $candidate->getCalculatedLength();
+            if ($duration <= 0.0) {
+                continue;
+            }
+
+            $fitsCompletely = $duration <= $availableSeconds;
+            $airedFraction = min(1.0, $availableSeconds / $duration);
+            $isUsableBridge = !$fitsCompletely
+                && $airedFraction >= self::MIN_PROTECTED_BRIDGE_AIR_FRACTION;
+
+            // This is the cramming guard: an overlong song may bridge the ID
+            // only when most of it will actually air. A three-minute song with
+            // 21 seconds of runway is rejected rather than knowingly launched.
+            if (!$fitsCompletely && !$isUsableBridge) {
+                continue;
+            }
+
+            $stretchRatio = $this->stretchCalculator->calculate(
+                $duration,
+                max(1, (int)round($availableSeconds)),
+            );
+
+            if (null !== $stretchRatio) {
+                $distance = 0.0;
+            } elseif ($fitsCompletely) {
+                // Prefer a slight runtime cut over leaving an equally-sized
+                // orphan gap that would tempt AutoDJ to launch another song.
+                $distance = ($availableSeconds - $duration) * 1.5;
+            } else {
+                $distance = $duration - $availableSeconds;
+            }
+
+            $scored[] = [
+                'queue_item' => $queueItem,
+                'duration' => $duration,
+                'distance' => $distance,
+                'aired_fraction' => $airedFraction,
+            ];
+        }
+
+        if ($scored === []) {
+            $this->logger->warning(
+                'Protected boundary: refusing to cram a full song into the remaining pre-boundary runway.',
+                [
+                    'playlist_id' => $playlist->id,
+                    'reason' => $reason,
+                    'available_seconds' => $availableSeconds,
+                    'minimum_bridge_air_fraction' => self::MIN_PROTECTED_BRIDGE_AIR_FRACTION,
+                ]
+            );
+            return null;
+        }
+
+        usort(
+            $scored,
+            static fn(array $a, array $b): int =>
+                $a['distance'] <=> $b['distance']
+                ?: $b['aired_fraction'] <=> $a['aired_fraction']
+                ?: $b['duration'] <=> $a['duration']
+        );
+
+        $ordered = array_map(
+            static fn(array $row): StationPlaylistQueue => $row['queue_item'],
+            $scored,
+        );
+
+        if ($playlist->avoid_duplicates) {
+            $duplicateSafe = $this->duplicatePrevention->preventDuplicates(
+                $ordered,
+                $recentSongHistory,
+                $allowDuplicates,
+            );
+
+            if (null !== $duplicateSafe) {
+                return $duplicateSafe;
+            }
+
+            if (!$allowDuplicates) {
+                return null;
+            }
+        }
+
+        return $ordered[0];
+    }
+
+    private static function secondsBetween(
+        DateTimeImmutable $start,
+        DateTimeImmutable $end,
+    ): float {
+        return max(
+            0.0,
+            (float)$end->format('U.u') - (float)$start->format('U.u'),
+        );
     }
 
     private function filterQueueByRotationGoal(StationPlaylist $playlist, array $mediaQueue): array
@@ -1126,7 +1359,7 @@ final class QueueBuilder implements EventSubscriberInterface
 
             if ($playlist->backendPrioritizeOverRequests()) {
                 $this->logger->debug(sprintf(
-                    'Playlist "%s" is prioritized and due now; skipping request queue.',
+                    'Playlist "%s" is prioritized and due now; skipping regular request queue.',
                     $playlist->name
                 ));
                 return;
