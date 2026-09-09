@@ -62,9 +62,10 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
             # Override only the station cross callback before ConfigWriter applies
             # the cross operator. Normal/live crossfade behavior remains identical
             # to the common runtime; only the one-shot broadcast-clock branch is
-            # changed. The hold switch is deliberately built inline from
-            # `new.source`: Liquidsoap 2.4.5 then keeps the PCM source type known
-            # to `cross`, while a generic helper loses that track typing.
+            # changed. The hold switch is built inline from `new.source`, then
+            # passed through unity-gain amplify. That last operator deliberately
+            # constrains the result to PCM audio for Liquidsoap 2.4.5's `cross`
+            # callback type while still clocking only the selected switch branch.
             def azuracast.live_aware_crossfade_impl(old, new) =
                 log.info(label="azuracast.crossfade", "Crossfading")
                 list.iter(
@@ -84,7 +85,7 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
                     )
 
                     fresh_hold_blank = blank()
-                    switch(
+                    fresh_hold_source = switch(
                         track_sensitive=false,
                         replay_metadata=true,
                         transition_length=0.0,
@@ -93,6 +94,7 @@ final class TopOfHourCrossfadeConfiguration implements EventSubscriberInterface
                             ({ true }, fresh_hold_blank)
                         ]
                     )
+                    amplify(1.0, fresh_hold_source)
                 elsif azuracast.to_live() then
                     log.info(label="azuracast.crossfade", "Fading to live...")
                     sequence([
