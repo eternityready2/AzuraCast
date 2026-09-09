@@ -31,11 +31,13 @@ final class TopOfHourCrossfadeConfigurationTest extends Unit
         self::assertStringContainsString('def azuracast.discard_autodj_current_cleanly_and_hold(handoff_epoch)', $config);
         self::assertStringContainsString('source.skip(azuracast.autodj_transport())', $config);
         self::assertStringContainsString('fresh_hold_blank = blank()', $config);
+        self::assertStringContainsString('fresh_hold_source = switch(', $config);
         self::assertStringContainsString(
             '({ not azuracast.autodj_fresh_hold() }, new.source)',
             $config,
         );
         self::assertStringContainsString('({ true }, fresh_hold_blank)', $config);
+        self::assertStringContainsString('amplify(1.0, fresh_hold_source)', $config);
         self::assertStringContainsString('discarded buffered old crossfade tail and parked fresh successor.', $config);
         self::assertStringContainsString('azuracast.broadcast_clock_cross_source = radio', $config);
 
