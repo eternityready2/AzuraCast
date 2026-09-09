@@ -20,7 +20,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/TopOfHourQueueClock
 
 final class TopOfHourQueueClockConstraintTest extends Unit
 {
-    public function testOpenHourCutsCurrentLiveIncidentProjectionAndResumesAfterIdOccupancy(): void
+    public function testOpenHourCutsCurrentProjectionAndResumesAfterIdOccupancy(): void
     {
         $station = $this->makeStation();
         $start = CarbonImmutable::parse('2026-09-07 22:56:40', 'UTC');
@@ -37,6 +37,7 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         );
 
         self::assertTrue($event->hasConstraint());
+        self::assertFalse($event->shouldPersistDurationCap());
         self::assertSame(
             '2026-09-07 22:59:21.000000',
             $event->getInterruptAt()?->format('Y-m-d H:i:s.u'),
@@ -64,6 +65,7 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         );
 
         self::assertTrue($event->hasConstraint());
+        self::assertFalse($event->shouldPersistDurationCap());
         self::assertSame(
             '2026-09-07 22:59:21.000000',
             $event->getInterruptAt()?->format('Y-m-d H:i:s.u'),
@@ -71,6 +73,87 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         self::assertSame(
             '2026-09-07 23:00:00.000000',
             $event->getResumeAt()?->format('Y-m-d H:i:s.u'),
+        );
+    }
+
+    public function testFutureRowCrossingIdReservesIntervalWithoutPersistentDurationCap(): void
+    {
+        $station = $this->makeStation();
+        $start = CarbonImmutable::parse('2026-09-07 22:58:40', 'UTC');
+        /** @var StationQueue $futureRow */
+        $futureRow = (new ReflectionClass(StationQueue::class))->newInstanceWithoutConstructor();
+
+        $event = new ResolveQueueClockConstraint(
+            $station,
+            $start->toDateTimeImmutable(),
+            $start->addSeconds(180)->toDateTimeImmutable(),
+            $futureRow,
+        );
+
+        TopOfHourQueueClockConstraint::applyPlan(
+            $event,
+            $this->makePlan(TopOfHourMode::SoftEtm),
+        );
+
+        self::assertTrue($event->hasConstraint());
+        self::assertFalse($event->shouldPersistDurationCap());
+        self::assertSame(
+            '2026-09-07 22:59:21.000000',
+            $event->getInterruptAt()?->format('Y-m-d H:i:s.u'),
+        );
+        self::assertSame(
+            '2026-09-07 22:59:58.825000',
+            $event->getResumeAt()?->format('Y-m-d H:i:s.u'),
+        );
+    }
+
+    public function testStaleFutureRowInsideIdWindowIsDeferredInsteadOfCrammed(): void
+    {
+        $station = $this->makeStation();
+        $start = CarbonImmutable::parse('2026-09-07 22:59:55', 'UTC');
+        /** @var StationQueue $futureRow */
+        $futureRow = (new ReflectionClass(StationQueue::class))->newInstanceWithoutConstructor();
+
+        $event = new ResolveQueueClockConstraint(
+            $station,
+            $start->toDateTimeImmutable(),
+            $start->addSeconds(240)->toDateTimeImmutable(),
+            $futureRow,
+        );
+
+        TopOfHourQueueClockConstraint::applyPlan(
+            $event,
+            $this->makePlan(TopOfHourMode::SoftEtm),
+        );
+
+        self::assertFalse($event->hasConstraint());
+        self::assertTrue($event->hasDeferral());
+        self::assertSame(
+            '2026-09-07 22:59:58.825000',
+            $event->getDeferUntil()?->format('Y-m-d H:i:s.u'),
+        );
+        self::assertFalse($event->shouldPersistDurationCap());
+    }
+
+    public function testHardStaleRowInsideHoldWindowDefersToExactBoundary(): void
+    {
+        $station = $this->makeStation();
+        $start = CarbonImmutable::parse('2026-09-07 22:59:59', 'UTC');
+        $event = new ResolveQueueClockConstraint(
+            $station,
+            $start->toDateTimeImmutable(),
+            $start->addSeconds(180)->toDateTimeImmutable(),
+        );
+
+        TopOfHourQueueClockConstraint::applyPlan(
+            $event,
+            $this->makePlan(TopOfHourMode::HardToh),
+        );
+
+        self::assertTrue($event->hasDeferral());
+        self::assertSame(
+            '2026-09-07 23:00:00.000000',
+            $event->getDeferUntil()?->format('Y-m-d H:i:s.u'),
         );
     }
 
@@ -90,33 +173,7 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         );
 
         self::assertFalse($event->hasConstraint());
-    }
-
-    public function testFutureQueueRowIsNeverCappedByTohForecast(): void
-    {
-        $station = $this->makeStation();
-        $station->backend_config->top_of_hour_id_enabled = true;
-
-        $start = CarbonImmutable::parse('2026-09-07 22:56:40', 'UTC');
-        /** @var StationQueue $futureRow */
-        $futureRow = (new ReflectionClass(StationQueue::class))->newInstanceWithoutConstructor();
-
-        $event = new ResolveQueueClockConstraint(
-            $station,
-            $start->toDateTimeImmutable(),
-            $start->addSeconds(275)->toDateTimeImmutable(),
-            $futureRow,
-        );
-
-        // The resolver must return before TopOfHourClock::plan(), so no selector
-        // or persistence infrastructure is needed for this regression.
-        /** @var TopOfHourClock $clock */
-        $clock = (new ReflectionClass(TopOfHourClock::class))->newInstanceWithoutConstructor();
-        (new TopOfHourQueueClockConstraint($clock))->resolve($event);
-
-        self::assertFalse($event->hasConstraint());
-        self::assertNull($event->getInterruptAt());
-        self::assertNull($event->getResumeAt());
+        self::assertFalse($event->hasDeferral());
     }
 
     public function testDisabledTopOfHourLeavesOrdinaryTimelineUntouched(): void
@@ -136,8 +193,10 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         (new TopOfHourQueueClockConstraint($clock))->resolve($event);
 
         self::assertFalse($event->hasConstraint());
+        self::assertFalse($event->hasDeferral());
         self::assertNull($event->getInterruptAt());
         self::assertNull($event->getResumeAt());
+        self::assertNull($event->getDeferUntil());
     }
 
     private function makeStation(): Station
