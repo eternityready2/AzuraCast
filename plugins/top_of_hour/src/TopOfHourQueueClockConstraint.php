@@ -11,14 +11,15 @@ use Carbon\CarbonImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Makes the near-term ordinary AutoDJ projection consume the same station clock
- * event that the plugin enforces on air without rewriting ordinary queued-media
- * durations or AutoCue cue-out values.
+ * Projects the plugin-owned legal-ID interval into the ordinary AutoDJ timeline
+ * without rewriting media duration or AutoCue cue-out values.
  *
- * The authoritative runtime cut is performed by Liquidsoap. This listener only
- * adjusts the projection cursor when the song that is actually on air crosses
- * the next TOH target. Future unsaved/upcoming rows are left natural so a stale
- * forecast cannot manufacture 2- or 3-second music rows around :59.
+ * Runtime Liquidsoap remains the final frame-accurate authority. Queue planning
+ * only reserves the wall-clock interval so Upcoming Programming cannot cram
+ * multiple ordinary songs into seconds that are actually owned by the ID/hard
+ * boundary. A future song crossing the target advances the next-play cursor to
+ * the end of the reserved interval, while a stale row already inside the window
+ * is deferred to that same resume instant.
  */
 final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
 {
@@ -41,27 +42,6 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
             return;
         }
 
-        // Only the initial current-song projection has no StationQueue row.
-        // Applying this constraint to ordinary future rows causes Queue.php to
-        // persist a hard duration cap into the media row, which can survive later
-        // timing recalculations and collapse Upcoming Programming into tiny slots.
-        if (null !== $event->getQueueRow()) {
-            return;
-        }
-
-        $start = CarbonImmutable::instance($event->getExpectedPlayAt());
-        $projectedEnd = CarbonImmutable::instance($event->getProjectedEndAt());
-
-        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
-        $candidateTarget = $boundary
-            ->subMinute()
-            ->startOfMinute()
-            ->addSeconds($this->clock->getIdStartSecond($station));
-
-        if ($candidateTarget <= $start || $candidateTarget > $projectedEnd) {
-            return;
-        }
-
         $plan = $this->clock->plan($station, $event->getExpectedPlayAt());
         if (!$plan instanceof TopOfHourPlan) {
             return;
@@ -75,7 +55,7 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
     }
 
     /**
-     * Apply an already-resolved TOH plan to the current on-air projection.
+     * Apply an already-resolved TOH plan to one current/future projection row.
      */
     public static function applyPlan(
         ResolveQueueClockConstraint $event,
@@ -85,26 +65,42 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
         $projectedEnd = CarbonImmutable::instance($event->getProjectedEndAt());
         $target = CarbonImmutable::instance($plan->targetStartAt);
 
-        if ($target <= $start || $target > $projectedEnd) {
-            return;
-        }
-
         if ($plan->isHard()) {
             // A rigid programme owns :00. Ordinary AutoDJ projection resumes at
             // the boundary; the rigid runtime remains the actual on-air owner.
             $resumeAt = CarbonImmutable::instance($plan->boundaryAt);
         } else {
-            // Open hour: the ID occupies real wall-clock time even though it lives
-            // in the plugin-owned Liquidsoap lane rather than the ordinary queue.
+            // Open hour: reserve the ID's real file duration even though the ID
+            // lives in the plugin-owned Liquidsoap lane rather than AutoDJ queue.
             $resumeAt = $target->addMilliseconds(
                 (int)round($plan->durationSeconds * 1000)
             );
         }
 
+        // Recover an already-built stale row whose projected start was inside
+        // the legal-ID/hard-hold interval. Move the row; do not create a tiny
+        // duration cap just to fill the remaining seconds of the reservation.
+        if ($start >= $target && $start < $resumeAt) {
+            $event->deferUntil(
+                $resumeAt->toDateTimeImmutable(),
+                'top_of_hour_station_id',
+            );
+            return;
+        }
+
+        if ($target <= $start || $target > $projectedEnd) {
+            return;
+        }
+
+        // Runtime TOH performs the actual destructive cut. This constraint is
+        // projection-only: never persist the cap into StationQueue::duration or
+        // a media cue_out, because that was the source of the historical 1-5s
+        // song-cramming failure around :59.
         $event->constrain(
             $target->toDateTimeImmutable(),
             $resumeAt->toDateTimeImmutable(),
             'top_of_hour_station_id',
+            false,
         );
     }
 }
