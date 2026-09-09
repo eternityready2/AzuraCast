@@ -13,7 +13,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/TopOfHourCrossfadeC
 
 final class TopOfHourCrossfadeConfigurationTest extends Unit
 {
-    public function testCleanCutParksFreshSourceAndCapturesOnlyPostCrossGraph(): void
+    public function testCapturesPostCrossSourceWithoutOverridingCommonCrossCallback(): void
     {
         $station = new Station();
         $station->name = 'TOH Crossfade Test';
@@ -22,35 +22,18 @@ final class TopOfHourCrossfadeConfigurationTest extends Unit
 
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         $subscriber = new TopOfHourCrossfadeConfiguration();
-        $subscriber->installHoldAwareCrossfade($event);
+        $subscriber->installBoundaryState($event);
         $subscriber->captureCrossSource($event);
         $config = $event->buildConfiguration();
 
-        self::assertStringContainsString('azuracast.autodj_fresh_hold = ref(false)', $config);
         self::assertStringContainsString('azuracast.autodj_hard_handoff_epoch = ref(0.0)', $config);
-        self::assertStringContainsString('def azuracast.discard_autodj_current_cleanly_and_hold(handoff_epoch)', $config);
-        self::assertStringContainsString('source.skip(azuracast.autodj_transport())', $config);
-        self::assertStringContainsString('fresh_source = (new.source:source(audio=pcm))', $config);
-        self::assertStringContainsString('fresh_hold_blank = (blank():source(audio=pcm))', $config);
-        self::assertStringContainsString(
-            '({ not azuracast.autodj_fresh_hold() }, fresh_source)',
-            $config,
-        );
-        self::assertStringContainsString('({ true }, fresh_hold_blank)', $config);
-        self::assertStringContainsString('discarded buffered old crossfade tail and parked fresh successor.', $config);
         self::assertStringContainsString('azuracast.broadcast_clock_cross_source = radio', $config);
 
-        // The generic helper version is forbidden because Liquidsoap 2.4.5 loses
-        // the cross callback's PCM track typing when the source is passed through
-        // an unconstrained helper function.
-        self::assertStringNotContainsString('def azuracast.hold_clean_cut_fresh_source(s)', $config);
-        self::assertStringNotContainsString('amplify(1.0, fresh_hold_source)', $config);
-
-        // Normal/live paths are intentionally copied from the common runtime so
-        // TOH changes only the forced clean-cut branch.
-        self::assertStringContainsString('elsif azuracast.to_live() then', $config);
-        self::assertStringContainsString('cross.smart(', $config);
-        self::assertStringContainsString('cross.simple(', $config);
-        self::assertStringContainsString('add(normalize=false, [', $config);
+        // The plugin must not replace or wrap the common PR #160 cross callback.
+        // OLD-tail retirement remains owned by util/docker/.../azuracast.liq.
+        self::assertStringNotContainsString('def azuracast.live_aware_crossfade_impl(old, new)', $config);
+        self::assertStringNotContainsString('azuracast.autodj_fresh_hold', $config);
+        self::assertStringNotContainsString('fresh_source =', $config);
+        self::assertStringNotContainsString('hold_clean_cut_fresh_source', $config);
     }
 }
