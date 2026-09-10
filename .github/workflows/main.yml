@@ -1,5 +1,6 @@
 name: Build Custom AzuraCast
 on:
+  workflow_dispatch:
   push:
     branches: [ main, dev ]
     tags: [ 'v*' ]
@@ -7,6 +8,10 @@ on:
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: build-custom-azuracast-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -27,7 +32,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
