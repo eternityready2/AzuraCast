@@ -1,15 +1,37 @@
-name: Cancel Accidental Image Build
+name: Build Custom AzuraCast
 on:
+  workflow_dispatch:
   push:
     branches: [ main, dev ]
+    tags: [ 'v*' ]
 
-concurrency:
-  group: build-custom-azuracast-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  cancel-only:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: No image push
-        run: echo "Cancelling prior accidental image build; no container image is built or pushed."
+      - uses: actions/checkout@v4
+      - name: Create Version File
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "${{ github.ref_name }}" > .version
+          else
+            echo "$(git rev-parse --short HEAD)" > .version
+          fi
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || 'rolling' }}
+            ${{ github.ref_name == 'main' && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
