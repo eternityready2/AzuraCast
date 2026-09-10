@@ -9,10 +9,6 @@ permissions:
   contents: read
   packages: write
 
-concurrency:
-  group: build-custom-azuracast-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
