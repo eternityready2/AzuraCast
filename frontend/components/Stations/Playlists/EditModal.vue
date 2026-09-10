@@ -11,7 +11,6 @@
         <tabs>
             <form-basic-info/>
             <form-schedule v-model:schedule-items="form.schedule_items" />
-            <form-playout-rules v-if="!form.is_smart_block" />
         </tabs>
     </modal-form>
 </template>
@@ -19,7 +18,6 @@
 <script setup lang="ts">
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
-import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
 import {useTranslate} from "~/vendor/gettext";
