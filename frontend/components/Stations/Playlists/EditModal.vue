@@ -1,6 +1,7 @@
 <template>
     <modal-form
         ref="$modal"
+        size="xl"
         :loading="loading"
         :title="langTitle"
         :error="error"
