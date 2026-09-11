@@ -2,7 +2,7 @@
     <div class="playout-settings">
         <section class="behavior-section mb-4">
             <div class="behavior-heading behavior-heading-start">
-                <span class="heading-icon">▶</span>
+                <span class="heading-icon heading-icon-start"><icon-ic-play-arrow /></span>
                 <span>
                     <strong>{{ $gettext('2. How should it start?') }}</strong>
                     <small>{{ $gettext('Choose what happens when the scheduled start time arrives.') }}</small>
@@ -49,7 +49,7 @@
 
         <section class="behavior-section mb-4">
             <div class="behavior-heading behavior-heading-end">
-                <span class="heading-icon">■</span>
+                <span class="heading-icon heading-icon-end"><icon-ic-stop /></span>
                 <span>
                     <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
                     <small>{{ $gettext('The end behavior is paired with the selected start style so Liquidsoap follows the setting reliably.') }}</small>
@@ -57,7 +57,7 @@
             </div>
 
             <div
-                v-if="unsupportedCombination"
+                v-if="hasSchedule && unsupportedCombination"
                 class="alert alert-warning py-2 mx-3 mt-3 mb-0"
             >
                 {{ $gettext('This playlist contains a legacy start/end combination that Liquidsoap cannot honor reliably. Choose a start behavior or Quick Setup preset to normalize it.') }}
@@ -97,7 +97,7 @@
 
         <details class="advanced-box">
             <summary>
-                <span class="advanced-icon">⚙</span>
+                <span class="advanced-icon"><icon-ic-settings /></span>
                 <span>
                     <strong>{{ $gettext('Special / Advanced Options (Optional)') }}</strong>
                     <small>{{ $gettext('Additional settings for unusual playlist behavior, listener-request overrides, or sponsor tracking.') }}</small>
@@ -164,6 +164,9 @@
 import {computed} from "vue";
 import {storeToRefs} from "pinia";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
+import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
+import IconIcSettings from "~icons/ic/baseline-settings";
+import IconIcStop from "~icons/ic/baseline-stop";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form";
 import {useTranslate} from "~/vendor/gettext";
 
@@ -300,31 +303,40 @@ const endBehaviorOptions: Array<{
 .behavior-heading {
     display: flex;
     align-items: center;
-    gap: .75rem;
-    padding: .8rem 1rem;
+    gap: .85rem;
+    padding: .9rem 1rem;
 }
 
 .behavior-heading-start {
-    background: rgba(25, 135, 84, .1);
-    color: var(--bs-success-text-emphasis);
+    border-bottom: 1px solid rgba(25, 135, 84, .18);
+    background: rgba(25, 135, 84, .12);
+    color: #21a45f;
 }
 
 .behavior-heading-end {
-    background: rgba(220, 53, 69, .1);
-    color: var(--bs-danger-text-emphasis);
+    border-bottom: 1px solid rgba(220, 53, 69, .18);
+    background: rgba(220, 53, 69, .12);
+    color: #e54859;
 }
 
 .heading-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    flex: 0 0 2rem;
-    border-radius: .5rem;
-    background: currentColor;
-    color: var(--bs-body-bg);
-    font-size: .75rem;
+    width: 2.7rem;
+    height: 2.7rem;
+    flex: 0 0 2.7rem;
+    border-radius: .55rem;
+    color: #fff;
+    font-size: 1.55rem;
+}
+
+.heading-icon-start {
+    background: #198754;
+}
+
+.heading-icon-end {
+    background: #dc3545;
 }
 
 .behavior-heading strong,
@@ -339,12 +351,13 @@ const endBehaviorOptions: Array<{
 }
 
 .behavior-heading strong {
-    font-size: 1rem;
+    font-size: 1.08rem;
 }
 
 .behavior-heading small {
     margin-top: .15rem;
     color: var(--bs-secondary-color);
+    font-size: .84rem;
 }
 
 .choice-grid {
@@ -365,7 +378,7 @@ const endBehaviorOptions: Array<{
     display: flex;
     align-items: flex-start;
     gap: .75rem;
-    padding: .9rem;
+    padding: .95rem;
     margin: 0;
     border: 1px solid var(--bs-border-color);
     border-radius: .65rem;
@@ -376,8 +389,8 @@ const endBehaviorOptions: Array<{
 .choice-option.is-active,
 .behavior-option.is-active {
     border-color: #2688ff;
-    background: rgba(38, 136, 255, .08);
-    box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .12);
+    background: rgba(38, 136, 255, .10);
+    box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .14);
 }
 
 .choice-option.is-disabled {
@@ -392,31 +405,32 @@ const endBehaviorOptions: Array<{
 
 .option-copy strong,
 .behavior-option strong {
-    font-size: .86rem;
+    font-size: .92rem;
 }
 
 .option-copy small,
 .behavior-option small {
     margin-top: .2rem;
     color: var(--bs-secondary-color);
+    font-size: .82rem;
     line-height: 1.45;
 }
 
 .recommended-badge {
     display: inline-block;
     margin-top: .45rem;
-    padding: .16rem .48rem;
+    padding: .18rem .5rem;
     border-radius: 999px;
-    background: rgba(25, 135, 84, .16);
-    color: var(--bs-success-text-emphasis);
-    font-size: .68rem;
+    background: rgba(25, 135, 84, .18);
+    color: #24ab65;
+    font-size: .7rem;
     font-weight: 700;
 }
 
 .behavior-note {
     color: var(--bs-secondary-color);
-    font-size: .75rem;
-    line-height: 1.4;
+    font-size: .8rem;
+    line-height: 1.45;
 }
 
 .advanced-box {
@@ -429,18 +443,32 @@ const endBehaviorOptions: Array<{
 .advanced-box summary {
     display: flex;
     align-items: center;
-    gap: .75rem;
-    padding: .9rem 1rem;
+    gap: .8rem;
+    padding: .95rem 1rem;
     cursor: pointer;
 }
 
 .advanced-icon {
-    font-size: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 2.5rem;
+    border-radius: 50%;
+    background: rgba(108, 117, 125, .16);
+    color: var(--bs-secondary-color);
+    font-size: 1.45rem;
+}
+
+.advanced-box summary strong {
+    font-size: .96rem;
 }
 
 .advanced-box summary small {
     margin-top: .15rem;
     color: var(--bs-secondary-color);
+    font-size: .8rem;
     font-weight: 400;
 }
 
