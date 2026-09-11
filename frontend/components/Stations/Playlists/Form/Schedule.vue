@@ -2,12 +2,12 @@
     <tab :label="$gettext('Schedule & Playback')">
         <div class="schedule-hero mb-4">
             <div>
-                <h2 class="h5 mb-1">{{ $gettext('Schedule & Playback') }}</h2>
+                <h2 class="h4 mb-1">{{ $gettext('Schedule & Playback') }}</h2>
                 <p class="mb-0">{{ $gettext('Set when this playlist airs and how it should behave at the beginning and end of each scheduled block.') }}</p>
             </div>
         </div>
 
-        <div class="row g-4">
+        <div class="row g-4 schedule-workspace">
             <div class="col-xl-9">
                 <div
                     class="schedule-overview mb-4"
@@ -25,7 +25,7 @@
                 </div>
 
                 <div class="step-heading step-heading-time mb-3">
-                    <span class="step-icon">▣</span>
+                    <span class="step-icon step-icon-time"><icon-ic-event /></span>
                     <span>
                         <strong>{{ $gettext('1. When should this playlist play?') }}</strong>
                         <small>{{ $gettext('Set the days, times, date range, timing mode and whether the playlist repeats inside its window.') }}</small>
@@ -53,10 +53,10 @@
                 <div class="buttons mb-4">
                     <button
                         type="button"
-                        class="btn btn-sm btn-primary"
+                        class="btn btn-primary add-schedule-button"
                         @click="add"
                     >
-                        <icon-ic-add/>
+                        <icon-ic-add />
                         <span>{{ $gettext('Add Schedule Item') }}</span>
                     </button>
                 </div>
@@ -67,7 +67,7 @@
                 />
 
                 <div class="schedule-summary mt-4">
-                    <span class="summary-check">✓</span>
+                    <span class="summary-check"><icon-ic-check-circle /></span>
                     <span>
                         <strong>{{ $gettext('Schedule Summary') }}</strong>
                         <small v-if="scheduleItems.length > 0">{{ scheduleSummary }}</small>
@@ -76,18 +76,24 @@
                 </div>
             </div>
 
-            <aside class="col-xl-3">
+            <aside class="col-xl-3 schedule-sidebar">
                 <div class="side-card side-card-help mb-3">
-                    <h3 class="h6 mb-2">{{ $gettext('Need Help?') }}</h3>
+                    <div class="side-card-heading">
+                        <span class="side-card-icon icon-help"><icon-ic-help /></span>
+                        <h3>{{ $gettext('Need Help?') }}</h3>
+                    </div>
                     <p class="mb-0">
-                        {{ $gettext('The common show settings are all on this page. Start with the schedule, then choose how playback begins and ends.') }}
+                        {{ $gettext('This simplified editor puts the most important settings in one place. Start with the schedule, then choose how playback begins and ends.') }}
                     </p>
                 </div>
 
                 <div class="side-card side-card-presets mb-3">
-                    <h3 class="h6 mb-1">{{ $gettext('Quick Setup Presets') }}</h3>
-                    <p class="small text-muted mb-3">
-                        {{ $gettext('Add a schedule first, then use a preset to configure the most common combinations.') }}
+                    <div class="side-card-heading">
+                        <span class="side-card-icon icon-presets"><icon-ic-settings /></span>
+                        <h3>{{ $gettext('Quick Setup Presets') }}</h3>
+                    </div>
+                    <p class="side-card-intro mb-3">
+                        {{ $gettext('Use a preset to quickly configure common playlist types.') }}
                     </p>
 
                     <button
@@ -96,8 +102,11 @@
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('show')"
                     >
-                        <strong>{{ $gettext('Scheduled Show / Programme') }}</strong>
-                        <small>{{ $gettext('Starts on time • Plays once • Stops at boundary') }}</small>
+                        <span class="preset-icon"><icon-ic-play-arrow /></span>
+                        <span class="preset-copy">
+                            <strong>{{ $gettext('Scheduled Show / Programme') }}</strong>
+                            <small>{{ $gettext('Starts on time • Plays once • Stops at boundary') }}</small>
+                        </span>
                     </button>
 
                     <button
@@ -106,8 +115,11 @@
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('music')"
                     >
-                        <strong>{{ $gettext('Music Rotation Block') }}</strong>
-                        <small>{{ $gettext('Waits for current song • Repeats • Flexible end') }}</small>
+                        <span class="preset-icon"><icon-ic-music-note /></span>
+                        <span class="preset-copy">
+                            <strong>{{ $gettext('Music Rotation Block') }}</strong>
+                            <small>{{ $gettext('Waits for current song • Repeats • Flexible end') }}</small>
+                        </span>
                     </button>
 
                     <button
@@ -116,13 +128,19 @@
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('news')"
                     >
-                        <strong>{{ $gettext('News / Alert / Priority') }}</strong>
-                        <small>{{ $gettext('Hard start • Plays once • Overrides requests') }}</small>
+                        <span class="preset-icon"><icon-ic-warning /></span>
+                        <span class="preset-copy">
+                            <strong>{{ $gettext('News / Alert / Priority') }}</strong>
+                            <small>{{ $gettext('Starts on time • Overrides requests') }}</small>
+                        </span>
                     </button>
                 </div>
 
                 <div class="side-card side-card-reminder mb-3">
-                    <h3 class="h6 mb-2">{{ $gettext('Important Reminder') }}</h3>
+                    <div class="side-card-heading">
+                        <span class="side-card-icon icon-reminder"><icon-ic-info /></span>
+                        <h3>{{ $gettext('Important Reminder') }}</h3>
+                    </div>
                     <p class="mb-2">
                         {{ $gettext('An enabled playlist with no schedule can still be selected and played all day according to its playlist type and settings.') }}
                     </p>
@@ -131,14 +149,17 @@
                     </p>
                 </div>
 
-                <div class="side-card">
-                    <h3 class="h6 mb-2">{{ $gettext('Terminology Tips') }}</h3>
-                    <ul class="small mb-0 ps-3">
-                        <li>{{ $gettext('Programme = interrupts normal rotation when its schedule starts.') }}</li>
-                        <li>{{ $gettext('Rotation = waits for the current song before taking over.') }}</li>
-                        <li>{{ $gettext('Flexible = prefers smooth timing for this schedule item.') }}</li>
+                <div class="side-card side-card-terms">
+                    <div class="side-card-heading">
+                        <span class="side-card-icon icon-terms"><icon-ic-help /></span>
+                        <h3>{{ $gettext('Terminology Tips') }}</h3>
+                    </div>
+                    <ul class="mb-0 ps-3">
+                        <li>{{ $gettext('Programme = starts at the scheduled time for shows.') }}</li>
+                        <li>{{ $gettext('Rotation = waits for the current song for music.') }}</li>
+                        <li>{{ $gettext('Flexible = allows natural timing around the schedule.') }}</li>
                         <li>{{ $gettext('Strict = makes this schedule item a hard wall-clock start.') }}</li>
-                        <li>{{ $gettext('Play once per block = do not start another playlist cycle in the same window.') }}</li>
+                        <li>{{ $gettext('Play once per block = does not repeat within the time slot.') }}</li>
                     </ul>
                 </div>
             </aside>
@@ -154,6 +175,14 @@ import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import Tab from "~/components/Common/Tab.vue";
 import IconIcAdd from "~icons/ic/baseline-add";
+import IconIcCheckCircle from "~icons/ic/baseline-check-circle";
+import IconIcEvent from "~icons/ic/baseline-event";
+import IconIcHelp from "~icons/ic/baseline-help";
+import IconIcInfo from "~icons/ic/baseline-info";
+import IconIcMusicNote from "~icons/ic/baseline-music-note";
+import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
+import IconIcSettings from "~icons/ic/baseline-settings";
+import IconIcWarning from "~icons/ic/baseline-warning";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form.ts";
 import {useTranslate} from "~/vendor/gettext";
 
@@ -311,19 +340,25 @@ const scheduleSummary = computed(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.1rem;
+    padding: 1.05rem 1.2rem;
     border-radius: .75rem;
-    background: linear-gradient(90deg, #1688f8, #0d6efd);
+    background: linear-gradient(90deg, #0d6efd, #1688f8);
     color: #fff;
+    box-shadow: 0 .2rem .65rem rgba(13, 110, 253, .18);
 }
 
 .schedule-hero p {
-    color: rgba(255, 255, 255, .82);
-    font-size: .82rem;
+    color: rgba(255, 255, 255, .9);
+    font-size: .92rem;
+    line-height: 1.4;
+}
+
+.schedule-workspace {
+    align-items: flex-start;
 }
 
 .schedule-overview {
-    padding: .85rem 1rem;
+    padding: 1rem 1.1rem;
     border: 1px solid;
     border-radius: .7rem;
 }
@@ -334,63 +369,81 @@ const scheduleSummary = computed(() => {
 .step-heading small,
 .schedule-summary strong,
 .schedule-summary small,
-.preset-button strong,
-.preset-button small {
+.preset-copy strong,
+.preset-copy small {
     display: block;
 }
 
 .schedule-overview strong {
-    font-size: .92rem;
+    font-size: 1rem;
 }
 
 .schedule-overview span {
     margin-top: .2rem;
-    font-size: .78rem;
-    line-height: 1.4;
+    font-size: .88rem;
+    line-height: 1.45;
 }
 
 .schedule-overview.is-scheduled {
-    border-color: #3477b7;
-    background: rgba(38, 136, 255, .08);
+    border-color: rgba(13, 110, 253, .55);
+    background: rgba(13, 110, 253, .1);
 }
 
 .schedule-overview.is-unscheduled {
-    border-color: #b7791f;
-    background: rgba(245, 158, 11, .08);
+    border-color: rgba(245, 158, 11, .55);
+    background: rgba(245, 158, 11, .1);
 }
 
 .step-heading {
     display: flex;
     align-items: center;
-    gap: .75rem;
-    padding: .8rem 1rem;
+    gap: .85rem;
+    padding: .9rem 1rem;
     border-radius: .7rem;
 }
 
 .step-heading-time {
-    background: rgba(13, 110, 253, .1);
-    color: var(--bs-primary-text-emphasis);
+    border: 1px solid rgba(13, 110, 253, .2);
+    background: rgba(13, 110, 253, .12);
+    color: #1688f8;
 }
 
 .step-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    flex: 0 0 2rem;
-    border-radius: .5rem;
-    background: #0d6efd;
+    width: 2.7rem;
+    height: 2.7rem;
+    flex: 0 0 2.7rem;
+    border-radius: .55rem;
     color: #fff;
+    font-size: 1.55rem;
+}
+
+.step-icon-time {
+    background: #0d6efd;
 }
 
 .step-heading strong {
-    font-size: 1rem;
+    font-size: 1.08rem;
 }
 
 .step-heading small {
     margin-top: .15rem;
     color: var(--bs-secondary-color);
+    font-size: .84rem;
+}
+
+.add-schedule-button {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-weight: 600;
+}
+
+.schedule-sidebar {
+    position: sticky;
+    top: 1rem;
 }
 
 .side-card {
@@ -398,32 +451,92 @@ const scheduleSummary = computed(() => {
     border: 1px solid var(--bs-border-color);
     border-radius: .75rem;
     background: var(--bs-tertiary-bg);
-    font-size: .8rem;
-    line-height: 1.45;
+    font-size: .92rem;
+    line-height: 1.48;
+}
+
+.side-card-heading {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    margin-bottom: .65rem;
+}
+
+.side-card-heading h3 {
+    margin: 0;
+    font-size: 1.03rem;
+    font-weight: 750;
+    line-height: 1.2;
+}
+
+.side-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.7rem;
+    height: 2.7rem;
+    flex: 0 0 2.7rem;
+    border-radius: 50%;
+    font-size: 1.55rem;
+}
+
+.icon-help,
+.icon-reminder,
+.icon-terms {
+    background: rgba(13, 110, 253, .14);
+    color: #2688ff;
+}
+
+.icon-presets {
+    background: rgba(245, 158, 11, .18);
+    color: #f59e0b;
 }
 
 .side-card-help {
-    border-color: rgba(13, 110, 253, .4);
-    background: rgba(13, 110, 253, .06);
+    border-color: rgba(13, 110, 253, .42);
+    background: rgba(13, 110, 253, .10);
+}
+
+.side-card-help h3,
+.side-card-reminder h3,
+.side-card-terms h3 {
+    color: #2688ff;
 }
 
 .side-card-presets {
-    border-color: rgba(245, 158, 11, .45);
-    background: rgba(245, 158, 11, .05);
+    border-color: rgba(245, 158, 11, .52);
+    background: rgba(245, 158, 11, .10);
 }
 
-.side-card-reminder {
-    border-color: rgba(13, 110, 253, .28);
+.side-card-presets h3 {
+    color: #f59e0b;
+}
+
+.side-card-reminder,
+.side-card-terms {
+    border-color: rgba(13, 110, 253, .32);
+    background: rgba(13, 110, 253, .055);
+}
+
+.side-card-intro {
+    color: var(--bs-secondary-color);
+    font-size: .86rem;
+    line-height: 1.4;
 }
 
 .preset-button {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
     width: 100%;
-    padding: .75rem .8rem;
-    margin-bottom: .55rem;
+    min-height: 4.25rem;
+    padding: .72rem .78rem;
+    margin-bottom: .6rem;
     border: 0;
-    border-radius: .55rem;
+    border-radius: .58rem;
     color: #fff;
     text-align: left;
+    box-shadow: 0 .15rem .4rem rgba(0, 0, 0, .12);
 }
 
 .preset-button:last-child {
@@ -435,55 +548,85 @@ const scheduleSummary = computed(() => {
     cursor: not-allowed;
 }
 
-.preset-button small {
-    margin-top: .15rem;
-    color: rgba(255, 255, 255, .85);
-    font-size: .7rem;
+.preset-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    flex: 0 0 2rem;
+    font-size: 1.6rem;
+}
+
+.preset-copy {
+    min-width: 0;
+}
+
+.preset-copy strong {
+    font-size: .9rem;
+    line-height: 1.2;
+}
+
+.preset-copy small {
+    margin-top: .18rem;
+    color: rgba(255, 255, 255, .9);
+    font-size: .75rem;
+    line-height: 1.25;
 }
 
 .preset-show {
-    background: #198754;
+    background: linear-gradient(135deg, #198754, #11a55a);
 }
 
 .preset-music {
-    background: #0d6efd;
+    background: linear-gradient(135deg, #0d6efd, #1688f8);
 }
 
 .preset-news {
-    background: #7c3aed;
+    background: linear-gradient(135deg, #7c3aed, #9333ea);
+}
+
+.side-card-terms li + li {
+    margin-top: .35rem;
 }
 
 .schedule-summary {
     display: flex;
     align-items: flex-start;
-    gap: .75rem;
-    padding: .9rem 1rem;
-    border: 1px solid rgba(25, 135, 84, .45);
+    gap: .8rem;
+    padding: 1rem 1.1rem;
+    border: 1px solid rgba(25, 135, 84, .48);
     border-radius: .7rem;
-    background: rgba(25, 135, 84, .08);
+    background: rgba(25, 135, 84, .10);
 }
 
 .summary-check {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    flex: 0 0 2rem;
+    width: 2.6rem;
+    height: 2.6rem;
+    flex: 0 0 2.6rem;
     border-radius: 50%;
     background: #198754;
     color: #fff;
-    font-weight: 800;
+    font-size: 1.55rem;
+}
+
+.schedule-summary strong {
+    color: #23a866;
+    font-size: 1rem;
 }
 
 .schedule-summary small {
     margin-top: .2rem;
     color: var(--bs-secondary-color);
+    font-size: .84rem;
     line-height: 1.45;
 }
 
 @media (max-width: 1199.98px) {
-    aside {
+    .schedule-sidebar {
+        position: static;
         margin-top: .5rem;
     }
 }
