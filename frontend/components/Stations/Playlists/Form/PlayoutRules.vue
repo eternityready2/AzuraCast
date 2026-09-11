@@ -52,8 +52,15 @@
                 <span class="heading-icon">■</span>
                 <span>
                     <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
-                    <small>{{ $gettext('Choose what happens when the scheduled end time is reached.') }}</small>
+                    <small>{{ $gettext('The end behavior is paired with the selected start style so Liquidsoap follows the setting reliably.') }}</small>
                 </span>
+            </div>
+
+            <div
+                v-if="unsupportedCombination"
+                class="alert alert-warning py-2 mx-3 mt-3 mb-0"
+            >
+                {{ $gettext('This playlist contains a legacy start/end combination that Liquidsoap cannot honor reliably. Choose a start behavior or Quick Setup preset to normalize it.') }}
             </div>
 
             <div class="choice-grid choice-grid-end p-3">
@@ -61,19 +68,30 @@
                     v-for="option in endBehaviorOptions"
                     :key="option.value"
                     class="choice-option"
-                    :class="{'is-active': endBehavior === option.value}"
+                    :class="{
+                        'is-active': endBehavior === option.value,
+                        'is-disabled': isEndOptionDisabled(option.value)
+                    }"
                 >
                     <input
                         v-model="endBehavior"
                         class="form-check-input"
                         type="radio"
                         :value="option.value"
+                        :disabled="isEndOptionDisabled(option.value)"
                     >
                     <span class="option-copy">
                         <strong>{{ option.title }}</strong>
                         <small>{{ option.description }}</small>
                     </span>
                 </label>
+            </div>
+
+            <div class="behavior-note mx-3 mb-3">
+                {{ startBehavior === 'wait'
+                    ? $gettext('Rotation waits for the current song at the start, so the current item is also allowed to finish at the end.')
+                    : $gettext('Programme and Priority starts use exact schedule boundaries, so they return at the scheduled end time.')
+                }}
             </div>
         </section>
 
@@ -185,13 +203,33 @@ const startBehavior = computed({
     set: (value: 'wait' | 'scheduled' | 'priority') => {
         setOption('interrupt', value !== 'wait');
         setOption('prioritize', value === 'priority');
+
+        // Liquidsoap's native schedule switch uses one track-sensitivity mode
+        // for both entry and exit. Keep the UI on combinations the backend can
+        // honor deterministically: Rotation = natural boundaries; Programme /
+        // Priority = hard boundaries.
+        setOption('allow_overrun', value === 'wait');
     },
 });
 
 const endBehavior = computed({
     get: (): 'boundary' | 'finish' => hasOption('allow_overrun') ? 'finish' : 'boundary',
-    set: (value: 'boundary' | 'finish') => setOption('allow_overrun', value === 'finish'),
+    set: (value: 'boundary' | 'finish') => {
+        if (!isEndOptionDisabled(value)) {
+            setOption('allow_overrun', value === 'finish');
+        }
+    },
 });
+
+const unsupportedCombination = computed(() => (
+    hasOption('interrupt') === hasOption('allow_overrun')
+));
+
+const isEndOptionDisabled = (value: 'boundary' | 'finish'): boolean => {
+    return startBehavior.value === 'wait'
+        ? value === 'boundary'
+        : value === 'finish';
+};
 
 const prioritizeRequests = computed({
     get: () => hasOption('prioritize'),
@@ -229,16 +267,20 @@ const startBehaviorOptions = [
     },
 ];
 
-const endBehaviorOptions = [
+const endBehaviorOptions: Array<{
+    value: 'boundary' | 'finish',
+    title: string,
+    description: string,
+}> = [
     {
         value: 'boundary',
         title: $gettext('Stop at scheduled time'),
-        description: $gettext('Return to normal programming at the scheduled end boundary.'),
+        description: $gettext('Return to normal programming at the scheduled end boundary. Used with Programme and Priority starts.'),
     },
     {
         value: 'finish',
         title: $gettext('Let current item finish (Allow Overrun)'),
-        description: $gettext('If a track or programme is still playing at the end time, let it finish before returning to normal programming.'),
+        description: $gettext('Let the current track finish naturally before returning to normal programming. Used with Rotation starts.'),
     },
 ];
 </script>
@@ -336,6 +378,11 @@ const endBehaviorOptions = [
     border-color: #2688ff;
     background: rgba(38, 136, 255, .08);
     box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .12);
+}
+
+.choice-option.is-disabled {
+    opacity: .5;
+    cursor: not-allowed;
 }
 
 .choice-option input,
