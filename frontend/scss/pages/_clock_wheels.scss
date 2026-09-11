@@ -1,27 +1,372 @@
-// Keep the Clock Wheel slot editor usable on phone landscape and small tablets.
-// The component itself switches to cards below Bootstrap's md breakpoint; this
-// extends the same responsive treatment through the lg breakpoint so the wide
-// desktop row never clips fields or actions from a narrow landscape viewport.
-@media (min-width: 768px) and (max-width: 991.98px) {
-    .clock-wheel-hour-distribution-card {
-        width: 100%;
-        max-width: 100%;
-        padding: .85rem 1rem;
+// Clock Wheels responsive workspace styling.
+// Matches the approved mockup while keeping all existing functionality.
+
+.clock-wheel-inline-editor {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .7rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .12);
+    overflow: hidden;
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.1rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    background: var(--bs-body-bg);
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-title {
+    min-width: 0;
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-title h2 {
+    margin: 0;
+    font-size: 1.12rem;
+    font-weight: 700;
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-kicker,
+.clock-wheel-inline-editor .clock-wheel-editor-title p,
+.clock-wheel-inline-editor .clock-wheel-back,
+.clock-wheel-inline-editor .clock-wheel-editor-actions {
+    display: none !important;
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-surface {
+    padding: 0;
+    background: var(--bs-body-bg);
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+    padding: 1rem;
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-subtabs {
+    padding: 0 1rem;
+    background: var(--bs-tertiary-bg);
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .7rem;
+    padding: .95rem 1rem;
+    border-top: 1px solid var(--bs-border-color);
+    background: var(--bs-body-bg);
+}
+
+.clock-wheel-inline-editor .clock-wheel-editor-footer .btn {
+    min-height: 2.55rem;
+    min-width: 7.4rem;
+    font-weight: 600;
+}
+
+.clock-wheel-hour-distribution-card {
+    width: 100%;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .75rem;
+    background: var(--bs-tertiary-bg, rgba(255, 255, 255, .03));
+}
+
+.clock-wheel-timeline {
+    min-width: 0;
+}
+
+.clock-wheel-timeline > small {
+    display: block !important;
+    margin: 0 0 .9rem !important;
+    padding: .8rem .95rem;
+    border: 1px solid rgba(13, 202, 240, .45);
+    border-radius: .35rem;
+    background: rgba(13, 202, 240, .12);
+    color: var(--bs-body-color) !important;
+    font-size: .86rem;
+    line-height: 1.42;
+}
+
+.clock-wheel-timeline__track {
+    width: 100%;
+    height: 2.05rem;
+    margin-bottom: 1.35rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .35rem;
+    background: var(--bs-secondary-bg);
+}
+
+.clock-wheel-timeline__marker {
+    width: .7rem !important;
+    height: 1.32rem !important;
+}
+
+.clock-wheel-entries-table {
+    width: 100%;
+    table-layout: fixed;
+    border-color: transparent !important;
+}
+
+.clock-wheel-entries-table thead th {
+    padding: .7rem .45rem;
+    border: 0;
+    background: transparent;
+    color: var(--bs-body-color);
+    font-size: .72rem !important;
+    font-weight: 700;
+    line-height: 1.25;
+    vertical-align: bottom;
+}
+
+.clock-wheel-entries-table tbody td {
+    padding: .55rem .4rem;
+    border: 0;
+    vertical-align: middle;
+}
+
+.clock-wheel-entries-table :is(.form-control, .form-select) {
+    min-height: 2.45rem;
+    border-color: var(--bs-border-color);
+}
+
+.clock-wheel-entries-table .drag-handle {
+    width: 2rem;
+    color: var(--bs-secondary-color) !important;
+}
+
+.clock-wheel-entries-table .btn-group {
+    gap: 0;
+}
+
+.clock-wheel-entries-table .cw-action-btn {
+    width: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.55rem;
+}
+
+.clock-wheel-entries-table + button.btn-outline-secondary {
+    margin-top: .55rem !important;
+    margin-bottom: .35rem !important;
+    min-height: 2.5rem;
+    padding-left: .9rem;
+    padding-right: .9rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.clock-wheel-entries-table + button.btn-outline-secondary + button.btn-secondary {
+    min-height: 3rem;
+    margin-top: .55rem !important;
+    border: 0;
+    background: #6c757d;
+    font-weight: 700;
+    text-align: left;
+    text-transform: uppercase;
+}
+
+/* Desktop mockup: one compact slot row across the width. */
+@media (min-width: 992px) {
+    .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+        padding: 1.15rem 1.25rem 1.25rem;
     }
 
-    .clock-wheel-timeline {
+    .clock-wheel-entries-table thead th:nth-child(1) { width: 2.2rem; }
+    .clock-wheel-entries-table thead th:nth-child(2) { width: 12%; }
+    .clock-wheel-entries-table thead th:nth-child(3) { width: 10%; }
+    .clock-wheel-entries-table thead th:nth-child(4) { width: 18%; }
+    .clock-wheel-entries-table thead th:nth-child(5) { width: 20%; }
+    .clock-wheel-entries-table thead th:nth-child(6) { width: 10%; }
+    .clock-wheel-entries-table thead th:nth-child(7) { width: 9.5rem; }
+
+    .clock-wheel-entries-table tbody tr {
+        background: transparent;
+    }
+}
+
+/* Portrait phone mockup: every label sits above a full-width control. */
+@media (max-width: 575.98px) {
+    .clock-wheels-page-body {
+        padding: .65rem !important;
+    }
+
+    .clock-wheels-primary-tabs {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .clock-wheels-primary-tabs .nav-link {
+        white-space: nowrap;
+    }
+
+    .clock-wheel-inline-editor {
+        border-radius: .55rem;
+    }
+
+    .clock-wheel-inline-editor .clock-wheel-editor-hero {
+        padding: .85rem .9rem;
+    }
+
+    .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+        padding: .85rem;
+    }
+
+    .clock-wheel-inline-editor .clock-wheel-editor-footer {
+        gap: .55rem;
+        padding: .8rem .85rem;
+    }
+
+    .clock-wheel-inline-editor .clock-wheel-editor-footer .btn {
+        flex: 1 1 0;
         min-width: 0;
     }
 
-    .clock-wheel-timeline__track {
+    .clock-wheel-hour-distribution-card {
+        padding: .85rem .95rem;
+    }
+
+    .clock-wheel-timeline > small {
+        padding: .75rem .85rem;
+        font-size: .82rem;
+    }
+
+    .clock-wheel-entries-table {
+        display: block;
+        border: 0 !important;
+        background: transparent;
+    }
+
+    .clock-wheel-entries-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .clock-wheel-entries-table tbody {
+        display: grid;
+        gap: .8rem;
         width: 100%;
-        margin-bottom: 1.1rem;
+    }
+
+    .clock-wheel-entries-table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: .72rem;
+        width: 100%;
+        padding: .2rem 0 .4rem;
+        border: 0;
+        background: transparent !important;
+    }
+
+    .clock-wheel-entries-table tbody td {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .3rem !important;
+        width: 100%;
+        min-width: 0;
+        padding: 0 !important;
+        border: 0 !important;
+        text-align: left !important;
+    }
+
+    .clock-wheel-entries-table tbody td::before {
+        content: attr(data-label);
+        display: block;
+        color: var(--bs-body-color);
+        font-size: .78rem;
+        font-weight: 700;
+        line-height: 1.2;
+        text-transform: none;
+    }
+
+    .clock-wheel-entries-table tbody td.drag-handle {
+        display: none !important;
+    }
+
+    .clock-wheel-entries-table tbody td[colspan]::before {
+        content: none;
+    }
+
+    .clock-wheel-entries-table :is(.form-control, .form-select) {
+        width: 100%;
+        max-width: 100%;
+        min-height: 2.65rem;
+        font-size: .92rem;
+    }
+
+    .clock-wheel-entries-table .btn-group {
+        display: flex;
+        width: auto !important;
+        justify-content: flex-start !important;
+    }
+
+    .clock-wheel-entries-table .cw-action-btn {
+        flex: 0 0 3rem !important;
+        width: 3rem !important;
+        max-width: 3rem !important;
+        min-height: 2.75rem;
+    }
+
+    .clock-wheel-entries-table + button.btn-outline-secondary {
+        display: block;
+        width: auto;
+        max-width: 100%;
+        margin-top: .7rem !important;
+    }
+
+    .clock-wheel-entries-table + button.btn-outline-secondary + button.btn-secondary {
+        width: 100%;
+        margin-top: .75rem !important;
+    }
+}
+
+/* Landscape phone / small tablet mockup: fields flow across three columns,
+ * creating the compact two-row control layout shown in the approved design. */
+@media (min-width: 576px) and (max-width: 991.98px) {
+    .clock-wheels-page-body {
+        padding: .75rem !important;
+    }
+
+    .clock-wheels-primary-tabs {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .clock-wheels-primary-tabs .nav-link {
+        white-space: nowrap;
+    }
+
+    .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+        padding: .9rem;
+    }
+
+    .clock-wheel-timeline > small {
+        padding: .7rem .85rem;
+        font-size: .8rem;
     }
 
     .clock-wheel-entries-table {
         display: block;
         width: 100%;
-        border: 0;
+        border: 0 !important;
         background: transparent;
     }
 
@@ -43,73 +388,75 @@
         width: 100%;
     }
 
-    .clock-wheel-entries-table tr {
+    .clock-wheel-entries-table tbody tr {
         display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: .7rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: .75rem .85rem;
         width: 100%;
-        padding: .85rem;
-        border: 1px solid var(--bs-border-color);
-        border-radius: .75rem;
-        background: var(--bs-body-bg);
+        padding: .2rem 0 .45rem;
+        border: 0;
+        background: transparent !important;
     }
 
-    .clock-wheel-entries-table td {
-        display: grid;
-        grid-template-columns: minmax(6.25rem, 38%) minmax(0, 1fr);
-        align-items: center;
-        gap: .65rem;
+    .clock-wheel-entries-table tbody td {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        align-content: start;
+        gap: .3rem !important;
         width: 100%;
         min-width: 0;
-        padding: 0;
-        border: 0;
+        padding: 0 !important;
+        border: 0 !important;
         text-align: left !important;
     }
 
-    .clock-wheel-entries-table td::before {
+    .clock-wheel-entries-table tbody td::before {
         content: attr(data-label);
-        color: var(--bs-secondary-color);
-        font-size: .72rem;
-        font-weight: 700;
-        letter-spacing: .035em;
-        text-transform: uppercase;
-    }
-
-    .clock-wheel-entries-table td:first-child {
-        display: flex;
-        justify-content: center;
-        min-height: 1.5rem;
-        padding-bottom: .35rem;
-        border-bottom: 1px solid var(--bs-border-color);
-    }
-
-    .clock-wheel-entries-table td:first-child::before,
-    .clock-wheel-entries-table td[colspan]::before {
-        content: none;
-    }
-
-    .clock-wheel-entries-table td[colspan] {
         display: block;
-        padding: .5rem;
-        text-align: center !important;
+        color: var(--bs-body-color);
+        font-size: .75rem;
+        font-weight: 700;
+        line-height: 1.2;
+        text-transform: none;
+    }
+
+    .clock-wheel-entries-table tbody td.drag-handle {
+        display: none !important;
+    }
+
+    .clock-wheel-entries-table tbody td[colspan] {
+        grid-column: 1 / -1;
+    }
+
+    .clock-wheel-entries-table tbody td[colspan]::before {
+        content: none;
     }
 
     .clock-wheel-entries-table :is(.form-control, .form-select) {
         width: 100%;
-        min-width: 0;
         max-width: 100%;
+        min-height: 2.5rem;
+        font-size: .88rem;
     }
 
     .clock-wheel-entries-table .btn-group {
-        width: 100% !important;
-        justify-content: flex-end !important;
+        display: flex;
+        width: auto !important;
+        justify-content: flex-start !important;
     }
 
     .clock-wheel-entries-table .cw-action-btn {
-        flex: 1 1 0;
-        width: auto;
-        min-width: 2.75rem;
-        max-width: 4rem;
-        min-height: 2.5rem;
+        flex: 0 0 3rem !important;
+        width: 3rem !important;
+        max-width: 3rem !important;
+        min-height: 2.55rem;
+    }
+
+    .clock-wheel-entries-table + button.btn-outline-secondary {
+        margin-top: .75rem !important;
+    }
+
+    .clock-wheel-entries-table + button.btn-outline-secondary + button.btn-secondary {
+        margin-top: .7rem !important;
     }
 }
