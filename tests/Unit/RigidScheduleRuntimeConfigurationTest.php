@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Unit;
 
+use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Station;
@@ -26,7 +27,7 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         $config = $event->buildConfiguration();
 
         self::assertStringContainsString(
-            '# Dedicated native source for an AutoDJ-only rigid scheduled programme.',
+            '# Dedicated native source for a rigid scheduled programme.',
             $config,
         );
         self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
@@ -48,6 +49,67 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         self::assertStringNotContainsString('broadcast_clock_release_when_fresh', $config);
         self::assertStringNotContainsString('azuracast.discard_autodj_current()', $config);
         self::assertStringNotContainsString('source.skip(source.effective(', $config);
+    }
+
+    public function testConfiguredStrictSongPlaylistStillUsesIsolatedRigidSource(): void
+    {
+        [$station, $playlist] = $this->makeScheduledProgram(true);
+        $station->backend_config->write_playlists_to_liquidsoap = true;
+        $playlist->backend_options = [StationPlaylist::OPTION_MERGE];
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        // Even when ConfigWriter will also create a normal native source, the
+        // outer rigid lane must have its own source object. Reusing the normal
+        // source above stretch()/cross() is what creates Liquidsoap Error 11.
+        self::assertStringContainsString(
+            '# Dedicated native source for a rigid scheduled programme.',
+            $config,
+        );
+        self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
+        self::assertStringContainsString('merge_tracks(id="merge_rigid_playlist_scheduled_program_', $config);
+        self::assertStringContainsString('id="rigid_schedule_runtime"', $config);
+    }
+
+    public function testStrictRemoteStreamGetsIndependentClockSource(): void
+    {
+        $station = new Station();
+        $station->name = 'Rigid Remote Runtime Test';
+        $station->short_name = 'rigid_remote_runtime_test';
+        $station->timezone = 'UTC';
+        $station->radio_base_dir = '/tmp/rigid_remote_runtime_test';
+
+        $playlist = new StationPlaylist($station);
+        $playlist->name = 'Remote Program';
+        $playlist->source = PlaylistSources::RemoteUrl;
+        $playlist->type = PlaylistTypes::Standard;
+        $playlist->remote_type = PlaylistRemoteTypes::Stream;
+        $playlist->remote_url = 'https://example.test/program.mp3';
+        $playlist->remote_buffer = 20;
+        $playlist->is_enabled = true;
+
+        $schedule = new StationSchedule($playlist);
+        $schedule->start_time = 1300;
+        $schedule->end_time = 1400;
+        $schedule->days = [];
+        $schedule->strict_start = true;
+
+        $station->playlists->add($playlist);
+        $playlist->schedule_items->add($schedule);
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        self::assertStringContainsString('rigid_playlist_remote_program_', $config);
+        self::assertStringContainsString(
+            'mksafe(buffer(buffer=20., input.http("https://example.test/program.mp3")))',
+            $config,
+        );
+        self::assertStringContainsString('13h0m-14h0m', $config);
+        self::assertStringContainsString('id="rigid_schedule_runtime"', $config);
     }
 
     public function testFlexibleScheduleDoesNotWrapOrdinaryRadioPath(): void
