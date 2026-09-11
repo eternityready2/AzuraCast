@@ -1,58 +1,287 @@
 <template>
     <section
-        class="card clock-wheels-page"
+        class="card clock-wheels-page clock-management-page"
         role="region"
-        aria-labelledby="hdr_clock_wheels"
+        aria-labelledby="hdr_clock_management"
     >
-        <div class="card-header text-bg-primary clock-wheels-page-header">
-            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                <div>
-                    <h2
-                        id="hdr_clock_wheels"
-                        class="card-title mb-1"
-                    >
-                        {{ $gettext('Manage Clock Wheels') }}
-                    </h2>
-                    <p class="mb-0 opacity-75 small">
-                        {{ $gettext('Build reusable Templates, turn them into Dayparts, then manage the hourly Clock Wheels that actually air.') }}
-                    </p>
-                </div>
+        <div class="clock-management-header">
+            <div>
+                <h2 id="hdr_clock_management">
+                    {{ $gettext('Clock Management') }}
+                </h2>
+                <p>
+                    {{ $gettext('Create and manage your Templates, Dayparts, and Clock Wheels from one workspace.') }}
+                </p>
+            </div>
+            <button
+                type="button"
+                class="btn btn-outline-primary"
+                @click="activeWorkspaceTab = 'overview'"
+            >
+                {{ $gettext('Help & Overview') }}
+            </button>
+        </div>
+
+        <div class="clock-management-summary-grid">
+            <button
+                type="button"
+                class="clock-management-summary-card clock-management-summary-card--wheels"
+                @click="activeWorkspaceTab = 'wheels'"
+            >
+                <span class="clock-management-summary-icon" aria-hidden="true">◷</span>
+                <span>
+                    <span class="clock-management-summary-title">{{ $gettext('Clock Wheels') }}</span>
+                    <span class="clock-management-summary-copy">
+                        {{ $gettext('Individual hourly clocks that play your content.') }}
+                    </span>
+                </span>
+                <span class="clock-management-summary-count">
+                    <strong>{{ displayCount(overviewCounts.wheels) }}</strong>
+                    <small>{{ $gettext('Total Wheels') }}</small>
+                </span>
+            </button>
+
+            <button
+                type="button"
+                class="clock-management-summary-card clock-management-summary-card--dayparts"
+                @click="activeWorkspaceTab = 'dayparts'"
+            >
+                <span class="clock-management-summary-icon" aria-hidden="true">▦</span>
+                <span>
+                    <span class="clock-management-summary-title">{{ $gettext('Dayparts') }}</span>
+                    <span class="clock-management-summary-copy">
+                        {{ $gettext('Time blocks that apply Templates to groups of hours.') }}
+                    </span>
+                </span>
+                <span class="clock-management-summary-count">
+                    <strong>{{ displayCount(overviewCounts.dayparts) }}</strong>
+                    <small>{{ $gettext('Total Dayparts') }}</small>
+                </span>
+            </button>
+
+            <button
+                type="button"
+                class="clock-management-summary-card clock-management-summary-card--templates"
+                @click="activeWorkspaceTab = 'templates'"
+            >
+                <span class="clock-management-summary-icon" aria-hidden="true">▤</span>
+                <span>
+                    <span class="clock-management-summary-title">{{ $gettext('Templates') }}</span>
+                    <span class="clock-management-summary-copy">
+                        {{ $gettext('Reusable slot layouts for Dayparts and Clock Wheels.') }}
+                    </span>
+                </span>
+                <span class="clock-management-summary-count">
+                    <strong>{{ displayCount(overviewCounts.templates) }}</strong>
+                    <small>{{ $gettext('Total Templates') }}</small>
+                </span>
+            </button>
+        </div>
+
+        <div class="clock-management-nav-wrap">
+            <nav
+                class="nav clock-management-tabs"
+                role="tablist"
+                aria-label="Clock Management"
+            >
+                <button
+                    v-for="tab in workspaceTabs"
+                    :key="tab.id"
+                    type="button"
+                    class="nav-link"
+                    :class="{active: activeWorkspaceTab === tab.id}"
+                    :aria-selected="activeWorkspaceTab === tab.id"
+                    role="tab"
+                    @click="activeWorkspaceTab = tab.id"
+                >
+                    {{ tab.label }}
+                </button>
+            </nav>
+
+            <div class="dropdown">
+                <button
+                    class="btn btn-primary dropdown-toggle"
+                    type="button"
+                    data-bs-toggle="dropdown"
+                    aria-expanded="false"
+                >
+                    + {{ $gettext('Create New') }}
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <button
+                            type="button"
+                            class="dropdown-item"
+                            @click="createWheelFromAnywhere"
+                        >
+                            {{ $gettext('Clock Wheel') }}
+                        </button>
+                    </li>
+                    <li>
+                        <button
+                            type="button"
+                            class="dropdown-item"
+                            @click="createDaypartFromAnywhere"
+                        >
+                            {{ $gettext('Daypart') }}
+                        </button>
+                    </li>
+                    <li>
+                        <button
+                            type="button"
+                            class="dropdown-item"
+                            @click="createTemplateFromAnywhere"
+                        >
+                            {{ $gettext('Template') }}
+                        </button>
+                    </li>
+                </ul>
             </div>
         </div>
 
-        <div class="card-body clock-wheels-page-body">
-            <div class="clock-workflow-guide mb-3">
-                <div class="clock-workflow-guide__step">
-                    <span class="clock-workflow-guide__number">1</span>
-                    <div>
-                        <strong>{{ $gettext('Templates') }}</strong>
-                        <span>{{ $gettext('Build a reusable slot layout.') }}</span>
+        <div class="clock-management-content">
+            <div v-if="activeWorkspaceTab === 'overview'" class="clock-management-overview-grid">
+                <section class="clock-management-panel">
+                    <h3>{{ $gettext('How Clock Management fits together') }}</h3>
+                    <div class="clock-management-flow">
+                        <div class="clock-management-flow-step">
+                            <strong>{{ $gettext('1. Template') }}</strong>
+                            <span>{{ $gettext('Build a reusable layout of music, IDs, talk, promos, and other slots.') }}</span>
+                        </div>
+                        <span class="clock-management-flow-arrow" aria-hidden="true">→</span>
+                        <div class="clock-management-flow-step">
+                            <strong>{{ $gettext('2. Daypart') }}</strong>
+                            <span>{{ $gettext('Apply that Template to a named block of hours such as Morning or Overnight.') }}</span>
+                        </div>
+                        <span class="clock-management-flow-arrow" aria-hidden="true">→</span>
+                        <div class="clock-management-flow-step">
+                            <strong>{{ $gettext('3. Clock Wheel') }}</strong>
+                            <span>{{ $gettext('Fine-tune the actual hourly clock and manage how it runs on-air.') }}</span>
+                        </div>
                     </div>
-                </div>
-                <span class="clock-workflow-guide__arrow" aria-hidden="true">→</span>
-                <div class="clock-workflow-guide__step">
-                    <span class="clock-workflow-guide__number">2</span>
-                    <div>
-                        <strong>{{ $gettext('Dayparts') }}</strong>
-                        <span>{{ $gettext('Apply a Template to a block of hours.') }}</span>
+                </section>
+
+                <section class="clock-management-panel">
+                    <h3>{{ $gettext('Quick Actions') }}</h3>
+                    <div class="clock-management-actions-grid">
+                        <button type="button" class="btn btn-primary" @click="createWheelFromAnywhere">
+                            + {{ $gettext('New Clock Wheel') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" @click="createDaypartFromAnywhere">
+                            + {{ $gettext('New Daypart') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" @click="createTemplateFromAnywhere">
+                            + {{ $gettext('New Template') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @click="activeWorkspaceTab = 'program-grid'">
+                            {{ $gettext('Open Program Grid') }}
+                        </button>
                     </div>
-                </div>
-                <span class="clock-workflow-guide__arrow" aria-hidden="true">→</span>
-                <div class="clock-workflow-guide__step">
-                    <span class="clock-workflow-guide__number">3</span>
-                    <div>
-                        <strong>{{ $gettext('Clock Wheels') }}</strong>
-                        <span>{{ $gettext('Fine-tune and schedule the actual hourly clocks.') }}</span>
+                    <div class="alert alert-info py-2 mt-3 mb-0 small">
+                        {{ $gettext('Templates do not air by themselves. Dayparts can generate and maintain groups of hourly Clock Wheels from a Template.') }}
                     </div>
-                </div>
+                </section>
             </div>
 
-            <tabs
-                nav-tabs-class="nav-tabs clock-wheels-primary-tabs"
-                content-class="mt-3"
-                destroy-on-hide
-            >
-                <tab :label="$gettext('Wheels')">
+            <div v-else-if="activeWorkspaceTab === 'wheels'" class="clock-management-split">
+                <aside class="clock-management-list-pane">
+                    <div class="clock-management-pane-header">
+                        <div>
+                            <h3>{{ $gettext('Clock Wheels') }}</h3>
+                            <p>{{ $gettext('Choose a wheel to edit it without leaving this page.') }}</p>
+                        </div>
+                        <add-button
+                            :text="$gettext('Add')"
+                            @click="openNewWheelEditor"
+                        />
+                    </div>
+
+                    <div class="p-2 border-bottom d-flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary flex-grow-1"
+                            @click="$generateModal?.open()"
+                        >
+                            {{ $gettext('Auto-Generate') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary flex-grow-1"
+                            @click="triggerImport"
+                        >
+                            {{ $gettext('Import') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-danger flex-grow-1"
+                            :disabled="!hasSelectedWheels"
+                            @click="doDeleteSelected"
+                        >
+                            {{ $gettext('Delete Selected') }}
+                        </button>
+                        <input
+                            ref="$importInput"
+                            type="file"
+                            accept="application/json,.json"
+                            class="d-none"
+                            @change="onImportFile"
+                        >
+                    </div>
+
+                    <data-table
+                        id="station_clock_wheels"
+                        selectable
+                        paginated
+                        :fields="wheelFields"
+                        :provider="listItemProvider"
+                        @row-selected="onWheelRowSelected"
+                    >
+                        <template #cell(name)="{ item }">
+                            <div
+                                class="d-flex align-items-center gap-2 clock-wheel-row"
+                                role="button"
+                                tabindex="0"
+                                @click="openWheelEditor(item)"
+                                @keydown.enter="openWheelEditor(item)"
+                            >
+                                <span
+                                    class="d-inline-block rounded-circle flex-shrink-0"
+                                    style="width: 2rem; height: 2rem;"
+                                    :style="{backgroundColor: item.color ?? '#cccccc'}"
+                                />
+                                <div class="flex-grow-1 min-width-0">
+                                    <h5 class="m-0 text-truncate">{{ item.name }}</h5>
+                                    <small class="text-muted">
+                                        {{ item.inherits_template_slots
+                                            ? $gettext('Inherited from Template')
+                                            : $gettext('Custom configuration') }}
+                                    </small>
+                                </div>
+                                <span
+                                    v-if="item.inherits_template_slots"
+                                    class="badge text-bg-secondary"
+                                >
+                                    {{ $gettext('Template') }}
+                                </span>
+                                <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
+                            </div>
+                        </template>
+                    </data-table>
+
+                    <div v-if="activeWheel" class="clock-management-quick-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="openPreview(activeWheel)">
+                            {{ $gettext('Preview') }}
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="openAnalytics(activeWheel)">
+                            {{ $gettext('Analytics') }}
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="doExportJson(activeWheel)">
+                            {{ $gettext('Export Clock') }}
+                        </button>
+                    </div>
+                </aside>
+
+                <section class="clock-management-editor-pane">
                     <clock-wheel-inline-editor
                         v-if="wheelEditorOpen"
                         :key="wheelEditorKey"
@@ -62,182 +291,85 @@
                         @saved="onWheelEditorSaved"
                         @cancel="closeWheelEditor"
                     />
-
-                    <div
-                        v-else
-                        class="card-body-flush"
-                    >
-                        <div class="clock-workspace-list-header">
-                            <div>
-                                <h3 class="h5 mb-1">{{ $gettext('Clock Wheels') }}</h3>
-                                <p class="mb-0 text-muted small">
-                                    {{ $gettext('These are the final hourly clocks. Open one to edit its slots or schedule, preview it, review analytics, or export it.') }}
-                                </p>
-                            </div>
-                            <div class="clock-wheels-toolbar d-flex flex-wrap align-items-center gap-2">
-                                <add-button
-                                    :text="$gettext('Add Clock Wheel')"
-                                    @click="openNewWheelEditor"
-                                />
-                                <button
-                                    type="button"
-                                    class="btn btn-secondary"
-                                    @click="$generateModal?.open()"
-                                >
-                                    {{ $gettext('Auto-Generate') }}
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-secondary"
-                                    @click="triggerImport"
-                                >
-                                    {{ $gettext('Import JSON') }}
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-danger"
-                                    :disabled="!hasSelectedWheels"
-                                    @click="doDeleteSelected"
-                                >
-                                    {{ $gettext('Delete Selected') }}
-                                </button>
-                                <input
-                                    ref="$importInput"
-                                    type="file"
-                                    accept="application/json,.json"
-                                    class="d-none"
-                                    @change="onImportFile"
-                                >
-                            </div>
+                    <div v-else class="clock-management-empty-state">
+                        <div class="clock-management-empty-state__inner">
+                            <div class="clock-management-empty-state__icon" aria-hidden="true">◷</div>
+                            <h3 class="h5">{{ $gettext('Select a Clock Wheel') }}</h3>
+                            <p class="text-muted">
+                                {{ $gettext('Choose a wheel from the list to edit it inline, or create a new wheel.') }}
+                            </p>
+                            <button type="button" class="btn btn-primary" @click="openNewWheelEditor">
+                                + {{ $gettext('Add Clock Wheel') }}
+                            </button>
                         </div>
-
-                        <data-table
-                            id="station_clock_wheels"
-                            selectable
-                            paginated
-                            :fields="wheelFields"
-                            :provider="listItemProvider"
-                            @row-selected="onWheelRowSelected"
-                        >
-                            <template #cell(actions)="{ item }">
-                                <div
-                                    class="btn-group btn-group-sm clock-wheel-list-actions"
-                                    @click.stop
-                                >
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Next hour preview')"
-                                        @click="openPreview(item)"
-                                    >
-                                        {{ $gettext('Preview') }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Audit analytics')"
-                                        @click="openAnalytics(item)"
-                                    >
-                                        {{ $gettext('Analytics') }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Export JSON')"
-                                        @click="doExportJson(item)"
-                                    >
-                                        {{ $gettext('Export') }}
-                                    </button>
-                                </div>
-                            </template>
-                            <template #cell(name)="{ item }">
-                                <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="openWheelEditor(item.links.self)"
-                                >
-                                    <div class="flex-grow-1 min-width-0">
-                                        <h5 class="m-0">
-                                            {{ item.name }}
-                                            <span
-                                                v-if="item.inherits_template_slots"
-                                                class="badge text-bg-secondary ms-1"
-                                            >
-                                                {{ $gettext('Template') }}
-                                            </span>
-                                        </h5>
-                                        <small class="text-muted">{{ $gettext('Open editor') }}</small>
-                                    </div>
-                                    <span
-                                        class="d-inline-block rounded flex-shrink-0"
-                                        style="width: 1.5rem; height: 1.5rem;"
-                                        :style="{backgroundColor: item.color ?? '#cccccc'}"
-                                    />
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
-                                </div>
-                            </template>
-                        </data-table>
                     </div>
-                </tab>
+                </section>
+            </div>
 
-                <tab :label="$gettext('Templates')">
-                    <template-inline-editor
-                        v-if="templateEditorOpen"
-                        :key="templateEditorKey"
-                        :create-url="templatesUrl"
-                        :record-url="templateEditorUrl"
-                        @saved="onTemplateEditorSaved"
-                        @cancel="closeTemplateEditor"
-                    />
-
-                    <div
-                        v-else
-                        class="card-body-flush"
-                    >
-                        <div class="clock-workspace-list-header">
-                            <div>
-                                <h3 class="h5 mb-1">{{ $gettext('Templates') }}</h3>
-                                <p class="mb-0 text-muted small">
-                                    {{ $gettext('Build a slot layout once and reuse it in multiple Dayparts or Clock Wheels. Templates do not air by themselves.') }}
-                                </p>
-                            </div>
-                            <add-button
-                                :text="$gettext('Add Template')"
-                                @click="openNewTemplateEditor"
-                            />
+            <div v-else-if="activeWorkspaceTab === 'dayparts'" class="clock-management-split">
+                <aside class="clock-management-list-pane">
+                    <div class="clock-management-pane-header">
+                        <div>
+                            <h3>{{ $gettext('Dayparts') }}</h3>
+                            <p>{{ $gettext('Apply a Template to a block of station hours.') }}</p>
                         </div>
-
-                        <data-table
-                            id="station_clock_wheel_templates"
-                            paginated
-                            :fields="templateFields"
-                            :provider="templateListProvider"
-                        >
-                            <template #cell(name)="{ item }">
-                                <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="openTemplateEditor(item.links.self)"
-                                >
-                                    <div class="flex-grow-1 min-width-0">
-                                        <h5 class="m-0">{{ item.name }}</h5>
-                                        <small class="text-muted">{{ $gettext('Reusable layout · Open editor') }}</small>
-                                    </div>
-                                    <span
-                                        class="d-inline-block rounded flex-shrink-0"
-                                        style="width: 1.5rem; height: 1.5rem;"
-                                        :style="{backgroundColor: item.color ?? '#cccccc'}"
-                                    />
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
-                                </div>
-                            </template>
-                        </data-table>
+                        <add-button :text="$gettext('Add')" @click="openNewDaypartEditor" />
                     </div>
-                </tab>
 
-                <tab :label="$gettext('Dayparts')">
+                    <data-table
+                        id="station_clock_dayparts"
+                        paginated
+                        :fields="daypartFields"
+                        :provider="daypartListProvider"
+                    >
+                        <template #cell(name)="{ item }">
+                            <div
+                                class="d-flex align-items-center gap-2 clock-wheel-row"
+                                role="button"
+                                tabindex="0"
+                                @click="openDaypartEditor(item)"
+                                @keydown.enter="openDaypartEditor(item)"
+                            >
+                                <span class="clock-management-summary-icon flex-shrink-0" style="width: 2rem; height: 2rem; font-size: .9rem;">▦</span>
+                                <div class="flex-grow-1 min-width-0">
+                                    <h5 class="m-0 text-truncate">{{ item.name }}</h5>
+                                    <small class="text-muted">
+                                        {{ formatHour(item.start_hour) }} – {{ formatHour(item.end_hour) }}
+                                    </small>
+                                </div>
+                                <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
+                            </div>
+                        </template>
+                        <template #cell(hours)="{ item }">
+                            {{ formatHour(item.start_hour) }} – {{ formatHour(item.end_hour) }}
+                        </template>
+                        <template #cell(separation)="{ item }">
+                            <span v-if="item.separation_override_enabled && item.separation_enabled">
+                                {{ item.separation_artist_minutes }}/{{ item.separation_title_minutes }} min
+                            </span>
+                            <span v-else-if="item.separation_override_enabled" class="text-muted">
+                                {{ $gettext('Off') }}
+                            </span>
+                            <span v-else class="text-muted">—</span>
+                        </template>
+                    </data-table>
+
+                    <div v-if="activeDaypart" class="clock-management-quick-actions">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            :disabled="syncingDaypartId === activeDaypart.id"
+                            @click="doSyncDaypart(activeDaypart)"
+                        >
+                            {{ syncingDaypartId === activeDaypart.id ? $gettext('Syncing…') : $gettext('Re-sync Wheels') }}
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="activeWorkspaceTab = 'wheels'">
+                            {{ $gettext('View Wheels') }}
+                        </button>
+                    </div>
+                </aside>
+
+                <section class="clock-management-editor-pane">
                     <daypart-inline-editor
                         v-if="daypartEditorOpen"
                         :key="daypartEditorKey"
@@ -248,116 +380,112 @@
                         @changed="relistDayparts"
                         @cancel="closeDaypartEditor"
                     />
+                    <div v-else class="clock-management-empty-state">
+                        <div class="clock-management-empty-state__inner">
+                            <div class="clock-management-empty-state__icon" aria-hidden="true">▦</div>
+                            <h3 class="h5">{{ $gettext('Select a Daypart') }}</h3>
+                            <p class="text-muted">
+                                {{ $gettext('Choose a Daypart to edit its Template, hour range, and optional separation overrides.') }}
+                            </p>
+                            <button type="button" class="btn btn-primary" @click="openNewDaypartEditor">
+                                + {{ $gettext('Add Daypart') }}
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
 
-                    <div
-                        v-else
-                        class="card-body-flush"
+            <div v-else-if="activeWorkspaceTab === 'templates'" class="clock-management-split">
+                <aside class="clock-management-list-pane">
+                    <div class="clock-management-pane-header">
+                        <div>
+                            <h3>{{ $gettext('Templates') }}</h3>
+                            <p>{{ $gettext('Reusable slot layouts that can feed many Dayparts and Wheels.') }}</p>
+                        </div>
+                        <add-button :text="$gettext('Add')" @click="openNewTemplateEditor" />
+                    </div>
+
+                    <data-table
+                        id="station_clock_wheel_templates"
+                        paginated
+                        :fields="templateFields"
+                        :provider="templateListProvider"
                     >
-                        <div class="clock-workspace-list-header">
-                            <div>
-                                <h3 class="h5 mb-1">{{ $gettext('Dayparts') }}</h3>
-                                <p class="mb-0 text-muted small">
-                                    {{ $gettext('A Daypart combines a Template with an hour range and keeps the generated hourly Clock Wheels in sync.') }}
-                                </p>
+                        <template #cell(name)="{ item }">
+                            <div
+                                class="d-flex align-items-center gap-2 clock-wheel-row"
+                                role="button"
+                                tabindex="0"
+                                @click="openTemplateEditor(item)"
+                                @keydown.enter="openTemplateEditor(item)"
+                            >
+                                <span
+                                    class="d-inline-block rounded flex-shrink-0"
+                                    style="width: 2rem; height: 2rem;"
+                                    :style="{backgroundColor: item.color ?? '#7c3aed'}"
+                                />
+                                <div class="flex-grow-1 min-width-0">
+                                    <h5 class="m-0 text-truncate">{{ item.name }}</h5>
+                                    <small class="text-muted">{{ $gettext('Reusable clock layout') }}</small>
+                                </div>
+                                <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
                             </div>
-                            <add-button
-                                :text="$gettext('Add Daypart')"
-                                @click="openNewDaypartEditor"
-                            />
-                        </div>
+                        </template>
+                    </data-table>
 
-                        <data-table
-                            id="station_clock_dayparts"
-                            paginated
-                            :fields="daypartFields"
-                            :provider="daypartListProvider"
-                        >
-                            <template #cell(actions)="{ item }">
-                                <div
-                                    class="btn-group btn-group-sm"
-                                    @click.stop
-                                >
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :disabled="syncingDaypartId === item.id"
-                                        :title="$gettext('Regenerate hourly wheels from this daypart')"
-                                        @click="doSyncDaypart(item)"
-                                    >
-                                        {{ syncingDaypartId === item.id
-                                            ? $gettext('Syncing…')
-                                            : $gettext('Re-sync') }}
-                                    </button>
-                                </div>
-                            </template>
-                            <template #cell(name)="{ item }">
-                                <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="openDaypartEditor(item.links.self)"
-                                >
-                                    <div class="flex-grow-1 min-width-0">
-                                        <h5 class="m-0">
-                                            {{ item.name }}
-                                            <span
-                                                v-if="item.separation_override_enabled"
-                                                class="badge text-bg-info ms-1"
-                                            >
-                                                {{ $gettext('Separation') }}
-                                            </span>
-                                        </h5>
-                                        <small class="text-muted">{{ $gettext('Hour block · Open editor') }}</small>
-                                    </div>
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
-                                </div>
-                            </template>
-                            <template #cell(hours)="{ item }">
-                                {{ formatHour(item.start_hour) }} – {{ formatHour(item.end_hour) }}
-                            </template>
-                            <template #cell(separation)="{ item }">
-                                <span v-if="item.separation_override_enabled && item.separation_enabled">
-                                    {{ item.separation_artist_minutes }}/{{ item.separation_title_minutes }} min
-                                </span>
-                                <span
-                                    v-else-if="item.separation_override_enabled"
-                                    class="text-muted"
-                                >
-                                    {{ $gettext('Off') }}
-                                </span>
-                                <span
-                                    v-else
-                                    class="text-muted"
-                                >—</span>
-                            </template>
-                        </data-table>
+                    <div v-if="activeTemplate" class="clock-management-quick-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="activeWorkspaceTab = 'dayparts'">
+                            {{ $gettext('View Dayparts') }}
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="activeWorkspaceTab = 'wheels'">
+                            {{ $gettext('View Wheels') }}
+                        </button>
                     </div>
-                </tab>
+                </aside>
 
-                <tab :label="$gettext('Program Grid')">
-                    <div class="clock-workspace-list-header mb-3">
-                        <div>
-                            <h3 class="h5 mb-1">{{ $gettext('Program Grid') }}</h3>
-                            <p class="mb-0 text-muted small">
-                                {{ $gettext('See which Clock Wheels are expected to run across the schedule and spot gaps quickly.') }}
+                <section class="clock-management-editor-pane">
+                    <template-inline-editor
+                        v-if="templateEditorOpen"
+                        :key="templateEditorKey"
+                        :create-url="templatesUrl"
+                        :record-url="templateEditorUrl"
+                        @saved="onTemplateEditorSaved"
+                        @cancel="closeTemplateEditor"
+                    />
+                    <div v-else class="clock-management-empty-state">
+                        <div class="clock-management-empty-state__inner">
+                            <div class="clock-management-empty-state__icon" aria-hidden="true">▤</div>
+                            <h3 class="h5">{{ $gettext('Select a Template') }}</h3>
+                            <p class="text-muted">
+                                {{ $gettext('Choose a Template to edit its reusable slot layout, or create a new one.') }}
                             </p>
+                            <button type="button" class="btn btn-primary" @click="openNewTemplateEditor">
+                                + {{ $gettext('Add Template') }}
+                            </button>
                         </div>
                     </div>
-                    <program-grid-tab :grid-url="programGridUrl" />
-                </tab>
+                </section>
+            </div>
 
-                <tab :label="$gettext('Reconciliation')">
-                    <div class="clock-workspace-list-header mb-3">
-                        <div>
-                            <h3 class="h5 mb-1">{{ $gettext('Reconciliation') }}</h3>
-                            <p class="mb-0 text-muted small">
-                                {{ $gettext('Review what was scheduled versus what actually played without leaving the Clock Wheels workspace.') }}
-                            </p>
-                        </div>
+            <section v-else-if="activeWorkspaceTab === 'program-grid'" class="clock-management-panel">
+                <div class="clock-management-pane-header mb-3">
+                    <div>
+                        <h3>{{ $gettext('Program Grid') }}</h3>
+                        <p>{{ $gettext('See which Clock Wheels are expected to run across the schedule and spot gaps quickly.') }}</p>
                     </div>
-                    <reconciliation-log-tab :log-url="reconciliationLogUrl" />
-                </tab>
-            </tabs>
+                </div>
+                <program-grid-tab :grid-url="programGridUrl" />
+            </section>
+
+            <section v-else class="clock-management-panel">
+                <div class="clock-management-pane-header mb-3">
+                    <div>
+                        <h3>{{ $gettext('Reconciliation') }}</h3>
+                        <p>{{ $gettext('Review what was scheduled versus what actually played.') }}</p>
+                    </div>
+                </div>
+                <reconciliation-log-tab :log-url="reconciliationLogUrl" />
+            </section>
         </div>
     </section>
 
@@ -373,10 +501,8 @@
 <script setup lang="ts">
 import DataTable, {DataTableField} from '~/components/Common/DataTable.vue';
 import AddButton from '~/components/Common/AddButton.vue';
-import Tabs from '~/components/Common/Tabs.vue';
-import Tab from '~/components/Common/Tab.vue';
+import {computed, onMounted, ref, shallowRef, useTemplateRef} from 'vue';
 import {useTranslate} from '~/vendor/gettext';
-import {computed, ref, shallowRef, useTemplateRef} from 'vue';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useAxios} from '~/vendor/axios';
 import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
@@ -394,6 +520,8 @@ import ReconciliationLogTab from '~/components/Stations/ClockWheels/Reconciliati
 import IconBiChevronRight from '~icons/bi/chevron-right';
 import {formatHourOfDayToAmPm} from '~/functions/amPmTime.ts';
 
+type WorkspaceTab = 'overview' | 'wheels' | 'dayparts' | 'templates' | 'program-grid' | 'reconciliation';
+
 const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/clock-wheels');
 const templatesUrl = getStationApiUrl('/clock-wheel-templates');
@@ -403,26 +531,91 @@ const reconciliationLogUrl = getStationApiUrl('/clock-wheels/reconciliation-log'
 const generateUrl = getStationApiUrl('/clock-wheels/generate');
 const importUrl = getStationApiUrl('/clock-wheels/import');
 
-const $importInput = useTemplateRef('$importInput');
-
 const {$gettext, $ngettext} = useTranslate();
 const {notifySuccess, notifyError} = useNotify();
 const {axios} = useAxios();
 const {confirmDelete} = useDialog();
+
+const activeWorkspaceTab = ref<WorkspaceTab>('wheels');
+const workspaceTabs = computed<Array<{id: WorkspaceTab; label: string}>>(() => [
+    {id: 'overview', label: $gettext('Overview')},
+    {id: 'wheels', label: $gettext('Clock Wheels')},
+    {id: 'dayparts', label: $gettext('Dayparts')},
+    {id: 'templates', label: $gettext('Templates')},
+    {id: 'program-grid', label: $gettext('Program Grid')},
+    {id: 'reconciliation', label: $gettext('Reconciliation')},
+]);
+
+const overviewCounts = ref<{wheels: number | null; dayparts: number | null; templates: number | null}>({
+    wheels: null,
+    dayparts: null,
+    templates: null,
+});
+
+const collectionCount = (data: unknown): number => {
+    if (Array.isArray(data)) {
+        return data.length;
+    }
+    if (data && typeof data === 'object') {
+        const record = data as Record<string, unknown>;
+        for (const key of ['total', 'total_count', 'totalCount']) {
+            if (typeof record[key] === 'number') {
+                return record[key] as number;
+            }
+        }
+        for (const key of ['rows', 'items', 'results']) {
+            if (Array.isArray(record[key])) {
+                return (record[key] as unknown[]).length;
+            }
+        }
+    }
+    return 0;
+};
+
+const displayCount = (count: number | null) => count === null ? '—' : String(count);
+
+const refreshOverviewCounts = async () => {
+    const [wheels, dayparts, templates] = await Promise.allSettled([
+        axios.get(listUrl.value),
+        axios.get(daypartsUrl.value),
+        axios.get(templatesUrl.value),
+    ]);
+
+    overviewCounts.value = {
+        wheels: wheels.status === 'fulfilled' ? collectionCount(wheels.value.data) : overviewCounts.value.wheels,
+        dayparts: dayparts.status === 'fulfilled' ? collectionCount(dayparts.value.data) : overviewCounts.value.dayparts,
+        templates: templates.status === 'fulfilled' ? collectionCount(templates.value.data) : overviewCounts.value.templates,
+    };
+};
+
+onMounted(() => {
+    void refreshOverviewCounts();
+});
+
+const $importInput = useTemplateRef('$importInput');
+const $previewModal = useTemplateRef('$previewModal');
+const $analyticsModal = useTemplateRef('$analyticsModal');
+const $generateModal = useTemplateRef('$generateModal');
+
 const syncingDaypartId = ref<number | null>(null);
 
 const wheelEditorOpen = ref(false);
 const wheelEditorUrl = ref<string | null>(null);
 const wheelEditorKey = ref(0);
+const activeWheel = ref<ClockWheelRow | null>(null);
 
 const openNewWheelEditor = () => {
+    activeWorkspaceTab.value = 'wheels';
+    activeWheel.value = null;
     wheelEditorUrl.value = null;
     wheelEditorKey.value += 1;
     wheelEditorOpen.value = true;
 };
 
-const openWheelEditor = (recordUrl: string) => {
-    wheelEditorUrl.value = recordUrl;
+const openWheelEditor = (item: ClockWheelRow) => {
+    activeWorkspaceTab.value = 'wheels';
+    activeWheel.value = item;
+    wheelEditorUrl.value = item.links.self;
     wheelEditorKey.value += 1;
     wheelEditorOpen.value = true;
 };
@@ -435,15 +628,20 @@ const closeWheelEditor = () => {
 const templateEditorOpen = ref(false);
 const templateEditorUrl = ref<string | null>(null);
 const templateEditorKey = ref(0);
+const activeTemplate = ref<TemplateRow | null>(null);
 
 const openNewTemplateEditor = () => {
+    activeWorkspaceTab.value = 'templates';
+    activeTemplate.value = null;
     templateEditorUrl.value = null;
     templateEditorKey.value += 1;
     templateEditorOpen.value = true;
 };
 
-const openTemplateEditor = (recordUrl: string) => {
-    templateEditorUrl.value = recordUrl;
+const openTemplateEditor = (item: TemplateRow) => {
+    activeWorkspaceTab.value = 'templates';
+    activeTemplate.value = item;
+    templateEditorUrl.value = item.links.self;
     templateEditorKey.value += 1;
     templateEditorOpen.value = true;
 };
@@ -456,15 +654,20 @@ const closeTemplateEditor = () => {
 const daypartEditorOpen = ref(false);
 const daypartEditorUrl = ref<string | null>(null);
 const daypartEditorKey = ref(0);
+const activeDaypart = ref<DaypartRow | null>(null);
 
 const openNewDaypartEditor = () => {
+    activeWorkspaceTab.value = 'dayparts';
+    activeDaypart.value = null;
     daypartEditorUrl.value = null;
     daypartEditorKey.value += 1;
     daypartEditorOpen.value = true;
 };
 
-const openDaypartEditor = (recordUrl: string) => {
-    daypartEditorUrl.value = recordUrl;
+const openDaypartEditor = (item: DaypartRow) => {
+    activeWorkspaceTab.value = 'dayparts';
+    activeDaypart.value = item;
+    daypartEditorUrl.value = item.links.self;
     daypartEditorKey.value += 1;
     daypartEditorOpen.value = true;
 };
@@ -473,6 +676,10 @@ const closeDaypartEditor = () => {
     daypartEditorOpen.value = false;
     daypartEditorUrl.value = null;
 };
+
+const createWheelFromAnywhere = () => openNewWheelEditor();
+const createTemplateFromAnywhere = () => openNewTemplateEditor();
+const createDaypartFromAnywhere = () => openNewDaypartEditor();
 
 type ClockWheelRow = {
     id: number;
@@ -509,17 +716,15 @@ const onWheelRowSelected = (rows: ClockWheelRow[]) => {
 };
 
 const wheelFields: DataTableField<ClockWheelRow>[] = [
-    {key: 'actions', label: $gettext('Actions'), sortable: false, class: 'shrink'},
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
+    {key: 'name', isRowHeader: true, label: $gettext('Clock Wheel'), sortable: true},
 ];
 
 const templateFields: DataTableField<TemplateRow>[] = [
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
+    {key: 'name', isRowHeader: true, label: $gettext('Template'), sortable: true},
 ];
 
 const daypartFields: DataTableField<DaypartRow>[] = [
-    {key: 'actions', label: $gettext('Actions'), sortable: false},
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
+    {key: 'name', isRowHeader: true, label: $gettext('Daypart'), sortable: true},
     {key: 'hours', label: $gettext('Hours'), sortable: false},
     {key: 'separation', label: $gettext('Separation'), sortable: false},
 ];
@@ -541,6 +746,7 @@ const daypartListProvider = useApiItemProvider(
 
 const relistWheels = () => {
     void listItemProvider.refresh();
+    void refreshOverviewCounts();
 };
 
 const onWheelEditorSaved = () => {
@@ -550,6 +756,7 @@ const onWheelEditorSaved = () => {
 
 const relistTemplates = () => {
     void templateListProvider.refresh();
+    void refreshOverviewCounts();
 };
 
 const onTemplateEditorSaved = () => {
@@ -562,16 +769,13 @@ const onTemplateEditorSaved = () => {
 const relistDayparts = () => {
     void daypartListProvider.refresh();
     void listItemProvider.refresh();
+    void refreshOverviewCounts();
 };
 
 const onDaypartEditorSaved = () => {
     relistDayparts();
     closeDaypartEditor();
 };
-
-const $previewModal = useTemplateRef('$previewModal');
-const $analyticsModal = useTemplateRef('$analyticsModal');
-const $generateModal = useTemplateRef('$generateModal');
 
 const formatHour = (hour: number) => formatHourOfDayToAmPm(hour);
 
@@ -616,6 +820,8 @@ const doDeleteSelected = async () => {
             )
         );
         selectedWheels.value = [];
+        activeWheel.value = null;
+        closeWheelEditor();
         relistWheels();
     } catch {
         notifyError($gettext('Could not delete selected clock wheels.'));
@@ -678,153 +884,3 @@ const onImportFile = async (event: Event) => {
     }
 };
 </script>
-
-<style scoped>
-.clock-wheels-page {
-    overflow: visible;
-}
-
-.clock-wheels-page-header {
-    padding: 1rem 1.25rem;
-}
-
-.clock-wheels-page-body {
-    min-width: 0;
-}
-
-.clock-workflow-guide {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr auto 1fr;
-    align-items: stretch;
-    gap: .7rem;
-    padding: .8rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .65rem;
-    background: color-mix(in srgb, var(--bs-tertiary-bg) 65%, transparent);
-}
-
-.clock-workflow-guide__step {
-    display: flex;
-    align-items: center;
-    gap: .65rem;
-    min-width: 0;
-    padding: .45rem .55rem;
-}
-
-.clock-workflow-guide__step div {
-    display: grid;
-    min-width: 0;
-}
-
-.clock-workflow-guide__step span:not(.clock-workflow-guide__number) {
-    color: var(--bs-secondary-color);
-    font-size: .78rem;
-}
-
-.clock-workflow-guide__number {
-    display: inline-grid;
-    place-items: center;
-    width: 1.8rem;
-    height: 1.8rem;
-    border-radius: 50%;
-    background: var(--bs-primary);
-    color: var(--bs-white);
-    font-size: .78rem;
-    font-weight: 800;
-    flex: 0 0 auto;
-}
-
-.clock-workflow-guide__arrow {
-    align-self: center;
-    color: var(--bs-secondary-color);
-    font-weight: 800;
-}
-
-.clock-workspace-list-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-    padding: .9rem 1rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .65rem;
-    background: var(--bs-tertiary-bg);
-}
-
-.clock-workspace-list-header > div:first-child {
-    min-width: 0;
-}
-
-.min-width-0 {
-    min-width: 0;
-}
-
-.clock-wheel-chevron {
-    opacity: .35;
-    transition: opacity 0.15s, transform 0.15s;
-}
-
-tr:hover .clock-wheel-chevron {
-    opacity: 1;
-    transform: translateX(.15rem);
-}
-
-@media (max-width: 991.98px) {
-    .clock-workflow-guide {
-        grid-template-columns: 1fr;
-        gap: .2rem;
-    }
-
-    .clock-workflow-guide__arrow {
-        display: none;
-    }
-
-    .clock-workflow-guide__step {
-        padding: .35rem .25rem;
-    }
-}
-
-@media (max-width: 767.98px) {
-    .clock-wheels-page-body {
-        padding: .75rem;
-    }
-
-    .clock-wheels-primary-tabs {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        overflow-y: hidden;
-        scrollbar-width: thin;
-    }
-
-    .clock-wheels-primary-tabs :deep(.nav-link) {
-        white-space: nowrap;
-    }
-
-    .clock-workspace-list-header {
-        flex-direction: column;
-        align-items: stretch;
-        padding: .8rem;
-    }
-
-    .clock-workspace-list-header > .btn {
-        width: 100%;
-    }
-
-    .clock-wheels-toolbar {
-        width: 100%;
-    }
-
-    .clock-wheels-toolbar > :not(input) {
-        flex: 1 1 calc(50% - .5rem);
-        min-width: 8.5rem;
-    }
-
-    .clock-wheel-list-actions {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: .3rem;
-        width: 100%;
-    }
-}
-</style>
