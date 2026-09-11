@@ -26,7 +26,7 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         $config = $event->buildConfiguration();
 
         self::assertStringContainsString(
-            '# Dedicated native source for an AutoDJ-only rigid scheduled programme.',
+            '# Dedicated native source for a rigid scheduled programme.',
             $config,
         );
         self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
@@ -48,6 +48,26 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         self::assertStringNotContainsString('broadcast_clock_release_when_fresh', $config);
         self::assertStringNotContainsString('azuracast.discard_autodj_current()', $config);
         self::assertStringNotContainsString('source.skip(source.effective(', $config);
+    }
+
+    public function testStrictConfiguredSongPlaylistUsesSeparateRigidSource(): void
+    {
+        [$station] = $this->makeScheduledProgram(true);
+        $station->backend_config->write_playlists_to_liquidsoap = true;
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        // A configured Songs playlist may also exist inside the normal radio
+        // graph. The rigid wall-clock lane must use a different playlist()
+        // instance so one source is never shared below and above stretch/cross.
+        self::assertStringContainsString(
+            '# Dedicated native source for a rigid scheduled programme.',
+            $config,
+        );
+        self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
+        self::assertStringContainsString('id="rigid_schedule_runtime"', $config);
     }
 
     public function testFlexibleScheduleDoesNotWrapOrdinaryRadioPath(): void
