@@ -72,24 +72,35 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
             if ($usesConfiguredNativeSource) {
                 // Mirror ConfigWriter's native-variable collision handling across
-                // every playlist it writes, not only the rigid ones.
-                $playlistVarName = ConfigWriter::getPlaylistVariableName($playlist);
-                if (in_array($playlistVarName, $playlistVarNames, true)) {
-                    $playlistVarName .= '_' . $playlist->id;
+                // every playlist it writes, even though rigid Songs playlists get
+                // their own dedicated source below. Tracking the configured name
+                // keeps the collision calculation consistent with ConfigWriter.
+                $configuredPlaylistVarName = ConfigWriter::getPlaylistVariableName($playlist);
+                if (in_array($configuredPlaylistVarName, $playlistVarNames, true)) {
+                    $configuredPlaylistVarName .= '_' . $playlist->id;
                 }
-                $playlistVarNames[] = $playlistVarName;
-            } elseif ([] !== $rigidSchedules && PlaylistSources::Songs === $playlist->source) {
-                // A strict-start Songs playlist may be AutoDJ-only. The outer
-                // rigid lane still needs a native source to own the wall clock,
-                // so create one from the playlist file maintained for Songs.
-                $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
-                $playlistVarName = 'rigid_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
-                $this->writeDedicatedSongSource($event, $playlist, $playlistVarName);
-            } else {
-                continue;
+                $playlistVarNames[] = $configuredPlaylistVarName;
             }
 
             if ([] === $rigidSchedules) {
+                continue;
+            }
+
+            if (PlaylistSources::Songs === $playlist->source) {
+                // Never reuse ConfigWriter's native Songs source in the outer
+                // rigid wall-clock lane. That same source already lives below the
+                // stretch -> cross processing chain; reusing it again above that
+                // chain forces Liquidsoap to unify the nested cross/stretch clocks
+                // and crashes startup with Error 11. A separate playlist() source
+                // keeps the two clock domains independent while preserving strict
+                // starts, Stretch/Squeeze and crossfade.
+                $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
+                $playlistVarName = 'rigid_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
+                $this->writeDedicatedSongSource($event, $playlist, $playlistVarName);
+            } elseif ($usesConfiguredNativeSource) {
+                // Non-Songs native sources retain the existing behavior.
+                $playlistVarName = $configuredPlaylistVarName;
+            } else {
                 continue;
             }
 
@@ -192,7 +203,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
         ];
 
         $event->appendLines([
-            '# Dedicated native source for an AutoDJ-only rigid scheduled programme.',
+            '# Dedicated native source for a rigid scheduled programme.',
             $playlistVarName . ' = playlist(' . implode(',', $playlistParams) . ')',
         ]);
 
