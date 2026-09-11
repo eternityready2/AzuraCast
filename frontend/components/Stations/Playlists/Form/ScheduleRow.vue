@@ -100,12 +100,29 @@
                 <form-markup
                     :id="'edit_form_scheduling_'+index"
                     class="col-xl-6"
-                    :label="$gettext('Scheduling Mode')"
                 >
-                    <div class="mode-grid">
+                    <template #label>
+                        <span class="field-label-with-help">
+                            {{ $gettext('Scheduling Mode') }}
+                            <span
+                                class="info-help"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="schedulingHelp"
+                                :title="schedulingHelp"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
+                    </template>
+
+                    <div class="mode-grid scheduling-mode-grid">
                         <label
-                            class="mode-option"
-                            :class="{'is-active': schedulingMode === 'flexible'}"
+                            class="mode-option mode-option-scheduling"
+                            :class="{
+                                'is-active': schedulingMode === 'flexible',
+                                'is-muted': schedulingMode !== 'flexible'
+                            }"
                         >
                             <input
                                 :id="'scheduling_flexible_'+index"
@@ -114,15 +131,25 @@
                                 type="radio"
                                 value="flexible"
                             >
-                            <span>
-                                <strong>{{ $gettext('Flexible') }}</strong>
-                                <small>{{ $gettext('AutoDJ prefers natural song endings before this window. The playlist start behavior below still decides whether the show interrupts.') }}</small>
+                            <span class="mode-copy">
+                                <span class="mode-title-row">
+                                    <strong>{{ $gettext('Flexible') }}</strong>
+                                    <span class="mode-badge">{{ $gettext('Default') }}</span>
+                                </span>
+                                <small>{{ $gettext('Normal AzuraCast-style schedule timing. This schedule row does not add its own hard-start override.') }}</small>
+                                <ul class="mode-detail-list">
+                                    <li>{{ $gettext('Start Behavior below still decides whether the playlist normally interrupts.') }}</li>
+                                    <li>{{ $gettext('Best for normal music flow and schedules that do not need a special exact-time override.') }}</li>
+                                </ul>
                             </span>
                         </label>
 
                         <label
-                            class="mode-option"
-                            :class="{'is-active': schedulingMode === 'strict'}"
+                            class="mode-option mode-option-scheduling"
+                            :class="{
+                                'is-active': schedulingMode === 'strict',
+                                'is-muted': schedulingMode !== 'strict'
+                            }"
                         >
                             <input
                                 :id="'scheduling_strict_'+index"
@@ -131,20 +158,48 @@
                                 type="radio"
                                 value="strict"
                             >
-                            <span>
-                                <strong>{{ $gettext('Strict') }}</strong>
-                                <small>{{ $gettext('Make this specific schedule a hard wall-clock start. It may cut current audio at the scheduled start if needed.') }}</small>
+                            <span class="mode-copy">
+                                <span class="mode-title-row">
+                                    <strong>{{ $gettext('Strict / Exact Time') }}</strong>
+                                    <span class="mode-badge mode-badge-strict">{{ $gettext('Exact') }}</span>
+                                </span>
+                                <small>{{ $gettext('Adds a hard wall-clock start override to this specific schedule row.') }}</small>
+                                <ul class="mode-detail-list">
+                                    <li>{{ $gettext('May cut current audio at the scheduled start if needed.') }}</li>
+                                    <li>{{ $gettext('Overrides a Rotation / wait start for this schedule time only.') }}</li>
+                                </ul>
                             </span>
                         </label>
                     </div>
+
+                    <p class="mode-explainer mb-0">
+                        {{ schedulingMode === 'strict'
+                            ? $gettext('Strict is active for this schedule row. Other playlist playback controls remain available and are not removed.')
+                            : $gettext('Flexible is active by default. Strict-only behavior is inactive until you select Strict / Exact Time.')
+                        }}
+                    </p>
                 </form-markup>
 
                 <form-markup
                     :id="'edit_form_repeat_mode_'+index"
                     class="col-xl-6"
-                    :label="$gettext('Repeat During Scheduled Window')"
                 >
-                    <div class="mode-grid">
+                    <template #label>
+                        <span class="field-label-with-help">
+                            {{ $gettext('Repeat During Scheduled Window') }}
+                            <span
+                                class="info-help"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="repeatHelp"
+                                :title="repeatHelp"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
+                    </template>
+
+                    <div class="mode-stack">
                         <label
                             class="mode-option"
                             :class="{'is-active': repeatMode === 'once'}"
@@ -190,7 +245,18 @@
                             type="checkbox"
                         >
                         <span>
-                            <strong>{{ $gettext('Block listener requests while this schedule is active') }}</strong>
+                            <span class="option-title-with-help">
+                                <strong>{{ $gettext('Block listener requests while this schedule is active') }}</strong>
+                                <span
+                                    class="info-help"
+                                    tabindex="0"
+                                    role="img"
+                                    :aria-label="requestHelp"
+                                    :title="requestHelp"
+                                >
+                                    <icon-ic-info />
+                                </span>
+                            </span>
                             <small>{{ $gettext('Requests remain queued, but the automatic request queue will not interrupt this scheduled window.') }}</small>
                         </span>
                     </label>
@@ -199,7 +265,18 @@
                 <div class="col-12">
                     <details class="calendar-rules">
                         <summary>
-                            <strong>{{ $gettext('Calendar Repeat & Date Rules') }}</strong>
+                            <span class="option-title-with-help">
+                                <strong>{{ $gettext('Calendar Repeat & Date Rules') }}</strong>
+                                <span
+                                    class="info-help"
+                                    tabindex="0"
+                                    role="img"
+                                    :aria-label="calendarHelp"
+                                    :title="calendarHelp"
+                                >
+                                    <icon-ic-info />
+                                </span>
+                            </span>
                             <small>{{ $gettext('Weekly, bi-weekly, monthly and limited-occurrence scheduling.') }}</small>
                         </summary>
 
@@ -294,6 +371,7 @@ import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
 import FormGroupSelect from "~/components/Form/FormGroupSelect.vue";
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useAppScopedRegle} from "~/vendor/regle.ts";
+import IconIcInfo from "~icons/ic/baseline-info";
 import IconIcRemove from "~icons/ic/baseline-remove";
 
 interface PlaylistScheduleRow {
@@ -337,6 +415,11 @@ const isMonthlyDayOfWeekPattern = computed(
 const requiresDaysOfWeek = computed(() => !isMonthlyDatePattern.value);
 
 const {$gettext} = useTranslate();
+
+const schedulingHelp = $gettext('Flexible is the normal/default schedule behavior. Strict / Exact Time adds a per-schedule hard-start override. Playlist-wide Start Behavior and End Behavior remain separate controls below.');
+const repeatHelp = $gettext('Play once prevents a second playlist cycle inside this scheduled window. Repeat allows another cycle while the same window is still active.');
+const requestHelp = $gettext('This blocks automatic listener-request playback only while this schedule is active. Requests remain queued for later.');
+const calendarHelp = $gettext('These rules control which calendar occurrences of this scheduled time are active. They do not change Flexible versus Strict playback behavior.');
 
 const schedulingMode = computed({
     get: (): 'flexible' | 'strict' => row.value.strict_start ? 'strict' : 'flexible',
@@ -471,6 +554,12 @@ const doRemove = () => {
     gap: .65rem;
 }
 
+.mode-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: .65rem;
+}
+
 .mode-option,
 .request-option {
     display: flex;
@@ -482,6 +571,7 @@ const doRemove = () => {
     border-radius: .65rem;
     background: var(--bs-tertiary-bg);
     cursor: pointer;
+    transition: opacity .15s ease, border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
 .mode-option.is-active {
@@ -490,9 +580,83 @@ const doRemove = () => {
     box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .1);
 }
 
+.mode-option-scheduling.is-muted {
+    opacity: .48;
+    background: rgba(108, 117, 125, .06);
+}
+
+.mode-option-scheduling.is-muted:hover,
+.mode-option-scheduling.is-muted:focus-within {
+    opacity: .82;
+}
+
 .mode-option input,
 .request-option input {
     margin-top: .2rem;
+}
+
+.mode-copy {
+    min-width: 0;
+}
+
+.mode-title-row,
+.option-title-with-help,
+.field-label-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.mode-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: .08rem .42rem;
+    border-radius: 999px;
+    background: rgba(13, 110, 253, .14);
+    color: #2688ff;
+    font-size: .65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
+
+.mode-badge-strict {
+    background: rgba(220, 53, 69, .14);
+    color: var(--bs-danger-text-emphasis);
+}
+
+.mode-detail-list {
+    margin: .5rem 0 0;
+    padding-left: 1.1rem;
+    color: var(--bs-secondary-color);
+    font-size: .76rem;
+    line-height: 1.4;
+}
+
+.mode-explainer {
+    margin-top: .6rem;
+    color: var(--bs-secondary-color);
+    font-size: .76rem;
+    line-height: 1.4;
+}
+
+.info-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    flex: 0 0 1.25rem;
+    border-radius: 50%;
+    color: #2688ff;
+    cursor: help;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.info-help:focus {
+    outline: 2px solid rgba(38, 136, 255, .45);
+    outline-offset: 2px;
 }
 
 .mode-option strong,
