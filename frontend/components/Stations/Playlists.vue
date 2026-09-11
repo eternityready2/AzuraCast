@@ -188,7 +188,7 @@
                                     <button
                                         type="button"
                                         class="btn btn-primary"
-                                        @click="doEdit(item.links.self)"
+                                        @click="doEdit(item.id)"
                                     >
                                         {{ $gettext('Edit') }}
                                     </button>
@@ -322,12 +322,6 @@
         </div>
     </section>
 
-    <edit-modal
-        ref="$editModal"
-        :create-url="listUrl"
-        @relist="() => relist()"
-        @needs-restart="() => mayNeedRestart()"
-    />
     <reorder-modal ref="$reorderModal" />
     <queue-modal ref="$queueModal" />
     <import-modal ref="$importModal" @relist="() => relist()" />
@@ -347,6 +341,7 @@
 <script setup lang="ts">
 import {toRefs} from "@vueuse/core";
 import {ref, useTemplateRef} from "vue";
+import {useRouter} from "vue-router";
 import AddButton from "~/components/Common/AddButton.vue";
 import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -356,7 +351,6 @@ import PlaylistSourceIcon from "~/components/Stations/Common/PlaylistSourceIcon.
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import ApplyToModal from "~/components/Stations/Playlists/ApplyToModal.vue";
 import CloneModal from "~/components/Stations/Playlists/CloneModal.vue";
-import EditModal from "~/components/Stations/Playlists/EditModal.vue";
 import ImportModal from "~/components/Stations/Playlists/ImportModal.vue";
 import ImportPlaylistConfigModal from "~/components/Stations/Playlists/ImportPlaylistConfigModal.vue";
 import PlaylistGroupingTab from "~/components/Stations/Playlists/PlaylistGroupingTab.vue";
@@ -366,7 +360,6 @@ import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
 import {useApiItemProvider} from "~/functions/dataTable/useApiItemProvider.ts";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
 import useConfirmAndDelete from "~/functions/useConfirmAndDelete";
-import useHasEditModal from "~/functions/useHasEditModal";
 import {useMayNeedRestart} from "~/functions/useMayNeedRestart";
 import {useStationData} from "~/functions/useStationQuery.ts";
 import {useAxios} from "~/vendor/axios";
@@ -377,6 +370,7 @@ import IconBiExpand from "~icons/bi/chevron-expand";
 import IconBiCloudDownload from "~icons/bi/cloud-download";
 import IconBiCloudUpload from "~icons/bi/cloud-upload";
 
+const router = useRouter();
 const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/playlists');
 const exportPlaylistsConfigUrl = getStationApiUrl('/playlists/export-config');
@@ -413,8 +407,11 @@ const relist = () => {
     void listItemProvider.refresh();
 };
 
-const $editModal = useTemplateRef('$editModal');
-const {doCreate, doEdit} = useHasEditModal($editModal);
+const doCreate = () => router.push({name: 'stations:playlists:new'});
+const doEdit = (playlistId: number) => router.push({
+    name: 'stations:playlists:edit',
+    params: {playlist_id: playlistId},
+});
 
 const $reorderModal = useTemplateRef('$reorderModal');
 const doReorder = (url: string) => {
