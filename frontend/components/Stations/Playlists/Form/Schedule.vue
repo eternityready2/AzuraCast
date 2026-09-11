@@ -210,6 +210,10 @@ const setBackendOption = (option: string, enabled: boolean) => {
 };
 
 const applyTimingBundle = (mode: 'flexible' | 'strict') => {
+    if (scheduleItems.value.length === 0) {
+        return;
+    }
+
     if (mode === 'strict') {
         setBackendOption('interrupt', true);
         setBackendOption('allow_overrun', false);
