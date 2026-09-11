@@ -297,7 +297,7 @@
                         <td class="text-center align-middle drag-handle text-muted">
                             ⋮⋮
                         </td>
-                        <td>
+                        <td :data-label="$gettext('Position (m:s)')">
                             <input
                                 :value="formatPosition(entry.position_seconds)"
                                 type="text"
@@ -306,7 +306,7 @@
                                 @change="onPositionChange(entry, $event)"
                             >
                         </td>
-                        <td>
+                        <td :data-label="$gettext('Type')">
                             <select
                                 v-model="entry.type"
                                 class="form-select form-select-sm"
@@ -321,7 +321,7 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td :data-label="$gettext('Category')">
                             <select
                                 v-model="entry.category_id"
                                 class="form-select form-select-sm"
@@ -336,7 +336,7 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td :data-label="$gettext('Algorithm')">
                             <select
                                 v-model="entry.algorithm"
                                 class="form-select form-select-sm"
@@ -364,7 +364,7 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td :data-label="$gettext('Max sec')">
                             <input
                                 v-model.number="entry.duration_seconds"
                                 type="number"
@@ -397,7 +397,10 @@
                                 >
                             </div>
                         </td>
-                        <td class="text-center align-middle">
+                        <td
+                            class="text-center align-middle"
+                            :data-label="$gettext('Actions')"
+                        >
                             <div class="btn-group btn-group-sm w-100 justify-content-center">
                                 <button
                                     type="button"
@@ -708,5 +711,136 @@ const focusRow = (index: number) => {
 .clock-wheel-hour-distribution-card__icon {
     color: var(--bs-primary);
     font-size: 0.6rem;
+}
+
+@media (max-width: 767.98px) {
+    .clock-wheel-hour-distribution-card {
+        width: 100%;
+        max-width: 100%;
+        padding: .85rem 1rem;
+    }
+
+    .clock-wheel-timeline {
+        min-width: 0;
+    }
+
+    .clock-wheel-timeline__track {
+        width: 100%;
+        margin-bottom: 1.1rem;
+    }
+
+    .clock-wheel-entries-table {
+        display: block;
+        width: 100%;
+        border: 0;
+        background: transparent;
+    }
+
+    .clock-wheel-entries-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .clock-wheel-entries-table tbody {
+        display: grid;
+        gap: .85rem;
+        width: 100%;
+    }
+
+    .clock-wheel-entries-table tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: .7rem;
+        width: 100%;
+        padding: .85rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+    }
+
+    .clock-wheel-entries-table td {
+        display: grid;
+        grid-template-columns: minmax(6.25rem, 38%) minmax(0, 1fr);
+        align-items: center;
+        gap: .65rem;
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        border: 0;
+        text-align: left !important;
+    }
+
+    .clock-wheel-entries-table td::before {
+        content: attr(data-label);
+        color: var(--bs-secondary-color);
+        font-size: .72rem;
+        font-weight: 700;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+    }
+
+    .clock-wheel-entries-table td:first-child {
+        display: flex;
+        justify-content: center;
+        min-height: 1.5rem;
+        padding-bottom: .35rem;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .clock-wheel-entries-table td:first-child::before,
+    .clock-wheel-entries-table td[colspan]::before {
+        content: none;
+    }
+
+    .clock-wheel-entries-table td[colspan] {
+        display: block;
+        padding: .5rem;
+        text-align: center !important;
+    }
+
+    .clock-wheel-entries-table :is(.form-control, .form-select) {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .clock-wheel-entries-table .btn-group {
+        width: 100% !important;
+        justify-content: flex-end !important;
+    }
+
+    .clock-wheel-entries-table .cw-action-btn {
+        flex: 1 1 0;
+        width: auto;
+        min-width: 2.75rem;
+        max-width: 4rem;
+        min-height: 2.5rem;
+    }
+}
+
+@media (max-width: 419.98px) {
+    .clock-wheel-entries-table td {
+        grid-template-columns: 1fr;
+        gap: .3rem;
+    }
+
+    .clock-wheel-entries-table td:first-child {
+        display: flex;
+    }
+
+    .clock-wheel-entries-table td:last-child .btn-group {
+        justify-content: stretch !important;
+    }
+
+    .clock-wheel-entries-table .cw-action-btn {
+        max-width: none;
+    }
 }
 </style>
