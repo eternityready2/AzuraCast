@@ -105,7 +105,7 @@
                         <span class="preset-icon"><icon-ic-play-arrow /></span>
                         <span class="preset-copy">
                             <strong>{{ $gettext('Scheduled Show / Programme') }}</strong>
-                            <small>{{ $gettext('Starts on time • Plays once • Stops at boundary') }}</small>
+                            <small>{{ $gettext('Strict exact start • Plays once • Stops at boundary') }}</small>
                         </span>
                     </button>
 
@@ -216,7 +216,7 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         setBackendOption('allow_overrun', false);
         scheduleItems.value.forEach((item) => {
             item.loop_once = true;
-            item.strict_start = false;
+            item.strict_start = true;
         });
         return;
     }
