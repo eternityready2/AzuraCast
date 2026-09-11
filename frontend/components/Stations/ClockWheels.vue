@@ -1,34 +1,50 @@
 <template>
     <section
-        class="card"
+        class="card clock-wheels-page"
         role="region"
         aria-labelledby="hdr_clock_wheels"
     >
-        <div class="card-header text-bg-primary">
-            <div class="row align-items-center">
-                <div class="col-md-6">
+        <div class="card-header text-bg-primary clock-wheels-page-header">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div>
                     <h2
                         id="hdr_clock_wheels"
-                        class="card-title"
+                        class="card-title mb-1"
                     >
                         {{ $gettext('Manage Clock Wheels') }}
                     </h2>
+                    <p class="mb-0 opacity-75 small">
+                        {{ $gettext('Build hourly clocks, reuse templates, manage dayparts, preview output and audit playout from one workspace.') }}
+                    </p>
                 </div>
             </div>
         </div>
 
-        <div class="card-body">
+        <div class="card-body clock-wheels-page-body">
             <tabs
-                nav-tabs-class="nav-tabs"
+                nav-tabs-class="nav-tabs clock-wheels-primary-tabs"
                 content-class="mt-3"
                 destroy-on-hide
             >
                 <tab :label="$gettext('Wheels')">
-                    <div class="card-body-flush">
-                        <div class="card-body buttons d-flex flex-wrap align-items-center">
+                    <clock-wheel-inline-editor
+                        v-if="wheelEditorOpen"
+                        :key="wheelEditorKey"
+                        :create-url="listUrl"
+                        :templates-url="templatesUrl"
+                        :record-url="wheelEditorUrl"
+                        @saved="onWheelEditorSaved"
+                        @cancel="closeWheelEditor"
+                    />
+
+                    <div
+                        v-else
+                        class="card-body-flush"
+                    >
+                        <div class="clock-wheels-toolbar card-body d-flex flex-wrap align-items-center gap-2">
                             <add-button
                                 :text="$gettext('Add Clock Wheel')"
-                                @click="doCreate"
+                                @click="openNewWheelEditor"
                             />
                             <button
                                 type="button"
@@ -71,7 +87,7 @@
                         >
                             <template #cell(actions)="{ item }">
                                 <div
-                                    class="btn-group btn-group-sm"
+                                    class="btn-group btn-group-sm clock-wheel-list-actions"
                                     @click.stop
                                 >
                                     <button
@@ -105,7 +121,7 @@
                                     class="d-flex align-items-center gap-3 clock-wheel-row"
                                     role="button"
                                     style="cursor: pointer;"
-                                    @click="doEdit(item.links.self)"
+                                    @click="openWheelEditor(item.links.self)"
                                 >
                                     <h5 class="m-0 flex-grow-1">
                                         {{ item.name }}
@@ -248,13 +264,6 @@
         </div>
     </section>
 
-    <edit-modal
-        ref="$editModal"
-        :create-url="listUrl"
-        :templates-url="templatesUrl"
-        @relist="relistWheels"
-    />
-
     <template-edit-modal
         ref="$templateEditModal"
         :create-url="templatesUrl"
@@ -291,7 +300,7 @@ import useHasEditModal from '~/functions/useHasEditModal';
 import {useApiItemProvider} from '~/functions/dataTable/useApiItemProvider.ts';
 import {QueryKeys, queryKeyWithStation} from '~/entities/Queries.ts';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
-import EditModal from '~/components/Stations/ClockWheels/EditModal.vue';
+import ClockWheelInlineEditor from '~/components/Stations/ClockWheels/InlineEditor.vue';
 import TemplateEditModal from '~/components/Stations/ClockWheels/TemplateEditModal.vue';
 import DaypartEditModal from '~/components/Stations/ClockWheels/DaypartEditModal.vue';
 import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
@@ -318,6 +327,27 @@ const {notifySuccess, notifyError} = useNotify();
 const {axios} = useAxios();
 const {confirmDelete} = useDialog();
 const syncingDaypartId = ref<number | null>(null);
+
+const wheelEditorOpen = ref(false);
+const wheelEditorUrl = ref<string | null>(null);
+const wheelEditorKey = ref(0);
+
+const openNewWheelEditor = () => {
+    wheelEditorUrl.value = null;
+    wheelEditorKey.value += 1;
+    wheelEditorOpen.value = true;
+};
+
+const openWheelEditor = (recordUrl: string) => {
+    wheelEditorUrl.value = recordUrl;
+    wheelEditorKey.value += 1;
+    wheelEditorOpen.value = true;
+};
+
+const closeWheelEditor = () => {
+    wheelEditorOpen.value = false;
+    wheelEditorUrl.value = null;
+};
 
 type ClockWheelRow = {
     id: number;
@@ -388,6 +418,11 @@ const relistWheels = () => {
     void listItemProvider.refresh();
 };
 
+const onWheelEditorSaved = () => {
+    relistWheels();
+    closeWheelEditor();
+};
+
 const relistTemplates = () => {
     void templateListProvider.refresh();
 };
@@ -397,14 +432,12 @@ const relistDayparts = () => {
     void listItemProvider.refresh();
 };
 
-const $editModal = useTemplateRef('$editModal');
 const $templateEditModal = useTemplateRef('$templateEditModal');
 const $daypartEditModal = useTemplateRef('$daypartEditModal');
 const $previewModal = useTemplateRef('$previewModal');
 const $analyticsModal = useTemplateRef('$analyticsModal');
 const $generateModal = useTemplateRef('$generateModal');
 
-const {doCreate, doEdit} = useHasEditModal($editModal);
 const {doCreate: doCreateTemplate, doEdit: doEditTemplate} = useHasEditModal($templateEditModal);
 const {doCreate: doCreateDaypart, doEdit: doEditDaypart} = useHasEditModal($daypartEditModal);
 
@@ -515,6 +548,18 @@ const onImportFile = async (event: Event) => {
 </script>
 
 <style scoped>
+.clock-wheels-page {
+    overflow: visible;
+}
+
+.clock-wheels-page-header {
+    padding: 1rem 1.25rem;
+}
+
+.clock-wheels-page-body {
+    min-width: 0;
+}
+
 .clock-wheel-chevron {
     opacity: 0;
     transition: opacity 0.15s;
@@ -522,5 +567,38 @@ const onImportFile = async (event: Event) => {
 
 tr:hover .clock-wheel-chevron {
     opacity: 1;
+}
+
+@media (max-width: 767.98px) {
+    .clock-wheels-page-body {
+        padding: .75rem;
+    }
+
+    .clock-wheels-primary-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .clock-wheels-primary-tabs :deep(.nav-link) {
+        white-space: nowrap;
+    }
+
+    .clock-wheels-toolbar {
+        padding: .75rem 0;
+    }
+
+    .clock-wheels-toolbar > :not(input) {
+        flex: 1 1 calc(50% - .5rem);
+        min-width: 8.5rem;
+    }
+
+    .clock-wheel-list-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: .3rem;
+        width: 100%;
+    }
 }
 </style>
