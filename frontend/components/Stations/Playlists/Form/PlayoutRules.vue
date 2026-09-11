@@ -4,7 +4,18 @@
             <div class="behavior-heading behavior-heading-start">
                 <span class="heading-icon heading-icon-start"><icon-ic-play-arrow /></span>
                 <span>
-                    <strong>{{ $gettext('2. How should it start?') }}</strong>
+                    <span class="heading-title-with-help">
+                        <strong>{{ $gettext('2. How should it start?') }}</strong>
+                        <span
+                            class="info-help"
+                            tabindex="0"
+                            role="img"
+                            :aria-label="startHelp"
+                            :title="startHelp"
+                        >
+                            <icon-ic-info />
+                        </span>
+                    </span>
                     <small>{{ $gettext('Choose what happens when the scheduled start time arrives.') }}</small>
                 </span>
             </div>
@@ -30,7 +41,18 @@
                         :value="option.value"
                     >
                     <span class="option-copy">
-                        <strong>{{ option.title }}</strong>
+                        <span class="option-title-with-help">
+                            <strong>{{ option.title }}</strong>
+                            <span
+                                class="info-help info-help-small"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="option.help"
+                                :title="option.help"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
                         <small>{{ option.description }}</small>
                         <span
                             v-if="option.recommended"
@@ -43,7 +65,7 @@
             </div>
 
             <div class="behavior-note mx-3 mb-3">
-                {{ $gettext('Scheduling Mode above is set per scheduled time. Start Behavior here applies to this playlist whenever one of its schedules becomes active.') }}
+                {{ $gettext('Scheduling Mode above is per scheduled time. Flexible leaves this playlist-wide Start Behavior in control. Strict / Exact Time adds an exact-start override for only that schedule row, even if Rotation is selected here.') }}
             </div>
         </section>
 
@@ -51,7 +73,18 @@
             <div class="behavior-heading behavior-heading-end">
                 <span class="heading-icon heading-icon-end"><icon-ic-stop /></span>
                 <span>
-                    <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
+                    <span class="heading-title-with-help">
+                        <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
+                        <span
+                            class="info-help"
+                            tabindex="0"
+                            role="img"
+                            :aria-label="endHelp"
+                            :title="endHelp"
+                        >
+                            <icon-ic-info />
+                        </span>
+                    </span>
                     <small>{{ $gettext('The end behavior is paired with the selected start style so Liquidsoap follows the setting reliably.') }}</small>
                 </span>
             </div>
@@ -81,7 +114,18 @@
                         :disabled="isEndOptionDisabled(option.value)"
                     >
                     <span class="option-copy">
-                        <strong>{{ option.title }}</strong>
+                        <span class="option-title-with-help">
+                            <strong>{{ option.title }}</strong>
+                            <span
+                                class="info-help info-help-small"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="option.help"
+                                :title="option.help"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
                         <small>{{ option.description }}</small>
                     </span>
                 </label>
@@ -89,8 +133,8 @@
 
             <div class="behavior-note mx-3 mb-3">
                 {{ startBehavior === 'wait'
-                    ? $gettext('Rotation waits for the current song at the start, so the current item is also allowed to finish at the end.')
-                    : $gettext('Programme and Priority starts use exact schedule boundaries, so they return at the scheduled end time.')
+                    ? $gettext('Rotation waits for the current song at the start, so the current item is also allowed to finish at the end. A Strict / Exact Time schedule row can still override the start time for that row.')
+                    : $gettext('Programme and Priority starts use exact playlist boundaries, so they return at the scheduled end time.')
                 }}
             </div>
         </section>
@@ -99,7 +143,18 @@
             <summary>
                 <span class="advanced-icon"><icon-ic-settings /></span>
                 <span>
-                    <strong>{{ $gettext('Special / Advanced Options (Optional)') }}</strong>
+                    <span class="heading-title-with-help">
+                        <strong>{{ $gettext('Special / Advanced Options (Optional)') }}</strong>
+                        <span
+                            class="info-help"
+                            tabindex="0"
+                            role="img"
+                            :aria-label="advancedHelp"
+                            :title="advancedHelp"
+                        >
+                            <icon-ic-info />
+                        </span>
+                    </span>
                     <small>{{ $gettext('Additional settings for unusual playlist behavior, listener-request overrides, or sponsor tracking.') }}</small>
                 </span>
             </summary>
@@ -164,6 +219,7 @@
 import {computed} from "vue";
 import {storeToRefs} from "pinia";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
+import IconIcInfo from "~icons/ic/baseline-info";
 import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
 import IconIcSettings from "~icons/ic/baseline-settings";
 import IconIcStop from "~icons/ic/baseline-stop";
@@ -178,6 +234,10 @@ withDefaults(defineProps<{
 
 const {$gettext} = useTranslate();
 const {form, r$} = storeToRefs(useStationsPlaylistsForm());
+
+const startHelp = $gettext('This is a playlist-wide AutoDJ behavior. Flexible schedule rows follow this choice. Strict / Exact Time rows add a per-row exact-start override without removing this setting.');
+const endHelp = $gettext('End behavior is playlist-wide. It controls whether the current scheduled item stops at the boundary or is allowed to finish naturally.');
+const advancedHelp = $gettext('These options remain independent. Scheduling Mode does not remove Only Play One Track, Merge, request priority, or sponsor controls.');
 
 const hasOption = (option: string) => form.value.backend_options.includes(option);
 
@@ -254,18 +314,21 @@ const startBehaviorOptions = [
         value: 'scheduled',
         title: $gettext('Start at scheduled time (Programme)'),
         description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programmes.'),
+        help: $gettext('Programme is the playlist-wide interrupt option. It starts this playlist when an active schedule begins. Strict / Exact Time is a separate per-schedule override.'),
         recommended: true,
     },
     {
         value: 'wait',
         title: $gettext('Wait for current song (Rotation)'),
         description: $gettext('Do not interrupt normal playback. Start after the current song finishes. Best for music rotation blocks.'),
+        help: $gettext('Rotation is the normal non-interrupting start. If an individual schedule row is set to Strict / Exact Time, that row can still force an exact start.'),
         recommended: false,
     },
     {
         value: 'priority',
         title: $gettext('Priority Start (News / Alert)'),
         description: $gettext('Start on schedule and also override listener requests. Best for news, alerts and time-sensitive content.'),
+        help: $gettext('Priority combines an interrupting scheduled start with priority over automatic listener requests.'),
         recommended: false,
     },
 ];
@@ -274,16 +337,19 @@ const endBehaviorOptions: Array<{
     value: 'boundary' | 'finish',
     title: string,
     description: string,
+    help: string,
 }> = [
     {
         value: 'boundary',
         title: $gettext('Stop at scheduled time'),
         description: $gettext('Return to normal programming at the scheduled end boundary. Used with Programme and Priority starts.'),
+        help: $gettext('This is the firm-end behavior. Liquidsoap returns to normal programming when the schedule window ends.'),
     },
     {
         value: 'finish',
         title: $gettext('Let current item finish (Allow Overrun)'),
         description: $gettext('Let the current track finish naturally before returning to normal programming. Used with Rotation starts.'),
+        help: $gettext('Allow Overrun prevents the schedule boundary from cutting the current item at the end of the window.'),
     },
 ];
 </script>
@@ -337,6 +403,39 @@ const endBehaviorOptions: Array<{
 
 .heading-icon-end {
     background: #dc3545;
+}
+
+.heading-title-with-help,
+.option-title-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.info-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.3rem;
+    height: 1.3rem;
+    flex: 0 0 1.3rem;
+    border-radius: 50%;
+    color: #2688ff;
+    cursor: help;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.info-help-small {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-basis: 1.15rem;
+    font-size: .9rem;
+}
+
+.info-help:focus {
+    outline: 2px solid rgba(38, 136, 255, .45);
+    outline-offset: 2px;
 }
 
 .behavior-heading strong,
