@@ -1,5 +1,24 @@
 <template>
     <div class="playout-settings">
+        <section class="auto-behavior-card mb-4">
+            <div class="auto-behavior-copy">
+                <span class="auto-behavior-kicker">{{ $gettext('Automatic Playlist Behavior') }}</span>
+                <strong>{{ detectedBehaviorLabel }}</strong>
+                <small>{{ detectedBehavior.reason }}</small>
+            </div>
+            <label class="form-check form-switch auto-behavior-switch m-0">
+                <input
+                    v-model="autoBehaviorEnabled"
+                    class="form-check-input"
+                    type="checkbox"
+                    role="switch"
+                >
+                <span class="form-check-label">
+                    {{ autoBehaviorEnabled ? $gettext('Automatic') : $gettext('Manual override') }}
+                </span>
+            </label>
+        </section>
+
         <section class="behavior-section mb-4">
             <div class="behavior-heading behavior-heading-start">
                 <span class="heading-icon heading-icon-start"><icon-ic-play-arrow /></span>
@@ -35,10 +54,11 @@
                     :class="{'is-active': startBehavior === option.value}"
                 >
                     <input
-                        v-model="startBehavior"
                         class="form-check-input"
                         type="radio"
                         :value="option.value"
+                        :checked="startBehavior === option.value"
+                        @change="selectStartBehavior(option.value)"
                     >
                     <span class="option-copy">
                         <span class="option-title-with-help">
@@ -55,10 +75,10 @@
                         </span>
                         <small>{{ option.description }}</small>
                         <span
-                            v-if="option.recommended"
+                            v-if="autoBehaviorEnabled && detectedStartBehavior === option.value"
                             class="recommended-badge"
                         >
-                            {{ $gettext('Recommended for shows') }}
+                            {{ $gettext('Automatically selected') }}
                         </span>
                     </span>
                 </label>
@@ -93,7 +113,7 @@
                 v-if="hasSchedule && unsupportedCombination"
                 class="alert alert-warning py-2 mx-3 mt-3 mb-0"
             >
-                {{ $gettext('This playlist contains a legacy start/end combination that Liquidsoap cannot honor reliably. Choose a start behavior or Quick Setup preset to normalize it.') }}
+                {{ $gettext('This playlist contains a legacy start/end combination that Liquidsoap cannot honor reliably. Choose a start behavior to normalize it.') }}
             </div>
 
             <div class="choice-grid choice-grid-end p-3">
@@ -216,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed} from "vue";
+import {computed, ref, watch} from "vue";
 import {storeToRefs} from "pinia";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
 import IconIcInfo from "~icons/ic/baseline-info";
@@ -224,9 +244,12 @@ import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
 import IconIcSettings from "~icons/ic/baseline-settings";
 import IconIcStop from "~icons/ic/baseline-stop";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form";
+import {detectPlaylistBehavior} from "~/functions/playlistBehaviorDetector";
 import {useTranslate} from "~/vendor/gettext";
 
-withDefaults(defineProps<{
+type StartBehavior = 'wait' | 'scheduled' | 'priority';
+
+const props = withDefaults(defineProps<{
     hasSchedule?: boolean,
 }>(), {
     hasSchedule: false,
@@ -234,10 +257,11 @@ withDefaults(defineProps<{
 
 const {$gettext} = useTranslate();
 const {form, r$} = storeToRefs(useStationsPlaylistsForm());
+const autoBehaviorEnabled = ref(true);
 
 const startHelp = $gettext('This is a playlist-wide AutoDJ behavior. Flexible schedule rows follow this choice. Strict / Exact Time rows add a per-row exact-start override without removing this setting.');
 const endHelp = $gettext('End behavior is playlist-wide. It controls whether the current scheduled item stops at the boundary or is allowed to finish naturally.');
-const advancedHelp = $gettext('These options remain independent. Scheduling Mode does not remove Only Play One Track, Merge, request priority, or sponsor controls.');
+const advancedHelp = $gettext('The automatic selector manages start, end and request-priority behavior. Only Play One Track, Merge and sponsor controls remain independent.');
 
 const hasOption = (option: string) => form.value.backend_options.includes(option);
 
@@ -251,34 +275,77 @@ const setOption = (option: string, enabled: boolean) => {
     form.value.backend_options = options;
 };
 
-const startBehavior = computed({
-    get: (): 'wait' | 'scheduled' | 'priority' => {
-        if (hasOption('interrupt') && hasOption('prioritize')) {
-            return 'priority';
-        }
+const applyStartBehavior = (value: StartBehavior) => {
+    setOption('interrupt', value !== 'wait');
+    setOption('prioritize', value === 'priority');
 
-        if (hasOption('interrupt')) {
-            return 'scheduled';
-        }
+    // Liquidsoap's native schedule switch uses one track-sensitivity mode
+    // for both entry and exit. Rotation keeps natural boundaries; Programme /
+    // Priority use hard boundaries.
+    setOption('allow_overrun', value === 'wait');
+};
 
-        return 'wait';
-    },
-    set: (value: 'wait' | 'scheduled' | 'priority') => {
-        setOption('interrupt', value !== 'wait');
-        setOption('prioritize', value === 'priority');
+const startBehavior = computed<StartBehavior>(() => {
+    if (hasOption('interrupt') && hasOption('prioritize')) {
+        return 'priority';
+    }
 
-        // Liquidsoap's native schedule switch uses one track-sensitivity mode
-        // for both entry and exit. Keep the UI on combinations the backend can
-        // honor deterministically: Rotation = natural boundaries; Programme /
-        // Priority = hard boundaries.
-        setOption('allow_overrun', value === 'wait');
-    },
+    if (hasOption('interrupt')) {
+        return 'scheduled';
+    }
+
+    return 'wait';
 });
+
+const detectedBehavior = computed(() => detectPlaylistBehavior({
+    name: form.value.name,
+    description: form.value.description,
+    hasSchedule: props.hasSchedule,
+    scheduleItems: form.value.schedule_items,
+}));
+
+const detectedStartBehavior = computed<StartBehavior>(() => {
+    switch (detectedBehavior.value.behavior) {
+        case 'priority':
+            return 'priority';
+        case 'programme':
+            return 'scheduled';
+        default:
+            return 'wait';
+    }
+});
+
+const detectedBehaviorLabel = computed(() => {
+    switch (detectedBehavior.value.behavior) {
+        case 'priority':
+            return $gettext('News / Alert / Priority');
+        case 'programme':
+            return $gettext('Scheduled Show / Programme');
+        default:
+            return $gettext('Music Rotation Block');
+    }
+});
+
+const selectStartBehavior = (value: StartBehavior) => {
+    autoBehaviorEnabled.value = false;
+    applyStartBehavior(value);
+};
+
+watch(
+    () => [autoBehaviorEnabled.value, detectedStartBehavior.value] as const,
+    ([enabled, behavior]) => {
+        if (enabled) {
+            applyStartBehavior(behavior);
+        }
+    },
+    {immediate: true}
+);
 
 const endBehavior = computed({
     get: (): 'boundary' | 'finish' => hasOption('allow_overrun') ? 'finish' : 'boundary',
     set: (value: 'boundary' | 'finish') => {
         if (!isEndOptionDisabled(value)) {
+            autoBehaviorEnabled.value = false;
             setOption('allow_overrun', value === 'finish');
         }
     },
@@ -296,7 +363,10 @@ const isEndOptionDisabled = (value: 'boundary' | 'finish'): boolean => {
 
 const prioritizeRequests = computed({
     get: () => hasOption('prioritize'),
-    set: (value: boolean) => setOption('prioritize', value),
+    set: (value: boolean) => {
+        autoBehaviorEnabled.value = false;
+        setOption('prioritize', value);
+    },
 });
 
 const singleTrack = computed({
@@ -309,27 +379,29 @@ const mergeTracks = computed({
     set: (value: boolean) => setOption('merge', value),
 });
 
-const startBehaviorOptions = [
+const startBehaviorOptions: Array<{
+    value: StartBehavior;
+    title: string;
+    description: string;
+    help: string;
+}> = [
     {
         value: 'scheduled',
         title: $gettext('Start at scheduled time (Programme)'),
         description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programmes.'),
         help: $gettext('Programme is the playlist-wide interrupt option. It starts this playlist when an active schedule begins. Strict / Exact Time is a separate per-schedule override.'),
-        recommended: true,
     },
     {
         value: 'wait',
         title: $gettext('Wait for current song (Rotation)'),
         description: $gettext('Do not interrupt normal playback. Start after the current song finishes. Best for music rotation blocks.'),
         help: $gettext('Rotation is the normal non-interrupting start. If an individual schedule row is set to Strict / Exact Time, that row can still force an exact start.'),
-        recommended: false,
     },
     {
         value: 'priority',
         title: $gettext('Priority Start (News / Alert)'),
         description: $gettext('Start on schedule and also override listener requests. Best for news, alerts and time-sensitive content.'),
         help: $gettext('Priority combines an interrupting scheduled start with priority over automatic listener requests.'),
-        recommended: false,
     },
 ];
 
@@ -357,6 +429,50 @@ const endBehaviorOptions: Array<{
 <style scoped>
 .playout-settings {
     padding-top: .25rem;
+}
+
+.auto-behavior-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid rgba(38, 136, 255, .35);
+    border-radius: .75rem;
+    background: rgba(38, 136, 255, .08);
+}
+
+.auto-behavior-copy {
+    min-width: 0;
+}
+
+.auto-behavior-copy strong,
+.auto-behavior-copy small,
+.auto-behavior-kicker {
+    display: block;
+}
+
+.auto-behavior-kicker {
+    margin-bottom: .15rem;
+    color: #2688ff;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.auto-behavior-copy strong {
+    font-size: 1rem;
+}
+
+.auto-behavior-copy small {
+    margin-top: .2rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.4;
+}
+
+.auto-behavior-switch {
+    flex: 0 0 auto;
 }
 
 .behavior-section {
@@ -585,6 +701,13 @@ const endBehaviorOptions: Array<{
     .choice-grid-start,
     .choice-grid-end {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .auto-behavior-card {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 </style>
