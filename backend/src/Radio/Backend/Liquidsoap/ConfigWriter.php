@@ -774,13 +774,11 @@ LIQ;
             # Log current metadata for debugging.
             source.methods(radio).on_metadata(synchronous=false, azuracast.log_meta)
 
-            # Clock Wheel stretch/squeeze: pitch-preserving time-stretch, ratio computed
-            # in PHP (safe +/-5%), passed through the 'liq_stretch_ratio' request annotation.
-            clock_wheel_stretch_ratio = ref(1.0)
-            source.methods(radio).on_track(synchronous=false, fun (m) -> begin
-              clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
-            end)
-            radio = stretch(ratio={clock_wheel_stretch_ratio()}, radio)
+            # Clock-wheel stretch is intentionally disabled here. Liquidsoap's
+            # stretch() operator creates its own clock, and nesting it with the
+            # crossfade clock causes a fatal "Cannot unify two nested clocks"
+            # startup error. Keep the annotation/calculation code in place so
+            # the feature can be restored later with a clock-safe topology.
 
             # Apply crossfade.
             radio = azuracast.apply_crossfade(radio)
@@ -1038,7 +1036,7 @@ LIQ;
         // Configure the outbound broadcast.
         $hlsStreams = [];
 
-        // Build the HLS stream encoder destinations.
+        // Build an aggregate source composed of the various encoders.
         foreach ($station->hls_streams as $hlsStream) {
             $streamVarName = self::cleanUpVarName($hlsStream->name);
 
@@ -1551,10 +1549,6 @@ LIQ;
 
         $outputParams[] = 'public = ' . ($source->isPublic ? 'true' : 'false');
         $outputParams[] = 'encoding = ' . self::toRawString($charset);
-
-        if (StreamProtocols::Https === $source->protocol) {
-            $outputParams[] = 'transport = https_transport';
-        }
 
         $sendIcyMetadata = $encoding->format->sendIcyMetadata();
         if (null !== $sendIcyMetadata) {
