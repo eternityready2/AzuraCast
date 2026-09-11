@@ -283,7 +283,7 @@
                     <tr v-if="entries.length === 0">
                         <td
                             colspan="7"
-                            class="text-center text-muted py-3"
+                            class="text-center text-muted py-3 cw-empty-row"
                         >
                             {{ $gettext('No Clockwheel Entries found.') }}
                         </td>
@@ -294,10 +294,16 @@
                         :class="{ 'table-warning': rowHasWarning(index) }"
                         :data-entry-index="index"
                     >
-                        <td class="text-center align-middle drag-handle text-muted">
+                        <td
+                            class="text-center align-middle drag-handle text-muted cw-drag-cell"
+                            :data-label="$gettext('Move')"
+                        >
                             ⋮⋮
                         </td>
-                        <td>
+                        <td
+                            class="cw-field"
+                            :data-label="$gettext('Position')"
+                        >
                             <input
                                 :value="formatPosition(entry.position_seconds)"
                                 type="text"
@@ -306,7 +312,10 @@
                                 @change="onPositionChange(entry, $event)"
                             >
                         </td>
-                        <td>
+                        <td
+                            class="cw-field"
+                            :data-label="$gettext('Type')"
+                        >
                             <select
                                 v-model="entry.type"
                                 class="form-select form-select-sm"
@@ -321,7 +330,10 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td
+                            class="cw-field"
+                            :data-label="$gettext('Category')"
+                        >
                             <select
                                 v-model="entry.category_id"
                                 class="form-select form-select-sm"
@@ -336,7 +348,10 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td
+                            class="cw-field"
+                            :data-label="$gettext('Algorithm')"
+                        >
                             <select
                                 v-model="entry.algorithm"
                                 class="form-select form-select-sm"
@@ -364,7 +379,10 @@
                                 </option>
                             </select>
                         </td>
-                        <td>
+                        <td
+                            class="cw-field"
+                            :data-label="$gettext('Max sec')"
+                        >
                             <input
                                 v-model.number="entry.duration_seconds"
                                 type="number"
@@ -397,7 +415,10 @@
                                 >
                             </div>
                         </td>
-                        <td class="text-center align-middle">
+                        <td
+                            class="text-center align-middle cw-actions"
+                            :data-label="$gettext('Actions')"
+                        >
                             <div class="btn-group btn-group-sm w-100 justify-content-center">
                                 <button
                                     type="button"
@@ -708,5 +729,123 @@ const focusRow = (index: number) => {
 .clock-wheel-hour-distribution-card__icon {
     color: var(--bs-primary);
     font-size: 0.6rem;
+}
+
+@media (max-width: 767.98px) {
+    .clock-wheel-hour-distribution-card {
+        max-width: none;
+        padding: .9rem 1rem;
+    }
+
+    .clock-wheel-timeline {
+        padding-bottom: .4rem;
+    }
+
+    .clock-wheel-timeline > small {
+        line-height: 1.4;
+    }
+
+    .clock-wheel-entries-table {
+        display: block;
+        width: 100%;
+        border: 0;
+        background: transparent;
+    }
+
+    .clock-wheel-entries-table thead {
+        display: none;
+    }
+
+    .clock-wheel-entries-table tbody {
+        display: block;
+        width: 100%;
+    }
+
+    .clock-wheel-entries-table tr {
+        display: block;
+        width: 100%;
+        padding: .75rem;
+        margin-bottom: .85rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .7rem;
+        background: var(--bs-body-bg);
+        box-shadow: 0 .08rem .25rem rgba(0, 0, 0, .06);
+    }
+
+    .clock-wheel-entries-table tr.table-warning {
+        background: var(--bs-warning-bg-subtle);
+    }
+
+    .clock-wheel-entries-table td {
+        display: grid;
+        grid-template-columns: minmax(6.75rem, 34%) minmax(0, 1fr);
+        align-items: center;
+        gap: .6rem;
+        width: 100%;
+        padding: .38rem 0;
+        border: 0;
+        text-align: left !important;
+    }
+
+    .clock-wheel-entries-table td::before {
+        content: attr(data-label);
+        min-width: 0;
+        color: var(--bs-secondary-color);
+        font-size: .7rem;
+        font-weight: 750;
+        letter-spacing: .045em;
+        line-height: 1.2;
+        text-transform: uppercase;
+    }
+
+    .clock-wheel-entries-table .cw-drag-cell {
+        grid-template-columns: minmax(6.75rem, 34%) minmax(0, 1fr);
+        padding-top: 0;
+        padding-bottom: .5rem;
+        border-bottom: 1px solid var(--bs-border-color);
+        font-size: 1.15rem;
+        text-align: left !important;
+    }
+
+    .clock-wheel-entries-table .cw-field > .form-control,
+    .clock-wheel-entries-table .cw-field > .form-select,
+    .clock-wheel-entries-table .cw-field > div,
+    .clock-wheel-entries-table .cw-actions > .btn-group {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .clock-wheel-entries-table .cw-actions {
+        padding-top: .6rem;
+        margin-top: .2rem;
+        border-top: 1px solid var(--bs-border-color);
+    }
+
+    .clock-wheel-entries-table .cw-actions .btn-group {
+        display: flex;
+    }
+
+    .clock-wheel-entries-table .cw-actions .cw-action-btn {
+        flex: 1 1 0;
+        width: auto;
+        min-height: 2.5rem;
+    }
+
+    .clock-wheel-entries-table .cw-empty-row {
+        display: block;
+        padding: 1rem;
+    }
+
+    .clock-wheel-entries-table .cw-empty-row::before {
+        display: none;
+    }
+}
+
+@media (max-width: 420px) {
+    .clock-wheel-entries-table td,
+    .clock-wheel-entries-table .cw-drag-cell {
+        grid-template-columns: 1fr;
+        gap: .3rem;
+    }
 }
 </style>
