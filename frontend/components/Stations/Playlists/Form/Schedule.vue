@@ -91,20 +91,65 @@
                     </p>
                 </div>
 
+                <div class="side-card side-card-auto mb-3">
+                    <div class="side-card-heading">
+                        <span class="side-card-icon icon-auto"><icon-ic-settings /></span>
+                        <h3>{{ $gettext('Automatic Playlist Behavior') }}</h3>
+                    </div>
+                    <p class="side-card-intro mb-3">
+                        {{ $gettext('AzuraCast watches this playlist’s name, playback order and schedule and automatically selects the safest matching behavior.') }}
+                    </p>
+
+                    <div
+                        v-if="scheduleItems.length > 0"
+                        class="auto-detection-result"
+                        :class="'is-' + detectedBehavior.preset"
+                    >
+                        <span class="auto-detection-label">{{ $gettext('Detected') }}</span>
+                        <strong>{{ detectedBehaviorTitle }}</strong>
+                        <small>{{ detectedBehaviorReason }}</small>
+                    </div>
+                    <div
+                        v-else
+                        class="auto-detection-result is-unscheduled"
+                    >
+                        <span class="auto-detection-label">{{ $gettext('Detected') }}</span>
+                        <strong>{{ $gettext('General Rotation / Unscheduled') }}</strong>
+                        <small>{{ $gettext('Add a schedule to let the automatic selector configure a scheduled music block, programme or news/priority playlist.') }}</small>
+                    </div>
+
+                    <label class="form-check form-switch mt-3 mb-0">
+                        <input
+                            v-model="autoBehaviorEnabled"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span class="form-check-label fw-semibold">
+                            {{ $gettext('Automatically apply detected settings') }}
+                        </span>
+                    </label>
+                    <small
+                        v-if="!autoBehaviorEnabled"
+                        class="d-block text-muted mt-2"
+                    >
+                        {{ $gettext('Manual override is active for this edit. Turn automation back on to re-detect and apply the recommended behavior.') }}
+                    </small>
+                </div>
+
                 <div class="side-card side-card-presets mb-3">
                     <div class="side-card-heading">
                         <span class="side-card-icon icon-presets"><icon-ic-settings /></span>
-                        <h3>{{ $gettext('Quick Setup Presets') }}</h3>
+                        <h3>{{ $gettext('Manual Override') }}</h3>
                     </div>
                     <p class="side-card-intro mb-3">
-                        {{ $gettext('Use a preset to quickly configure common playlist types.') }}
+                        {{ $gettext('The automatic selector normally handles these settings. Choose a preset here only when you want to override its decision.') }}
                     </p>
 
                     <button
                         type="button"
                         class="preset-button preset-show"
                         :disabled="scheduleItems.length === 0"
-                        @click="applyPreset('show')"
+                        @click="applyManualPreset('show')"
                     >
                         <span class="preset-icon"><icon-ic-play-arrow /></span>
                         <span class="preset-copy">
@@ -117,7 +162,7 @@
                         type="button"
                         class="preset-button preset-music"
                         :disabled="scheduleItems.length === 0"
-                        @click="applyPreset('music')"
+                        @click="applyManualPreset('music')"
                     >
                         <span class="preset-icon"><icon-ic-music-note /></span>
                         <span class="preset-copy">
@@ -130,7 +175,7 @@
                         type="button"
                         class="preset-button preset-news"
                         :disabled="scheduleItems.length === 0"
-                        @click="applyPreset('news')"
+                        @click="applyManualPreset('news')"
                     >
                         <span class="preset-icon"><icon-ic-warning /></span>
                         <span class="preset-copy">
@@ -172,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, watch} from "vue";
+import {computed, ref, watch} from "vue";
 import {storeToRefs} from "pinia";
 import PlaylistsFormScheduleRow from "~/components/Stations/Playlists/Form/ScheduleRow.vue";
 import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.vue";
@@ -188,6 +233,10 @@ import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
 import IconIcSettings from "~icons/ic/baseline-settings";
 import IconIcWarning from "~icons/ic/baseline-warning";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form.ts";
+import {
+    detectPlaylistBehavior,
+    type PlaylistBehaviorPreset,
+} from "~/functions/playlistBehaviorDetector.ts";
 import {useTranslate} from "~/vendor/gettext";
 
 const {$gettext} = useTranslate();
@@ -196,6 +245,9 @@ const {form} = storeToRefs(useStationsPlaylistsForm());
 const scheduleItems = defineModel<Array<any>>('scheduleItems', {
     default: () => []
 });
+
+const autoBehaviorEnabled = ref(true);
+const applyingAutomaticBehavior = ref(false);
 
 const setBackendOption = (option: string, enabled: boolean) => {
     const existing = Array.isArray(form.value.backend_options)
@@ -208,6 +260,10 @@ const setBackendOption = (option: string, enabled: boolean) => {
 
     form.value.backend_options = existing;
 };
+
+const hasOption = (option: string): boolean => (
+    Array.isArray(form.value.backend_options) && form.value.backend_options.includes(option)
+);
 
 const applyTimingBundle = (mode: 'flexible' | 'strict') => {
     if (scheduleItems.value.length === 0) {
@@ -245,20 +301,46 @@ const effectiveTimingMode = computed<'flexible' | 'strict' | 'mixed'>(() => {
 
 const timingModeClass = computed(() => `timing-${effectiveTimingMode.value}`);
 
-const onWorkspaceChange = (event: Event) => {
-    const target = event.target as HTMLInputElement | null;
-    if (!target || target.type !== 'radio') {
-        return;
-    }
+const detectedBehavior = computed(() => detectPlaylistBehavior({
+    name: form.value.name,
+    description: form.value.description,
+    order: form.value.order,
+    type: form.value.type,
+    backendOptions: form.value.backend_options,
+    scheduleItems: scheduleItems.value,
+}));
 
-    if (target.id.startsWith('scheduling_flexible_')) {
-        applyTimingBundle('flexible');
-    } else if (target.id.startsWith('scheduling_strict_')) {
-        applyTimingBundle('strict');
+const detectedBehaviorTitle = computed(() => {
+    switch (detectedBehavior.value.preset) {
+        case 'news':
+            return $gettext('News / Alert / Priority');
+        case 'music':
+            return $gettext('Music Rotation Block');
+        default:
+            return $gettext('Scheduled Show / Programme');
     }
-};
+});
 
-const applyPreset = (preset: 'show' | 'music' | 'news') => {
+const detectedBehaviorReason = computed(() => {
+    switch (detectedBehavior.value.reason) {
+        case 'news_signal':
+            return $gettext('News/alert wording or request-priority settings indicate time-sensitive content.');
+        case 'programme_signal':
+            return $gettext('Programme wording, sequential playback or merged tracks indicate a scheduled show.');
+        case 'music_signal':
+            return $gettext('The playlist name or description identifies this as music-oriented programming.');
+        case 'music_order':
+            return $gettext('Random/shuffled or cadence-based playback is typical of a music rotation.');
+        case 'long_block':
+            return $gettext('A multi-hour window is treated as a repeating music block unless stronger programme signals are present.');
+        case 'play_once':
+            return $gettext('The existing schedule is configured to play once per block.');
+        default:
+            return $gettext('Scheduled content without a stronger music or news signal defaults to Programme behavior.');
+    }
+});
+
+const applyPreset = (preset: PlaylistBehaviorPreset) => {
     if (scheduleItems.value.length === 0) {
         return;
     }
@@ -270,6 +352,7 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         scheduleItems.value.forEach((item) => {
             item.loop_once = true;
             item.strict_start = true;
+            item.prevent_requests = false;
         });
         return;
     }
@@ -281,6 +364,7 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         scheduleItems.value.forEach((item) => {
             item.loop_once = false;
             item.strict_start = false;
+            item.prevent_requests = false;
         });
         return;
     }
@@ -293,6 +377,54 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         item.strict_start = true;
         item.prevent_requests = true;
     });
+};
+
+const applyAutomaticBehavior = () => {
+    if (
+        !autoBehaviorEnabled.value
+        || form.value.is_smart_block
+        || scheduleItems.value.length === 0
+    ) {
+        return;
+    }
+
+    applyingAutomaticBehavior.value = true;
+    applyPreset(detectedBehavior.value.preset);
+    applyingAutomaticBehavior.value = false;
+};
+
+const applyManualPreset = (preset: PlaylistBehaviorPreset) => {
+    autoBehaviorEnabled.value = false;
+    applyPreset(preset);
+};
+
+const onWorkspaceChange = (event: Event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) {
+        return;
+    }
+
+    if (!applyingAutomaticBehavior.value && target.closest('.playout-settings')) {
+        autoBehaviorEnabled.value = false;
+        return;
+    }
+
+    const input = target as HTMLInputElement;
+    if (input.type !== 'radio') {
+        return;
+    }
+
+    if (input.id.startsWith('scheduling_flexible_')) {
+        if (!applyingAutomaticBehavior.value) {
+            autoBehaviorEnabled.value = false;
+        }
+        applyTimingBundle('flexible');
+    } else if (input.id.startsWith('scheduling_strict_')) {
+        if (!applyingAutomaticBehavior.value) {
+            autoBehaviorEnabled.value = false;
+        }
+        applyTimingBundle('strict');
+    }
 };
 
 const add = () => {
@@ -315,26 +447,39 @@ const add = () => {
         recurrence_end_after: null,
         recurrence_end_date: null
     });
-    applyTimingBundle('flexible');
+
+    if (!autoBehaviorEnabled.value) {
+        applyTimingBundle('flexible');
+    }
 };
 
 const remove = (index: number) => {
     scheduleItems.value.splice(index, 1);
 };
 
-const hasOption = (option: string): boolean => (
-    Array.isArray(form.value.backend_options) && form.value.backend_options.includes(option)
-);
-
 watch(
-    effectiveTimingMode,
-    (mode) => {
-        if (mode === 'flexible' || mode === 'strict') {
-            applyTimingBundle(mode);
-        }
-    },
+    () => [
+        form.value.name,
+        form.value.description,
+        form.value.order,
+        form.value.type,
+        scheduleItems.value.map((item) => [
+            item.start_time,
+            item.end_time,
+            item.loop_once,
+            item.strict_start,
+            item.prevent_requests,
+        ].join(':')).join('|'),
+    ],
+    () => applyAutomaticBehavior(),
     {immediate: true}
 );
+
+watch(autoBehaviorEnabled, (enabled) => {
+    if (enabled) {
+        applyAutomaticBehavior();
+    }
+});
 
 const formatTime = (timeCode: number | string | null | undefined): string => {
     if (timeCode === null || timeCode === undefined || timeCode === '') {
@@ -450,7 +595,9 @@ const scheduleSummary = computed(() => {
 .schedule-summary strong,
 .schedule-summary small,
 .preset-copy strong,
-.preset-copy small {
+.preset-copy small,
+.auto-detection-result strong,
+.auto-detection-result small {
     display: block;
 }
 
@@ -567,6 +714,11 @@ const scheduleSummary = computed(() => {
     color: #2688ff;
 }
 
+.icon-auto {
+    background: rgba(25, 135, 84, .16);
+    color: #23a866;
+}
+
 .icon-presets {
     background: rgba(245, 158, 11, .18);
     color: #f59e0b;
@@ -581,6 +733,59 @@ const scheduleSummary = computed(() => {
 .side-card-reminder h3,
 .side-card-terms h3 {
     color: #2688ff;
+}
+
+.side-card-auto {
+    border-color: rgba(25, 135, 84, .45);
+    background: rgba(25, 135, 84, .075);
+}
+
+.side-card-auto h3 {
+    color: #23a866;
+}
+
+.auto-detection-result {
+    padding: .8rem .85rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .6rem;
+    background: var(--bs-body-bg);
+}
+
+.auto-detection-label {
+    display: inline-block;
+    margin-bottom: .25rem;
+    color: var(--bs-secondary-color);
+    font-size: .7rem;
+    font-weight: 750;
+    letter-spacing: .055em;
+    text-transform: uppercase;
+}
+
+.auto-detection-result strong {
+    font-size: .93rem;
+}
+
+.auto-detection-result small {
+    margin-top: .25rem;
+    color: var(--bs-secondary-color);
+    font-size: .78rem;
+    line-height: 1.38;
+}
+
+.auto-detection-result.is-show {
+    border-color: rgba(25, 135, 84, .45);
+}
+
+.auto-detection-result.is-music {
+    border-color: rgba(13, 110, 253, .5);
+}
+
+.auto-detection-result.is-news {
+    border-color: rgba(124, 58, 237, .5);
+}
+
+.auto-detection-result.is-unscheduled {
+    border-color: rgba(245, 158, 11, .5);
 }
 
 .side-card-presets {
