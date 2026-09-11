@@ -7,7 +7,11 @@
             </div>
         </div>
 
-        <div class="row g-4 schedule-workspace">
+        <div
+            class="row g-4 schedule-workspace"
+            :class="timingModeClass"
+            @change="onWorkspaceChange"
+        >
             <div class="col-xl-9">
                 <div
                     class="schedule-overview mb-4"
@@ -155,10 +159,10 @@
                         <h3>{{ $gettext('Terminology Tips') }}</h3>
                     </div>
                     <ul class="mb-0 ps-3">
-                        <li>{{ $gettext('Programme = starts at the scheduled time for shows.') }}</li>
-                        <li>{{ $gettext('Rotation = waits for the current song for music.') }}</li>
-                        <li>{{ $gettext('Flexible = allows natural timing around the schedule.') }}</li>
-                        <li>{{ $gettext('Strict = makes this schedule item a hard wall-clock start.') }}</li>
+                        <li>{{ $gettext('Flexible = waits for the current song and lets the current item finish.') }}</li>
+                        <li>{{ $gettext('Strict = exact wall-clock start with a firm scheduled end.') }}</li>
+                        <li>{{ $gettext('Programme = normal strict show start.') }}</li>
+                        <li>{{ $gettext('Priority = strict start plus listener-request priority.') }}</li>
                         <li>{{ $gettext('Play once per block = does not repeat within the time slot.') }}</li>
                     </ul>
                 </div>
@@ -168,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed} from "vue";
+import {computed, watch} from "vue";
 import {storeToRefs} from "pinia";
 import PlaylistsFormScheduleRow from "~/components/Stations/Playlists/Form/ScheduleRow.vue";
 import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.vue";
@@ -203,6 +207,51 @@ const setBackendOption = (option: string, enabled: boolean) => {
     }
 
     form.value.backend_options = existing;
+};
+
+const applyTimingBundle = (mode: 'flexible' | 'strict') => {
+    if (mode === 'strict') {
+        setBackendOption('interrupt', true);
+        setBackendOption('allow_overrun', false);
+        if (!hasOption('prioritize')) {
+            setBackendOption('prioritize', false);
+        }
+        return;
+    }
+
+    setBackendOption('interrupt', false);
+    setBackendOption('prioritize', false);
+    setBackendOption('allow_overrun', true);
+};
+
+const effectiveTimingMode = computed<'flexible' | 'strict' | 'mixed'>(() => {
+    if (scheduleItems.value.length === 0) {
+        return 'flexible';
+    }
+
+    const strictCount = scheduleItems.value.filter((item) => Boolean(item.strict_start)).length;
+    if (strictCount === 0) {
+        return 'flexible';
+    }
+    if (strictCount === scheduleItems.value.length) {
+        return 'strict';
+    }
+    return 'mixed';
+});
+
+const timingModeClass = computed(() => `timing-${effectiveTimingMode.value}`);
+
+const onWorkspaceChange = (event: Event) => {
+    const target = event.target as HTMLInputElement | null;
+    if (!target || target.type !== 'radio') {
+        return;
+    }
+
+    if (target.id.startsWith('scheduling_flexible_')) {
+        applyTimingBundle('flexible');
+    } else if (target.id.startsWith('scheduling_strict_')) {
+        applyTimingBundle('strict');
+    }
 };
 
 const applyPreset = (preset: 'show' | 'music' | 'news') => {
@@ -262,6 +311,7 @@ const add = () => {
         recurrence_end_after: null,
         recurrence_end_date: null
     });
+    applyTimingBundle('flexible');
 };
 
 const remove = (index: number) => {
@@ -270,6 +320,16 @@ const remove = (index: number) => {
 
 const hasOption = (option: string): boolean => (
     Array.isArray(form.value.backend_options) && form.value.backend_options.includes(option)
+);
+
+watch(
+    effectiveTimingMode,
+    (mode) => {
+        if (mode === 'flexible' || mode === 'strict') {
+            applyTimingBundle(mode);
+        }
+    },
+    {immediate: true}
 );
 
 const formatTime = (timeCode: number | string | null | undefined): string => {
@@ -318,9 +378,11 @@ const scheduleSummary = computed(() => {
     const endBehavior = hasOption('allow_overrun')
         ? $gettext('Lets current item finish')
         : $gettext('Stops at boundary');
-    const timingMode = first.strict_start
+    const timingMode = effectiveTimingMode.value === 'strict'
         ? $gettext('Strict scheduling')
-        : $gettext('Flexible scheduling');
+        : effectiveTimingMode.value === 'mixed'
+            ? $gettext('Mixed Flexible/Strict scheduling')
+            : $gettext('Flexible scheduling');
 
     const dateRange = first.start_date && first.end_date
         ? `${first.start_date} – ${first.end_date}`
@@ -355,6 +417,20 @@ const scheduleSummary = computed(() => {
 
 .schedule-workspace {
     align-items: flex-start;
+}
+
+/* The simple editor presents Flexible and Strict as coherent bundles. The
+   opposite playout choices stay visible for clarity but are muted and cannot
+   be selected until the operator switches Scheduling Mode. Mixed legacy rows
+   remain editable without forced lockout. */
+.timing-flexible :deep(.choice-grid-start .choice-option:nth-child(1)),
+.timing-flexible :deep(.choice-grid-start .choice-option:nth-child(3)),
+.timing-flexible :deep(.choice-grid-end .choice-option:nth-child(1)),
+.timing-strict :deep(.choice-grid-start .choice-option:nth-child(2)),
+.timing-strict :deep(.choice-grid-end .choice-option:nth-child(2)) {
+    opacity: .42;
+    pointer-events: none;
+    filter: grayscale(.45);
 }
 
 .schedule-overview {
