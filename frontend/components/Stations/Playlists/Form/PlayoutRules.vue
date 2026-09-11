@@ -1,78 +1,89 @@
 <template>
     <div class="playout-settings">
-        <div class="section-heading mb-3">
-            <span class="step-number">2</span>
-            <span class="section-copy">
-                <strong>{{ $gettext('How should it start?') }}</strong>
-                <small>{{ $gettext('Choose what happens when a scheduled start time arrives. This replaces the old Playout Priority setting with plain-language choices.') }}</small>
-            </span>
-        </div>
+        <section class="behavior-section mb-4">
+            <div class="behavior-heading behavior-heading-start">
+                <span class="heading-icon">▶</span>
+                <span>
+                    <strong>{{ $gettext('2. How should it start?') }}</strong>
+                    <small>{{ $gettext('Choose what happens when the scheduled start time arrives.') }}</small>
+                </span>
+            </div>
 
-        <div
-            v-if="!hasSchedule"
-            class="alert alert-warning py-2 mb-3"
-        >
-            {{ $gettext('This playlist has no schedule. Start behavior does not create a schedule; an enabled unscheduled playlist may still be selected all day.') }}
-        </div>
-
-        <div class="choice-options mb-4">
-            <label
-                v-for="option in startBehaviorOptions"
-                :key="option.value"
-                class="choice-option"
-                :class="{'is-active': startBehavior === option.value}"
+            <div
+                v-if="!hasSchedule"
+                class="alert alert-warning py-2 mx-3 mt-3 mb-0"
             >
-                <input
-                    v-model="startBehavior"
-                    class="form-check-input"
-                    type="radio"
-                    :value="option.value"
+                {{ $gettext('Add a schedule above first. Start behavior does not create a schedule by itself.') }}
+            </div>
+
+            <div class="choice-grid choice-grid-start p-3">
+                <label
+                    v-for="option in startBehaviorOptions"
+                    :key="option.value"
+                    class="choice-option"
+                    :class="{'is-active': startBehavior === option.value}"
                 >
-                <span class="option-copy">
-                    <strong>{{ option.title }}</strong>
-                    <small>{{ option.description }}</small>
-                    <span
-                        v-if="option.recommended"
-                        class="recommended-badge"
+                    <input
+                        v-model="startBehavior"
+                        class="form-check-input"
+                        type="radio"
+                        :value="option.value"
                     >
-                        {{ $gettext('Recommended for shows') }}
+                    <span class="option-copy">
+                        <strong>{{ option.title }}</strong>
+                        <small>{{ option.description }}</small>
+                        <span
+                            v-if="option.recommended"
+                            class="recommended-badge"
+                        >
+                            {{ $gettext('Recommended for shows') }}
+                        </span>
                     </span>
+                </label>
+            </div>
+
+            <div class="behavior-note mx-3 mb-3">
+                {{ $gettext('Scheduling Mode above is set per scheduled time. Start Behavior here applies to this playlist whenever one of its schedules becomes active.') }}
+            </div>
+        </section>
+
+        <section class="behavior-section mb-4">
+            <div class="behavior-heading behavior-heading-end">
+                <span class="heading-icon">■</span>
+                <span>
+                    <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
+                    <small>{{ $gettext('Choose what happens when the scheduled end time is reached.') }}</small>
                 </span>
-            </label>
-        </div>
+            </div>
 
-        <div class="section-heading mb-3">
-            <span class="step-number">3</span>
-            <span class="section-copy">
-                <strong>{{ $gettext('What should happen at the end?') }}</strong>
-                <small>{{ $gettext('Choose whether the schedule boundary is firm or whether the current item may finish naturally.') }}</small>
-            </span>
-        </div>
-
-        <div class="choice-options mb-4">
-            <label
-                v-for="option in endBehaviorOptions"
-                :key="option.value"
-                class="choice-option"
-                :class="{'is-active': endBehavior === option.value}"
-            >
-                <input
-                    v-model="endBehavior"
-                    class="form-check-input"
-                    type="radio"
-                    :value="option.value"
+            <div class="choice-grid choice-grid-end p-3">
+                <label
+                    v-for="option in endBehaviorOptions"
+                    :key="option.value"
+                    class="choice-option"
+                    :class="{'is-active': endBehavior === option.value}"
                 >
-                <span class="option-copy">
-                    <strong>{{ option.title }}</strong>
-                    <small>{{ option.description }}</small>
-                </span>
-            </label>
-        </div>
+                    <input
+                        v-model="endBehavior"
+                        class="form-check-input"
+                        type="radio"
+                        :value="option.value"
+                    >
+                    <span class="option-copy">
+                        <strong>{{ option.title }}</strong>
+                        <small>{{ option.description }}</small>
+                    </span>
+                </label>
+            </div>
+        </section>
 
         <details class="advanced-box">
             <summary>
-                <strong>{{ $gettext('Special / Advanced Options') }}</strong>
-                <small>{{ $gettext('Only needed for unusual playlist behavior, listener-request overrides, or sponsor tracking.') }}</small>
+                <span class="advanced-icon">⚙</span>
+                <span>
+                    <strong>{{ $gettext('Special / Advanced Options (Optional)') }}</strong>
+                    <small>{{ $gettext('Additional settings for unusual playlist behavior, listener-request overrides, or sponsor tracking.') }}</small>
+                </span>
             </summary>
 
             <div class="advanced-body">
@@ -80,7 +91,7 @@
                     <input v-model="singleTrack" class="form-check-input" type="checkbox">
                     <span>
                         <strong>{{ $gettext('Only Play One Track') }}</strong>
-                        <small>{{ $gettext('At each scheduled start, play one track from this playlist instead of running the whole playlist block.') }}</small>
+                        <small>{{ $gettext('At each eligible play, use one track from this playlist instead of running the whole playlist block.') }}</small>
                     </span>
                 </label>
 
@@ -96,7 +107,7 @@
                     <input v-model="prioritizeRequests" class="form-check-input" type="checkbox">
                     <span>
                         <strong>{{ $gettext('Override Listener Requests') }}</strong>
-                        <small>{{ $gettext('Give this playlist priority over automatic listener requests. Selecting Priority / News above turns this on automatically.') }}</small>
+                        <small>{{ $gettext('Give this playlist priority over automatic listener requests. Priority / News enables this automatically.') }}</small>
                     </span>
                 </label>
 
@@ -199,21 +210,21 @@ const mergeTracks = computed({
 
 const startBehaviorOptions = [
     {
-        value: 'wait',
-        title: $gettext('Wait for the current song'),
-        description: $gettext('Do not interrupt normal playback. Start this playlist after the current song finishes. Best for music blocks and background rotation.'),
-        recommended: false,
-    },
-    {
         value: 'scheduled',
-        title: $gettext('Start at the scheduled time'),
-        description: $gettext('Interrupt normal rotation when the scheduled time arrives. Best for regular shows and prerecorded programmes.'),
+        title: $gettext('Start at scheduled time (Programme)'),
+        description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programmes.'),
         recommended: true,
     },
     {
+        value: 'wait',
+        title: $gettext('Wait for current song (Rotation)'),
+        description: $gettext('Do not interrupt normal playback. Start after the current song finishes. Best for music rotation blocks.'),
+        recommended: false,
+    },
+    {
         value: 'priority',
-        title: $gettext('Priority / News'),
-        description: $gettext('Start at the scheduled time and also take priority over listener requests. Best for news, alerts and time-sensitive content.'),
+        title: $gettext('Priority Start (News / Alert)'),
+        description: $gettext('Start on schedule and also override listener requests. Best for news, alerts and time-sensitive content.'),
         recommended: false,
     },
 ];
@@ -221,45 +232,61 @@ const startBehaviorOptions = [
 const endBehaviorOptions = [
     {
         value: 'boundary',
-        title: $gettext('Return at the schedule boundary'),
-        description: $gettext('Keep the scheduled window firm and return to normal rotation when the block ends.'),
+        title: $gettext('Stop at scheduled time'),
+        description: $gettext('Return to normal programming at the scheduled end boundary.'),
     },
     {
         value: 'finish',
-        title: $gettext('Let the current item finish'),
-        description: $gettext('If content is still playing at the end time, let it finish before returning to normal rotation.'),
+        title: $gettext('Let current item finish (Allow Overrun)'),
+        description: $gettext('If a track or programme is still playing at the end time, let it finish before returning to normal programming.'),
     },
 ];
 </script>
 
 <style scoped>
 .playout-settings {
-    border-top: 1px solid var(--bs-border-color);
-    padding-top: 1.25rem;
+    padding-top: .25rem;
 }
 
-.section-heading {
+.behavior-section {
+    overflow: hidden;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .75rem;
+    background: var(--bs-body-bg);
+}
+
+.behavior-heading {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: .75rem;
+    padding: .8rem 1rem;
 }
 
-.step-number {
+.behavior-heading-start {
+    background: rgba(25, 135, 84, .1);
+    color: var(--bs-success-text-emphasis);
+}
+
+.behavior-heading-end {
+    background: rgba(220, 53, 69, .1);
+    color: var(--bs-danger-text-emphasis);
+}
+
+.heading-icon {
     display: inline-flex;
-    width: 1.8rem;
-    height: 1.8rem;
     align-items: center;
     justify-content: center;
-    flex: 0 0 1.8rem;
-    border-radius: 50%;
-    background: #2688ff;
-    color: #fff;
-    font-weight: 700;
-    font-size: .82rem;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 2rem;
+    border-radius: .5rem;
+    background: currentColor;
+    color: var(--bs-body-bg);
+    font-size: .75rem;
 }
 
-.section-copy strong,
-.section-copy small,
+.behavior-heading strong,
+.behavior-heading small,
 .option-copy strong,
 .option-copy small,
 .behavior-option strong,
@@ -269,20 +296,26 @@ const endBehaviorOptions = [
     display: block;
 }
 
-.section-copy strong {
+.behavior-heading strong {
     font-size: 1rem;
 }
 
-.section-copy small {
+.behavior-heading small {
     margin-top: .15rem;
     color: var(--bs-secondary-color);
-    line-height: 1.45;
 }
 
-.choice-options,
-.advanced-body {
+.choice-grid {
     display: grid;
-    gap: .65rem;
+    gap: .75rem;
+}
+
+.choice-grid-start {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-grid-end {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .choice-option,
@@ -290,7 +323,7 @@ const endBehaviorOptions = [
     display: flex;
     align-items: flex-start;
     gap: .75rem;
-    padding: .85rem .9rem;
+    padding: .9rem;
     margin: 0;
     border: 1px solid var(--bs-border-color);
     border-radius: .65rem;
@@ -308,7 +341,6 @@ const endBehaviorOptions = [
 .choice-option input,
 .behavior-option input {
     margin-top: .2rem;
-    accent-color: #2688ff;
 }
 
 .option-copy strong,
@@ -318,7 +350,7 @@ const endBehaviorOptions = [
 
 .option-copy small,
 .behavior-option small {
-    margin-top: .18rem;
+    margin-top: .2rem;
     color: var(--bs-secondary-color);
     line-height: 1.45;
 }
@@ -326,37 +358,59 @@ const endBehaviorOptions = [
 .recommended-badge {
     display: inline-block;
     margin-top: .45rem;
-    padding: .15rem .45rem;
+    padding: .16rem .48rem;
     border-radius: 999px;
-    background: rgba(38, 136, 255, .16);
-    color: #72adff;
+    background: rgba(25, 135, 84, .16);
+    color: var(--bs-success-text-emphasis);
     font-size: .68rem;
     font-weight: 700;
 }
 
+.behavior-note {
+    color: var(--bs-secondary-color);
+    font-size: .75rem;
+    line-height: 1.4;
+}
+
 .advanced-box {
     border: 1px solid var(--bs-border-color);
-    border-radius: .7rem;
+    border-radius: .75rem;
     background: var(--bs-tertiary-bg);
     overflow: hidden;
 }
 
 .advanced-box summary {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
     padding: .9rem 1rem;
     cursor: pointer;
 }
 
+.advanced-icon {
+    font-size: 1.25rem;
+}
+
 .advanced-box summary small {
-    margin-top: .18rem;
+    margin-top: .15rem;
     color: var(--bs-secondary-color);
     font-weight: 400;
 }
 
 .advanced-body {
+    display: grid;
+    gap: .65rem;
     padding: 0 1rem 1rem;
 }
 
 .sponsor-toggle {
     margin-top: .2rem;
+}
+
+@media (max-width: 1199.98px) {
+    .choice-grid-start,
+    .choice-grid-end {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
