@@ -1,3 +1,12 @@
+# Allow output clocks to follow time-sensitive source operators instead of forcing
+# everything onto Liquidsoap's default output clock. This is Liquidsoap's own
+# recommended setting for a source chain that contains multiple nested clocked
+# operators (our stretch/squeeze stage followed by cross/crossfade).
+#
+# Keep BOTH features active: this resolves the clock topology instead of
+# disabling stretch/squeeze or crossfade.
+settings.output.use_default_clock := false
+
 # Smart transition for crossfade
 # @category Source / Fade
 # @param ~fade_in  Fade-in duration, if any.
