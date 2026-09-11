@@ -747,6 +747,9 @@ def azuracast.live_aware_crossfade_impl(old, new) =
 end
 
 def azuracast.apply_crossfade(s) =
+    # `stretch` and `cross` each run on their own clock. Keep both features,
+    # but decouple their clock domains so Liquidsoap does not try to nest them.
+    s = buffer(s)
     cross(
         duration=settings.azuracast.default_cross(),
         azuracast.live_aware_crossfade_impl,
