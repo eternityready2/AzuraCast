@@ -1,0 +1,512 @@
+// Final desktop fidelity layer for Clock Management.
+// Keep this file last in style.scss: it intentionally wins over the earlier
+// incremental Clock Management styling while continuing to use AzuraCast's
+// Bootstrap/theme variables and the existing responsive mobile editor.
+
+@media (min-width: 992px) {
+    // The station layout normally constrains every page to Bootstrap's .container.
+    // The approved Clock Management reference is a full-width workstation, so only
+    // this route breaks out of that max-width without affecting other station pages.
+    #content:has(.clock-management-page) {
+        width: 100%;
+        max-width: none !important;
+        padding: 1.15rem 1.35rem 2rem;
+    }
+
+    .clock-wheels-page.clock-management-page {
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .clock-management-page .clock-management-header {
+        align-items: center;
+        min-height: 4.65rem;
+        padding: .15rem .35rem 1.15rem;
+    }
+
+    .clock-management-page .clock-management-header h2 {
+        margin-bottom: .35rem;
+        font-size: 2rem;
+        line-height: 1.05;
+        font-weight: 800;
+        letter-spacing: -.025em;
+    }
+
+    .clock-management-page .clock-management-header p {
+        font-size: .98rem;
+    }
+
+    .clock-management-page .clock-management-header > .btn {
+        min-height: 2.8rem;
+        padding: .55rem 1rem;
+        border-radius: .45rem;
+        font-weight: 650;
+    }
+
+    // Large dashboard summary cards from the approved reference.
+    .clock-management-summary-grid {
+        gap: 1.05rem;
+        margin-bottom: 1rem;
+    }
+
+    .clock-management-summary-card {
+        position: relative;
+        grid-template-columns: 3.75rem minmax(0, 1fr) auto;
+        grid-template-rows: minmax(4.65rem, auto) 2.35rem;
+        gap: .75rem .95rem;
+        min-height: 8rem;
+        padding: .85rem .95rem 0;
+        overflow: hidden;
+        border-radius: .55rem;
+        box-shadow: 0 .18rem .65rem rgba(0, 0, 0, .12);
+    }
+
+    .clock-management-summary-card::after {
+        grid-column: 2 / 4;
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 2.15rem;
+        margin: 0 -.55rem .7rem 0;
+        border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+        border-radius: .38rem;
+        background: color-mix(in srgb, currentColor 10%, transparent);
+        font-size: .76rem;
+        font-weight: 700;
+        line-height: 1;
+        opacity: .95;
+    }
+
+    .clock-management-summary-card--wheels::after {
+        content: 'View All Wheels  →';
+    }
+
+    .clock-management-summary-card--dayparts::after {
+        content: 'View All Day Parts  →';
+    }
+
+    .clock-management-summary-card--templates::after {
+        content: 'View All Templates  →';
+    }
+
+    .clock-management-summary-card--wheels {
+        border-color: color-mix(in srgb, var(--bs-primary) 58%, var(--bs-border-color));
+        background: linear-gradient(135deg,
+            color-mix(in srgb, var(--bs-primary) 24%, var(--bs-body-bg)),
+            color-mix(in srgb, var(--bs-primary) 8%, var(--bs-body-bg)) 70%);
+    }
+
+    .clock-management-summary-card--dayparts {
+        border-color: color-mix(in srgb, var(--bs-success) 58%, var(--bs-border-color));
+        background: linear-gradient(135deg,
+            color-mix(in srgb, var(--bs-success) 23%, var(--bs-body-bg)),
+            color-mix(in srgb, var(--bs-success) 8%, var(--bs-body-bg)) 70%);
+    }
+
+    .clock-management-summary-card--templates {
+        border-color: color-mix(in srgb, #8b5cf6 60%, var(--bs-border-color));
+        background: linear-gradient(135deg,
+            color-mix(in srgb, #7c3aed 28%, var(--bs-body-bg)),
+            color-mix(in srgb, #7c3aed 9%, var(--bs-body-bg)) 70%);
+    }
+
+    .clock-management-summary-icon {
+        grid-row: 1 / 3;
+        align-self: start;
+        width: 3.55rem;
+        height: 3.55rem;
+        margin-top: .05rem;
+        border-radius: .8rem;
+        background: color-mix(in srgb, var(--bs-primary) 58%, transparent);
+        color: #fff;
+        font-size: 1.75rem;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+    }
+
+    .clock-management-summary-card--dayparts .clock-management-summary-icon {
+        background: color-mix(in srgb, var(--bs-success) 64%, transparent);
+        color: #fff;
+    }
+
+    .clock-management-summary-card--templates .clock-management-summary-icon {
+        background: color-mix(in srgb, #7c3aed 75%, transparent);
+        color: #fff;
+    }
+
+    .clock-management-summary-title {
+        margin: .12rem 0 .28rem;
+        font-size: 1.02rem;
+        font-weight: 800;
+    }
+
+    .clock-management-summary-copy {
+        max-width: 19rem;
+        font-size: .79rem;
+        line-height: 1.35;
+    }
+
+    .clock-management-summary-count {
+        align-self: start;
+        min-width: 3rem;
+        padding-top: .08rem;
+    }
+
+    .clock-management-summary-count strong {
+        font-size: 1.85rem;
+        line-height: 1;
+    }
+
+    .clock-management-summary-count small {
+        display: none;
+    }
+
+    // Reference-style navigation strip.
+    .clock-management-nav-wrap {
+        min-height: 3.2rem;
+        margin-bottom: .95rem;
+        padding: .34rem .42rem;
+        border-radius: .48rem;
+        background: color-mix(in srgb, var(--bs-tertiary-bg) 66%, var(--bs-body-bg));
+    }
+
+    .clock-management-tabs {
+        flex-wrap: nowrap;
+        gap: .18rem;
+    }
+
+    .clock-management-tabs .nav-link {
+        min-height: 2.45rem;
+        padding: .55rem .85rem;
+        border-radius: .36rem;
+        font-size: .82rem;
+        font-weight: 650;
+        white-space: nowrap;
+    }
+
+    .clock-management-nav-wrap > .dropdown > .btn {
+        min-width: 10rem;
+        min-height: 2.55rem;
+        border-radius: .38rem;
+        font-weight: 700;
+    }
+
+    // 330px browser/list rail + wide editor, matching the reference proportions.
+    .clock-management-split {
+        grid-template-columns: 20.75rem minmax(0, 1fr) !important;
+        gap: .75rem !important;
+        align-items: stretch;
+    }
+
+    .clock-management-list-pane,
+    .clock-management-editor-pane,
+    .clock-management-panel {
+        border-radius: .48rem;
+        box-shadow: 0 .18rem .55rem rgba(0, 0, 0, .08);
+    }
+
+    .clock-management-list-pane {
+        align-self: stretch;
+        min-height: 48rem;
+        background: color-mix(in srgb, var(--bs-body-bg) 95%, var(--bs-tertiary-bg));
+    }
+
+    .clock-management-pane-header {
+        align-items: center;
+        min-height: 3.55rem;
+        padding: .65rem .7rem;
+        background: color-mix(in srgb, var(--bs-tertiary-bg) 72%, var(--bs-body-bg));
+    }
+
+    .clock-management-pane-header h3 {
+        font-size: 1.03rem;
+        font-weight: 800;
+    }
+
+    .clock-management-pane-header p {
+        display: none;
+    }
+
+    .clock-management-pane-header .btn {
+        min-height: 2.25rem;
+        padding: .38rem .62rem;
+        font-size: .78rem;
+    }
+
+    // Make the generic DataTable toolbar read like the compact search field in
+    // the mockup instead of a full report-table toolbar.
+    .clock-management-list-pane .datatable-toolbar-top {
+        padding: .55rem !important;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .clock-management-list-pane .datatable-toolbar-top > .row {
+        display: block;
+        margin: 0;
+    }
+
+    .clock-management-list-pane .datatable-toolbar-top > .row > :first-child {
+        display: none;
+    }
+
+    .clock-management-list-pane .datatable-toolbar-top > .row > :last-child {
+        display: flex !important;
+        width: 100%;
+        max-width: none;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .clock-management-list-pane .datatable-toolbar-top .input-group-text,
+    .clock-management-list-pane .datatable-toolbar-top .form-control,
+    .clock-management-list-pane .datatable-toolbar-top .btn {
+        min-height: 2.35rem;
+        font-size: .78rem;
+    }
+
+    .clock-management-list-pane .datatable-toolbar-top .actions {
+        margin-left: .35rem;
+    }
+
+    .clock-management-list-pane .datatable-toolbar-bottom {
+        padding: .45rem .65rem !important;
+        border-top: 1px solid var(--bs-border-color);
+    }
+
+    .clock-management-list-pane tbody td {
+        padding: .72rem .68rem !important;
+    }
+
+    .clock-management-list-pane tbody tr {
+        border-bottom: 1px solid var(--bs-border-color);
+        background: transparent;
+    }
+
+    .clock-management-list-pane tbody tr:hover,
+    .clock-management-list-pane tbody tr:focus-within {
+        background: color-mix(in srgb, var(--bs-primary) 13%, var(--bs-body-bg));
+        box-shadow: inset 3px 0 0 var(--bs-primary);
+    }
+
+    .clock-management-list-pane .clock-wheel-row {
+        min-height: 3.5rem;
+    }
+
+    .clock-management-list-pane .clock-wheel-row > span:first-child {
+        position: relative;
+        width: 2.45rem !important;
+        height: 2.45rem !important;
+        border: 2px solid color-mix(in srgb, var(--bs-body-color) 56%, transparent);
+        box-shadow: inset 0 0 0 .28rem color-mix(in srgb, var(--bs-body-bg) 78%, transparent);
+    }
+
+    .clock-management-list-pane .clock-wheel-row h5 {
+        margin-bottom: .18rem !important;
+        font-size: .9rem;
+        font-weight: 750;
+    }
+
+    .clock-management-list-pane .clock-wheel-row small {
+        font-size: .71rem;
+        line-height: 1.25;
+    }
+
+    .clock-management-quick-actions {
+        gap: .42rem;
+        padding: .65rem;
+    }
+
+    .clock-management-quick-actions .btn {
+        min-height: 2.15rem;
+        font-size: .73rem;
+    }
+
+    // Editor: broad header, prominent tabs, card-like sections and compact controls.
+    .clock-management-editor-pane {
+        min-height: 48rem;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--bs-body-bg) 97%, var(--bs-tertiary-bg));
+    }
+
+    .clock-management-editor-pane .clock-wheel-inline-editor {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .clock-management-editor-pane .clock-wheel-inline-editor .clock-wheel-editor-hero {
+        align-items: center;
+        min-height: 5.1rem;
+        margin: 0 !important;
+        padding: .8rem 1rem !important;
+        border: 0 !important;
+        border-bottom: 1px solid var(--bs-border-color) !important;
+        border-radius: 0 !important;
+        background: color-mix(in srgb, var(--bs-tertiary-bg) 72%, var(--bs-body-bg)) !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-back {
+        display: inline-flex !important;
+        margin-bottom: .18rem !important;
+        font-size: .76rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-kicker {
+        display: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-title h2 {
+        margin: 0 !important;
+        font-size: 1.22rem !important;
+        font-weight: 800;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-title p {
+        max-width: 38rem;
+        margin-top: .15rem !important;
+        font-size: .76rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-actions .btn {
+        min-height: 2.35rem;
+        padding: .42rem .72rem;
+        font-size: .76rem;
+        font-weight: 650;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-surface {
+        flex: 1 1 auto;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        background: transparent;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs {
+        min-height: 3.2rem;
+        gap: .32rem;
+        padding: .55rem .8rem !important;
+        border-bottom: 1px solid var(--bs-border-color);
+        background: color-mix(in srgb, var(--bs-body-bg) 93%, var(--bs-tertiary-bg)) !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs .nav-link {
+        min-width: 7rem;
+        min-height: 2.2rem;
+        padding: .45rem .8rem;
+        border-radius: .38rem;
+        font-size: .78rem;
+        font-weight: 700;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs .nav-link.active {
+        background: var(--bs-primary);
+        color: #fff;
+        box-shadow: 0 .15rem .45rem color-mix(in srgb, var(--bs-primary) 28%, transparent);
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content {
+        padding: .85rem !important;
+        background: transparent;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content > div {
+        padding: .8rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .45rem;
+        background: color-mix(in srgb, var(--bs-body-bg) 98%, var(--bs-tertiary-bg));
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content :is(.form-control, .form-select) {
+        min-height: 2.35rem;
+        font-size: .8rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content .form-label,
+    .clock-management-editor-pane .clock-wheel-editor-tab-content .form-check-label {
+        font-size: .76rem;
+        font-weight: 650;
+    }
+
+    .clock-management-editor-pane .clock-wheel-hour-distribution-card,
+    .clock-management-editor-pane .clock-wheel-timeline {
+        border-radius: .4rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table {
+        width: 100% !important;
+        table-layout: fixed;
+        margin-top: .3rem;
+        overflow: hidden;
+        border-radius: .35rem;
+        font-size: .75rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table thead th {
+        padding: .5rem .4rem;
+        background: color-mix(in srgb, var(--bs-tertiary-bg) 82%, var(--bs-body-bg));
+        font-size: .66rem;
+        font-weight: 800;
+        letter-spacing: .02em;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td {
+        padding: .3rem .32rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table :is(.form-control, .form-select) {
+        min-height: 2rem !important;
+        padding-top: .25rem;
+        padding-bottom: .25rem;
+        font-size: .72rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table .btn {
+        min-height: 2rem;
+        padding: .25rem .38rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-footer {
+        position: sticky !important;
+        bottom: 0 !important;
+        z-index: 10 !important;
+        min-height: 4rem;
+        margin: 0 !important;
+        padding: .7rem .85rem !important;
+        border: 0 !important;
+        border-top: 1px solid var(--bs-border-color) !important;
+        border-radius: 0 !important;
+        background: color-mix(in srgb, var(--bs-body-bg) 96%, transparent) !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-footer .btn {
+        min-width: 7.25rem;
+        min-height: 2.45rem;
+        font-size: .78rem;
+        font-weight: 700;
+    }
+}
+
+@media (min-width: 992px) and (max-width: 1199.98px) {
+    #content:has(.clock-management-page) {
+        padding-left: .9rem;
+        padding-right: .9rem;
+    }
+
+    .clock-management-split {
+        grid-template-columns: 18.5rem minmax(0, 1fr) !important;
+    }
+
+    .clock-management-summary-card {
+        grid-template-columns: 3.25rem minmax(0, 1fr) auto;
+        padding-left: .75rem;
+        padding-right: .75rem;
+    }
+
+    .clock-management-summary-icon {
+        width: 3.1rem;
+        height: 3.1rem;
+    }
+}
