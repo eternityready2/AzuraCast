@@ -18,7 +18,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/FlexibleScheduleRun
 
 final class FlexibleScheduleRuntimeConfigurationTest extends Unit
 {
-    public function testFlexibleScheduleKeepsNaturalWindowThenEnforcesSixtySecondDeadline(): void
+    public function testFlexibleScheduleKeepsNominalPlanningAndAddsSixtySecondDeadline(): void
     {
         [$station] = $this->makeScheduledProgram(false);
 
@@ -27,20 +27,21 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         $config = $event->buildConfiguration();
 
         self::assertSame(60, FlexibleScheduleRuntimeConfiguration::FLEXIBLE_GRACE_SECONDS);
-        self::assertStringContainsString(
-            '# Dedicated native source for bounded flexible deadline enforcement.',
-            $config,
-        );
-        self::assertStringContainsString('bounded_playlist_scheduled_program_', $config);
-        self::assertStringContainsString('11h1m0s-12h0m0s', $config);
+        self::assertStringContainsString('11h1m0s-11h1m59s', $config);
         self::assertStringContainsString('bounded_flexible_current_playlist_id', $config);
+        self::assertStringContainsString('bounded_flexible_current_sq_id', $config);
         self::assertStringContainsString('azuracast.live_enabled()', $config);
         self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
-        self::assertStringContainsString('id="bounded_flexible_schedule_runtime"', $config);
-        self::assertStringContainsString('track_sensitive=false', $config);
+        self::assertStringContainsString('thread.run.recurrent(delay=0.25', $config);
+
+        // The bounded layer is intentionally not another source/switch. The
+        // existing station graph keeps ownership of source selection, crossfade,
+        // Stretch/Squeeze, remote streams and playlist sequence state.
+        self::assertStringNotContainsString('bounded_playlist_scheduled_program_', $config);
+        self::assertStringNotContainsString('bounded_flexible_schedule_runtime', $config);
     }
 
-    public function testAlreadyPlayingScheduledPlaylistIsNotForcedAgainAtDeadline(): void
+    public function testAlreadyPlayingScheduledPlaylistIsNotCutAtDeadline(): void
     {
         [$station] = $this->makeScheduledProgram(false);
 
@@ -48,8 +49,25 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
-        self::assertStringContainsString('list.assoc(default="", "playlist_id", m)', $config);
-        self::assertStringContainsString('bounded_flexible_current_playlist_id() !=', $config);
+        self::assertStringContainsString('target_playlist =', $config);
+        self::assertStringContainsString('current_playlist = bounded_flexible_current_playlist_id()', $config);
+        self::assertStringContainsString('if current_playlist == target_playlist then', $config);
+    }
+
+    public function testWatchdogOnlyCutsActualAutoDjQueueRows(): void
+    {
+        [$station] = $this->makeScheduledProgram(false);
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        self::assertStringContainsString('list.assoc(default="", "sq_id", m)', $config);
+        self::assertStringContainsString('elsif current_sq != "" then', $config);
+        self::assertStringContainsString(
+            '# Only cut a real AutoDJ queue request.',
+            $config,
+        );
     }
 
     public function testStrictScheduleRemainsOwnedByRigidLane(): void
@@ -60,11 +78,11 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
-        self::assertStringNotContainsString('bounded_flexible_schedule_runtime', $config);
+        self::assertStringNotContainsString('bounded_flexible_current_playlist_id', $config);
         self::assertStringNotContainsString('discard_autodj_current_cleanly()', $config);
     }
 
-    public function testEmergencyAndInterruptingSchedulesRemainOutsideFlexibleLane(): void
+    public function testEmergencyAndInterruptingSchedulesRemainOutsideFlexiblePolicy(): void
     {
         [$station, $playlist, $schedule] = $this->makeScheduledProgram(false);
         $schedule->is_emergency = true;
@@ -72,7 +90,7 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         self::assertStringNotContainsString(
-            'bounded_flexible_schedule_runtime',
+            'bounded_flexible_current_playlist_id',
             $event->buildConfiguration(),
         );
 
@@ -82,12 +100,12 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         self::assertStringNotContainsString(
-            'bounded_flexible_schedule_runtime',
+            'bounded_flexible_current_playlist_id',
             $event->buildConfiguration(),
         );
     }
 
-    public function testRemoteStreamIsNotReopenedByDeadlineBackstop(): void
+    public function testRemoteStreamUsesSameDeadlineWatchdogWithoutOpeningSecondInput(): void
     {
         $station = $this->makeStation();
 
@@ -111,8 +129,10 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
+        self::assertStringContainsString('13h1m0s-13h1m59s', $config);
+        self::assertStringContainsString('current_sq != ""', $config);
+        self::assertStringNotContainsString('input.http(', $config);
         self::assertStringNotContainsString('bounded_playlist_remote_program_', $config);
-        self::assertStringNotContainsString('bounded_flexible_schedule_runtime', $config);
     }
 
     public function testGraceCrossingMidnightMovesDeadlineToFollowingScheduleDay(): void
@@ -120,20 +140,20 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         [$station, , $schedule] = $this->makeScheduledProgram(false);
         $schedule->start_time = 2359;
         $schedule->end_time = 30;
-        $schedule->days = [1]; // Monday start; 00:00 deadline is Tuesday.
+        $schedule->days = [1]; // Monday nominal start; 00:00 deadline is Tuesday.
 
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
-        self::assertStringContainsString('(2w) and 0h0m0s-0h30m0s', $config);
+        self::assertStringContainsString('(2w) and 0h0m0s-0h0m59s', $config);
     }
 
-    public function testRuntimePriorityKeepsStrictAndTopOfHourAboveFlexibleDeadline(): void
+    public function testRuntimeRunsAfterRigidAndTopOfHourGraphIsFinalized(): void
     {
         $subscriptions = FlexibleScheduleRuntimeConfiguration::getSubscribedEvents();
         self::assertSame(
-            ['writeRuntime', 17],
+            ['writeRuntime', 14],
             $subscriptions[WriteLiquidsoapConfiguration::class],
         );
     }
