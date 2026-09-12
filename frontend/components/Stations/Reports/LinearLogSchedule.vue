@@ -95,7 +95,7 @@ function displayTitle(item: LinearLogItem): string {
 
 function sourceLabel(item: LinearLogItem): string {
     if (item.source_type === "scheduled_programme" && item.playlist) {
-        return `${$gettext("Scheduled Programme")}: ${item.playlist}`;
+        return `${$gettext("Scheduled Program")}: ${item.playlist}`;
     }
     if (item.clock_wheel) return item.clock_wheel;
     if (item.playlist) return item.playlist;
@@ -115,7 +115,7 @@ function resolveType(item: LinearLogItem): string {
 
 function typeLabel(item: LinearLogItem): string {
     const labels: Record<string, string> = {
-        programme: $gettext("Scheduled Programme"),
+        programme: $gettext("Scheduled Program"),
         music: $gettext("Music"),
         talk: $gettext("Talk"),
         id: $gettext("ID"),
