@@ -7,6 +7,8 @@ import {
     PlaylistRemoteTypes,
     PlaylistSources,
     PlaylistTypes,
+    SmartBlockLimitType,
+    SmartBlockMatchType,
     StationPlaylist
 } from "~/entities/ApiInterfaces.ts";
 
@@ -17,7 +19,10 @@ export type StationPlaylistsRecord = Required<
         | 'podcasts'
     >
 > & {
-    id: number | null
+    id: number | null,
+    is_sponsor: boolean,
+    sponsor_name: string | null,
+    sponsor_guaranteed_plays_per_day: number | null,
 }
 
 export const useStationsPlaylistsForm = defineStore(
@@ -47,9 +52,12 @@ export const useStationsPlaylistsForm = defineStore(
             backend_options: [],
             schedule_items: [],
             is_smart_block: false,
-            smart_block_match_type: 'all',
+            smart_block_match_type: SmartBlockMatchType.All,
             smart_block_limit: null as number | null,
-            smart_block_limit_type: 'tracks'
+            smart_block_limit_type: SmartBlockLimitType.Tracks,
+            is_sponsor: false,
+            sponsor_name: null,
+            sponsor_guaranteed_plays_per_day: null,
         });
 
         const {r$} = useAppScopedRegle(
@@ -85,7 +93,10 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.smart_block_limit_type,
                     ],
                     advancedTab: [
-                        fields.backend_options
+                        fields.backend_options,
+                        fields.is_sponsor,
+                        fields.sponsor_name,
+                        fields.sponsor_guaranteed_plays_per_day,
                     ]
                 })
             }
