@@ -1,0 +1,70 @@
+name: AirCheck Supervisor Regression
+
+on:
+  push:
+    branches:
+      - 'fix/aircheck-supervisor-shutdown-state'
+    paths:
+      - 'backend/src/Service/AirCheckDiagnosticsRecorder.php'
+      - '.github/workflows/aircheck-supervisor-regression.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'backend/src/Service/AirCheckDiagnosticsRecorder.php'
+      - '.github/workflows/aircheck-supervisor-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate AirCheck recovery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+          grep -q "SUPERVISOR_SHUTDOWN_STATE = 'SHUTDOWN_STATE'" backend/src/Service/AirCheckDiagnosticsRecorder.php
+          grep -q 'AirCheck deferred station recovery while Supervisor is shutting down.' backend/src/Service/AirCheckDiagnosticsRecorder.php
+          grep -q "'recovery' => 'retry_next_check'" backend/src/Service/AirCheckDiagnosticsRecorder.php
+          grep -q 'continue;' backend/src/Service/AirCheckDiagnosticsRecorder.php
+          php -l backend/src/Service/AirCheckDiagnosticsRecorder.php
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
+      - name: PHPStan AirCheck recorder
+        shell: bash
+        run: |
+          cat > phpstan.aircheck.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.aircheck.neon --memory-limit=-1 --no-progress \
+            backend/src/Service/AirCheckDiagnosticsRecorder.php
