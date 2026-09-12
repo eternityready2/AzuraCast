@@ -394,7 +394,7 @@ interface PlaylistScheduleRow {
     recurrence_end_date: string | null,
 }
 
-const props = defineProps<{
+defineProps<{
     index: number,
 }>();
 
