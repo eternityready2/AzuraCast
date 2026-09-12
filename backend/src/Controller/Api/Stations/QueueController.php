@@ -255,7 +255,7 @@ final class QueueController extends AbstractStationApiCrudController
         }
 
         // If the ordinary queue is temporarily empty during an active Strict
-        // programme and no wall-clock lookahead is configured, still expose the
+        // program and no wall-clock lookahead is configured, still expose the
         // active source's near-term songs instead of returning an empty page.
         if ($horizonEnd <= $now) {
             $activeWindow = $this->rigidScheduleWindowResolver->getActiveWindow($station, $now);
