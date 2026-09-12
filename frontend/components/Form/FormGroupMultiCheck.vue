@@ -74,7 +74,7 @@ import FormGroup from "~/components/Form/FormGroup.vue";
 import FormMultiCheck from "~/components/Form/FormMultiCheck.vue";
 import useSlotsExcept from "~/functions/useSlotsExcept";
 import {FormFieldEmits, FormFieldProps, ModelFormField, useFormField} from "~/components/Form/useFormField";
-import {useSlots} from "vue";
+import {computed, useSlots} from "vue";
 import {SimpleFormOptionInput} from "~/functions/objectToFormOptions.ts";
 import ValidationError from "~/components/Form/ValidationError.vue";
 
@@ -96,8 +96,9 @@ const slots = useSlots();
 
 const {
     model,
-    field,
     fieldClass,
     isRequired
 } = useFormField(props, emit);
+
+const field = computed(() => props.field);
 </script>
