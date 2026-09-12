@@ -9,8 +9,10 @@ use App\Entity\AiDjSchedule;
 use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
+use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiDjQueueListener;
 use App\Radio\AutoDJ\AiDjShiftLifecycleListener;
+use App\Radio\Backend\Liquidsoap;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -42,6 +44,7 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         private readonly AiDjQueueListener $queueListener,
         private readonly AiDjScheduler $scheduler,
         private readonly CacheInterface $cache,
+        private readonly Adapters $adapters,
     ) {
     }
 
@@ -77,6 +80,14 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
 
     private function runForStation(Station $station): void
     {
+        $backend = $this->adapters->getBackendAdapter($station);
+        if ($backend instanceof Liquidsoap && !$backend->isRunning($station)) {
+            $this->logger->debug('AI DJ: Runtime scheduling skipped because Liquidsoap is not running.', [
+                'station_id' => $station->id,
+            ]);
+            return;
+        }
+
         $now = new DateTimeImmutable('now', $station->getTimezoneObject());
         $event = new BuildQueue($station, $now, $now);
 
@@ -203,7 +214,9 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
                 'exception' => $e->getMessage(),
             ]);
 
-            return null;
+            // Fail closed on history uncertainty so a database/query failure can
+            // never create a duplicate talk break.
+            throw $e;
         }
     }
 
