@@ -11,6 +11,8 @@ on:
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
       - 'backend/src/Service/AiDjGenerator.php'
       - 'util/docker/kokoro/kokoro_tts.py'
+      - 'util/docker/web/scripts/piper'
+      - 'util/docker/web/setup/piper.sh'
       - 'backend/src/MessageQueue/QueueManager.php'
       - 'backend/src/Radio/AbstractLocalAdapter.php'
       - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
@@ -30,6 +32,8 @@ on:
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
       - 'backend/src/Service/AiDjGenerator.php'
       - 'util/docker/kokoro/kokoro_tts.py'
+      - 'util/docker/web/scripts/piper'
+      - 'util/docker/web/setup/piper.sh'
       - 'backend/src/MessageQueue/QueueManager.php'
       - 'backend/src/Radio/AbstractLocalAdapter.php'
       - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
@@ -97,6 +101,14 @@ jobs:
           grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
           grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
 
+          # AI News Piper gets a bounded primary render and sentence-safe retry,
+          # while setup leaves the real binary at a stable internal path.
+          grep -q 'PRIMARY_TIMEOUT_SECONDS = 80' util/docker/web/scripts/piper
+          grep -q 'RETRY_TIMEOUT_SECONDS = 32' util/docker/web/scripts/piper
+          grep -q 'bounded_retry_text' util/docker/web/scripts/piper
+          grep -q '/usr/local/bin/piper-real' util/docker/web/setup/piper.sh
+          grep -q 'chmod a+x /usr/local/bin/piper' util/docker/web/setup/piper.sh
+
           # LOGS(7) runtime regressions.
           grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
           ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
@@ -125,8 +137,10 @@ jobs:
           php -l backend/src/Radio/AutoDJ/Annotations.php
           php -l tests/Unit/AiDjRuntimeCadenceTest.php
 
-      - name: Python syntax check
-        run: python3 -m py_compile util/docker/kokoro/kokoro_tts.py
+      - name: TTS wrapper syntax check
+        run: |
+          python3 -m py_compile util/docker/kokoro/kokoro_tts.py util/docker/web/scripts/piper
+          bash -n util/docker/web/setup/piper.sh
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
