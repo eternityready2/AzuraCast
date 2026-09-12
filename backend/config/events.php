@@ -49,7 +49,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             $app->add(new Middleware\ApplyXForwarded());
 
             $errorMiddleware = $app->addErrorMiddleware(
-                $environment->showDetailedErrors,
+                $environment->showDetailedErrors(),
                 true,
                 true,
                 $container->get(Psr\Log\LoggerInterface::class)
