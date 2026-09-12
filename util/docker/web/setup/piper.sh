@@ -21,8 +21,13 @@ wget -O /tmp/piper.tar.gz \
 
 mkdir -p /usr/local/share/piper
 tar -xzf /tmp/piper.tar.gz -C /usr/local/share/piper/ --strip-components=1
-ln -sf /usr/local/share/piper/piper /usr/local/bin/piper
+
+# Keep the upstream binary at a stable internal path. /usr/local/bin/piper is the
+# lightweight wrapper copied from util/docker/web/scripts before setup scripts run;
+# it bounds a stalled inference and leaves time for one sentence-safe retry.
+ln -sf /usr/local/share/piper/piper /usr/local/bin/piper-real
 chmod a+x /usr/local/share/piper/piper
+chmod a+x /usr/local/bin/piper
 
 # Curated English Piper voices only (medium quality) — keeps image size small
 # for disk-constrained servers. Used by AI Newscaster and AI DJ Piper fallback.

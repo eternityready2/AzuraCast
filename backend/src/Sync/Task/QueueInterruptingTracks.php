@@ -14,6 +14,7 @@ use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use Monolog\LogRecord;
 use Psr\EventDispatcher\EventDispatcherInterface;
+use Throwable;
 
 final class QueueInterruptingTracks extends AbstractTask
 {
@@ -52,6 +53,14 @@ final class QueueInterruptingTracks extends AbstractTask
 
             try {
                 $this->queueForStation($station);
+            } catch (Throwable $e) {
+                // A backend can legitimately be stopping/restarting between the
+                // Supervisor status check and a telnet queue command. Never let that
+                // transient race terminate the entire sync-task process.
+                $this->logger->warning('Interrupting queue unavailable; will retry next minute.', [
+                    'station_id' => $station->id,
+                    'exception' => $e->getMessage(),
+                ]);
             } finally {
                 $this->logger->popProcessor();
             }
@@ -66,6 +75,11 @@ final class QueueInterruptingTracks extends AbstractTask
 
         $backend = $this->adapters->getBackendAdapter($station);
         if (!($backend instanceof Liquidsoap)) {
+            return;
+        }
+
+        if (!$backend->isRunning($station)) {
+            $this->logger->debug('Interrupting queue skipped because Liquidsoap is not running.');
             return;
         }
 

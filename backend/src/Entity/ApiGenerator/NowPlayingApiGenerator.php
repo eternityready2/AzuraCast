@@ -74,6 +74,13 @@ final class NowPlayingApiGenerator
             unique: $npResult->listeners->unique
         );
 
+        // A local backend can be starting/restarting before its first feedback row
+        // has created Station::current_song. That is an ordinary offline/startup
+        // state, not an exception-worthy "No track to update" condition.
+        if (!$updateSongFromNowPlaying && null === $station->current_song) {
+            return $this->offlineApi($station, $baseUri);
+        }
+
         try {
             if ($updateSongFromNowPlaying) {
                 $this->historyRepo->updateSongFromNowPlaying(

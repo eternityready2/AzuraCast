@@ -212,7 +212,7 @@
                                 value="once"
                             >
                             <span>
-                                <strong>{{ $gettext('Play once per scheduled block') }}</strong>
+                                <strong>{{ $gettext('Play once per scheduled block — No Loop') }}</strong>
                                 <small>{{ $gettext('Recommended for shows and programs. The playlist will not start a second cycle in this time slot.') }}</small>
                             </span>
                         </label>
@@ -229,7 +229,7 @@
                                 value="repeat"
                             >
                             <span>
-                                <strong>{{ $gettext('Repeat until end of block') }}</strong>
+                                <strong>{{ $gettext('Repeat until end of block — Loop') }}</strong>
                                 <small>{{ $gettext('Useful for music rotation. The playlist may begin another cycle while this schedule remains active.') }}</small>
                             </span>
                         </label>

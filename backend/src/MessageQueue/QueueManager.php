@@ -24,8 +24,19 @@ final class QueueManager extends AbstractQueueManager
     {
         $connection = $this->getConnection($queue);
 
-        $connection->cleanup();
+        // Keep the Redis stream and Symfony consumer group alive while clearing its
+        // entries. Connection::cleanup() deletes the stream/group, which races a
+        // long-lived Messenger worker blocked in XREADGROUP and produces NOGROUP.
+        // XTRIM removes queued entries without destroying the group metadata.
         $connection->setup();
+
+        $stream = CacheNamespace::Messages->value . ':' . $queue->value;
+        $this->redisFactory->getInstance()->rawCommand(
+            'XTRIM',
+            $stream,
+            'MAXLEN',
+            '0'
+        );
     }
 
     public function getTransport(QueueNames $queue): RedisTransport

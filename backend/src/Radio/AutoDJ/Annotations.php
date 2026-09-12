@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ;
 
 use App\Cache\AutoCueCache;
 use App\Container\EntityManagerAwareTrait;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\CustomFieldRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
@@ -266,6 +267,21 @@ final class Annotations implements EventSubscriberInterface
         if ($playlist->is_jingle) {
             $event->addAnnotations([
                 'jingle_mode' => 'true',
+            ]);
+        }
+
+        // Long-form programs are intentionally treated differently from songs in
+        // the AI DJ and Liquidsoap configuration. Do not ask Liquidsoap to perform
+        // expensive song-style AutoCue analysis on a remote feed, a single-track
+        // program or a merged program block; it predictably exceeds the analysis
+        // budget on 30-60 minute shows and only produces noisy failure logs.
+        if (
+            PlaylistSources::RemoteUrl === $playlist->source
+            || $playlist->backendPlaySingleTrack()
+            || $playlist->backendMerge()
+        ) {
+            $event->addAnnotations([
+                'azuracast_autocue' => false,
             ]);
         }
     }

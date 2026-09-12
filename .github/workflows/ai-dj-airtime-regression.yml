@@ -1,0 +1,212 @@
+name: AI DJ and Runtime Regression
+
+on:
+  push:
+    branches:
+      - 'fix/playlist-loop-labels-and-ai-dj-airtime'
+    paths:
+      - 'backend/config/events.php'
+      - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
+      - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
+      - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Service/AiDjGenerator.php'
+      - 'util/docker/kokoro/kokoro_tts.py'
+      - 'util/docker/web/scripts/piper'
+      - 'util/docker/web/setup/piper.sh'
+      - 'backend/src/MessageQueue/QueueManager.php'
+      - 'backend/src/Radio/AbstractLocalAdapter.php'
+      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/Annotations.php'
+      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
+      - 'tests/Unit/AiDjRuntimeCadenceTest.php'
+      - '.github/workflows/ai-dj-airtime-regression.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'backend/config/events.php'
+      - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
+      - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
+      - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Service/AiDjGenerator.php'
+      - 'util/docker/kokoro/kokoro_tts.py'
+      - 'util/docker/web/scripts/piper'
+      - 'util/docker/web/setup/piper.sh'
+      - 'backend/src/MessageQueue/QueueManager.php'
+      - 'backend/src/Radio/AbstractLocalAdapter.php'
+      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/Annotations.php'
+      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
+      - 'tests/Unit/AiDjRuntimeCadenceTest.php'
+      - '.github/workflows/ai-dj-airtime-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate behavior contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+
+          # AI speech is intentionally wall-clock driven. Slow TTS/API work must
+          # never run as a BuildQueue event subscriber and block music selection.
+          grep -q 'App\\Sync\\Task\\AiDjShiftLifecycleRuntimeTask::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjQueueListener::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjShiftLifecycleListener::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
+
+          grep -q 'TALK_BASE_INTERVAL_SECONDS = 300' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_talk_cadence_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+
+          # Preserve the welcome, sign-off and artist-history paths the station uses.
+          grep -q 'generateShiftIntro' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q 'AI DJ Welcome' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q 'generateShiftOutro' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q 'AI DJ Sign-off' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+
+          # Kokoro is bounded below the PHP 90-second ceiling. Full scripts already
+          # bounded by AiDjGenerator are split into safe chunks, not truncated, and
+          # the emergency fallback calls the real Piper binary directly.
+          grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
+          grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
+          grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
+          grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
+          grep -q 'REAL_PIPER_BIN = "/usr/local/share/piper/piper"' util/docker/kokoro/kokoro_tts.py
+          grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
+          grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
+
+          # Shared Piper stays inside the AI DJ 90-second caller ceiling while AI
+          # News still gets one bounded, sentence-safe retry on a stalled inference.
+          grep -q 'PRIMARY_TIMEOUT_SECONDS = 65' util/docker/web/scripts/piper
+          grep -q 'RETRY_TIMEOUT_SECONDS = 20' util/docker/web/scripts/piper
+          grep -q 'RETRY_MAX_CHARS = 800' util/docker/web/scripts/piper
+          grep -q 'bounded_retry_text' util/docker/web/scripts/piper
+          grep -q '/usr/local/bin/piper-real' util/docker/web/setup/piper.sh
+          grep -q 'chmod a+x /usr/local/bin/piper' util/docker/web/setup/piper.sh
+
+          # LOGS(7) runtime regressions.
+          grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
+          ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
+          grep -q 'if (!\$this->isRunning(\$station))' backend/src/Radio/AbstractLocalAdapter.php
+          grep -q '\$this->start(\$station);' backend/src/Radio/AbstractLocalAdapter.php
+          grep -q 'Interrupting queue skipped because Liquidsoap is not running' backend/src/Sync/Task/QueueInterruptingTracks.php
+          grep -q 'Top-of-Hour staging skipped because Liquidsoap is not running' backend/src/Sync/Task/StageTopOfHourStationIdTask.php
+          grep -q 'null === \$station->current_song' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          grep -q "'azuracast_autocue' => false" backend/src/Radio/AutoDJ/Annotations.php
+
+          # Requested playlist copy remains independent from Flexible/Strict timing.
+          grep -q 'Play once per scheduled block — No Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'Repeat until end of block — Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'Priority Start — Override Requests' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          grep -q 'Start on schedule and take priority over listener requests' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+
+      - name: PHP syntax check
+        run: |
+          php -l backend/config/events.php
+          php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          php -l backend/src/MessageQueue/QueueManager.php
+          php -l backend/src/Radio/AbstractLocalAdapter.php
+          php -l backend/src/Sync/Task/QueueInterruptingTracks.php
+          php -l backend/src/Sync/Task/StageTopOfHourStationIdTask.php
+          php -l backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          php -l backend/src/Radio/AutoDJ/Annotations.php
+          php -l tests/Unit/AiDjRuntimeCadenceTest.php
+
+      - name: TTS wrapper syntax check
+        run: |
+          python3 -m py_compile util/docker/kokoro/kokoro_tts.py util/docker/web/scripts/piper
+          bash -n util/docker/web/setup/piper.sh
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
+      - name: Execute AI DJ cadence regression
+        run: vendor/bin/codecept run tests/Unit/AiDjRuntimeCadenceTest.php
+
+      - name: PHPStan runtime repairs
+        shell: bash
+        run: |
+          cat > phpstan.ai-dj-airtime.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
+            backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
+            backend/src/MessageQueue/QueueManager.php \
+            backend/src/Radio/AbstractLocalAdapter.php \
+            backend/src/Sync/Task/QueueInterruptingTracks.php \
+            backend/src/Sync/Task/StageTopOfHourStationIdTask.php \
+            backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
+            backend/src/Radio/AutoDJ/Annotations.php \
+            tests/Unit/AiDjRuntimeCadenceTest.php
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check playlist UI changes
+        shell: bash
+        run: |
+          cat > tsconfig.ai-dj-airtime.json <<'EOF'
+          {
+            "extends": "./tsconfig.json",
+            "include": [
+              "frontend/**/*.d.ts",
+              "frontend/components/Stations/Playlists/Form/PlayoutRules.vue",
+              "frontend/components/Stations/Playlists/Form/ScheduleRow.vue"
+            ],
+            "exclude": ["node_modules"]
+          }
+          EOF
+          npx vue-tsc -p tsconfig.ai-dj-airtime.json --noEmit
+
+      - name: Lint playlist UI changes
+        run: >-
+          npx eslint
+          frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          frontend/components/Stations/Playlists/Form/ScheduleRow.vue

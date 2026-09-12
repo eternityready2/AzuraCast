@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Bound Piper inference so callers retain time to recover from a stalled render."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REAL_PIPER = "/usr/local/share/piper/piper"
+PRIMARY_TIMEOUT_SECONDS = 65
+RETRY_TIMEOUT_SECONDS = 20
+RETRY_MAX_CHARS = 800
+
+
+def output_path(args: list[str]) -> str | None:
+    try:
+        index = args.index("--output_file")
+    except ValueError:
+        return None
+
+    return args[index + 1] if index + 1 < len(args) else None
+
+
+def sentence_prefix(text: str, limit: int) -> str:
+    text = " ".join(text.strip().split())
+    if len(text) <= limit:
+        return text
+
+    chunk = text[:limit]
+    endings = [match.end() for match in re.finditer(r"[.!?](?:\s|$)", chunk)]
+    if endings and endings[-1] >= min(160, limit // 3):
+        return chunk[: endings[-1]].strip()
+
+    split_at = chunk.rfind(" ")
+    return chunk[:split_at].strip() if split_at > 0 else chunk.strip()
+
+
+def bounded_retry_text(text: str) -> str:
+    clean = text.strip()
+    if not clean:
+        return clean
+
+    # News scripts are paragraph-oriented. Keep the opening and, where practical,
+    # the final outro while dropping middle stories only after the primary render
+    # has demonstrably stalled. The shortened retry has a deliberately small text
+    # budget so it can finish inside RETRY_TIMEOUT_SECONDS on a busy host.
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", clean) if paragraph.strip()]
+    outro = paragraphs[-1] if len(paragraphs) > 1 else ""
+    reserve = min(240, len(outro) + 2) if outro else 0
+    prefix_limit = max(360, RETRY_MAX_CHARS - reserve)
+    prefix = sentence_prefix(clean, prefix_limit)
+
+    if outro and outro not in prefix and len(prefix) + len(outro) + 2 <= RETRY_MAX_CHARS:
+        prefix = f"{prefix}\n\n{outro}"
+
+    if len(prefix) >= len(clean):
+        # A short input can still stall because the host is resource-starved. A
+        # meaningfully shorter second attempt is more useful than repeating it.
+        prefix = sentence_prefix(clean, max(180, int(len(clean) * 0.60)))
+
+    return prefix
+
+
+def relay(result: subprocess.CompletedProcess[str]) -> None:
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+
+
+def run_piper(args: list[str], text: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [REAL_PIPER, *args],
+        input=text,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    out = output_path(args)
+
+    # Preserve native Piper behavior for uncommon streaming/stdout invocations.
+    if out is None:
+        os.execv(REAL_PIPER, [REAL_PIPER, *args])
+
+    text = sys.stdin.read()
+
+    try:
+        result = run_piper(args, text, PRIMARY_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        result = None
+
+    if result is not None:
+        relay(result)
+        if result.returncode == 0:
+            return 0
+
+        # Configuration/model failures are deterministic; shortening the script
+        # would hide the real error and waste more time.
+        return result.returncode
+
+    retry_text = bounded_retry_text(text)
+    if not retry_text:
+        print("Piper render timed out and no retry text was available.", file=sys.stderr)
+        return 124
+
+    try:
+        Path(out).unlink(missing_ok=True)
+        retry = run_piper(args, retry_text, RETRY_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        print(
+            f"Piper render exceeded {PRIMARY_TIMEOUT_SECONDS}s and the bounded retry "
+            f"exceeded {RETRY_TIMEOUT_SECONDS}s.",
+            file=sys.stderr,
+        )
+        return 124
+
+    relay(retry)
+    if retry.returncode == 0:
+        print(
+            "Piper primary render timed out; completed a sentence-safe shortened retry.",
+            file=sys.stderr,
+        )
+    return retry.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
