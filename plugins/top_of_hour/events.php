@@ -5,16 +5,19 @@ declare(strict_types=1);
 use App\CallableEventDispatcherInterface;
 use App\Event\GetSyncTasks;
 use App\Sync\Task\StageTopOfHourStationIdTask;
+use Plugin\TopOfHour\FlexibleScheduleRuntimeConfiguration;
 use Plugin\TopOfHour\RigidScheduleRuntimeConfiguration;
 use Plugin\TopOfHour\TopOfHourQueueClockConstraint;
 use Plugin\TopOfHour\TopOfHourRuntimeConfiguration;
 
+require_once __DIR__ . '/src/FlexibleScheduleRuntimeConfiguration.php';
 require_once __DIR__ . '/src/RigidScheduleRuntimeConfiguration.php';
 require_once __DIR__ . '/src/TopOfHourQueueClockConstraint.php';
 require_once __DIR__ . '/src/TopOfHourRuntimeConfiguration.php';
 
 return static function (CallableEventDispatcherInterface $dispatcher): void {
     $dispatcher->addServiceSubscriber([
+        FlexibleScheduleRuntimeConfiguration::class,
         RigidScheduleRuntimeConfiguration::class,
         TopOfHourQueueClockConstraint::class,
         TopOfHourRuntimeConfiguration::class,

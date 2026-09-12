@@ -169,8 +169,11 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
             <<<LIQ
             # Poll four times per second so the one-minute deadline predicate is
             # reliable without adding another audio source, switch or clock.
+            # Liquidsoap 2.4.x requires recurrent callbacks to return the delay
+            # before their next execution, so explicitly return 0.25 seconds.
             thread.run.recurrent(delay=0.25, {
                 {$body}
+                0.25
             })
             LIQ
         );
