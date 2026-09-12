@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, ref, watch} from "vue";
+import {computed, watch} from "vue";
 import {storeToRefs} from "pinia";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
 import IconIcInfo from "~icons/ic/baseline-info";
@@ -249,6 +249,8 @@ import {useTranslate} from "~/vendor/gettext";
 
 type StartBehavior = 'wait' | 'scheduled' | 'priority';
 
+const MANUAL_BEHAVIOR_OPTION = 'manual_behavior';
+
 const props = withDefaults(defineProps<{
     hasSchedule?: boolean,
 }>(), {
@@ -257,7 +259,6 @@ const props = withDefaults(defineProps<{
 
 const {$gettext} = useTranslate();
 const {form, r$} = storeToRefs(useStationsPlaylistsForm());
-const autoBehaviorEnabled = ref(true);
 
 const startHelp = $gettext('This is a playlist-wide AutoDJ behavior. Flexible schedule rows follow this choice. Strict / Exact Time rows add a per-row exact-start override without removing this setting.');
 const endHelp = $gettext('End behavior is playlist-wide. It controls whether the current scheduled item stops at the boundary or is allowed to finish naturally.');
@@ -326,15 +327,29 @@ const detectedBehaviorLabel = computed(() => {
     }
 });
 
+// Manual-vs-automatic is persisted inside backend_options, so reopening the
+// playlist cannot silently switch a user's manual choice back to Automatic.
+// This avoids a database migration while using the playlist's existing durable
+// options field.
+const autoBehaviorEnabled = computed({
+    get: (): boolean => !hasOption(MANUAL_BEHAVIOR_OPTION),
+    set: (enabled: boolean) => {
+        setOption(MANUAL_BEHAVIOR_OPTION, !enabled);
+        if (enabled) {
+            applyStartBehavior(detectedStartBehavior.value);
+        }
+    },
+});
+
 const selectStartBehavior = (value: StartBehavior) => {
-    autoBehaviorEnabled.value = false;
+    setOption(MANUAL_BEHAVIOR_OPTION, true);
     applyStartBehavior(value);
 };
 
 watch(
-    () => [autoBehaviorEnabled.value, detectedStartBehavior.value] as const,
-    ([enabled, behavior]) => {
-        if (enabled) {
+    detectedStartBehavior,
+    (behavior) => {
+        if (autoBehaviorEnabled.value) {
             applyStartBehavior(behavior);
         }
     },
@@ -345,7 +360,7 @@ const endBehavior = computed({
     get: (): 'boundary' | 'finish' => hasOption('allow_overrun') ? 'finish' : 'boundary',
     set: (value: 'boundary' | 'finish') => {
         if (!isEndOptionDisabled(value)) {
-            autoBehaviorEnabled.value = false;
+            setOption(MANUAL_BEHAVIOR_OPTION, true);
             setOption('allow_overrun', value === 'finish');
         }
     },
@@ -364,7 +379,7 @@ const isEndOptionDisabled = (value: 'boundary' | 'finish'): boolean => {
 const prioritizeRequests = computed({
     get: () => hasOption('prioritize'),
     set: (value: boolean) => {
-        autoBehaviorEnabled.value = false;
+        setOption(MANUAL_BEHAVIOR_OPTION, true);
         setOption('prioritize', value);
     },
 });
@@ -406,10 +421,10 @@ const startBehaviorOptions: Array<{
 ];
 
 const endBehaviorOptions: Array<{
-    value: 'boundary' | 'finish',
-    title: string,
-    description: string,
-    help: string,
+    value: 'boundary' | 'finish';
+    title: string;
+    description: string;
+    help: string;
 }> = [
     {
         value: 'boundary',
