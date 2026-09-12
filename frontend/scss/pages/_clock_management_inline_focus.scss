@@ -1,0 +1,52 @@
+// Mobile focused-edit behavior for Clock Management.
+// Uses :has() so no extra Vue state or modal behavior is required.
+
+@media (max-width: 991.98px) {
+    .clock-management-split:has(.clock-management-editor-pane .clock-wheel-inline-editor) .clock-management-list-pane,
+    .clock-management-split:has(.clock-management-editor-pane .clock-workspace-editor) .clock-management-list-pane {
+        display: none !important;
+    }
+
+    .clock-management-split:has(.clock-management-editor-pane .clock-wheel-inline-editor) .clock-management-editor-pane,
+    .clock-management-split:has(.clock-management-editor-pane .clock-workspace-editor) .clock-management-editor-pane {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: visible !important;
+    }
+
+    .clock-management-split:has(.clock-management-editor-pane .clock-wheel-inline-editor) .clock-wheel-inline-editor,
+    .clock-management-split:has(.clock-management-editor-pane .clock-workspace-editor) .clock-workspace-editor {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+    }
+
+    // While editing on a phone/tablet, remove dashboard chrome so the inline
+    // editor feels like a focused detail page rather than a modal overlay.
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-summary-grid,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-summary-grid,
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-nav-wrap,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-nav-wrap {
+        display: none !important;
+    }
+
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-header,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-header {
+        padding-bottom: .5rem !important;
+    }
+
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-header > .btn,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-header > .btn,
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-header p,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-header p {
+        display: none !important;
+    }
+
+    .clock-management-page:has(.clock-management-editor-pane .clock-wheel-inline-editor) > .clock-management-header h2,
+    .clock-management-page:has(.clock-management-editor-pane .clock-workspace-editor) > .clock-management-header h2 {
+        font-size: 1.1rem !important;
+        margin: 0 !important;
+        color: var(--bs-secondary-color) !important;
+    }
+}
