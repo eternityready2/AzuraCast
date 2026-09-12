@@ -21,11 +21,12 @@ use JsonException;
 /**
  * Reports the exact song order owned by the dedicated rigid Liquidsoap source.
  *
- * The 24-hour Linear Log uses getForecast() to plan across future strict windows.
- * Playing Next and Upcoming Song Queue use getActiveUpcoming() instead: that method
- * reads only the currently active native playlist cursor, so those surfaces remain
- * an operational view of what Liquidsoap is actually about to play rather than a
- * second copy of the day-ahead planner.
+ * The 24-hour Linear Log uses getForecast() across its full planning range. The
+ * Upcoming Song Queue also uses getForecast(), but only across the station's
+ * normal short live-queue horizon so Strict songs can be spliced into the same
+ * chronological 30-60 minute/configured lookahead as ordinary queued content.
+ * Playing Next uses getActiveUpcoming() because it only needs the currently
+ * active native source cursor.
  */
 final class RigidScheduleForecastService
 {
@@ -188,7 +189,7 @@ final class RigidScheduleForecastService
 
             while ($cursor < $window['end'] && count($items) < $limit) {
                 if ([] === $state['remaining']) {
-                    // The day-ahead planner may need more than one playlist round.
+                    // The planner/queue horizon may need more than one playlist round.
                     // mode="normal" keeps every later round in this same order.
                     $state['remaining'] = $state['cycle'];
                 }
