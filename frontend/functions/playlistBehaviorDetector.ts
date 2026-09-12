@@ -74,6 +74,16 @@ export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBe
         };
     }
 
+    // A per-row Strict / Exact Time choice is authoritative. It must beat name
+    // and duration heuristics; otherwise a schedule such as "Hymns and Favorites"
+    // is incorrectly changed back to Rotation merely because it contains music.
+    if (scheduleItems.some((schedule) => Boolean(schedule.strict_start))) {
+        return {
+            behavior: 'programme',
+            reason: 'An exact-start scheduled programme was detected.',
+        };
+    }
+
     if (musicPattern.test(searchable)) {
         return {
             behavior: 'rotation',
@@ -96,13 +106,6 @@ export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBe
         return {
             behavior: 'rotation',
             reason: 'A long scheduled block was detected, so continuous rotation behavior was selected.',
-        };
-    }
-
-    if (scheduleItems.some((schedule) => Boolean(schedule.strict_start))) {
-        return {
-            behavior: 'programme',
-            reason: 'An exact-start scheduled programme was detected.',
         };
     }
 
