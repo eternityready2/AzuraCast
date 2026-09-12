@@ -119,10 +119,7 @@
                     <div class="mode-grid scheduling-mode-grid">
                         <label
                             class="mode-option mode-option-scheduling"
-                            :class="{
-                                'is-active': schedulingMode === 'flexible',
-                                'is-muted': schedulingMode !== 'flexible'
-                            }"
+                            :class="{'is-active': schedulingMode === 'flexible'}"
                         >
                             <input
                                 :id="'scheduling_flexible_'+index"
@@ -146,10 +143,7 @@
 
                         <label
                             class="mode-option mode-option-scheduling"
-                            :class="{
-                                'is-active': schedulingMode === 'strict',
-                                'is-muted': schedulingMode !== 'strict'
-                            }"
+                            :class="{'is-active': schedulingMode === 'strict'}"
                         >
                             <input
                                 :id="'scheduling_strict_'+index"
@@ -175,7 +169,7 @@
                     <p class="mode-explainer mb-0">
                         {{ schedulingMode === 'strict'
                             ? $gettext('Strict is active for this schedule row. Other playlist playback controls remain available and are not removed.')
-                            : $gettext('Flexible is active by default. Strict-only behavior is inactive until you select Strict / Exact Time.')
+                            : $gettext('Flexible is active by default. Select Strict / Exact Time when this schedule row must take wall-clock authority.')
                         }}
                     </p>
                 </form-markup>
@@ -571,23 +565,13 @@ const doRemove = () => {
     border-radius: .65rem;
     background: var(--bs-tertiary-bg);
     cursor: pointer;
-    transition: opacity .15s ease, border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+    transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
 .mode-option.is-active {
     border-color: #2688ff;
     background: rgba(38, 136, 255, .08);
     box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .1);
-}
-
-.mode-option-scheduling.is-muted {
-    opacity: .48;
-    background: rgba(108, 117, 125, .06);
-}
-
-.mode-option-scheduling.is-muted:hover,
-.mode-option-scheduling.is-muted:focus-within {
-    opacity: .82;
 }
 
 .mode-option input,
