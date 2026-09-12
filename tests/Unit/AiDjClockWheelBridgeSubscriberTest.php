@@ -16,10 +16,19 @@ final class AiDjClockWheelBridgeSubscriberTest extends Unit
 {
     public function testBridgeRunsBetweenListenerRequestsAndClockWheelSelection(): void
     {
-        $requestPriority = QueueBuilder::getSubscribedEvents()[BuildQueue::class][0][1];
-        $bridgePriority = AiDjClockWheelBridgeSubscriber::getSubscribedEvents()[BuildQueue::class][1];
-        $clockWheelPriority = ClockWheelScheduler::getSubscribedEvents()[BuildQueue::class][0][1];
-        $normalQueuePriority = QueueBuilder::getSubscribedEvents()[BuildQueue::class][1][1];
+        /** @var array{0: array{0: string, 1: int}, 1: array{0: string, 1: int}} $queueEvents */
+        $queueEvents = QueueBuilder::getSubscribedEvents()[BuildQueue::class];
+
+        /** @var array{0: string, 1: int} $bridgeEvent */
+        $bridgeEvent = AiDjClockWheelBridgeSubscriber::getSubscribedEvents()[BuildQueue::class];
+
+        /** @var array{0: array{0: string, 1: int}} $clockWheelEvents */
+        $clockWheelEvents = ClockWheelScheduler::getSubscribedEvents()[BuildQueue::class];
+
+        $requestPriority = $queueEvents[0][1];
+        $bridgePriority = $bridgeEvent[1];
+        $clockWheelPriority = $clockWheelEvents[0][1];
+        $normalQueuePriority = $queueEvents[1][1];
 
         self::assertGreaterThan($bridgePriority, $requestPriority);
         self::assertGreaterThan($clockWheelPriority, $bridgePriority);
@@ -28,9 +37,18 @@ final class AiDjClockWheelBridgeSubscriberTest extends Unit
 
     public function testBridgeExistsBecauseNativeAiDjSubscribersRunAfterClockWheel(): void
     {
-        $clockWheelPriority = ClockWheelScheduler::getSubscribedEvents()[BuildQueue::class][0][1];
-        $lifecyclePriority = AiDjShiftLifecycleListener::getSubscribedEvents()[BuildQueue::class][1];
-        $talkPriority = AiDjQueueListener::getSubscribedEvents()[BuildQueue::class][1];
+        /** @var array{0: array{0: string, 1: int}} $clockWheelEvents */
+        $clockWheelEvents = ClockWheelScheduler::getSubscribedEvents()[BuildQueue::class];
+
+        /** @var array{0: string, 1: int} $lifecycleEvent */
+        $lifecycleEvent = AiDjShiftLifecycleListener::getSubscribedEvents()[BuildQueue::class];
+
+        /** @var array{0: string, 1: int} $talkEvent */
+        $talkEvent = AiDjQueueListener::getSubscribedEvents()[BuildQueue::class];
+
+        $clockWheelPriority = $clockWheelEvents[0][1];
+        $lifecyclePriority = $lifecycleEvent[1];
+        $talkPriority = $talkEvent[1];
 
         self::assertGreaterThan($lifecyclePriority, $clockWheelPriority);
         self::assertGreaterThan($talkPriority, $clockWheelPriority);
