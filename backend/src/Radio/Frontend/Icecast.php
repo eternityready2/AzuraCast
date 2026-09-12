@@ -142,18 +142,30 @@ class Icecast extends AbstractFrontend
         $frontendConfig = $station->frontend_config;
         $configDir = $station->getRadioConfigDir();
 
-        $settingsBaseUrl = $this->settingsRepo->readSettings()->getBaseUrlAsUri();
+        $settings = $this->settingsRepo->readSettings();
+        $settingsBaseUrl = $settings->getBaseUrlAsUri();
         $baseUrl = $settingsBaseUrl ?? new Uri('http://localhost');
+        $hostname = $baseUrl->getHost();
+
+        // Icecast 2.5 warns when the built-in placeholder contact is used. Prefer
+        // the already-configured ACME contact address; otherwise use a host-scoped
+        // technical contact rather than the reserved default literal.
+        $adminContact = trim((string)($settings->acme_email ?? ''));
+        if ('' === $adminContact) {
+            $contactHost = '' !== $hostname && 'localhost' !== $hostname
+                ? $hostname
+                : 'localhost.localdomain';
+            $adminContact = 'icemaster@' . $contactHost;
+        }
 
         [$certPath, $certKey] = Acme::getCertificatePaths();
 
         $config = [
             'location' => 'AzuraCast',
-            'admin' => 'icemaster@localhost',
-            'hostname' => $baseUrl->getHost(),
+            'admin' => $adminContact,
+            'hostname' => $hostname,
             'limits' => [
                 'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners * 2 : 2500,
-                'max-listeners' => $frontendConfig->max_listeners ?? -1,
                 'sources' => IcecastConfig::getSourceLimit($station->mounts->count()),
                 'queue-size' => 524288,
                 'client-timeout' => 30,
@@ -180,7 +192,6 @@ class Icecast extends AbstractFrontend
                 'logdir' => $configDir,
                 'webroot' => self::WEBROOT,
                 'adminroot' => self::ADMINROOT,
-                'pidfile' => $configDir . '/icecast.pid',
                 'alias' => [
                     [
                         '@source' => '/',
@@ -229,8 +240,13 @@ class Icecast extends AbstractFrontend
                 'mount-name' => $mountRow->name,
                 'charset' => $charset,
                 'stream-name' => $station->name,
-                'listenurl' => $this->getUrlForMount($station, $mountRow),
             ];
+
+            // Icecast 2.5 accepts max-listeners on a mount, not under global
+            // <limits>. Keep the station-wide setting by applying it to each mount.
+            if (!empty($frontendConfig->max_listeners)) {
+                $mount['max-listeners'] = $frontendConfig->max_listeners;
+            }
 
             if ($station->max_bitrate !== 0) {
                 $maxBitrateInBps = $station->max_bitrate * 1024 + 2500;
