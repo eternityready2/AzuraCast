@@ -172,7 +172,7 @@
             />
 
             <footer class="linear-log-footer">
-                {{ $gettext('Strict scheduled programmes are shown as authoritative programme blocks because their exact internal track sequence is owned by Liquidsoap. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
+                {{ $gettext('Strict scheduled programs use the authoritative strict-playlist forecast, so their projected songs match the same source used by Playing Next and Upcoming Song Queue. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
             </footer>
         </section>
     </div>
@@ -219,7 +219,7 @@ const columnOptions = [
 const visibleColumns = ref(["time", "title", "source", "type", "rules", "duration"]);
 
 const typeFilters = [
-    {key: "programme", label: $gettext("Scheduled Programme"), activeClass: "btn-primary"},
+    {key: "programme", label: $gettext("Scheduled Program"), activeClass: "btn-primary"},
     {key: "music", label: $gettext("Music"), activeClass: "btn-success"},
     {key: "talk", label: $gettext("Talk"), activeClass: "btn-warning"},
     {key: "id", label: $gettext("Station ID"), activeClass: "btn-danger"},
