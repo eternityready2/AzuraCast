@@ -27,12 +27,22 @@ final class AiDjCadenceWatchdogSubscriber implements EventSubscriberInterface
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
     /**
-     * Frequency-scaled silence ceiling. At the normal 50% setting this is 15
-     * minutes; lower-frequency DJs receive proportionally larger ceilings.
+     * Recent production history shows the natural station sound lands around one
+     * host break every 10-15 minutes. Scale from five minutes of base credit so a
+     * normal 50% talk-frequency profile becomes eligible after about 10 minutes.
      */
-    private const int MAX_SILENCE_BASE_SECONDS = 450;
+    private const int MAX_SILENCE_BASE_SECONDS = 300;
 
-    private const int MIN_MAX_SILENCE_SECONDS = 900;
+    /** Never force a normal-frequency host more often than roughly every 10 minutes. */
+    private const int NORMAL_MIN_SILENCE_SECONDS = 600;
+
+    /**
+     * Normal host profiles (25%+) should not silently drift beyond 15 minutes just
+     * because earlier BuildQueue attempts were blocked by harmless transient state.
+     */
+    private const int NORMAL_MAX_SILENCE_SECONDS = 900;
+
+    private const float NORMAL_FREQUENCY_FLOOR = 0.25;
 
     public function __construct(
         private readonly AiDjScheduler $scheduler,
@@ -79,10 +89,21 @@ final class AiDjCadenceWatchdogSubscriber implements EventSubscriberInterface
             $this->cache->set($startedKey, $lastBreakAt, self::STATE_TTL_SECONDS);
         }
 
-        $maxSilence = max(
-            self::MIN_MAX_SILENCE_SECONDS,
-            (int)ceil(self::MAX_SILENCE_BASE_SECONDS / $frequency),
-        );
+        $scaledSilence = (int)ceil(self::MAX_SILENCE_BASE_SECONDS / $frequency);
+
+        // Preserve intentionally sparse personalities below 25%. For normal DJ
+        // profiles, bound the silence window at 10-15 minutes. The queue listener
+        // still gets the final say and can defer the break for Top-of-Hour, news,
+        // live DJ, request-queue, cooldown, or other protected conditions.
+        if ($frequency >= self::NORMAL_FREQUENCY_FLOOR) {
+            $maxSilence = min(
+                self::NORMAL_MAX_SILENCE_SECONDS,
+                max(self::NORMAL_MIN_SILENCE_SECONDS, $scaledSilence),
+            );
+        } else {
+            $maxSilence = max(self::NORMAL_MAX_SILENCE_SECONDS, $scaledSilence);
+        }
+
         $silenceSeconds = time() - $lastBreakAt;
 
         if ($silenceSeconds < $maxSilence) {
@@ -106,18 +127,24 @@ final class AiDjCadenceWatchdogSubscriber implements EventSubscriberInterface
     private function getLastBreakTimestamp(int $stationId, string $djName): ?int
     {
         try {
+            $normalizedDjName = strtolower(trim($djName));
+
             $lastBreak = $this->em->createQuery(
                 <<<'DQL'
                     SELECT sq FROM App\Entity\StationQueue sq
                     WHERE sq.station_id = :station_id
                     AND sq.media IS NULL
-                    AND sq.artist = :dj_name
+                    AND (
+                        LOWER(sq.artist) = :dj_name
+                        OR LOWER(sq.artist) LIKE :dj_suffix
+                    )
                     AND sq.autodj_custom_uri IS NOT NULL
                     AND sq.timestamp_played IS NOT NULL
                     ORDER BY sq.timestamp_played DESC
                 DQL
             )->setParameter('station_id', $stationId)
-                ->setParameter('dj_name', $djName)
+                ->setParameter('dj_name', $normalizedDjName)
+                ->setParameter('dj_suffix', '% - ' . $normalizedDjName)
                 ->setMaxResults(1)
                 ->getOneOrNullResult();
 
