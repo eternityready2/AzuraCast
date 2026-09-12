@@ -13,6 +13,9 @@ use App\Entity\StationQueue;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Paginator;
+use App\Radio\AutoDJ\RigidScheduleForecastItem;
+use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
 use App\Utilities\Time;
 use App\Utilities\Types;
@@ -28,9 +31,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
         operationId: 'getQueue',
         summary: 'Return information about the upcoming song playback queue.',
         tags: [OpenApi::TAG_STATIONS_QUEUE],
-        parameters: [
-            new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
-        ],
+        parameters: [new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED)],
         responses: [
             new OpenApi\Response\Success(
                 content: new OA\JsonContent(
@@ -110,6 +111,7 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly StationQueueRepository $queueRepo,
         private readonly QueueLogCache $queueLogCache,
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
+        private readonly RigidScheduleForecastService $rigidScheduleForecast,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
@@ -122,17 +124,13 @@ final class QueueController extends AbstractStationApiCrudController
         array $params
     ): ResponseInterface {
         $station = $request->getStation();
-        $qb = $this->queueRepo->getUnplayedBaseQuery($station);
+        $now = Time::nowUtc();
 
-        // A native strict/programme lane sits above the ordinary AutoDJ queue.
-        // During that window the ordinary rows shown here are only underlay state
-        // for playback after the programme releases; they are NOT upcoming on-air
-        // songs. Keep the rows intact operationally, but hide them from this
-        // user-facing queue. Pre-staged TOH legal IDs remain because TOH has higher
-        // wall-clock authority and may actually interrupt the rigid programme.
-        if (null !== $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
-            $qb->andWhere('sq.top_of_hour_legal_id = 1');
+        if (null !== $this->rigidScheduleWindowResolver->getActiveWindow($station, $now)) {
+            return $this->listRigidScheduleQueue($request, $response);
         }
+
+        $qb = $this->queueRepo->getUnplayedBaseQuery($station);
 
         $searchPhrase = Types::stringOrNull($request->getQueryParam('searchPhrase'), true);
         if (null !== $searchPhrase) {
@@ -160,12 +158,7 @@ final class QueueController extends AbstractStationApiCrudController
 
         // The repository's operational queue order intentionally puts rows that
         // have already been handed to Liquidsoap before rows still waiting in PHP.
-        // That is correct for AutoDJ transport, but it is wrong for this screen:
-        // the Upcoming Song Queue displays `timestamp_played` as "Expected to Play at".
-        // A pre-staged TOH ID can therefore be marked sent_to_autodj before an
-        // earlier ordinary song, which previously made the UI show e.g. 1:59
-        // above 1:56. Override the transport order here and sort the display by
-        // the exact timestamp the user sees, with stable tie-breakers.
+        // The user-facing queue is chronological instead.
         $qb->orderBy('sq.timestamp_played', 'ASC')
             ->addOrderBy('sq.timestamp_cued', 'ASC')
             ->addOrderBy('sq.id', 'ASC');
@@ -175,6 +168,115 @@ final class QueueController extends AbstractStationApiCrudController
             $response,
             $qb->getQuery()
         );
+    }
+
+    private function listRigidScheduleQueue(
+        ServerRequest $request,
+        Response $response,
+    ): ResponseInterface {
+        $station = $request->getStation();
+        $now = Time::nowUtc();
+        $searchPhrase = Types::stringOrNull($request->getQueryParam('searchPhrase'), true);
+        $filterPlaylistId = Types::intOrNull($request->getQueryParam('filter_playlist_id'));
+        $hasGroupFilter = null !== Types::stringOrNull($request->getQueryParam('filter_group'), true)
+            || Types::bool($request->getQueryParam('filter_via_group'));
+
+        $rows = [];
+
+        // The actual strict native source is authoritative. Convert its exact
+        // remaining playlist cursor into read-only queue rows instead of showing
+        // the unrelated ordinary AutoDJ queue that is waiting underneath it.
+        if (!$hasGroupFilter) {
+            foreach ($this->rigidScheduleForecast->getActiveForecast($station, $now, 1000) as $forecastItem) {
+                if (null !== $filterPlaylistId && $forecastItem->playlist->id !== $filterPlaylistId) {
+                    continue;
+                }
+                if (!$this->forecastMatchesSearch($forecastItem, $searchPhrase)) {
+                    continue;
+                }
+
+                $rows[] = $this->viewForecastRecord($station, $forecastItem);
+            }
+        }
+
+        // TOH legal IDs retain higher wall-clock authority than the strict lane,
+        // so keep real pre-staged IDs visible in chronological position.
+        if (null === $filterPlaylistId && !$hasGroupFilter) {
+            $tohRows = $this->queueRepo->getUnplayedBaseQuery($station)
+                ->andWhere('sq.top_of_hour_legal_id = 1')
+                ->orderBy('sq.timestamp_played', 'ASC')
+                ->addOrderBy('sq.timestamp_cued', 'ASC')
+                ->getQuery()
+                ->getResult();
+
+            foreach ($tohRows as $tohRow) {
+                if (!$tohRow instanceof StationQueue || !$this->queueRecordMatchesSearch($tohRow, $searchPhrase)) {
+                    continue;
+                }
+                $rows[] = $this->viewRecord($tohRow, $request);
+            }
+        }
+
+        usort(
+            $rows,
+            static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
+        );
+
+        return Paginator::fromArray($rows, $request)->write($response);
+    }
+
+    private function forecastMatchesSearch(
+        RigidScheduleForecastItem $item,
+        ?string $searchPhrase,
+    ): bool {
+        if (null === $searchPhrase) {
+            return true;
+        }
+
+        $haystack = implode(' ', [
+            $item->media->title,
+            $item->media->artist,
+            $item->media->text,
+            $item->playlist->name,
+        ]);
+
+        return false !== mb_stripos($haystack, $searchPhrase);
+    }
+
+    private function queueRecordMatchesSearch(
+        StationQueue $row,
+        ?string $searchPhrase,
+    ): bool {
+        if (null === $searchPhrase) {
+            return true;
+        }
+
+        return false !== mb_stripos(
+            implode(' ', [$row->title, $row->artist, $row->text]),
+            $searchPhrase,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function viewForecastRecord(
+        \App\Entity\Station $station,
+        RigidScheduleForecastItem $item,
+    ): array {
+        $record = $this->rigidScheduleForecast->toQueueRow($station, $item);
+        $row = $this->queueApiGenerator->__invoke($record);
+
+        $apiResponse = new StationQueueDetailed();
+        $apiResponse->sent_to_autodj = true;
+        $apiResponse->is_played = false;
+        $apiResponse->autodj_custom_uri = null;
+        $apiResponse->media_type = $item->media->type;
+        $apiResponse->log = [];
+        $apiResponse->links = [];
+
+        return [
+            ...get_object_vars($row),
+            ...get_object_vars($apiResponse),
+        ];
     }
 
     protected function viewRecord(object $record, ServerRequest $request): array
@@ -189,14 +291,11 @@ final class QueueController extends AbstractStationApiCrudController
         $apiResponse->is_played = $record->is_played;
         $apiResponse->autodj_custom_uri = $record->autodj_custom_uri;
         $apiResponse->log = $this->queueLogCache->getLog($record);
-
-        // Expose media type so UIs (e.g. the linear log viewer) can filter by
-        // content category (music / talk / id / promo / jingle / podcast / stream).
         $apiResponse->media_type = match(true) {
-            $record->autodj_custom_uri !== null     => 'stream',
-            $record->top_of_hour_legal_id           => 'id',
-            $record->media !== null                 => $record->media->type ?? 'music',
-            default                                 => 'music',
+            $record->autodj_custom_uri !== null => 'stream',
+            $record->top_of_hour_legal_id => 'id',
+            $record->media !== null => $record->media->type,
+            default => 'music',
         };
 
         $apiResponse->links = [
