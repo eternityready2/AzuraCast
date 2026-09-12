@@ -154,7 +154,7 @@
             <div class="behavior-note mx-3 mb-3">
                 {{ startBehavior === 'wait'
                     ? $gettext('Flexible Rotation waits for the current song at the start and lets the current item finish at the end.')
-                    : $gettext('Strict Programme and Priority behavior uses exact playlist boundaries and returns at the scheduled end time.')
+                    : $gettext('Strict Program and Priority behavior uses exact playlist boundaries and returns at the scheduled end time.')
                 }}
             </div>
         </section>
@@ -192,7 +192,7 @@
                     <input v-model="mergeTracks" class="form-check-input" type="checkbox">
                     <span>
                         <strong>{{ $gettext('Merge All Tracks') }}</strong>
-                        <small>{{ $gettext('Treat all tracks in this playlist as one continuous block. Useful for multi-part programmes and long-form content.') }}</small>
+                        <small>{{ $gettext('Treat all tracks in this playlist as one continuous block. Useful for multi-part programs and long-form content.') }}</small>
                     </span>
                 </label>
 
@@ -258,8 +258,8 @@ const props = withDefaults(defineProps<{
 const {$gettext} = useTranslate();
 const {form, r$} = storeToRefs(useStationsPlaylistsForm());
 
-const startHelp = $gettext('Flexible selects the normal Rotation path. Strict / Exact Time selects the exact-time Programme/Priority path. The inactive path remains visible but muted so it is clear which settings currently apply.');
-const endHelp = $gettext('Flexible pairs with Allow Overrun. Strict Programme/Priority pairs with the firm scheduled boundary. The inactive end choice remains visible but muted.');
+const startHelp = $gettext('Flexible selects the normal Rotation path. Strict / Exact Time selects the exact-time Program/Priority path. The inactive path remains visible but muted so it is clear which settings currently apply.');
+const endHelp = $gettext('Flexible pairs with Allow Overrun. Strict Program/Priority pairs with the firm scheduled boundary. The inactive end choice remains visible but muted.');
 const advancedHelp = $gettext('These options remain independent. Scheduling Mode does not remove Only Play One Track, Merge, request priority, or sponsor controls.');
 
 const hasOption = (option: string) => form.value.backend_options.includes(option);
@@ -331,7 +331,7 @@ const detectedBehaviorLabel = computed(() => {
         case 'priority':
             return $gettext('News / Alert / Priority');
         case 'programme':
-            return $gettext('Scheduled Show / Programme');
+            return $gettext('Scheduled Show / Program');
         default:
             return $gettext('Music Rotation Block');
     }
@@ -365,9 +365,9 @@ const startBehaviorOptions: Array<{
 }> = [
     {
         value: 'scheduled',
-        title: $gettext('Start at scheduled time (Programme)'),
-        description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programmes.'),
-        help: $gettext('Programme is available with Strict / Exact Time and uses a firm scheduled boundary.'),
+        title: $gettext('Start at scheduled time (Program)'),
+        description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programs.'),
+        help: $gettext('Program is available with Strict / Exact Time and uses a firm scheduled boundary.'),
     },
     {
         value: 'wait',
@@ -392,7 +392,7 @@ const endBehaviorOptions: Array<{
     {
         value: 'boundary',
         title: $gettext('Stop at scheduled time'),
-        description: $gettext('Return to normal programming at the scheduled end boundary. Used with Strict Programme and Priority starts.'),
+        description: $gettext('Return to normal programming at the scheduled end boundary. Used with Strict Program and Priority starts.'),
         help: $gettext('This is the firm-end behavior for the Strict exact-time path.'),
     },
     {
