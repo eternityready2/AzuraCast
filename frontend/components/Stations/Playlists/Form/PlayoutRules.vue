@@ -25,7 +25,7 @@
                 <span class="heading-icon heading-icon-start"><icon-ic-play-arrow /></span>
                 <span>
                     <span class="heading-title-with-help">
-                        <strong>{{ $gettext('2. How should Flexible schedules start?') }}</strong>
+                        <strong>{{ $gettext('2. How should it start?') }}</strong>
                         <span
                             class="info-help"
                             tabindex="0"
@@ -36,7 +36,7 @@
                             <icon-ic-info />
                         </span>
                     </span>
-                    <small>{{ $gettext('This playlist-wide choice applies to Flexible schedule rows only.') }}</small>
+                    <small>{{ $gettext('Choose what happens when the scheduled start time arrives.') }}</small>
                 </span>
             </div>
 
@@ -47,7 +47,7 @@
                 {{ $gettext('Add a schedule above first. Start behavior does not create a schedule by itself.') }}
             </div>
 
-            <div class="choice-grid p-3">
+            <div class="choice-grid choice-grid-start p-3">
                 <label
                     v-for="option in startBehaviorOptions"
                     :key="option.value"
@@ -55,11 +55,10 @@
                     :class="{'is-active': startBehavior === option.value}"
                 >
                     <input
+                        v-model="startBehavior"
                         class="form-check-input"
                         type="radio"
                         :value="option.value"
-                        :checked="startBehavior === option.value"
-                        @change="applyStartBehavior(option.value)"
                     >
                     <span class="option-copy">
                         <span class="option-title-with-help">
@@ -86,7 +85,7 @@
             </div>
 
             <div class="behavior-note mx-3 mb-3">
-                {{ $gettext('Strict / Exact Time is controlled on each schedule row. A Strict row always gets exact wall-clock authority and is never changed by this Flexible start setting.') }}
+                {{ $gettext('Flexible activates Rotation behavior and mutes Strict-only start choices. Strict / Exact Time activates the exact-time choices and mutes Flexible Rotation for that schedule mode.') }}
             </div>
         </section>
 
@@ -95,7 +94,7 @@
                 <span class="heading-icon heading-icon-end"><icon-ic-stop /></span>
                 <span>
                     <span class="heading-title-with-help">
-                        <strong>{{ $gettext('3. End behavior') }}</strong>
+                        <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
                         <span
                             class="info-help"
                             tabindex="0"
@@ -106,17 +105,57 @@
                             <icon-ic-info />
                         </span>
                     </span>
-                    <small>{{ $gettext('The compatible end behavior follows your Flexible start choice automatically.') }}</small>
+                    <small>{{ $gettext('The end behavior is paired with the selected start style so Liquidsoap follows the setting reliably.') }}</small>
                 </span>
             </div>
 
-            <div class="end-summary p-3">
-                <strong>{{ endBehaviorTitle }}</strong>
-                <small>{{ endBehaviorDescription }}</small>
+            <div
+                v-if="hasSchedule && unsupportedCombination"
+                class="alert alert-warning py-2 mx-3 mt-3 mb-0"
+            >
+                {{ $gettext('This playlist contains a legacy start/end combination that Liquidsoap cannot honor reliably. Choose a start behavior or Quick Setup preset to normalize it.') }}
+            </div>
+
+            <div class="choice-grid choice-grid-end p-3">
+                <label
+                    v-for="option in endBehaviorOptions"
+                    :key="option.value"
+                    class="choice-option"
+                    :class="{
+                        'is-active': endBehavior === option.value,
+                        'is-disabled': isEndOptionDisabled(option.value)
+                    }"
+                >
+                    <input
+                        v-model="endBehavior"
+                        class="form-check-input"
+                        type="radio"
+                        :value="option.value"
+                        :disabled="isEndOptionDisabled(option.value)"
+                    >
+                    <span class="option-copy">
+                        <span class="option-title-with-help">
+                            <strong>{{ option.title }}</strong>
+                            <span
+                                class="info-help info-help-small"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="option.help"
+                                :title="option.help"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
+                        <small>{{ option.description }}</small>
+                    </span>
+                </label>
             </div>
 
             <div class="behavior-note mx-3 mb-3">
-                {{ $gettext('Strict / Exact Time rows use their exact schedule boundary. There is no disabled or hidden Strict setting here to fight with the schedule row.') }}
+                {{ startBehavior === 'wait'
+                    ? $gettext('Flexible Rotation waits for the current song at the start and lets the current item finish at the end.')
+                    : $gettext('Strict Programme and Priority behavior uses exact playlist boundaries and returns at the scheduled end time.')
+                }}
             </div>
         </section>
 
@@ -219,9 +258,9 @@ const props = withDefaults(defineProps<{
 const {$gettext} = useTranslate();
 const {form, r$} = storeToRefs(useStationsPlaylistsForm());
 
-const startHelp = $gettext('Flexible schedule rows use this playlist-wide start behavior. Strict / Exact Time is selected separately on each schedule row and always overrides this setting for that row.');
-const endHelp = $gettext('AzuraCast uses compatible start/end pairs. Rotation allows the current item to finish; Programme and Priority return at the scheduled boundary. Strict rows use their exact boundary independently.');
-const advancedHelp = $gettext('These options are saved exactly as you select them. No automatic process will change them when you reopen the playlist.');
+const startHelp = $gettext('Flexible selects the normal Rotation path. Strict / Exact Time selects the exact-time Programme/Priority path. The inactive path remains visible but muted so it is clear which settings currently apply.');
+const endHelp = $gettext('Flexible pairs with Allow Overrun. Strict Programme/Priority pairs with the firm scheduled boundary. The inactive end choice remains visible but muted.');
+const advancedHelp = $gettext('These options remain independent. Scheduling Mode does not remove Only Play One Track, Merge, request priority, or sponsor controls.');
 
 const hasOption = (option: string) => form.value.backend_options.includes(option);
 
@@ -233,21 +272,41 @@ const setOption = (option: string, enabled: boolean) => {
     form.value.backend_options = options;
 };
 
-const applyStartBehavior = (value: StartBehavior) => {
-    setOption('interrupt', value !== 'wait');
-    setOption('prioritize', value === 'priority');
-    setOption('allow_overrun', value === 'wait');
-};
-
-const startBehavior = computed<StartBehavior>(() => {
-    if (hasOption('interrupt') && hasOption('prioritize')) {
-        return 'priority';
-    }
-    if (hasOption('interrupt')) {
-        return 'scheduled';
-    }
-    return 'wait';
+const startBehavior = computed({
+    get: (): StartBehavior => {
+        if (hasOption('interrupt') && hasOption('prioritize')) {
+            return 'priority';
+        }
+        if (hasOption('interrupt')) {
+            return 'scheduled';
+        }
+        return 'wait';
+    },
+    set: (value: StartBehavior) => {
+        setOption('interrupt', value !== 'wait');
+        setOption('prioritize', value === 'priority');
+        setOption('allow_overrun', value === 'wait');
+    },
 });
+
+const endBehavior = computed({
+    get: (): 'boundary' | 'finish' => hasOption('allow_overrun') ? 'finish' : 'boundary',
+    set: (value: 'boundary' | 'finish') => {
+        if (!isEndOptionDisabled(value)) {
+            setOption('allow_overrun', value === 'finish');
+        }
+    },
+});
+
+const unsupportedCombination = computed(() => (
+    hasOption('interrupt') === hasOption('allow_overrun')
+));
+
+const isEndOptionDisabled = (value: 'boundary' | 'finish'): boolean => {
+    return startBehavior.value === 'wait'
+        ? value === 'boundary'
+        : value === 'finish';
+};
 
 const detectedBehavior = computed(() => detectPlaylistBehavior({
     name: form.value.name,
@@ -279,14 +338,9 @@ const detectedBehaviorLabel = computed(() => {
 });
 
 const recommendationApplied = computed(() => startBehavior.value === detectedStartBehavior.value);
-const applyRecommendation = () => applyStartBehavior(detectedStartBehavior.value);
-
-const endBehaviorTitle = computed(() => startBehavior.value === 'wait'
-    ? $gettext('Let the current item finish')
-    : $gettext('Return at the scheduled boundary'));
-const endBehaviorDescription = computed(() => startBehavior.value === 'wait'
-    ? $gettext('Rotation keeps natural song boundaries for Flexible schedule rows.')
-    : $gettext('Programme and Priority use a firm end boundary for Flexible schedule rows.'));
+const applyRecommendation = () => {
+    startBehavior.value = detectedStartBehavior.value;
+};
 
 const prioritizeRequests = computed({
     get: () => hasOption('prioritize'),
@@ -312,20 +366,40 @@ const startBehaviorOptions: Array<{
     {
         value: 'scheduled',
         title: $gettext('Start at scheduled time (Programme)'),
-        description: $gettext('Interrupt normal rotation when a Flexible schedule begins. Best for regular shows and prerecorded programmes.'),
-        help: $gettext('Programme is a playlist-wide behavior for Flexible rows. It does not turn a Flexible row into Strict / Exact Time.'),
+        description: $gettext('Interrupt normal rotation when the schedule begins. Best for regular shows and prerecorded programmes.'),
+        help: $gettext('Programme is available with Strict / Exact Time and uses a firm scheduled boundary.'),
     },
     {
         value: 'wait',
         title: $gettext('Wait for current song (Rotation)'),
-        description: $gettext('Do not interrupt normal playback on Flexible rows. Start after the current song finishes. Best for music blocks.'),
-        help: $gettext('If an individual schedule row is Strict / Exact Time, that row still starts exactly on time even when Rotation is selected here.'),
+        description: $gettext('Do not interrupt normal playback. Start after the current song finishes. Best for music rotation blocks.'),
+        help: $gettext('Rotation is the normal Flexible path. Selecting Strict / Exact Time mutes this choice and activates the exact-time choices.'),
     },
     {
         value: 'priority',
         title: $gettext('Priority Start (News / Alert)'),
-        description: $gettext('Interrupt on a Flexible schedule and also override listener requests. Best for time-sensitive content.'),
-        help: $gettext('Priority combines the Programme start with priority over automatic listener requests for Flexible rows.'),
+        description: $gettext('Start on schedule and also override listener requests. Best for news, alerts and time-sensitive content.'),
+        help: $gettext('Priority is available with Strict / Exact Time and combines exact start with listener-request priority.'),
+    },
+];
+
+const endBehaviorOptions: Array<{
+    value: 'boundary' | 'finish';
+    title: string;
+    description: string;
+    help: string;
+}> = [
+    {
+        value: 'boundary',
+        title: $gettext('Stop at scheduled time'),
+        description: $gettext('Return to normal programming at the scheduled end boundary. Used with Strict Programme and Priority starts.'),
+        help: $gettext('This is the firm-end behavior for the Strict exact-time path.'),
+    },
+    {
+        value: 'finish',
+        title: $gettext('Let current item finish (Allow Overrun)'),
+        description: $gettext('Let the current track finish naturally before returning to normal programming. Used with Flexible Rotation.'),
+        help: $gettext('Allow Overrun is the Flexible end behavior and prevents the schedule boundary from cutting the current item.'),
     },
 ];
 </script>
@@ -338,9 +412,10 @@ const startBehaviorOptions: Array<{
 .behavior-heading{display:flex;align-items:center;gap:.85rem;padding:.9rem 1rem}.behavior-heading-start{border-bottom:1px solid rgba(25,135,84,.18);background:rgba(25,135,84,.12);color:#21a45f}.behavior-heading-end{border-bottom:1px solid rgba(220,53,69,.18);background:rgba(220,53,69,.12);color:#e54859}
 .heading-icon{display:inline-flex;align-items:center;justify-content:center;width:2.7rem;height:2.7rem;flex:0 0 2.7rem;border-radius:.55rem;color:#fff;font-size:1.55rem}.heading-icon-start{background:#198754}.heading-icon-end{background:#dc3545}
 .heading-title-with-help,.option-title-with-help{display:inline-flex;align-items:center;gap:.4rem}.info-help{display:inline-flex;align-items:center;justify-content:center;width:1.3rem;height:1.3rem;flex:0 0 1.3rem;border-radius:50%;color:#2688ff;cursor:help;font-size:1rem;line-height:1}.info-help-small{width:1.15rem;height:1.15rem;flex-basis:1.15rem;font-size:.9rem}.info-help:focus{outline:2px solid rgba(38,136,255,.45);outline-offset:2px}
-.behavior-heading strong,.behavior-heading small,.option-copy strong,.option-copy small,.behavior-option strong,.behavior-option small,.advanced-box summary strong,.advanced-box summary small,.end-summary strong,.end-summary small{display:block}.behavior-heading strong{font-size:1.08rem}.behavior-heading small{margin-top:.15rem;color:var(--bs-secondary-color);font-size:.84rem}
-.choice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}.choice-option,.behavior-option{display:flex;align-items:flex-start;gap:.75rem;padding:.95rem;margin:0;border:1px solid var(--bs-border-color);border-radius:.65rem;background:var(--bs-tertiary-bg);cursor:pointer}.choice-option.is-active,.behavior-option.is-active{border-color:#2688ff;background:rgba(38,136,255,.10);box-shadow:0 0 0 .1rem rgba(38,136,255,.14)}.choice-option input,.behavior-option input{margin-top:.2rem}.option-copy strong,.behavior-option strong{font-size:.92rem}.option-copy small,.behavior-option small{margin-top:.2rem;color:var(--bs-secondary-color);font-size:.82rem;line-height:1.45}
-.recommended-badge{display:inline-block;margin-top:.45rem;padding:.18rem .5rem;border-radius:999px;background:rgba(25,135,84,.18);color:#24ab65;font-size:.7rem;font-weight:700}.behavior-note{color:var(--bs-secondary-color);font-size:.8rem;line-height:1.45}.end-summary strong{font-size:.95rem}.end-summary small{margin-top:.25rem;color:var(--bs-secondary-color)}
+.behavior-heading strong,.behavior-heading small,.option-copy strong,.option-copy small,.behavior-option strong,.behavior-option small,.advanced-box summary strong,.advanced-box summary small{display:block}.behavior-heading strong{font-size:1.08rem}.behavior-heading small{margin-top:.15rem;color:var(--bs-secondary-color);font-size:.84rem}
+.choice-grid{display:grid;gap:.75rem}.choice-grid-start{grid-template-columns:repeat(3,minmax(0,1fr))}.choice-grid-end{grid-template-columns:repeat(2,minmax(0,1fr))}
+.choice-option,.behavior-option{display:flex;align-items:flex-start;gap:.75rem;padding:.95rem;margin:0;border:1px solid var(--bs-border-color);border-radius:.65rem;background:var(--bs-tertiary-bg);cursor:pointer}.choice-option.is-active,.behavior-option.is-active{border-color:#2688ff;background:rgba(38,136,255,.10);box-shadow:0 0 0 .1rem rgba(38,136,255,.14)}.choice-option.is-disabled{opacity:.5;cursor:not-allowed}.choice-option input,.behavior-option input{margin-top:.2rem}.option-copy strong,.behavior-option strong{font-size:.92rem}.option-copy small,.behavior-option small{margin-top:.2rem;color:var(--bs-secondary-color);font-size:.82rem;line-height:1.45}
+.recommended-badge{display:inline-block;margin-top:.45rem;padding:.18rem .5rem;border-radius:999px;background:rgba(25,135,84,.18);color:#24ab65;font-size:.7rem;font-weight:700}.behavior-note{color:var(--bs-secondary-color);font-size:.8rem;line-height:1.45}
 .advanced-box{border:1px solid var(--bs-border-color);border-radius:.75rem;background:var(--bs-tertiary-bg);overflow:hidden}.advanced-box summary{display:flex;align-items:center;gap:.8rem;padding:.95rem 1rem;cursor:pointer}.advanced-icon{display:inline-flex;align-items:center;justify-content:center;width:2.5rem;height:2.5rem;flex:0 0 2.5rem;border-radius:50%;background:rgba(108,117,125,.16);color:var(--bs-secondary-color);font-size:1.45rem}.advanced-box summary strong{font-size:.96rem}.advanced-box summary small{margin-top:.15rem;color:var(--bs-secondary-color);font-size:.8rem;font-weight:400}.advanced-body{display:grid;gap:.65rem;padding:0 1rem 1rem}.sponsor-toggle{margin-top:.2rem}
-@media(max-width:1199.98px){.choice-grid{grid-template-columns:1fr}}@media(max-width:767.98px){.behavior-recommendation{align-items:flex-start;flex-direction:column}}
+@media(max-width:1199.98px){.choice-grid-start,.choice-grid-end{grid-template-columns:1fr}}@media(max-width:767.98px){.behavior-recommendation{align-items:flex-start;flex-direction:column}}
 </style>
