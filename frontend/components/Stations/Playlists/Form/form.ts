@@ -9,6 +9,7 @@ import {
     PlaylistTypes,
     SmartBlockLimitType,
     SmartBlockMatchType,
+    SmartBlockType,
     StationPlaylist
 } from "~/entities/ApiInterfaces.ts";
 
@@ -47,14 +48,19 @@ export const useStationsPlaylistsForm = defineStore(
             play_per_hour_minute: 0,
             include_in_requests: true,
             avoid_duplicates: true,
+            smart_shuffle_distance: null,
             rotation_goal_days: null as number | null,
             crossfade_profile: null as string | null,
             backend_options: [],
             schedule_items: [],
+            playlists: [],
+            playlist_groups: [],
             is_smart_block: false,
             smart_block_match_type: SmartBlockMatchType.All,
             smart_block_limit: null as number | null,
             smart_block_limit_type: SmartBlockLimitType.Tracks,
+            smart_block_type: SmartBlockType.Dynamic,
+            smart_block_criteria: [],
             is_sponsor: false,
             sponsor_name: null,
             sponsor_guaranteed_plays_per_day: null,
