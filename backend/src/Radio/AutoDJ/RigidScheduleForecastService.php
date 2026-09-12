@@ -121,10 +121,6 @@ final class RigidScheduleForecastService
                 }
 
                 $next = array_shift($state['remaining']);
-                if (null === $next) {
-                    break;
-                }
-
                 $playedAt = $cursor;
                 $availableSeconds = max(
                     0,
