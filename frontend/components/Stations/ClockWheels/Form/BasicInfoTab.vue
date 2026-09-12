@@ -90,7 +90,7 @@
                             :field="r$.inherits_template_slots"
                             :label="$gettext('Inherit Template Slots')"
                             :description="$gettext('Keep this wheel synchronized with its linked template.')"
-                            :disabled="!form.template_id"
+                            :input-attrs="{disabled: !form.template_id}"
                         />
                     </div>
                 </div>
