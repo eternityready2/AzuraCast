@@ -12,7 +12,7 @@ on:
       - 'backend/src/Service/AiDjGenerator.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'backend/src/MessageQueue/QueueManager.php'
-      - 'backend/src/Sync/Task/AirCheckTask.php'
+      - 'backend/src/Radio/AbstractLocalAdapter.php'
       - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
@@ -31,7 +31,7 @@ on:
       - 'backend/src/Service/AiDjGenerator.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'backend/src/MessageQueue/QueueManager.php'
-      - 'backend/src/Sync/Task/AirCheckTask.php'
+      - 'backend/src/Radio/AbstractLocalAdapter.php'
       - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
@@ -100,7 +100,8 @@ jobs:
           # LOGS(7) runtime regressions.
           grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
           ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
-          grep -q '\$adapter->start(\$station);' backend/src/Sync/Task/AirCheckTask.php
+          grep -q 'if (!\$this->isRunning(\$station))' backend/src/Radio/AbstractLocalAdapter.php
+          grep -q '\$this->start(\$station);' backend/src/Radio/AbstractLocalAdapter.php
           grep -q 'Interrupting queue skipped because Liquidsoap is not running' backend/src/Sync/Task/QueueInterruptingTracks.php
           grep -q 'Top-of-Hour staging skipped because Liquidsoap is not running' backend/src/Sync/Task/StageTopOfHourStationIdTask.php
           grep -q 'null === \$station->current_song' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
@@ -117,7 +118,7 @@ jobs:
           php -l backend/config/events.php
           php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           php -l backend/src/MessageQueue/QueueManager.php
-          php -l backend/src/Sync/Task/AirCheckTask.php
+          php -l backend/src/Radio/AbstractLocalAdapter.php
           php -l backend/src/Sync/Task/QueueInterruptingTracks.php
           php -l backend/src/Sync/Task/StageTopOfHourStationIdTask.php
           php -l backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
@@ -152,7 +153,7 @@ jobs:
           vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
             backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
             backend/src/MessageQueue/QueueManager.php \
-            backend/src/Sync/Task/AirCheckTask.php \
+            backend/src/Radio/AbstractLocalAdapter.php \
             backend/src/Sync/Task/QueueInterruptingTracks.php \
             backend/src/Sync/Task/StageTopOfHourStationIdTask.php \
             backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
