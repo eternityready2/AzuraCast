@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Sync\Task;
 
 use App\Controller\Api\Stations\Features\FeatureSuiteController;
+use App\Entity\Station;
+use App\Radio\Adapters;
 use App\Service\AirCheckDiagnosticsRecorder;
 use App\Service\AirCheckHealthMonitor;
 use Psr\SimpleCache\CacheInterface;
+use Throwable;
 
 final class AirCheckTask extends AbstractTask
 {
@@ -18,6 +21,7 @@ final class AirCheckTask extends AbstractTask
         private readonly AirCheckDiagnosticsRecorder $diagnosticsRecorder,
         private readonly AirCheckHealthMonitor $healthMonitor,
         private readonly CacheInterface $cache,
+        private readonly Adapters $adapters,
     ) {
     }
 
@@ -32,6 +36,12 @@ final class AirCheckTask extends AbstractTask
             if (!$force && !$station->backend_config->aircheck_enabled) {
                 continue;
             }
+
+            // FeatureSuiteController historically calls restart() when a service is
+            // already stopped. restart() begins with stop(), so Supervisor answers
+            // "cannot stop; It is not running" and recovery never reaches start().
+            // Start stopped station services directly before the normal AirCheck pass.
+            $this->startStoppedStationServices($station);
 
             $result = $this->featureSuiteController->runAirCheck($station);
             if (!($result['checked'] ?? false)) {
@@ -63,6 +73,37 @@ final class AirCheckTask extends AbstractTask
                 );
 
                 $this->cache->set($cacheKey, $running, self::HEALTH_STATE_TTL);
+            }
+        }
+    }
+
+    private function startStoppedStationServices(Station $station): void
+    {
+        foreach (['backend', 'frontend'] as $service) {
+            $adapter = 'backend' === $service
+                ? $this->adapters->getBackendAdapter($station)
+                : $this->adapters->getFrontendAdapter($station);
+
+            if (null === $adapter) {
+                continue;
+            }
+
+            try {
+                if (!$adapter->isRunning($station)) {
+                    $adapter->start($station);
+                    $this->logger->info('AirCheck started a stopped station service.', [
+                        'station_id' => $station->id,
+                        'service' => $service,
+                    ]);
+                }
+            } catch (Throwable $e) {
+                // Let the normal AirCheck pass record the failure/intervention; this
+                // preflight only prevents the known stop-before-start failure mode.
+                $this->logger->warning('AirCheck preflight start failed.', [
+                    'station_id' => $station->id,
+                    'service' => $service,
+                    'exception' => $e->getMessage(),
+                ]);
             }
         }
     }
