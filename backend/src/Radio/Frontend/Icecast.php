@@ -16,6 +16,7 @@ use GuzzleHttp\Promise\Utils;
 use GuzzleHttp\Psr7\Uri;
 use NowPlaying\Result\Result;
 use Psr\Http\Message\UriInterface;
+use RuntimeException;
 use Supervisor\Exception\SupervisorException as SupervisorLibException;
 use Symfony\Component\Filesystem\Path;
 
@@ -142,6 +143,13 @@ class Icecast extends AbstractFrontend
         $frontendConfig = $station->frontend_config;
         $configDir = $station->getRadioConfigDir();
 
+        $radioPort = $frontendConfig->port;
+        if (null === $radioPort) {
+            throw new RuntimeException(
+                'Station frontend port must be assigned before generating Icecast configuration.'
+            );
+        }
+
         $settings = $this->settingsRepo->readSettings();
         $settingsBaseUrl = $settings->getBaseUrlAsUri();
         $baseUrl = $settingsBaseUrl ?? new Uri('http://localhost');
@@ -182,7 +190,7 @@ class Icecast extends AbstractFrontend
             ],
 
             'listen-socket' => IcecastConfig::getListenSockets(
-                $frontendConfig->port,
+                $radioPort,
                 $frontendConfig->trusted_proxy_address
             ),
 
