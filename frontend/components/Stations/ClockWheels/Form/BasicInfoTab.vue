@@ -113,7 +113,7 @@
                         id="separation_artist_minutes"
                         :field="r$.separation_artist_minutes"
                         :label="$gettext('Artist Separation (min)')"
-                        type="number"
+                        input-type="number"
                     />
                 </div>
                 <div class="col-md-4">
@@ -121,7 +121,7 @@
                         id="separation_title_minutes"
                         :field="r$.separation_title_minutes"
                         :label="$gettext('Title Separation (min)')"
-                        type="number"
+                        input-type="number"
                     />
                 </div>
                 <div class="col-md-4">
@@ -129,7 +129,7 @@
                         id="burn_rate_max_plays_24h"
                         :field="r$.burn_rate_max_plays_24h"
                         :label="$gettext('Max Plays / 24h')"
-                        type="number"
+                        input-type="number"
                         :description="$gettext('Leave empty to disable burn-rate deprioritization.')"
                     />
                 </div>
@@ -144,9 +144,8 @@ import Tab from '~/components/Common/Tab.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
 import FormGroupSelect from '~/components/Form/FormGroupSelect.vue';
+import type {ValidatedField} from '~/components/Form/useFormField';
 import {useTranslate} from '~/vendor/gettext';
-
-type FormField = object;
 
 type ClockWheelForm = {
     name: string;
@@ -163,16 +162,16 @@ type ClockWheelForm = {
 };
 
 type ClockWheelValidation = {
-    name: FormField;
-    color: FormField;
-    is_active: FormField;
-    fill_strategy: FormField;
-    separation_enabled: FormField;
-    separation_artist_minutes: FormField;
-    separation_title_minutes: FormField;
-    burn_rate_max_plays_24h: FormField;
-    template_id?: FormField;
-    inherits_template_slots?: FormField;
+    name: ValidatedField<string>;
+    color: ValidatedField<string>;
+    is_active: ValidatedField<boolean>;
+    fill_strategy: ValidatedField<string>;
+    separation_enabled: ValidatedField<boolean>;
+    separation_artist_minutes: ValidatedField<number>;
+    separation_title_minutes: ValidatedField<number>;
+    burn_rate_max_plays_24h: ValidatedField<number | null>;
+    template_id: ValidatedField<number | null>;
+    inherits_template_slots: ValidatedField<boolean>;
 };
 
 const props = withDefaults(defineProps<{
