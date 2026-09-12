@@ -54,10 +54,25 @@ final class RigidScheduleWindowResolverTest extends Unit
         ));
     }
 
-    public function testProgrammeInterruptOptionMakesFlexibleRowRuntimeRigid(): void
+    public function testPlaylistProgrammeChoiceDoesNotTurnFlexibleRowIntoStrict(): void
     {
         [$station, $playlist] = $this->makePlaylist(false);
         $playlist->backend_options = [StationPlaylist::OPTION_INTERRUPT_OTHER_SONGS];
+        $resolver = new RigidScheduleWindowResolver();
+
+        self::assertNull(
+            $resolver->getActiveWindow(
+                $station,
+                new DateTimeImmutable('2026-09-12 12:00:00', new DateTimeZone('UTC')),
+            ),
+            'Playlist-wide Programme behavior must not silently convert a Flexible schedule row into Strict.',
+        );
+    }
+
+    public function testEmergencyRowStillGetsRigidAuthority(): void
+    {
+        [$station, , $schedule] = $this->makePlaylist(false);
+        $schedule->is_emergency = true;
         $resolver = new RigidScheduleWindowResolver();
 
         self::assertNotNull($resolver->getActiveWindow(
