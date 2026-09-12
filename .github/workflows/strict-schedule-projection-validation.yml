@@ -14,6 +14,7 @@ on:
       - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
       - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/Schedule.vue'
       - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
@@ -32,6 +33,7 @@ on:
       - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
       - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/Schedule.vue'
       - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
@@ -92,6 +94,17 @@ jobs:
           ! grep -q 'autoBehaviorEnabled' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
           ! grep -q 'MANUAL_BEHAVIOR_OPTION' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
           ! grep -q 'watch(' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+
+          # Flexible/Strict UI contract: Flexible is the default path; whichever
+          # timing mode is inactive remains visible but muted, and its associated
+          # start/end choices are also muted/locked until that timing mode is selected.
+          grep -q "'is-muted': schedulingMode !== 'flexible'" frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q "'is-muted': schedulingMode !== 'strict'" frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'mode-option-scheduling.is-muted' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'choice-grid-start' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          grep -q 'choice-grid-end' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          grep -q 'timing-flexible :deep(.choice-grid-start' frontend/components/Stations/Playlists/Form/Schedule.vue
+          grep -q 'timing-strict :deep(.choice-grid-start' frontend/components/Stations/Playlists/Form/Schedule.vue
 
       - name: PHP syntax check changed files
         shell: bash
@@ -187,6 +200,7 @@ jobs:
             "include": [
               "frontend/**/*.d.ts",
               "frontend/components/Stations/Playlists/Form/PlayoutRules.vue",
+              "frontend/components/Stations/Playlists/Form/Schedule.vue",
               "frontend/components/Stations/Playlists/Form/ScheduleRow.vue",
               "frontend/components/Stations/Reports/LinearLog.vue",
               "frontend/components/Stations/Reports/LinearLogSchedule.vue",
@@ -202,6 +216,7 @@ jobs:
         run: >-
           npx eslint
           frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          frontend/components/Stations/Playlists/Form/Schedule.vue
           frontend/components/Stations/Playlists/Form/ScheduleRow.vue
           frontend/components/Stations/Reports/LinearLog.vue
           frontend/components/Stations/Reports/LinearLogSchedule.vue
