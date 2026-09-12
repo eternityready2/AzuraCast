@@ -171,22 +171,22 @@ final class NowPlayingApiGenerator
         ?NowPlaying $npOld = null,
     ): void {
         // Strict / Exact Time playlists play from a dedicated native Liquidsoap
-        // source, so the ordinary AutoDJ queue is not authoritative while that
-        // source owns the air. Read the native source's exact remaining cursor and
-        // expose its first item as Playing Next.
-        $strictForecast = $this->rigidScheduleForecast->getActiveForecast(
+        // source. While that source owns the air, Playing Next must use the same
+        // live remaining cursor as Upcoming Song Queue, not the day-ahead Linear
+        // Log forecast and not the unrelated PHP AutoDJ underlay queue.
+        $strictUpcoming = $this->rigidScheduleForecast->getActiveUpcoming(
             $station,
             Time::nowUtc(),
             1,
         );
 
-        if ([] !== $strictForecast) {
-            $virtualQueueRow = $this->rigidScheduleForecast->toQueueRow(
+        if ([] !== $strictUpcoming) {
+            $nativeUpcomingRow = $this->rigidScheduleForecast->toQueueRow(
                 $station,
-                $strictForecast[0],
+                $strictUpcoming[0],
             );
             $np->playing_next = ($this->stationQueueApiGenerator)(
-                $virtualQueueRow,
+                $nativeUpcomingRow,
                 $baseUri,
                 true
             );
