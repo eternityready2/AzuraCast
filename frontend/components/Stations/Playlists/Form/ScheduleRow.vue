@@ -213,7 +213,7 @@
                             >
                             <span>
                                 <strong>{{ $gettext('Play once per scheduled block') }}</strong>
-                                <small>{{ $gettext('Recommended for shows and programmes. The playlist will not start a second cycle in this time slot.') }}</small>
+                                <small>{{ $gettext('Recommended for shows and programs. The playlist will not start a second cycle in this time slot.') }}</small>
                             </span>
                         </label>
 
