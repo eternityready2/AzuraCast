@@ -55,7 +55,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
         summary: 'Retrieve details of a single queued item.',
         tags: [OpenApi::TAG_STATIONS_QUEUE],
         parameters: [
-            new OpenApi\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+            new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
             new OA\Parameter(
                 name: 'id',
                 description: 'Queue Item ID',
@@ -84,7 +84,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
         summary: 'Delete a single queued item.',
         tags: [OpenApi::TAG_STATIONS_QUEUE],
         parameters: [
-            new OpenApi\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+            new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
             new OA\Parameter(
                 name: 'id',
                 description: 'Queue Item ID',
