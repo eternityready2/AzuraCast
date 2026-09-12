@@ -129,10 +129,30 @@ final class NowPlayingTask implements NowPlayingTaskInterface, EventSubscriberIn
     public function loadRawFromFrontend(GenerateRawNowPlaying $event): void
     {
         try {
-            $result = $event->getFrontend()?->getNowPlaying($event->getStation(), $event->includeClients());
-            if (null !== $result) {
-                $event->setResult($result);
+            $station = $event->getStation();
+            $frontend = $event->getFrontend();
+            if (null === $frontend) {
+                return;
             }
+
+            // Do not poll Icecast admin mount/client endpoints while the station is
+            // stopped or while a local Liquidsoap backend is still starting and has
+            // not reported its first current song. Icecast 2.5 otherwise logs a
+            // listclients warning and content-negotiation/KVA error on every poll of
+            // a mount that does not exist yet.
+            if (!$frontend->isRunning($station)) {
+                return;
+            }
+
+            if ($station->backend_type->isEnabled() && null === $station->current_song) {
+                $this->logger->debug('Skipping frontend Now Playing poll until local backend reports a current song.', [
+                    'station_id' => $station->id,
+                ]);
+                return;
+            }
+
+            $result = $frontend->getNowPlaying($station, $event->includeClients());
+            $event->setResult($result);
         } catch (Exception $e) {
             $this->logger->error(sprintf('NowPlaying adapter error: %s', $e->getMessage()));
         }
