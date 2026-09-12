@@ -33,17 +33,7 @@
                     </div>
                 </div>
 
-                <div class="col-md-6">
-                    <form-group-checkbox
-                        id="is_active"
-                        class="mb-0"
-                        :field="r$.is_active"
-                        :label="$gettext('Active')"
-                        :description="$gettext('Inactive wheels remain saved but will not run on-air.')"
-                    />
-                </div>
-
-                <div class="col-md-6">
+                <div class="col-12">
                     <form-group-select
                         id="fill_strategy"
                         class="mb-0"
