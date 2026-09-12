@@ -27,51 +27,6 @@
             </div>
 
             <div
-                v-if="entries.length > 0"
-                class="clock-wheel-entry-summary mb-3"
-            >
-                <div>
-                    <strong>{{ entries.length }}</strong>
-                    <span>{{ $gettext('Entries') }}</span>
-                </div>
-                <div>
-                    <strong>{{ formatLoopTime(estimatedLoopSeconds) }}</strong>
-                    <span>{{ $gettext('Estimated Loop') }}</span>
-                </div>
-                <div>
-                    <strong>{{ contentDensity.musicPercent }}%</strong>
-                    <span>{{ $gettext('Music') }}</span>
-                </div>
-                <span
-                    class="badge"
-                    :class="layoutValid ? 'text-bg-success' : 'text-bg-warning'"
-                >
-                    {{ layoutValid ? $gettext('Valid Layout') : $gettext('Needs Review') }}
-                </span>
-            </div>
-
-            <div
-                v-if="entries.length > 0"
-                class="clock-wheel-timeline mb-3"
-                role="img"
-                :aria-label="$gettext('Hour timeline showing anchor positions')"
-            >
-                <div class="clock-wheel-timeline__track">
-                    <span class="clock-wheel-timeline__label clock-wheel-timeline__label--start">0:00</span>
-                    <span class="clock-wheel-timeline__label clock-wheel-timeline__label--end">59:59</span>
-                    <button
-                        v-for="(entry, index) in sortedEntries"
-                        :key="'marker-' + index"
-                        type="button"
-                        class="clock-wheel-timeline__marker"
-                        :style="{left: timelinePercent(entry.position_seconds) + '%'}"
-                        :title="formatPosition(entry.position_seconds) + ' — ' + slotLabel(entry)"
-                        @click="focusRow(entries.indexOf(entry))"
-                    />
-                </div>
-            </div>
-
-            <div
                 v-if="timelineWarnings.length > 0"
                 class="alert alert-warning py-2 small mb-3"
             >
@@ -293,15 +248,11 @@ import IconIcDelete from '~icons/ic/baseline-delete';
 import IconIcAdd from '~icons/ic/baseline-add';
 import IconIcCopy from '~icons/ic/baseline-content-copy';
 import {
-    estimateClockWheelLoopSeconds,
     formatClockWheelPosition,
-    getClockWheelContentDensity,
     getClockWheelTimelineWarnings,
-    isClockWheelLayoutValid,
     parseClockWheelPosition,
-    timelinePercent,
 } from '~/functions/clockWheelPosition.ts';
-import {formatMediaType, getMediaTypeOptions} from '~/functions/mediaTypes.ts';
+import {getMediaTypeOptions} from '~/functions/mediaTypes.ts';
 import type {ClockWheelSlotEditorRow} from '~/functions/clockWheelSlotEditor.ts';
 
 export type ClockWheelEntryRow = ClockWheelSlotEditorRow;
@@ -344,22 +295,9 @@ const readOnlyMessage = computed(() =>
 );
 
 const mediaTypeOptions = computed(() => getMediaTypeOptions($gettext));
-const sortedEntries = computed(() =>
-    [...entries.value].sort((a, b) => a.position_seconds - b.position_seconds)
-);
 const timelineWarnings = computed(() => getClockWheelTimelineWarnings(entries.value, $gettext));
-const contentDensity = computed(() => getClockWheelContentDensity(entries.value));
-const estimatedLoopSeconds = computed(() => estimateClockWheelLoopSeconds(entries.value));
-const layoutValid = computed(() => isClockWheelLayoutValid(entries.value));
-
-const formatLoopTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${String(secs).padStart(2, '0')}`;
-};
 
 const formatPosition = formatClockWheelPosition;
-const slotLabel = (entry: ClockWheelEntryRow) => formatMediaType(entry.type, $gettext);
 const rowKey = (entry: ClockWheelEntryRow, index: number) =>
     `${index}-${entry.position_seconds}-${entry.type}`;
 const rowHasWarning = (index: number) =>
@@ -370,14 +308,6 @@ const onPositionChange = (entry: ClockWheelEntryRow, event: Event) => {
     entry.position_seconds = parseClockWheelPosition(target.value);
     target.value = formatPosition(entry.position_seconds);
     props.onEntriesChanged();
-};
-
-const focusRow = (index: number) => {
-    if (index < 0) {
-        return;
-    }
-    const row = $tbody.value?.querySelector(`tr[data-entry-index="${index}"]`);
-    row?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 };
 
 onMounted(() => {
