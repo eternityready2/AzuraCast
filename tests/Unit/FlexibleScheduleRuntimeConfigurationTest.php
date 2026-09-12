@@ -34,7 +34,7 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
         self::assertStringContainsString('thread.run.recurrent(delay=0.25', $config);
         self::assertMatchesRegularExpression(
-            '/thread\.run\.recurrent\(delay=0\.25, \{.*?\n\s+0\.25\n\s+\}\)/s',
+            '/thread\.run\.recurrent\(delay=0\.25, \{.*?\n\s+0\.25\n\s*\}\)/s',
             $config,
             'Liquidsoap recurrent callbacks must return a float delay, not unit.',
         );
