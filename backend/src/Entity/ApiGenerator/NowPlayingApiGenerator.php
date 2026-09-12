@@ -19,6 +19,8 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
+use App\Radio\AutoDJ\RigidScheduleForecastService;
+use App\Utilities\Time;
 use Exception;
 use GuzzleHttp\Psr7\Uri;
 use NowPlaying\Result\Result;
@@ -39,7 +41,8 @@ final class NowPlayingApiGenerator
         private readonly StationStreamerBroadcastRepository $broadcastRepo,
         private readonly Adapters $adapters,
         private readonly Router $router,
-        private readonly NowPlayingCache $nowPlayingCache
+        private readonly NowPlayingCache $nowPlayingCache,
+        private readonly RigidScheduleForecastService $rigidScheduleForecast,
     ) {
     }
 
@@ -117,16 +120,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
-        if (null === $nextVisibleSong) {
-            $np->playing_next = $npOld->playing_next ?? null;
-        } else {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisibleSong,
-                $baseUri,
-                true
-            );
-        }
+        $this->populatePlayingNext($np, $station, $baseUri, $npOld);
 
         // Detect and report live DJ status
         $currentStreamer = $station->current_streamer;
@@ -170,6 +164,48 @@ final class NowPlayingApiGenerator
         return $np ?? $this->offlineApi($station);
     }
 
+    private function populatePlayingNext(
+        NowPlaying $np,
+        Station $station,
+        ?UriInterface $baseUri,
+        ?NowPlaying $npOld = null,
+    ): void {
+        // Strict / Exact Time playlists play from a dedicated native Liquidsoap
+        // source. While that source owns the air, Playing Next must use the same
+        // live remaining cursor as Upcoming Song Queue, not the day-ahead Linear
+        // Log forecast and not the unrelated PHP AutoDJ underlay queue.
+        $strictUpcoming = $this->rigidScheduleForecast->getActiveUpcoming(
+            $station,
+            Time::nowUtc(),
+            1,
+        );
+
+        if ([] !== $strictUpcoming) {
+            $nativeUpcomingRow = $this->rigidScheduleForecast->toQueueRow(
+                $station,
+                $strictUpcoming[0],
+            );
+            $np->playing_next = ($this->stationQueueApiGenerator)(
+                $nativeUpcomingRow,
+                $baseUri,
+                true
+            );
+            return;
+        }
+
+        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+        if (null === $nextVisibleSong) {
+            $np->playing_next = $npOld?->playing_next;
+            return;
+        }
+
+        $np->playing_next = ($this->stationQueueApiGenerator)(
+            $nextVisibleSong,
+            $baseUri,
+            true
+        );
+    }
+
     private function offlineApi(
         Station $station,
         ?UriInterface $baseUri = null
@@ -196,14 +232,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisible = $this->queueRepo->getNextVisible($station);
-        if ($nextVisible instanceof StationQueue) {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisible,
-                $baseUri,
-                true
-            );
-        }
+        $this->populatePlayingNext($np, $station, $baseUri);
 
         $np->live = new Live();
 

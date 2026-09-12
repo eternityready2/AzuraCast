@@ -4,7 +4,7 @@
             <span v-if="group.isCurrent" class="badge text-bg-primary">{{ $gettext('NOW') }}</span>
             <strong>{{ group.label }}</strong>
             <span class="hour-summary">
-                {{ group.items.length }} {{ $gettext('tracks') }} / {{ group.totalDurationFormatted }}
+                {{ group.items.length }} {{ $gettext('items') }} / {{ group.totalDurationFormatted }}
             </span>
             <span v-if="group.hasId" class="badge text-bg-danger ms-auto">{{ $gettext('Station ID') }}</span>
         </div>
@@ -51,6 +51,9 @@
                         </td>
 
                         <td v-if="visibleColumns.includes('rules')" class="rules-cell">
+                            <span v-if="item.source_type === 'scheduled_programme'" class="badge text-bg-primary me-1">
+                                {{ $gettext('STRICT') }}
+                            </span>
                             <span v-if="item.top_of_hour_legal_id" class="badge text-bg-danger me-1">TOH</span>
                             <span v-if="item.clock_wheel_enforce_cap" class="badge text-bg-secondary me-1">CAP</span>
                             <span v-if="item.clock_wheel_stretch_ratio" class="badge text-bg-info me-1">
@@ -91,6 +94,9 @@ function displayTitle(item: LinearLogItem): string {
 }
 
 function sourceLabel(item: LinearLogItem): string {
+    if (item.source_type === "scheduled_programme" && item.playlist) {
+        return `${$gettext("Scheduled Program")}: ${item.playlist}`;
+    }
     if (item.clock_wheel) return item.clock_wheel;
     if (item.playlist) return item.playlist;
     if (item.is_request) return $gettext("Listener Request");
@@ -99,6 +105,7 @@ function sourceLabel(item: LinearLogItem): string {
 }
 
 function resolveType(item: LinearLogItem): string {
+    if (item.source_type === "scheduled_programme" || item.media_type === "programme") return "programme";
     if (item.is_request) return "request";
     if (item.clock_wheel) return "clock_wheel";
     if (item.top_of_hour_legal_id || item.media_type === "id") return "id";
@@ -108,6 +115,7 @@ function resolveType(item: LinearLogItem): string {
 
 function typeLabel(item: LinearLogItem): string {
     const labels: Record<string, string> = {
+        programme: $gettext("Scheduled Program"),
         music: $gettext("Music"),
         talk: $gettext("Talk"),
         id: $gettext("ID"),
@@ -123,6 +131,7 @@ function typeLabel(item: LinearLogItem): string {
 
 function typeBadgeClass(item: LinearLogItem): string {
     const classes: Record<string, string> = {
+        programme: "badge text-bg-primary",
         music: "badge text-bg-success",
         talk: "badge text-bg-warning",
         id: "badge text-bg-danger",
@@ -141,6 +150,7 @@ function rowClasses(item: LinearLogItem): Record<string, boolean> {
         "next-up": isNextUp(item),
         "legal-id": item.top_of_hour_legal_id,
         "live-queue": item.is_live_queue,
+        "scheduled-programme": item.source_type === "scheduled_programme",
     };
 }
 
@@ -174,11 +184,12 @@ function formatStretch(ratio: number): string {
 .queue-row.next-up td{background:color-mix(in srgb,var(--bs-success-bg-subtle) 34%,var(--bs-body-bg))}
 .queue-row.legal-id td{background:color-mix(in srgb,var(--bs-danger-bg-subtle) 28%,var(--bs-body-bg))}
 .queue-row.live-queue td{box-shadow:inset 2px 0 0 color-mix(in srgb,var(--bs-success) 55%,transparent)}
+.queue-row.scheduled-programme td{background:color-mix(in srgb,var(--bs-primary-bg-subtle) 45%,var(--bs-body-bg));box-shadow:inset 3px 0 0 var(--bs-primary)}
 .queue-time,.duration-cell{font-family:var(--bs-font-monospace);font-size:.76rem;white-space:nowrap}
 .queue-time{width:100px}
 .duration-cell{width:72px;text-align:right}
 .playlist-cell{width:210px;font-size:.79rem}
-.type-cell{width:95px}
+.type-cell{width:135px}
 .rules-cell{width:185px}
 .track-title{color:var(--bs-body-color)}
 .track-artist{color:var(--bs-secondary-color)!important}

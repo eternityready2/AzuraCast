@@ -18,7 +18,7 @@ require_once dirname(__DIR__, 2) . '/plugins/top_of_hour/src/RigidScheduleRuntim
 
 final class RigidScheduleRuntimeConfigurationTest extends Unit
 {
-    public function testStrictSongPlaylistGetsDedicatedNativeSourceAndCleanAutoDjCut(): void
+    public function testStrictSongPlaylistGetsDedicatedNativeSourceForecastAndCleanAutoDjCut(): void
     {
         [$station] = $this->makeScheduledProgram(true);
 
@@ -27,11 +27,16 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         $config = $event->buildConfiguration();
 
         self::assertStringContainsString(
-            '# Dedicated native source for a rigid scheduled programme.',
+            '# Dedicated native source for a strict scheduled programme.',
             $config,
         );
         self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
-        self::assertStringContainsString('mode="randomize"', $config);
+        self::assertStringContainsString('mode="normal"', $config);
+        self::assertStringContainsString('.register_command(', $config);
+        self::assertStringContainsString('"forecast"', $config);
+        self::assertStringContainsString('.remaining()', $config);
+        self::assertStringContainsString('.remaining_files()', $config);
+        self::assertStringContainsString('playlist.files(mime_type="audio/x-mpegurl"', $config);
         self::assertStringContainsString('11h0m-12h0m', $config);
 
         // The wall-clock switch owns the handoff. It arms the shared one-shot
@@ -65,7 +70,7 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         // outer rigid lane must have its own source object. Reusing the normal
         // source above stretch()/cross() is what creates Liquidsoap Error 11.
         self::assertStringContainsString(
-            '# Dedicated native source for a rigid scheduled programme.',
+            '# Dedicated native source for a strict scheduled programme.',
             $config,
         );
         self::assertStringContainsString('rigid_playlist_scheduled_program_', $config);
@@ -120,14 +125,25 @@ final class RigidScheduleRuntimeConfigurationTest extends Unit
         (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
         $config = $event->buildConfiguration();
 
-        // Helper state is inert. With no rigid schedule this subscriber must not
-        // replace `radio` with any gate/switch/fallback at all.
         self::assertStringContainsString('rigid_schedule_active = ref(false)', $config);
         self::assertStringNotContainsString('id="rigid_schedule_runtime"', $config);
         self::assertStringNotContainsString('azuracast.discard_autodj_current_cleanly()', $config);
         self::assertStringNotContainsString('broadcast_clock_autodj_gate', $config);
         self::assertStringNotContainsString('fallback.skip(', $config);
         self::assertStringNotContainsString('source.available(', $config);
+    }
+
+    public function testProgrammePlaylistOptionDoesNotConvertFlexibleRowToStrictLane(): void
+    {
+        [$station, $playlist] = $this->makeScheduledProgram(false);
+        $playlist->backend_options = [StationPlaylist::OPTION_INTERRUPT_OTHER_SONGS];
+
+        $event = new WriteLiquidsoapConfiguration($station, false, false);
+        (new RigidScheduleRuntimeConfiguration())->writeRuntime($event);
+        $config = $event->buildConfiguration();
+
+        self::assertStringNotContainsString('id="rigid_schedule_runtime"', $config);
+        self::assertStringNotContainsString('rigid_playlist_scheduled_program_', $config);
     }
 
     /** @return array{Station, StationPlaylist, StationSchedule} */

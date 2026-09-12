@@ -7,6 +7,9 @@ import {
     PlaylistRemoteTypes,
     PlaylistSources,
     PlaylistTypes,
+    SmartBlockLimitType,
+    SmartBlockMatchType,
+    SmartBlockType,
     StationPlaylist
 } from "~/entities/ApiInterfaces.ts";
 
@@ -17,7 +20,10 @@ export type StationPlaylistsRecord = Required<
         | 'podcasts'
     >
 > & {
-    id: number | null
+    id: number | null,
+    is_sponsor: boolean,
+    sponsor_name: string | null,
+    sponsor_guaranteed_plays_per_day: number | null,
 }
 
 export const useStationsPlaylistsForm = defineStore(
@@ -42,14 +48,22 @@ export const useStationsPlaylistsForm = defineStore(
             play_per_hour_minute: 0,
             include_in_requests: true,
             avoid_duplicates: true,
+            smart_shuffle_distance: null,
             rotation_goal_days: null as number | null,
             crossfade_profile: null as string | null,
             backend_options: [],
             schedule_items: [],
+            playlists: [],
+            playlist_groups: [],
             is_smart_block: false,
-            smart_block_match_type: 'all',
+            smart_block_match_type: SmartBlockMatchType.All,
             smart_block_limit: null as number | null,
-            smart_block_limit_type: 'tracks'
+            smart_block_limit_type: SmartBlockLimitType.Tracks,
+            smart_block_type: SmartBlockType.Dynamic,
+            smart_block_criteria: [],
+            is_sponsor: false,
+            sponsor_name: null,
+            sponsor_guaranteed_plays_per_day: null,
         });
 
         const {r$} = useAppScopedRegle(
@@ -85,7 +99,10 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.smart_block_limit_type,
                     ],
                     advancedTab: [
-                        fields.backend_options
+                        fields.backend_options,
+                        fields.is_sponsor,
+                        fields.sponsor_name,
+                        fields.sponsor_guaranteed_plays_per_day,
                     ]
                 })
             }

@@ -59,6 +59,7 @@ const scheduleDurationMinutes = (schedule: PlaylistBehaviorScheduleLike): number
 export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBehaviorDetection => {
     const scheduleItems = input.scheduleItems ?? [];
     const searchable = `${input.name ?? ''} ${input.description ?? ''}`.trim();
+    const hasStrictRow = scheduleItems.some((schedule) => Boolean(schedule.strict_start));
 
     if (scheduleItems.some((schedule) => Boolean(schedule.is_emergency)) || priorityPattern.test(searchable)) {
         return {
@@ -70,21 +71,28 @@ export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBe
     if (!input.hasSchedule) {
         return {
             behavior: 'rotation',
-            reason: 'No schedule is attached, so normal rotation behavior is the safest default.',
+            reason: 'No schedule is attached, so normal rotation behavior is the safest recommendation.',
         };
     }
 
+    // Strict / Exact Time is deliberately NOT used to rewrite playlist-wide
+    // Flexible behavior. It is a per-schedule timing choice and independently
+    // owns its exact wall-clock boundary.
     if (musicPattern.test(searchable)) {
         return {
             behavior: 'rotation',
-            reason: 'Scheduled music or rotation content was detected.',
+            reason: hasStrictRow
+                ? 'Music rotation content was detected. Strict schedule rows will still start exactly on time.'
+                : 'Scheduled music or rotation content was detected.',
         };
     }
 
     if (programmePattern.test(searchable)) {
         return {
             behavior: 'programme',
-            reason: 'A scheduled show or programme was detected.',
+            reason: hasStrictRow
+                ? 'Show or program content was detected. Strict rows keep their separate exact-time authority.'
+                : 'A scheduled show or program was detected.',
         };
     }
 
@@ -95,19 +103,16 @@ export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBe
     if (durations.length > 0 && Math.max(...durations) >= 180) {
         return {
             behavior: 'rotation',
-            reason: 'A long scheduled block was detected, so continuous rotation behavior was selected.',
-        };
-    }
-
-    if (scheduleItems.some((schedule) => Boolean(schedule.strict_start))) {
-        return {
-            behavior: 'programme',
-            reason: 'An exact-start scheduled programme was detected.',
+            reason: hasStrictRow
+                ? 'A long scheduled block was detected. Strict rows remain exact even with a Rotation recommendation.'
+                : 'A long scheduled block was detected, so continuous rotation is recommended.',
         };
     }
 
     return {
         behavior: 'programme',
-        reason: 'A scheduled programming block was detected.',
+        reason: hasStrictRow
+            ? 'A scheduled programming block was detected. Strict rows remain independently exact.'
+            : 'A scheduled programming block was detected.',
     };
 };

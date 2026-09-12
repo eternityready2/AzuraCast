@@ -1,0 +1,233 @@
+name: Strict Schedule Projection Validation
+
+on:
+  push:
+    branches:
+      - 'fix/strict-schedule-*'
+      - dev
+    paths:
+      - 'backend/src/Controller/Api/Stations/QueueController.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
+      - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
+      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/Schedule.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
+      - 'frontend/components/Stations/Reports/LinearLog.vue'
+      - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
+      - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
+      - 'tests/Unit/RigidScheduleWindowResolverTest.php'
+      - '.github/workflows/strict-schedule-projection-validation.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'backend/src/Controller/Api/Stations/QueueController.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
+      - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
+      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/Schedule.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
+      - 'frontend/components/Stations/Reports/LinearLog.vue'
+      - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
+      - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
+      - 'tests/Unit/RigidScheduleWindowResolverTest.php'
+      - '.github/workflows/strict-schedule-projection-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate diff and scheduling contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+
+          test -f backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php
+          test -f backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
+          test -f backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php
+
+          # Strict runtime owns only explicitly strict/emergency rows and exposes
+          # the exact native source cursor used by planning/reporting surfaces.
+          grep -q 'mode="normal"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '\.register_command(' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '"forecast"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '\.remaining_files()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q 'playlist.files(mime_type="audio/x-mpegurl"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q '\|\| \$playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+
+          # The 24-hour Linear Log remains the full planner. Upcoming Queue keeps
+          # its normal configured/track-count lookahead and splices Strict songs
+          # into only that same short horizon. Playing Next uses the active cursor.
+          grep -q 'function getActiveUpcoming' backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
+          grep -q 'getActiveUpcoming' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          grep -q 'autodj_queue_lookahead_minutes' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getUnplayedQueue' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getWindows' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getForecast' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'isSuppressedByRigidWindow' backend/src/Controller/Api/Stations/QueueController.php
+          ! grep -q 'listRigidScheduleQueue' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getForecast' backend/src/Radio/AutoDJ/LinearLogBuilder.php
+          grep -q 'mapRigidForecastItem' backend/src/Radio/AutoDJ/LinearLogBuilder.php
+
+          # Recommendation UI must never mutate saved behavior merely by opening
+          # the form. The user must explicitly apply it.
+          grep -q 'Apply Recommendation' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'autoBehaviorEnabled' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'MANUAL_BEHAVIOR_OPTION' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'watch(' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+
+          # Flexible/Strict UI contract: Flexible is the default path; whichever
+          # timing mode is inactive remains visible but muted, and its associated
+          # start/end choices are also muted/locked until that timing mode is selected.
+          grep -q "'is-muted': schedulingMode !== 'flexible'" frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q "'is-muted': schedulingMode !== 'strict'" frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'mode-option-scheduling.is-muted' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          grep -q 'choice-grid-start' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          grep -q 'choice-grid-end' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          grep -q 'timing-flexible :deep(.choice-grid-start' frontend/components/Stations/Playlists/Form/Schedule.vue
+          grep -q 'timing-strict :deep(.choice-grid-start' frontend/components/Stations/Playlists/Form/Schedule.vue
+
+      - name: PHP syntax check changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only origin/dev...HEAD -- '*.php' | while read -r f; do test -f "$f" && echo "$f"; done)
+          for file in "${files[@]}"; do php -l "$file"; done
+
+      - name: Liquidsoap 2.4.5 strict forecast command smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/strict-forecast.m3u <<'EOF'
+          /tmp/not-present.mp3
+          EOF
+          cat > /tmp/strict-forecast-smoke.liq <<'EOF'
+          init.daemon := false
+
+          strict_source = playlist.list(
+            id="rigid_forecast_smoke",
+            mode="normal",
+            ["/tmp/not-present.mp3"]
+          )
+
+          strict_source.register_command(
+            description="Return exact strict-program forecast state.",
+            "forecast",
+            fun (_) -> json.stringify({
+              remaining_seconds = strict_source.remaining(),
+              remaining_files = strict_source.remaining_files(),
+              all_files = playlist.files(mime_type="audio/x-mpegurl", "/tmp/strict-forecast.m3u")
+            })
+          )
+          EOF
+          docker run --rm --entrypoint liquidsoap \
+            -v /tmp/strict-forecast.m3u:/tmp/strict-forecast.m3u:ro \
+            -v /tmp/strict-forecast-smoke.liq:/tmp/strict-forecast-smoke.liq:ro \
+            savonet/liquidsoap:v2.4.5 --check /tmp/strict-forecast-smoke.liq
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
+      - name: Execute strict schedule regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/codecept run tests/Unit/RigidScheduleWindowResolverTest.php
+          vendor/bin/codecept run tests/Unit/RigidScheduleRuntimeConfigurationTest.php
+          vendor/bin/codecept run tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php
+
+      - name: PHPStan changed scheduling integration
+        shell: bash
+        run: |
+          cat > phpstan.strict-schedule.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.strict-schedule.neon --memory-limit=-1 --no-progress \
+            backend/src/Controller/Api/Stations/QueueController.php \
+            backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
+            backend/src/Radio/AutoDJ/LinearLogBuilder.php \
+            backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php \
+            backend/src/Radio/AutoDJ/RigidScheduleForecastService.php \
+            backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php \
+            plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
+            tests/Unit/RigidScheduleRuntimeConfigurationTest.php \
+            tests/Unit/RigidScheduleWindowResolverTest.php
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check changed frontend
+        shell: bash
+        run: |
+          cat > tsconfig.strict-schedule.json <<'EOF'
+          {
+            "extends": "./tsconfig.json",
+            "include": [
+              "frontend/**/*.d.ts",
+              "frontend/components/Stations/Playlists/Form/PlayoutRules.vue",
+              "frontend/components/Stations/Playlists/Form/Schedule.vue",
+              "frontend/components/Stations/Playlists/Form/ScheduleRow.vue",
+              "frontend/components/Stations/Reports/LinearLog.vue",
+              "frontend/components/Stations/Reports/LinearLogSchedule.vue",
+              "frontend/functions/playlistBehaviorDetector.ts",
+              "frontend/entities/LinearLog.ts"
+            ],
+            "exclude": ["node_modules"]
+          }
+          EOF
+          npx vue-tsc -p tsconfig.strict-schedule.json --noEmit
+
+      - name: Lint changed frontend
+        run: >-
+          npx eslint
+          frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          frontend/components/Stations/Playlists/Form/Schedule.vue
+          frontend/components/Stations/Playlists/Form/ScheduleRow.vue
+          frontend/components/Stations/Reports/LinearLog.vue
+          frontend/components/Stations/Reports/LinearLogSchedule.vue
+          frontend/functions/playlistBehaviorDetector.ts
