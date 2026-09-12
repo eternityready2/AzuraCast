@@ -9,11 +9,16 @@ on:
       - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
       - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
+      - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
       - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleWindowResolverTest.php'
       - '.github/workflows/strict-schedule-projection-validation.yml'
   pull_request:
@@ -22,11 +27,16 @@ on:
       - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
       - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
+      - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php'
+      - 'plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
+      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
       - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleWindowResolverTest.php'
       - '.github/workflows/strict-schedule-projection-validation.yml'
 
@@ -53,18 +63,35 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      - name: Validate diff and contracts
+      - name: Validate diff and scheduling contracts
         shell: bash
         run: |
           set -euo pipefail
           git diff --check origin/dev...HEAD
 
+          test -f backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php
+          test -f backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
           test -f backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php
-          grep -q 'strict_start' frontend/functions/playlistBehaviorDetector.ts
-          grep -q "MANUAL_BEHAVIOR_OPTION = 'manual_behavior'" frontend/components/Stations/Playlists/Form/PlayoutRules.vue
-          grep -q 'source_type.*scheduled_programme' backend/src/Radio/AutoDJ/LinearLogBuilder.php
-          grep -q 'RigidScheduleWindowResolver' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          grep -q 'RigidScheduleWindowResolver' backend/src/Controller/Api/Stations/QueueController.php
+
+          # Strict runtime owns only explicitly strict/emergency rows and exposes
+          # the exact native source cursor used by all forecast surfaces.
+          grep -q 'mode="normal"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '\.register_command(' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '"forecast"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q '\.remaining_files()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q 'playlist.files(mime_type="audio/x-mpegurl"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q '\|\| \$playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+
+          grep -q 'RigidScheduleForecastService' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          grep -q 'getActiveForecast' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'mapRigidForecastItem' backend/src/Radio/AutoDJ/LinearLogBuilder.php
+
+          # Recommendation UI must never mutate saved behavior merely by opening
+          # the form. The user must explicitly apply it.
+          grep -q 'Apply Recommendation' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'autoBehaviorEnabled' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'MANUAL_BEHAVIOR_OPTION' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          ! grep -q 'watch(' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
 
       - name: PHP syntax check changed files
         shell: bash
@@ -72,6 +99,37 @@ jobs:
           set -euo pipefail
           mapfile -t files < <(git diff --name-only origin/dev...HEAD -- '*.php' | while read -r f; do test -f "$f" && echo "$f"; done)
           for file in "${files[@]}"; do php -l "$file"; done
+
+      - name: Liquidsoap 2.4.5 strict forecast command smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/strict-forecast.m3u <<'EOF'
+          /tmp/not-present.mp3
+          EOF
+          cat > /tmp/strict-forecast-smoke.liq <<'EOF'
+          init.daemon := false
+
+          strict_source = playlist.list(
+            id="rigid_forecast_smoke",
+            mode="normal",
+            ["/tmp/not-present.mp3"]
+          )
+
+          strict_source.register_command(
+            description="Return exact strict-programme forecast state.",
+            "forecast",
+            fun (_) -> json.stringify({
+              remaining_seconds = strict_source.remaining(),
+              remaining_files = strict_source.remaining_files(),
+              all_files = playlist.files(mime_type="audio/x-mpegurl", "/tmp/strict-forecast.m3u")
+            })
+          )
+          EOF
+          docker run --rm --entrypoint liquidsoap \
+            -v /tmp/strict-forecast.m3u:/tmp/strict-forecast.m3u:ro \
+            -v /tmp/strict-forecast-smoke.liq:/tmp/strict-forecast-smoke.liq:ro \
+            savonet/liquidsoap:v2.4.5 --check /tmp/strict-forecast-smoke.liq
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
@@ -104,7 +162,11 @@ jobs:
             backend/src/Controller/Api/Stations/QueueController.php \
             backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
             backend/src/Radio/AutoDJ/LinearLogBuilder.php \
+            backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php \
+            backend/src/Radio/AutoDJ/RigidScheduleForecastService.php \
             backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php \
+            plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
+            tests/Unit/RigidScheduleRuntimeConfigurationTest.php \
             tests/Unit/RigidScheduleWindowResolverTest.php
 
       - name: Set up Node
@@ -125,6 +187,7 @@ jobs:
             "include": [
               "frontend/**/*.d.ts",
               "frontend/components/Stations/Playlists/Form/PlayoutRules.vue",
+              "frontend/components/Stations/Playlists/Form/ScheduleRow.vue",
               "frontend/components/Stations/Reports/LinearLog.vue",
               "frontend/components/Stations/Reports/LinearLogSchedule.vue",
               "frontend/functions/playlistBehaviorDetector.ts",
@@ -139,6 +202,7 @@ jobs:
         run: >-
           npx eslint
           frontend/components/Stations/Playlists/Form/PlayoutRules.vue
+          frontend/components/Stations/Playlists/Form/ScheduleRow.vue
           frontend/components/Stations/Reports/LinearLog.vue
           frontend/components/Stations/Reports/LinearLogSchedule.vue
           frontend/functions/playlistBehaviorDetector.ts
