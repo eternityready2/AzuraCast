@@ -77,7 +77,7 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         );
 
         $schedule->is_emergency = false;
-        $playlist->backend_options = [StationPlaylist::OPTION_INTERRUPT];
+        $playlist->backend_options = [StationPlaylist::OPTION_INTERRUPT_OTHER_SONGS];
 
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
