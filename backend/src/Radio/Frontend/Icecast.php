@@ -16,6 +16,7 @@ use GuzzleHttp\Promise\Utils;
 use GuzzleHttp\Psr7\Uri;
 use NowPlaying\Result\Result;
 use Psr\Http\Message\UriInterface;
+use RuntimeException;
 use Supervisor\Exception\SupervisorException as SupervisorLibException;
 use Symfony\Component\Filesystem\Path;
 
@@ -142,18 +143,38 @@ class Icecast extends AbstractFrontend
         $frontendConfig = $station->frontend_config;
         $configDir = $station->getRadioConfigDir();
 
-        $settingsBaseUrl = $this->settingsRepo->readSettings()->getBaseUrlAsUri();
+        $radioPort = $frontendConfig->port;
+        if (null === $radioPort) {
+            throw new RuntimeException(
+                'Station frontend port must be assigned before generating Icecast configuration.'
+            );
+        }
+
+        $settings = $this->settingsRepo->readSettings();
+        $settingsBaseUrl = $settings->getBaseUrlAsUri();
         $baseUrl = $settingsBaseUrl ?? new Uri('http://localhost');
+        $hostname = $baseUrl->getHost();
+
+        // Icecast 2.5 warns when its reserved placeholder contact is used. Do not
+        // reuse ACME's registration email here because <admin> is public in Icecast
+        // status output. Generate a non-sensitive host-scoped technical contact.
+        $contactHost = '' !== $hostname && 'localhost' !== $hostname
+            ? $hostname
+            : 'localhost.localdomain';
+        $adminContact = 'icemaster@' . $contactHost;
 
         [$certPath, $certKey] = Acme::getCertificatePaths();
 
         $config = [
             'location' => 'AzuraCast',
-            'admin' => 'icemaster@localhost',
-            'hostname' => $baseUrl->getHost(),
+            'admin' => $adminContact,
+            'hostname' => $hostname,
             'limits' => [
-                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners * 2 : 2500,
-                'max-listeners' => $frontendConfig->max_listeners ?? -1,
+                // Icecast 2.5 has no server-wide <max-listeners> tag. Its global
+                // <clients> limit is the aggregate cap across all mount points.
+                // Use the configured station-wide maximum here instead of copying
+                // it to every mount, which would allow the total to multiply.
+                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners : 2500,
                 'sources' => IcecastConfig::getSourceLimit($station->mounts->count()),
                 'queue-size' => 524288,
                 'client-timeout' => 30,
@@ -169,7 +190,7 @@ class Icecast extends AbstractFrontend
             ],
 
             'listen-socket' => IcecastConfig::getListenSockets(
-                $frontendConfig->port,
+                $radioPort,
                 $frontendConfig->trusted_proxy_address
             ),
 
@@ -180,7 +201,6 @@ class Icecast extends AbstractFrontend
                 'logdir' => $configDir,
                 'webroot' => self::WEBROOT,
                 'adminroot' => self::ADMINROOT,
-                'pidfile' => $configDir . '/icecast.pid',
                 'alias' => [
                     [
                         '@source' => '/',
@@ -229,7 +249,6 @@ class Icecast extends AbstractFrontend
                 'mount-name' => $mountRow->name,
                 'charset' => $charset,
                 'stream-name' => $station->name,
-                'listenurl' => $this->getUrlForMount($station, $mountRow),
             ];
 
             if ($station->max_bitrate !== 0) {
