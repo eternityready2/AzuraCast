@@ -23,7 +23,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * This subscriber adds only the missing runtime backstop for audio that has
  * already been handed to Liquidsoap and therefore cannot be shortened later by
- * PHP queue planning. At nominal start + 60 seconds it checks the final on-air
+ * PHP queue planning. At nominal start + 60 seconds it checks the on-air
  * metadata. If the scheduled playlist is already on air, nothing happens. If a
  * different AutoDJ queue row is still on air, it performs the same one-shot
  * clean AutoDJ cut used by the proven Top-of-Hour/rigid paths. The existing
@@ -49,9 +49,9 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
 
     public static function getSubscribedEvents(): array
     {
-        // Run after ConfigWriter (playlists/crossfade/live), rigid (16) and TOH
-        // (15). We do not wrap `radio`; we only observe the final on-air metadata
-        // and, when necessary, advance the shared AutoDJ transport once.
+        // Run after ConfigWriter has created playlists/crossfade/live and after
+        // rigid (16) and TOH (15). We do not wrap `radio`; we only observe the
+        // authoritative on-air graph and, when necessary, advance AutoDJ once.
         return [
             WriteLiquidsoapConfiguration::class => ['writeRuntime', 14],
         ];
@@ -60,7 +60,7 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
     public function writeRuntime(WriteLiquidsoapConfiguration $event): void
     {
         $station = $event->getStation();
-        $checks = [];
+        $checkData = [];
 
         foreach ($station->playlists as $playlist) {
             if (!$playlist->is_enabled) {
@@ -79,63 +79,27 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
 
                 $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
                 $scheduleKey = isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
-                $triggeredRef = 'bounded_flexible_' . $scheduleKey . '_triggered';
-                $checkName = 'bounded_flexible_' . $scheduleKey . '_check';
 
-                $event->appendLines([
-                    $triggeredRef . ' = ref(false)',
-                    'def ' . $checkName . '() =',
-                    '    in_deadline_window = (' . $deadlineWindow . ')',
-                    '',
-                    '    if in_deadline_window then',
-                    '        if not ' . $triggeredRef . '() then',
-                    '            ' . $triggeredRef . ' := true',
-                    '',
-                    '            # Never take the microphone away from a live DJ.',
-                    '            if not azuracast.live_enabled() then',
-                    '                target_playlist = ' . ConfigWriter::toRawString((string)$playlistId),
-                    '                current_playlist = bounded_flexible_current_playlist_id()',
-                    '                current_sq = bounded_flexible_current_sq_id()',
-                    '',
-                    '                if current_playlist == target_playlist then',
-                    '                    log(' . ConfigWriter::toRawString(
-                        'Bounded Flexible: "' . $playlist->name
-                        . '" reached air naturally inside the grace window.'
-                    ) . ')',
-                    '                elsif current_sq != "" then',
-                    '                    # Only cut a real AutoDJ queue request. Native playlists,',
-                    '                    # remote streams, rigid/TOH lanes and other non-queue sources',
-                    '                    # are deliberately never skipped by this watchdog.',
-                    '                    azuracast.discard_autodj_current_cleanly()',
-                    '                    log(' . ConfigWriter::toRawString(
-                        'Bounded Flexible: 60-second grace deadline reached for "'
-                        . $playlist->name . '"; cleanly advancing the late AutoDJ row.'
-                    ) . ')',
-                    '                end',
-                    '            end',
-                    '        end',
-                    '    else',
-                    '        # Re-arm after this one-minute deadline window so the next',
-                    '        # daily/weekly/recurring occurrence can enforce independently.',
-                    '        ' . $triggeredRef . ' := false',
-                    '    end',
-                    'end',
-                    '',
-                ]);
-
-                $checks[] = $checkName . '()';
+                $checkData[] = [
+                    'deadline_window' => $deadlineWindow,
+                    'playlist_id' => (string)$playlistId,
+                    'playlist_name' => $playlist->name,
+                    'triggered_ref' => 'bounded_flexible_' . $scheduleKey . '_triggered',
+                    'check_name' => 'bounded_flexible_' . $scheduleKey . '_check',
+                ];
             }
         }
 
-        if ([] === $checks) {
+        if ([] === $checkData) {
             return;
         }
 
+        // Define shared metadata state before any generated check function refers
+        // to it. sq_id is the important safety discriminator: it exists on PHP
+        // AutoDJ queue rows, but not on native/remote/TOH/rigid sources.
         $event->appendBlock(
             <<<'LIQ'
-            # Bounded flexible scheduling observes the FINAL station graph. Both
-            # native playlist files and AutoDJ queue annotations can carry a
-            # playlist_id; sq_id specifically identifies a PHP AutoDJ queue row.
+            # Bounded flexible scheduling observes the authoritative station graph.
             bounded_flexible_current_playlist_id = ref("")
             bounded_flexible_current_sq_id = ref("")
 
@@ -150,6 +114,55 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
             )
             LIQ
         );
+
+        $checks = [];
+        foreach ($checkData as $data) {
+            $triggeredRef = $data['triggered_ref'];
+            $checkName = $data['check_name'];
+
+            $event->appendLines([
+                $triggeredRef . ' = ref(false)',
+                'def ' . $checkName . '() =',
+                '    in_deadline_window = (' . $data['deadline_window'] . ')',
+                '',
+                '    if in_deadline_window then',
+                '        if not ' . $triggeredRef . '() then',
+                '            ' . $triggeredRef . ' := true',
+                '',
+                '            # Never take the microphone away from a live DJ.',
+                '            if not azuracast.live_enabled() then',
+                '                target_playlist = ' . ConfigWriter::toRawString($data['playlist_id']),
+                '                current_playlist = bounded_flexible_current_playlist_id()',
+                '                current_sq = bounded_flexible_current_sq_id()',
+                '',
+                '                if current_playlist == target_playlist then',
+                '                    log(' . ConfigWriter::toRawString(
+                    'Bounded Flexible: "' . $data['playlist_name']
+                    . '" reached air naturally inside the grace window.'
+                ) . ')',
+                '                elsif current_sq != "" then',
+                '                    # Only cut a real AutoDJ queue request. Native playlists,',
+                '                    # remote streams, rigid/TOH lanes and other non-queue sources',
+                '                    # are deliberately never skipped by this watchdog.',
+                '                    azuracast.discard_autodj_current_cleanly()',
+                '                    log(' . ConfigWriter::toRawString(
+                    'Bounded Flexible: 60-second grace deadline reached for "'
+                    . $data['playlist_name'] . '"; cleanly advancing the late AutoDJ row.'
+                ) . ')',
+                '                end',
+                '            end',
+                '        end',
+                '    else',
+                '        # Re-arm after this one-minute deadline window so the next',
+                '        # daily/weekly/recurring occurrence can enforce independently.',
+                '        ' . $triggeredRef . ' := false',
+                '    end',
+                'end',
+                '',
+            ]);
+
+            $checks[] = $checkName . '()';
+        }
 
         $body = implode("\n    ", $checks);
         $event->appendBlock(
