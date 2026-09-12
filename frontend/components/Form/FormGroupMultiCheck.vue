@@ -34,7 +34,7 @@
                     :radio="radio"
                     :stacked="stacked"
                     :disabled="disabled"
-                    :field-class="fieldClass"
+                    :field-class="fieldClass ?? undefined"
                 >
                     <template
                         v-for="(_, slot) of useSlotsExcept(['default', 'label', 'description'])"
@@ -89,18 +89,15 @@ type FormGroupMultiCheckProps = FormFieldProps<T> & FormLabelParentProps & {
     disabled?: boolean
 }
 
-const props = withDefaults(
-    defineProps<FormGroupMultiCheckProps>(),
-    {
-        radio: false,
-        stacked: false,
-        disabled: false
-    }
-);
+const props = defineProps<FormGroupMultiCheckProps>();
+const emit = defineEmits<FormFieldEmits<T>>();
 
 const slots = useSlots();
 
-const emit = defineEmits<FormFieldEmits<T>>();
-
-const {model, fieldClass, isRequired} = useFormField<T>(props, emit);
+const {
+    model,
+    field,
+    fieldClass,
+    isRequired
+} = useFormField(props, emit);
 </script>
