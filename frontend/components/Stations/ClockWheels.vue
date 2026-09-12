@@ -212,43 +212,72 @@
                             <h3>{{ $gettext('Clock Wheels') }}</h3>
                             <p>{{ $gettext('Choose a wheel to edit it without leaving this page.') }}</p>
                         </div>
-                        <add-button
-                            :text="$gettext('Add')"
-                            @click="openNewWheelEditor"
-                        />
+                        <div class="clock-management-pane-actions">
+                            <add-button
+                                :text="$gettext('Add Clock Wheel')"
+                                @click="openNewWheelEditor"
+                            />
+                            <div class="dropdown">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary clock-management-more-actions"
+                                    data-bs-toggle="dropdown"
+                                    aria-expanded="false"
+                                    :aria-label="$gettext('More Clock Wheel actions')"
+                                >
+                                    ⋮
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <button
+                                            type="button"
+                                            class="dropdown-item"
+                                            @click="$generateModal?.open()"
+                                        >
+                                            {{ $gettext('Auto-Generate') }}
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button
+                                            type="button"
+                                            class="dropdown-item"
+                                            @click="triggerImport"
+                                        >
+                                            {{ $gettext('Import') }}
+                                        </button>
+                                    </li>
+                                    <li v-if="activeWheel">
+                                        <button
+                                            type="button"
+                                            class="dropdown-item"
+                                            @click="openAnalytics(activeWheel)"
+                                        >
+                                            {{ $gettext('Analytics') }}
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <button
+                                            type="button"
+                                            class="dropdown-item text-danger"
+                                            :disabled="!hasSelectedWheels"
+                                            @click="doDeleteSelected"
+                                        >
+                                            {{ $gettext('Delete Selected') }}
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="clock-management-list-actions">
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            @click="$generateModal?.open()"
-                        >
-                            {{ $gettext('Auto-Generate') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            @click="triggerImport"
-                        >
-                            {{ $gettext('Import') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-danger"
-                            :disabled="!hasSelectedWheels"
-                            @click="doDeleteSelected"
-                        >
-                            {{ $gettext('Delete Selected') }}
-                        </button>
-                        <input
-                            ref="$importInput"
-                            type="file"
-                            accept="application/json,.json"
-                            class="d-none"
-                            @change="onImportFile"
-                        >
-                    </div>
+                    <input
+                        ref="$importInput"
+                        type="file"
+                        accept="application/json,.json"
+                        class="d-none"
+                        @change="onImportFile"
+                    >
 
                     <data-table
                         id="station_clock_wheels"
@@ -307,29 +336,52 @@
 
                     <div
                         v-if="activeWheel"
-                        class="clock-management-quick-actions"
+                        class="clock-management-side-cards"
                     >
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            @click="openPreview(activeWheel)"
-                        >
-                            {{ $gettext('Preview') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            @click="openAnalytics(activeWheel)"
-                        >
-                            {{ $gettext('Analytics') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            @click="doExportJson(activeWheel)"
-                        >
-                            {{ $gettext('Export Clock') }}
-                        </button>
+                        <section class="clock-management-side-card">
+                            <h4>{{ $gettext('Template / Day Part Info') }}</h4>
+                            <dl class="clock-management-side-card__details">
+                                <div>
+                                    <dt>{{ $gettext('Source') }}</dt>
+                                    <dd>{{ wheelTemplateSummary(activeWheel) }}</dd>
+                                </div>
+                                <div>
+                                    <dt>{{ $gettext('Schedule') }}</dt>
+                                    <dd>{{ wheelScheduleSummary(activeWheel) }}</dd>
+                                </div>
+                                <div>
+                                    <dt>{{ $gettext('Status') }}</dt>
+                                    <dd>{{ activeWheel.is_active === false ? $gettext('Inactive') : $gettext('Active') }}</dd>
+                                </div>
+                            </dl>
+                        </section>
+
+                        <section class="clock-management-side-card">
+                            <h4>{{ $gettext('Quick Actions') }}</h4>
+                            <div class="clock-management-side-card__actions">
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @click="openPreview(activeWheel)"
+                                >
+                                    {{ $gettext('Preview') }}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @click="activeWorkspaceTab = 'program-grid'"
+                                >
+                                    {{ $gettext('Open in Program Grid') }}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @click="doExportJson(activeWheel)"
+                                >
+                                    {{ $gettext('Export Clock') }}
+                                </button>
+                            </div>
+                        </section>
                     </div>
                 </aside>
 
