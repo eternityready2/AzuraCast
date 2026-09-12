@@ -101,9 +101,6 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         }
 
         $dj = $schedule->getAiDj();
-        if (!$dj instanceof AiDj) {
-            return;
-        }
 
         $shift = $this->scheduler->getShiftWindow($station, $schedule, $now);
         $startsAt = $shift['starts_at'];
