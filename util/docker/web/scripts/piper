@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 REAL_PIPER = "/usr/local/share/piper/piper"
-PRIMARY_TIMEOUT_SECONDS = 80
-RETRY_TIMEOUT_SECONDS = 32
-RETRY_MAX_CHARS = 1800
+PRIMARY_TIMEOUT_SECONDS = 65
+RETRY_TIMEOUT_SECONDS = 20
+RETRY_MAX_CHARS = 800
 
 
 def output_path(args: list[str]) -> str | None:
@@ -45,11 +45,12 @@ def bounded_retry_text(text: str) -> str:
 
     # News scripts are paragraph-oriented. Keep the opening and, where practical,
     # the final outro while dropping middle stories only after the primary render
-    # has demonstrably stalled.
+    # has demonstrably stalled. The shortened retry has a deliberately small text
+    # budget so it can finish inside RETRY_TIMEOUT_SECONDS on a busy host.
     paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", clean) if paragraph.strip()]
     outro = paragraphs[-1] if len(paragraphs) > 1 else ""
-    reserve = min(320, len(outro) + 2) if outro else 0
-    prefix_limit = max(600, RETRY_MAX_CHARS - reserve)
+    reserve = min(240, len(outro) + 2) if outro else 0
+    prefix_limit = max(360, RETRY_MAX_CHARS - reserve)
     prefix = sentence_prefix(clean, prefix_limit)
 
     if outro and outro not in prefix and len(prefix) + len(outro) + 2 <= RETRY_MAX_CHARS:
