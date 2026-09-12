@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
@@ -37,9 +38,7 @@ final class RigidScheduleForecastService
     ) {
     }
 
-    /**
-     * @return list<RigidScheduleForecastItem>
-     */
+    /** @return list<RigidScheduleForecastItem> */
     public function getActiveForecast(
         Station $station,
         ?DateTimeImmutable $at = null,
@@ -54,9 +53,7 @@ final class RigidScheduleForecastService
         return $this->getForecast($station, $at, $window['end'], $limit);
     }
 
-    /**
-     * @return list<RigidScheduleForecastItem>
-     */
+    /** @return list<RigidScheduleForecastItem> */
     public function getForecast(
         Station $station,
         DateTimeImmutable $rangeStart,
@@ -78,9 +75,9 @@ final class RigidScheduleForecastService
 
         foreach ($windows as $window) {
             $playlist = $window['playlist'];
-            if (!$playlist->source->isLocalMedia()) {
+            if (PlaylistSources::Songs !== $playlist->source) {
                 // Remote streams/playlists do not expose StationMedia rows that can
-                // truthfully populate song metadata in the queue/report surfaces.
+                // truthfully populate song metadata in queue/report surfaces.
                 continue;
             }
 
@@ -118,7 +115,7 @@ final class RigidScheduleForecastService
                 if ([] === $state['remaining']) {
                     // Rigid song sources run in deterministic normal mode. Once a
                     // full round is exhausted, Liquidsoap loops the same source
-                    // file order; repeat the same cycle here so future rows remain
+                    // file order; repeat that same cycle here so future rows remain
                     // identical to what the station will actually air.
                     $state['remaining'] = $state['cycle'];
                 }
@@ -199,11 +196,11 @@ final class RigidScheduleForecastService
             $payload = $this->decodeForecastResponse($response);
 
             $cycle = $this->mapUrisToMedia(
-                $payload['all_files'] ?? [],
+                is_array($payload['all_files'] ?? null) ? $payload['all_files'] : [],
                 $mediaById,
             );
             $remaining = $this->mapUrisToMedia(
-                $payload['remaining_files'] ?? [],
+                is_array($payload['remaining_files'] ?? null) ? $payload['remaining_files'] : [],
                 $mediaById,
             );
 
@@ -252,7 +249,7 @@ final class RigidScheduleForecastService
     }
 
     /**
-     * @param list<string> $uris
+     * @param array<mixed> $uris
      * @param array<int, StationMedia> $mediaById
      * @return list<array{media: StationMedia, duration: float}>
      */
@@ -289,9 +286,7 @@ final class RigidScheduleForecastService
         return $result;
     }
 
-    /**
-     * @return list<StationMedia>
-     */
+    /** @return list<StationMedia> */
     private function getPlaylistMedia(StationPlaylist $playlist): array
     {
         return $this->em->createQuery(
