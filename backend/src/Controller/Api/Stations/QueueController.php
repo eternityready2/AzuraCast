@@ -225,7 +225,7 @@ final class QueueController extends AbstractStationApiCrudController
     }
 
     /**
-     * @param list<StationQueue> $queueRows
+     * @param array<array-key, StationQueue> $queueRows
      */
     private function getUpcomingHorizonEnd(
         Station $station,
