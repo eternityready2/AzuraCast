@@ -10,6 +10,7 @@ from kokoro_onnx import Kokoro
 
 MODEL_PATH = "/opt/kokoro/kokoro-v1.0.onnx"
 VOICES_PATH = "/opt/kokoro/voices-v1.0.bin"
+REAL_PIPER_BIN = "/usr/local/share/piper/piper"
 
 # Keep the outer PHP process comfortably below AiDjGenerator's 90-second ceiling.
 KOKORO_TIMEOUT_SECONDS = 35
@@ -95,7 +96,12 @@ def choose_piper_model(voice: str) -> str:
 
 def run_piper_fallback(text: str, voice: str, output_path: str, speed: float) -> None:
     model = choose_piper_model(voice)
-    command = ["piper", "--model", model, "--output_file", output_path]
+
+    # Call the real Piper binary directly here. AI News intentionally uses the
+    # /usr/local/bin/piper timeout/retry wrapper, but Kokoro already owns a strict
+    # 40-second fallback budget. Nesting the wrapper under that shorter timeout can
+    # kill the wrapper while its real Piper child continues running as an orphan.
+    command = [REAL_PIPER_BIN, "--model", model, "--output_file", output_path]
 
     if speed != 1.0:
         command.extend(["--length_scale", str(1.0 / speed)])
