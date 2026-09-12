@@ -108,7 +108,7 @@
                     >
                         <span class="preset-icon"><icon-ic-play-arrow /></span>
                         <span class="preset-copy">
-                            <strong>{{ $gettext('Scheduled Show / Programme') }}</strong>
+                            <strong>{{ $gettext('Scheduled Show / Program') }}</strong>
                             <small>{{ $gettext('Strict exact start • Plays once • Stops at boundary') }}</small>
                         </span>
                     </button>
@@ -161,7 +161,7 @@
                     <ul class="mb-0 ps-3">
                         <li>{{ $gettext('Flexible = waits for the current song and lets the current item finish.') }}</li>
                         <li>{{ $gettext('Strict = exact wall-clock start with a firm scheduled end.') }}</li>
-                        <li>{{ $gettext('Programme = normal strict show start.') }}</li>
+                        <li>{{ $gettext('Program = normal strict show start.') }}</li>
                         <li>{{ $gettext('Priority = strict start plus listener-request priority.') }}</li>
                         <li>{{ $gettext('Play once per block = does not repeat within the time slot.') }}</li>
                     </ul>
