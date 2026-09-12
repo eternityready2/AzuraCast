@@ -49,7 +49,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             $app->add(new Middleware\ApplyXForwarded());
 
             $errorMiddleware = $app->addErrorMiddleware(
-                $environment->showDetailedErrors(),
+                $environment->showDetailedErrors,
                 true,
                 true,
                 $container->get(Psr\Log\LoggerInterface::class)
@@ -160,9 +160,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Radio\AutoDJ\Annotations::class,
             App\Radio\AutoDJ\ContentTypeCrossfadeAnnotator::class,
             App\Radio\AutoDJ\ClockWheel\ClockWheelAnnotator::class,
-            App\Radio\AutoDJ\AiDjShiftLifecycleListener::class,
-            App\Radio\AutoDJ\AiDjCadenceWatchdogSubscriber::class,
-            App\Radio\AutoDJ\AiDjQueueListener::class,
             App\Radio\AutoDJ\DmcaComplianceListener::class,
             App\Radio\Backend\Liquidsoap\ConfigWriter::class,
             App\Radio\Backend\Liquidsoap\TopOfHourAiNewsConfigurationGuard::class,
