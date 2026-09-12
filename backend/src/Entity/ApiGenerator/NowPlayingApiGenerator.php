@@ -19,6 +19,8 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
+use App\Radio\AutoDJ\RigidScheduleWindowResolver;
+use App\Utilities\Time;
 use Exception;
 use GuzzleHttp\Psr7\Uri;
 use NowPlaying\Result\Result;
@@ -39,7 +41,8 @@ final class NowPlayingApiGenerator
         private readonly StationStreamerBroadcastRepository $broadcastRepo,
         private readonly Adapters $adapters,
         private readonly Router $router,
-        private readonly NowPlayingCache $nowPlayingCache
+        private readonly NowPlayingCache $nowPlayingCache,
+        private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
     ) {
     }
 
@@ -117,15 +120,24 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
-        if (null === $nextVisibleSong) {
-            $np->playing_next = $npOld->playing_next ?? null;
+        // Strict/programme schedules are played by the native rigid Liquidsoap
+        // lane, not by the ordinary PHP AutoDJ queue. Showing the next ordinary
+        // queue row here during that window is false and can remain visually
+        // "stuck" for hours. Do not fabricate a next native-playlist track; its
+        // exact next item is owned by Liquidsoap's playlist source.
+        if (null !== $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
+            $np->playing_next = null;
         } else {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisibleSong,
-                $baseUri,
-                true
-            );
+            $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+            if (null === $nextVisibleSong) {
+                $np->playing_next = $npOld->playing_next ?? null;
+            } else {
+                $np->playing_next = ($this->stationQueueApiGenerator)(
+                    $nextVisibleSong,
+                    $baseUri,
+                    true
+                );
+            }
         }
 
         // Detect and report live DJ status
@@ -145,7 +157,7 @@ final class NowPlayingApiGenerator
                         routeParams: [
                             'station_id' => $station->short_name,
                             'id' => $currentStreamer->id,
-                            'timestamp' => $currentStreamer->art_updated_at,
+                            'timestamp' => $station->art_updated_at,
                         ],
                     )
                 );
@@ -196,13 +208,15 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisible = $this->queueRepo->getNextVisible($station);
-        if ($nextVisible instanceof StationQueue) {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisible,
-                $baseUri,
-                true
-            );
+        if (null === $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
+            $nextVisible = $this->queueRepo->getNextVisible($station);
+            if ($nextVisible instanceof StationQueue) {
+                $np->playing_next = ($this->stationQueueApiGenerator)(
+                    $nextVisible,
+                    $baseUri,
+                    true
+                );
+            }
         }
 
         $np->live = new Live();
