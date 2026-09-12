@@ -95,16 +95,22 @@ jobs:
           grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
-          # Kokoro is bounded below the PHP 90-second ceiling and has a local Piper
-          # fallback so a single stalled inference cannot silently erase a DJ break.
+          # Kokoro is bounded below the PHP 90-second ceiling. Full scripts already
+          # bounded by AiDjGenerator are split into safe chunks, not truncated, and
+          # the emergency fallback calls the real Piper binary directly.
           grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
           grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
+          grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
+          grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
+          grep -q 'REAL_PIPER_BIN = "/usr/local/share/piper/piper"' util/docker/kokoro/kokoro_tts.py
+          grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
           grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
 
-          # AI News Piper gets a bounded primary render and sentence-safe retry,
-          # while setup leaves the real binary at a stable internal path.
-          grep -q 'PRIMARY_TIMEOUT_SECONDS = 80' util/docker/web/scripts/piper
-          grep -q 'RETRY_TIMEOUT_SECONDS = 32' util/docker/web/scripts/piper
+          # Shared Piper stays inside the AI DJ 90-second caller ceiling while AI
+          # News still gets one bounded, sentence-safe retry on a stalled inference.
+          grep -q 'PRIMARY_TIMEOUT_SECONDS = 65' util/docker/web/scripts/piper
+          grep -q 'RETRY_TIMEOUT_SECONDS = 20' util/docker/web/scripts/piper
+          grep -q 'RETRY_MAX_CHARS = 800' util/docker/web/scripts/piper
           grep -q 'bounded_retry_text' util/docker/web/scripts/piper
           grep -q '/usr/local/bin/piper-real' util/docker/web/setup/piper.sh
           grep -q 'chmod a+x /usr/local/bin/piper' util/docker/web/setup/piper.sh
