@@ -1,30 +1,44 @@
-name: AI DJ Airtime Regression
+name: AI DJ and Runtime Regression
 
 on:
   push:
     branches:
       - 'fix/playlist-loop-labels-and-ai-dj-airtime'
     paths:
-      - 'backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php'
-      - 'backend/src/Radio/AutoDJ/AiDjCadenceWatchdogSubscriber.php'
+      - 'backend/config/events.php'
+      - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
-      - 'backend/src/Radio/AutoDJ/ClockWheelScheduler.php'
+      - 'backend/src/Service/AiDjGenerator.php'
+      - 'util/docker/kokoro/kokoro_tts.py'
+      - 'backend/src/MessageQueue/QueueManager.php'
+      - 'backend/src/Sync/Task/AirCheckTask.php'
+      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/Annotations.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
       - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
-      - 'tests/Unit/AiDjClockWheelBridgeSubscriberTest.php'
+      - 'tests/Unit/AiDjRuntimeCadenceTest.php'
       - '.github/workflows/ai-dj-airtime-regression.yml'
   pull_request:
     branches: [dev]
     paths:
-      - 'backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php'
-      - 'backend/src/Radio/AutoDJ/AiDjCadenceWatchdogSubscriber.php'
+      - 'backend/config/events.php'
+      - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
-      - 'backend/src/Radio/AutoDJ/ClockWheelScheduler.php'
+      - 'backend/src/Service/AiDjGenerator.php'
+      - 'util/docker/kokoro/kokoro_tts.py'
+      - 'backend/src/MessageQueue/QueueManager.php'
+      - 'backend/src/Sync/Task/AirCheckTask.php'
+      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/Annotations.php'
       - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
       - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
-      - 'tests/Unit/AiDjClockWheelBridgeSubscriberTest.php'
+      - 'tests/Unit/AiDjRuntimeCadenceTest.php'
       - '.github/workflows/ai-dj-airtime-regression.yml'
 
 permissions:
@@ -50,24 +64,26 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      - name: Validate requested behavior contracts
+      - name: Validate behavior contracts
         shell: bash
         run: |
           set -euo pipefail
           git diff --check origin/dev...HEAD
 
-          # Listener requests keep first refusal (5). The bridge must then run
-          # before ClockWheelScheduler (3), otherwise the wheel fills nextSongs
-          # and the native AI DJ lifecycle/talk subscribers intentionally return.
-          grep -q "BuildQueue::class => \['onBuildQueue', 4\]" backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php
-          grep -q "\['buildFromClockWheel', 3\]" backend/src/Radio/AutoDJ/ClockWheelScheduler.php
-          grep -q '\$this->cadenceWatchdog->onBuildQueue(\$event);' backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php
-          grep -q '\$this->shiftLifecycle->onBuildQueue(\$event);' backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php
-          grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php
+          # AI speech is intentionally wall-clock driven. Slow TTS/API work must
+          # never run as a BuildQueue event subscriber and block music selection.
+          grep -q 'App\\Sync\\Task\\AiDjShiftLifecycleRuntimeTask::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjQueueListener::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjShiftLifecycleListener::class' backend/config/events.php
+          ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
 
-          # Keep the proven sign-on/sign-off and artist-info paths wired. The fix
-          # restores their chance to run under Clock Wheel playback; it does not
-          # replace them with a second generator or remove their safety guards.
+          grep -q 'TALK_BASE_INTERVAL_SECONDS = 300' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_talk_cadence_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+
+          # Preserve the welcome, sign-off and artist-history paths the station uses.
           grep -q 'generateShiftIntro' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'AI DJ Welcome' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'generateShiftOutro' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
@@ -75,8 +91,22 @@ jobs:
           grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
-          # Requested playlist copy only; Repeat/Loop remains independent of
-          # Flexible/Strict and its existing descriptions/behavior are preserved.
+          # Kokoro is bounded below the PHP 90-second ceiling and has a local Piper
+          # fallback so a single stalled inference cannot silently erase a DJ break.
+          grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
+          grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
+          grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
+
+          # LOGS(7) runtime regressions.
+          grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
+          ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
+          grep -q '\$adapter->start(\$station);' backend/src/Sync/Task/AirCheckTask.php
+          grep -q 'Interrupting queue skipped because Liquidsoap is not running' backend/src/Sync/Task/QueueInterruptingTracks.php
+          grep -q 'Top-of-Hour staging skipped because Liquidsoap is not running' backend/src/Sync/Task/StageTopOfHourStationIdTask.php
+          grep -q 'null === \$station->current_song' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          grep -q "'azuracast_autocue' => false" backend/src/Radio/AutoDJ/Annotations.php
+
+          # Requested playlist copy remains independent from Flexible/Strict timing.
           grep -q 'Play once per scheduled block — No Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
           grep -q 'Repeat until end of block — Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
           grep -q 'Priority Start — Override Requests' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
@@ -84,8 +114,18 @@ jobs:
 
       - name: PHP syntax check
         run: |
-          php -l backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php
-          php -l tests/Unit/AiDjClockWheelBridgeSubscriberTest.php
+          php -l backend/config/events.php
+          php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          php -l backend/src/MessageQueue/QueueManager.php
+          php -l backend/src/Sync/Task/AirCheckTask.php
+          php -l backend/src/Sync/Task/QueueInterruptingTracks.php
+          php -l backend/src/Sync/Task/StageTopOfHourStationIdTask.php
+          php -l backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
+          php -l backend/src/Radio/AutoDJ/Annotations.php
+          php -l tests/Unit/AiDjRuntimeCadenceTest.php
+
+      - name: Python syntax check
+        run: python3 -m py_compile util/docker/kokoro/kokoro_tts.py
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
@@ -97,10 +137,10 @@ jobs:
           sudo mkdir -p /var/azuracast/www/plugins
           sudo chown -R "$USER":"$(id -gn)" /var/azuracast
 
-      - name: Execute AI DJ ordering regression
-        run: vendor/bin/codecept run tests/Unit/AiDjClockWheelBridgeSubscriberTest.php
+      - name: Execute AI DJ cadence regression
+        run: vendor/bin/codecept run tests/Unit/AiDjRuntimeCadenceTest.php
 
-      - name: PHPStan AI DJ bridge
+      - name: PHPStan runtime repairs
         shell: bash
         run: |
           cat > phpstan.ai-dj-airtime.neon <<'EOF'
@@ -110,8 +150,14 @@ jobs:
             reportUnmatchedIgnoredErrors: false
           EOF
           vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
-            backend/src/Radio/AutoDJ/AiDjClockWheelBridgeSubscriber.php \
-            tests/Unit/AiDjClockWheelBridgeSubscriberTest.php
+            backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
+            backend/src/MessageQueue/QueueManager.php \
+            backend/src/Sync/Task/AirCheckTask.php \
+            backend/src/Sync/Task/QueueInterruptingTracks.php \
+            backend/src/Sync/Task/StageTopOfHourStationIdTask.php \
+            backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
+            backend/src/Radio/AutoDJ/Annotations.php \
+            tests/Unit/AiDjRuntimeCadenceTest.php
 
       - name: Set up Node
         uses: actions/setup-node@v4
