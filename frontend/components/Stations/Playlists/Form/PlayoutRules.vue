@@ -377,8 +377,8 @@ const startBehaviorOptions: Array<{
     },
     {
         value: 'priority',
-        title: $gettext('Priority Start (News / Alert)'),
-        description: $gettext('Start on schedule and also override listener requests. Best for news, alerts and time-sensitive content.'),
+        title: $gettext('Priority Start — Override Requests'),
+        description: $gettext('Start on schedule and take priority over listener requests. Use when this playlist must not be delayed by queued requests.'),
         help: $gettext('Priority is available with Strict / Exact Time and combines exact start with listener-request priority.'),
     },
 ];
