@@ -22,27 +22,34 @@
             </div>
 
             <div class="clock-wheel-editor-actions">
+                <label class="clock-wheel-status-control">
+                    <span>{{ $gettext('Status') }}</span>
+                    <select
+                        v-model="form.is_active"
+                        class="form-select form-select-sm"
+                        :disabled="loading"
+                    >
+                        <option :value="true">{{ $gettext('Active') }}</option>
+                        <option :value="false">{{ $gettext('Inactive') }}</option>
+                    </select>
+                </label>
                 <button
+                    v-if="isEditMode"
                     type="button"
                     class="btn btn-outline-secondary"
                     :disabled="loading"
-                    @click="emit('cancel')"
+                    @click="doDuplicate"
                 >
-                    {{ $gettext('Cancel') }}
+                    {{ $gettext('Duplicate') }}
                 </button>
                 <button
+                    v-if="isEditMode"
                     type="button"
-                    class="btn btn-primary"
-                    :disabled="loading || r$.$invalid"
-                    @click="doSubmit"
+                    class="btn btn-outline-danger"
+                    :disabled="loading"
+                    @click="doDelete"
                 >
-                    <span
-                        v-if="loading"
-                        class="spinner-border spinner-border-sm me-2"
-                        role="status"
-                        aria-hidden="true"
-                    />
-                    {{ loading ? $gettext('Saving…') : $gettext('Save Clock Wheel') }}
+                    {{ $gettext('Delete') }}
                 </button>
             </div>
         </div>
@@ -95,7 +102,7 @@
                 :disabled="loading || r$.$invalid"
                 @click="doSubmit"
             >
-                {{ loading ? $gettext('Saving…') : $gettext('Save Clock Wheel') }}
+                {{ loading ? $gettext('Saving…') : $gettext('Save Changes') }}
             </button>
         </div>
     </div>
@@ -106,6 +113,7 @@ import {computed, onMounted, reactive, ref} from 'vue';
 import {useAxios} from '~/vendor/axios';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
+import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
 import {useAppRegle} from '~/vendor/regle.ts';
 import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
@@ -142,6 +150,7 @@ const emit = defineEmits<{
 const {$gettext} = useTranslate();
 const {axios} = useAxios();
 const {notifySuccess} = useNotify();
+const {confirmDelete} = useDialog();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -228,6 +237,15 @@ const populateForm = (data: Record<string, unknown>) => {
     }
 };
 
+const getRequestErrorMessage = (err: unknown, fallback: string): string => {
+    const message = typeof err === 'object'
+        && err !== null
+        && 'response' in err
+        ? (err as {response?: {data?: {message?: string}}}).response?.data?.message
+        : null;
+    return message ?? fallback;
+};
+
 const loadEditor = async () => {
     loading.value = true;
     error.value = null;
@@ -245,12 +263,7 @@ const loadEditor = async () => {
             populateForm(data as Record<string, unknown>);
         }
     } catch (err: unknown) {
-        const message = typeof err === 'object'
-            && err !== null
-            && 'response' in err
-            ? (err as {response?: {data?: {message?: string}}}).response?.data?.message
-            : null;
-        error.value = message ?? $gettext('Could not load this clock wheel.');
+        error.value = getRequestErrorMessage(err, $gettext('Could not load this clock wheel.'));
     } finally {
         loading.value = false;
     }
@@ -391,12 +404,63 @@ const doSubmit = async () => {
         notifySuccess($gettext('Clock Wheel saved.'));
         emit('saved');
     } catch (err: unknown) {
-        const message = typeof err === 'object'
-            && err !== null
-            && 'response' in err
-            ? (err as {response?: {data?: {message?: string}}}).response?.data?.message
-            : null;
-        error.value = message ?? $gettext('Could not save this clock wheel.');
+        error.value = getRequestErrorMessage(err, $gettext('Could not save this clock wheel.'));
+    } finally {
+        loading.value = false;
+    }
+};
+
+const doDuplicate = async () => {
+    if (!isEditMode.value) {
+        return;
+    }
+
+    const payload = await buildPayload();
+    if (!payload) {
+        return;
+    }
+
+    loading.value = true;
+    error.value = null;
+
+    try {
+        await axios.post(props.createUrl, {
+            ...payload,
+            name: $gettext('%{name} Copy', {name: form.value.name}),
+            is_active: false,
+            daypart_id: null,
+            schedule_items: [],
+        });
+        notifySuccess($gettext('Clock Wheel duplicated as an inactive copy.'));
+        emit('saved');
+    } catch (err: unknown) {
+        error.value = getRequestErrorMessage(err, $gettext('Could not duplicate this clock wheel.'));
+    } finally {
+        loading.value = false;
+    }
+};
+
+const doDelete = async () => {
+    if (!props.recordUrl) {
+        return;
+    }
+
+    const {value} = await confirmDelete({
+        title: $gettext('Delete “%{name}”?', {name: form.value.name}),
+    });
+    if (!value) {
+        return;
+    }
+
+    loading.value = true;
+    error.value = null;
+
+    try {
+        await axios.delete(props.recordUrl);
+        notifySuccess($gettext('Clock Wheel deleted.'));
+        emit('saved');
+    } catch (err: unknown) {
+        error.value = getRequestErrorMessage(err, $gettext('Could not delete this clock wheel.'));
     } finally {
         loading.value = false;
     }
@@ -449,6 +513,21 @@ const doSubmit = async () => {
     gap: .65rem;
 }
 
+.clock-wheel-status-control {
+    display: grid;
+    gap: .2rem;
+    min-width: 8.25rem;
+    margin: 0;
+}
+
+.clock-wheel-status-control > span {
+    color: var(--bs-secondary-color);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
 .clock-wheel-editor-surface {
     overflow: hidden;
     border: 1px solid var(--bs-border-color);
@@ -487,8 +566,12 @@ const doSubmit = async () => {
 
     .clock-wheel-editor-actions {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         width: 100%;
+    }
+
+    .clock-wheel-status-control {
+        min-width: 0;
     }
 
     .clock-wheel-editor-actions .btn,
@@ -504,6 +587,16 @@ const doSubmit = async () => {
         display: grid;
         grid-template-columns: 1fr 1fr;
         padding: .7rem;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .clock-wheel-editor-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .clock-wheel-status-control {
+        grid-column: 1 / -1;
     }
 }
 </style>
