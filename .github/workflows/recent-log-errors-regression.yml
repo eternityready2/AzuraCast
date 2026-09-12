@@ -47,11 +47,16 @@ jobs:
           set -euo pipefail
           git diff --check origin/dev...HEAD
 
-          # Icecast 2.5 rejects these old config locations/keys.
+          # Icecast 2.5 rejects these old config locations/keys. Keep the configured
+          # cap aggregate via global clients rather than multiplying it per mount.
           ! grep -q "'listenurl'" backend/src/Radio/Frontend/Icecast.php
           ! grep -q "'pidfile'" backend/src/Radio/Frontend/Icecast.php
-          grep -q "\$mount\['max-listeners'\]" backend/src/Radio/Frontend/Icecast.php
-          grep -q "acme_email" backend/src/Radio/Frontend/Icecast.php
+          ! grep -q "\$mount\['max-listeners'\]" backend/src/Radio/Frontend/Icecast.php
+          grep -q "'clients' => !empty(\$frontendConfig->max_listeners) ? \$frontendConfig->max_listeners : 2500" backend/src/Radio/Frontend/Icecast.php
+
+          # Icecast's admin field is public; never publish the private ACME address.
+          ! grep -q "settings->acme_email" backend/src/Radio/Frontend/Icecast.php
+          grep -q "\$adminContact = 'icemaster@'" backend/src/Radio/Frontend/Icecast.php
 
           # Healthy certificate checks must not be failures, and private keys must
           # always be locked down before Icecast examines them.
