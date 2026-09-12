@@ -36,6 +36,7 @@ final class LinearLogBuilder
         private readonly LinearLogSnapshotStore $snapshotStore,
         private readonly LinearLogPreviewContext $previewContext,
         private readonly AiDjScheduleRepository $aiDjScheduleRepo,
+        private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
     ) {
     }
 
@@ -71,7 +72,18 @@ final class LinearLogBuilder
         $buildStartedAt = time();
         $projectionStart = Time::nowUtc();
         $projectionStartTs = $projectionStart->getTimestamp();
-        $projectionEndTs = $projectionStart->modify('+' . $lookaheadMinutes . ' minutes')->getTimestamp();
+        $projectionEnd = $projectionStart->modify('+' . $lookaheadMinutes . ' minutes');
+        $projectionEndTs = $projectionEnd->getTimestamp();
+
+        // Strict/programme schedules are rendered by a native Liquidsoap source
+        // above the ordinary AutoDJ queue. Capture those windows before the
+        // isolated queue projection so the report can replace underlay rows with
+        // truthful programme blocks instead of pretending General Rotation airs.
+        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows(
+            $station,
+            $projectionStart,
+            $projectionEnd,
+        );
 
         $liveQueueIds = [];
         foreach ($this->queueRepo->getUnplayedQueue($station) as $queueRow) {
@@ -115,14 +127,32 @@ final class LinearLogBuilder
                     continue;
                 }
 
-                $duration = max(5.0, $row->duration ?? 0.0);
-                $coverageEnd = max($coverageEnd, $playedAt + (int)ceil($duration));
-                $entries[] = $this->mapQueueRow(
+                $entry = $this->mapQueueRow(
                     $row,
                     ++$sequence,
                     isset($liveQueueIds[$row->id]),
                 );
+                $entry = $this->applyRigidWindowsToQueueEntry($entry, $rigidWindows);
+                if (null === $entry) {
+                    continue;
+                }
+
+                $duration = max(1.0, (float)$entry['duration']);
+                $coverageEnd = max($coverageEnd, $playedAt + (int)ceil($duration));
+                $entries[] = $entry;
             }
+
+            // Preview gaps beneath a native rigid programme are not real on-air
+            // gaps. Remove them instead of alarming the operator with impossible
+            // holes inside a programme that Liquidsoap is already playing.
+            $gaps = array_values(array_filter(
+                $gaps,
+                fn(array $gap): bool => !$this->rangeOverlapsRigidWindow(
+                    (int)$gap['started_at'],
+                    (int)$gap['started_at'] + (int)$gap['duration'],
+                    $rigidWindows,
+                ),
+            ));
 
             foreach ($gaps as $gap) {
                 $coverageEnd = max(
@@ -130,6 +160,29 @@ final class LinearLogBuilder
                     (int)$gap['started_at'] + (int)$gap['duration'],
                 );
             }
+
+            foreach ($rigidWindows as $window) {
+                $marker = $this->mapRigidScheduleWindow(
+                    $window,
+                    $projectionStartTs,
+                    $projectionEndTs,
+                );
+                if (null === $marker) {
+                    continue;
+                }
+
+                $entries[] = $marker;
+                $coverageEnd = max(
+                    $coverageEnd,
+                    (int)$marker['played_at'] + (int)ceil((float)$marker['duration']),
+                );
+            }
+
+            usort(
+                $entries,
+                static fn(array $a, array $b): int =>
+                    ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
+            );
         } catch (Throwable $e) {
             $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
             throw $e;
@@ -164,6 +217,104 @@ final class LinearLogBuilder
         );
 
         return $this->snapshotStore->get($station);
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @param list<array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable}> $windows
+     * @return array<string, mixed>|null
+     */
+    private function applyRigidWindowsToQueueEntry(array $entry, array $windows): ?array
+    {
+        // TOH IDs sit above rigid schedules and really can air inside the block.
+        if ((bool)$entry['top_of_hour_legal_id']) {
+            return $entry;
+        }
+
+        $start = (int)($entry['played_at'] ?? 0);
+        $end = $start + (int)ceil((float)$entry['duration']);
+
+        foreach ($windows as $window) {
+            $windowStart = $window['start']->getTimestamp();
+            $windowEnd = $window['end']->getTimestamp();
+
+            if ($start >= $windowStart && $start < $windowEnd) {
+                return null;
+            }
+
+            // A normal AutoDJ item may begin before an exact programme boundary.
+            // It really airs only until the rigid takeover, so clip its projected
+            // duration instead of showing it continuing underneath the programme.
+            if ($start < $windowStart && $end > $windowStart) {
+                $entry['duration'] = max(1.0, (float)($windowStart - $start));
+                return $entry;
+            }
+        }
+
+        return $entry;
+    }
+
+    /**
+     * @param array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable} $window
+     * @return array<string, mixed>|null
+     */
+    private function mapRigidScheduleWindow(array $window, int $projectionStartTs, int $projectionEndTs): ?array
+    {
+        $start = max($projectionStartTs, $window['start']->getTimestamp());
+        $end = min($projectionEndTs, $window['end']->getTimestamp());
+        if ($end <= $start) {
+            return null;
+        }
+
+        $playlist = $window['playlist'];
+        $schedule = $window['schedule'];
+        $scheduleId = isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
+
+        return [
+            'id' => 'rigid-schedule-' . $scheduleId . '-' . $start,
+            'queue_id' => 0,
+            'song_id' => '',
+            'played_at' => $start,
+            'cued_at' => $start,
+            'duration' => (float)($end - $start),
+            'title' => $playlist->name,
+            'artist' => null,
+            'album' => null,
+            'text' => 'Strict scheduled programme',
+            'playlist' => $playlist->name,
+            'playlist_id' => isset($playlist->id) ? $playlist->id : null,
+            'playlist_chain' => null,
+            'clock_wheel' => null,
+            'clock_wheel_id' => null,
+            'media_type' => 'programme',
+            'source_type' => 'scheduled_programme',
+            'is_request' => false,
+            'is_live_queue' => false,
+            'sent_to_autodj' => false,
+            'top_of_hour_legal_id' => false,
+            'autodj_custom_uri' => null,
+            'clock_wheel_schedule_mode' => null,
+            'clock_wheel_enforce_cap' => false,
+            'clock_wheel_stretch_ratio' => null,
+            'clock_wheel_legal_id_substitute' => false,
+            'hour_boundary_enforce_cap' => false,
+            'hour_boundary_max_play_seconds' => null,
+            'top_of_hour_pre_id_fade' => false,
+        ];
+    }
+
+    /**
+     * @param list<array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable}> $windows
+     */
+    private function rangeOverlapsRigidWindow(int $start, int $end, array $windows): bool
+    {
+        foreach ($windows as $window) {
+            if ($start < $window['end']->getTimestamp() && $window['start']->getTimestamp() < $end) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
