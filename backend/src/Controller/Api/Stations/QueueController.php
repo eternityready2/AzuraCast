@@ -13,6 +13,8 @@ use App\Entity\StationQueue;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Radio\AutoDJ\RigidScheduleWindowResolver;
+use App\Utilities\Time;
 use App\Utilities\Types;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -107,6 +109,7 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly StationQueueApiGenerator $queueApiGenerator,
         private readonly StationQueueRepository $queueRepo,
         private readonly QueueLogCache $queueLogCache,
+        private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
@@ -120,6 +123,16 @@ final class QueueController extends AbstractStationApiCrudController
     ): ResponseInterface {
         $station = $request->getStation();
         $qb = $this->queueRepo->getUnplayedBaseQuery($station);
+
+        // A native strict/programme lane sits above the ordinary AutoDJ queue.
+        // During that window the ordinary rows shown here are only underlay state
+        // for playback after the programme releases; they are NOT upcoming on-air
+        // songs. Keep the rows intact operationally, but hide them from this
+        // user-facing queue. Pre-staged TOH legal IDs remain because TOH has higher
+        // wall-clock authority and may actually interrupt the rigid programme.
+        if (null !== $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
+            $qb->andWhere('sq.top_of_hour_legal_id = 1');
+        }
 
         $searchPhrase = Types::stringOrNull($request->getQueryParam('searchPhrase'), true);
         if (null !== $searchPhrase) {
