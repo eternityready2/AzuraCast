@@ -157,7 +157,7 @@ final class NowPlayingApiGenerator
                         routeParams: [
                             'station_id' => $station->short_name,
                             'id' => $currentStreamer->id,
-                            'timestamp' => $station->art_updated_at,
+                            'timestamp' => $currentStreamer->art_updated_at,
                         ],
                     )
                 );
