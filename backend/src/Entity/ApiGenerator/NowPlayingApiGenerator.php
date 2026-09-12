@@ -19,7 +19,7 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
-use App\Radio\AutoDJ\RigidScheduleWindowResolver;
+use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Utilities\Time;
 use Exception;
 use GuzzleHttp\Psr7\Uri;
@@ -42,7 +42,7 @@ final class NowPlayingApiGenerator
         private readonly Adapters $adapters,
         private readonly Router $router,
         private readonly NowPlayingCache $nowPlayingCache,
-        private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
+        private readonly RigidScheduleForecastService $rigidScheduleForecast,
     ) {
     }
 
@@ -120,25 +120,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        // Strict/programme schedules are played by the native rigid Liquidsoap
-        // lane, not by the ordinary PHP AutoDJ queue. Showing the next ordinary
-        // queue row here during that window is false and can remain visually
-        // "stuck" for hours. Do not fabricate a next native-playlist track; its
-        // exact next item is owned by Liquidsoap's playlist source.
-        if (null !== $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
-            $np->playing_next = null;
-        } else {
-            $nextVisibleSong = $this->queueRepo->getNextVisible($station);
-            if (null === $nextVisibleSong) {
-                $np->playing_next = $npOld->playing_next ?? null;
-            } else {
-                $np->playing_next = ($this->stationQueueApiGenerator)(
-                    $nextVisibleSong,
-                    $baseUri,
-                    true
-                );
-            }
-        }
+        $this->populatePlayingNext($np, $station, $baseUri, $npOld);
 
         // Detect and report live DJ status
         $currentStreamer = $station->current_streamer;
@@ -182,6 +164,48 @@ final class NowPlayingApiGenerator
         return $np ?? $this->offlineApi($station);
     }
 
+    private function populatePlayingNext(
+        NowPlaying $np,
+        Station $station,
+        ?UriInterface $baseUri,
+        ?NowPlaying $npOld = null,
+    ): void {
+        // Strict / Exact Time playlists play from a dedicated native Liquidsoap
+        // source, so the ordinary AutoDJ queue is not authoritative while that
+        // source owns the air. Read the native source's exact remaining cursor and
+        // expose its first item as Playing Next.
+        $strictForecast = $this->rigidScheduleForecast->getActiveForecast(
+            $station,
+            Time::nowUtc(),
+            1,
+        );
+
+        if ([] !== $strictForecast) {
+            $virtualQueueRow = $this->rigidScheduleForecast->toQueueRow(
+                $station,
+                $strictForecast[0],
+            );
+            $np->playing_next = ($this->stationQueueApiGenerator)(
+                $virtualQueueRow,
+                $baseUri,
+                true
+            );
+            return;
+        }
+
+        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+        if (null === $nextVisibleSong) {
+            $np->playing_next = $npOld?->playing_next;
+            return;
+        }
+
+        $np->playing_next = ($this->stationQueueApiGenerator)(
+            $nextVisibleSong,
+            $baseUri,
+            true
+        );
+    }
+
     private function offlineApi(
         Station $station,
         ?UriInterface $baseUri = null
@@ -208,16 +232,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        if (null === $this->rigidScheduleWindowResolver->getActiveWindow($station, Time::nowUtc())) {
-            $nextVisible = $this->queueRepo->getNextVisible($station);
-            if ($nextVisible instanceof StationQueue) {
-                $np->playing_next = ($this->stationQueueApiGenerator)(
-                    $nextVisible,
-                    $baseUri,
-                    true
-                );
-            }
-        }
+        $this->populatePlayingNext($np, $station, $baseUri);
 
         $np->live = new Live();
 
