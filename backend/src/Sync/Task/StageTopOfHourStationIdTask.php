@@ -71,6 +71,16 @@ final class StageTopOfHourStationIdTask extends AbstractTask
             return;
         }
 
+        // Do not issue telnet commands while Supervisor already reports the backend
+        // stopped. The task runs every minute and will stage the same boundary as
+        // soon as Liquidsoap is back, without producing connection-refused errors.
+        if (!$backend->isRunning($station)) {
+            $this->logger->debug('Top-of-Hour staging skipped because Liquidsoap is not running.', [
+                'station_id' => $station->id,
+            ]);
+            return;
+        }
+
         $this->syncRuntimeControls($station, $backend);
 
         if (!$this->clock->isEnabled($station)) {
