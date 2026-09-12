@@ -13,10 +13,10 @@ use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 
 /**
- * Resolves the same native rigid playlist windows that Liquidsoap gives
+ * Resolves the same native strict playlist windows that Liquidsoap gives
  * wall-clock authority in RigidScheduleRuntimeConfiguration.
  *
- * The runtime intentionally plays strict/programme schedules from a dedicated
+ * The runtime intentionally plays Strict / Exact Time schedules from a dedicated
  * native Liquidsoap source instead of the ordinary PHP AutoDJ queue. Reporting
  * surfaces must therefore consult these windows or they will incorrectly show
  * the underlay AutoDJ queue as the next/on-air programme.
@@ -56,14 +56,14 @@ final class RigidScheduleWindowResolver
         $windows = [];
 
         // Preserve station/playlist iteration order so overlapping schedules are
-        // resolved in the same order as the Liquidsoap rigid switch branches.
+        // resolved in the same order as the Liquidsoap strict switch branches.
         foreach ($station->playlists as $playlist) {
             if (!$this->isRuntimeEligiblePlaylist($playlist)) {
                 continue;
             }
 
             foreach ($playlist->schedule_items as $schedule) {
-                if (!$this->isRigidSchedule($playlist, $schedule)) {
+                if (!$this->isRigidSchedule($schedule)) {
                     continue;
                 }
 
@@ -123,10 +123,11 @@ final class RigidScheduleWindowResolver
         return in_array($playlist->source, [PlaylistSources::Songs, PlaylistSources::RemoteUrl], true);
     }
 
-    private function isRigidSchedule(StationPlaylist $playlist, StationSchedule $schedule): bool
+    private function isRigidSchedule(StationSchedule $schedule): bool
     {
-        return $schedule->strict_start
-            || $schedule->is_emergency
-            || $playlist->backendInterruptOtherSongs();
+        // Playlist-wide Start Behavior remains an ordinary/flexible behavior.
+        // Only an explicit Strict / Exact Time row (or emergency row) gets the
+        // outer native wall-clock lane.
+        return $schedule->strict_start || $schedule->is_emergency;
     }
 }
