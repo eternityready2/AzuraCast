@@ -19,14 +19,13 @@ use DateTimeImmutable;
 use JsonException;
 
 /**
- * Forecasts the exact song order owned by the dedicated rigid Liquidsoap source.
+ * Reports the exact song order owned by the dedicated rigid Liquidsoap source.
  *
- * Rigid scheduled programmes intentionally bypass the ordinary PHP AutoDJ queue.
- * That keeps wall-clock playback safe, but it also means the ordinary queue cannot
- * be used for Up Next, Upcoming Queue or the Linear Log while a rigid programme is
- * active. The runtime therefore exposes its playlist cursor through a local server
- * command; this service consumes that cursor and turns it back into StationMedia
- * rows for all user-facing forecast surfaces.
+ * The 24-hour Linear Log uses getForecast() to plan across future strict windows.
+ * Playing Next and Upcoming Song Queue use getActiveUpcoming() instead: that method
+ * reads only the currently active native playlist cursor, so those surfaces remain
+ * an operational view of what Liquidsoap is actually about to play rather than a
+ * second copy of the day-ahead planner.
  */
 final class RigidScheduleForecastService
 {
@@ -38,7 +37,83 @@ final class RigidScheduleForecastService
     ) {
     }
 
-    /** @return list<RigidScheduleForecastItem> */
+    /**
+     * Return the currently active strict source's real upcoming cursor.
+     *
+     * Unlike getForecast(), this does not walk later schedule windows and does not
+     * repeatedly expand the playlist through the whole scheduled block. It shows
+     * the files Liquidsoap currently reports as remaining in this playlist cycle.
+     * If the source is exactly at a cycle boundary, one deterministic next cycle is
+     * exposed so Playing Next never falls back to an unrelated AutoDJ song.
+     *
+     * @return list<RigidScheduleForecastItem>
+     */
+    public function getActiveUpcoming(
+        Station $station,
+        ?DateTimeImmutable $at = null,
+        int $limit = 250,
+    ): array {
+        if ($limit < 1) {
+            return [];
+        }
+
+        $at ??= Time::nowUtc();
+        $window = $this->windowResolver->getActiveWindow($station, $at);
+        if (null === $window || PlaylistSources::Songs !== $window['playlist']->source) {
+            return [];
+        }
+
+        $state = $this->loadPlaylistState($station, $window['playlist']);
+        if ([] === $state['cycle']) {
+            return [];
+        }
+
+        $remaining = $state['remaining'];
+        if ([] === $remaining) {
+            // mode="normal" makes the next cycle deterministic. At the exact end
+            // of a cycle, the first item of this cycle is genuinely what comes next.
+            $remaining = $state['cycle'];
+        }
+
+        $cursor = CarbonImmutable::instance($at);
+        if (null !== $state['remaining_seconds']) {
+            $cursor = $cursor->addSeconds((int)max(0, ceil($state['remaining_seconds'])));
+        }
+
+        $items = [];
+        foreach ($remaining as $next) {
+            if ($cursor >= $window['end'] || count($items) >= $limit) {
+                break;
+            }
+
+            $availableSeconds = max(
+                0,
+                $window['end']->getTimestamp() - $cursor->getTimestamp()
+            );
+            if (0 === $availableSeconds) {
+                break;
+            }
+
+            $duration = min($next['duration'], (float)$availableSeconds);
+            $items[] = new RigidScheduleForecastItem(
+                playlist: $window['playlist'],
+                schedule: $window['schedule'],
+                media: $next['media'],
+                playedAt: $cursor,
+                duration: $duration,
+            );
+
+            $cursor = $cursor->addSeconds((int)max(1, ceil($duration)));
+        }
+
+        return $items;
+    }
+
+    /**
+     * Backward-compatible active-window forecast helper.
+     *
+     * @return list<RigidScheduleForecastItem>
+     */
     public function getActiveForecast(
         Station $station,
         ?DateTimeImmutable $at = null,
@@ -113,10 +188,8 @@ final class RigidScheduleForecastService
 
             while ($cursor < $window['end'] && count($items) < $limit) {
                 if ([] === $state['remaining']) {
-                    // Rigid song sources run in deterministic normal mode. Once a
-                    // full round is exhausted, Liquidsoap loops the same source
-                    // file order; repeat that same cycle here so future rows remain
-                    // identical to what the station will actually air.
+                    // The day-ahead planner may need more than one playlist round.
+                    // mode="normal" keeps every later round in this same order.
                     $state['remaining'] = $state['cycle'];
                 }
 
@@ -161,8 +234,8 @@ final class RigidScheduleForecastService
         $row->timestamp_played = $item->playedAt;
         $row->duration = $item->duration;
 
-        // This is a read-only virtual row representing a Liquidsoap-owned source,
-        // not an ordinary AutoDJ row that may be deleted or sent by nextsong.
+        // This is a read-only API representation of the native Liquidsoap-owned
+        // upcoming cursor. It is not inserted into the PHP AutoDJ database queue.
         $row->sent_to_autodj = true;
         $row->is_visible = true;
 
@@ -202,9 +275,6 @@ final class RigidScheduleForecastService
 
             if ([] === $cycle) {
                 $cycle = $fallbackCycle;
-            }
-            if ([] === $remaining) {
-                $remaining = $cycle;
             }
 
             return [
