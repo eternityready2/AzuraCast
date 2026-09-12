@@ -49,7 +49,7 @@
 
         <div
             v-if="error"
-            class="alert alert-danger mb-3"
+            class="alert alert-danger m-3 mb-0"
         >
             {{ error }}
         </div>
@@ -61,10 +61,13 @@
                 nav-tabs-class="clock-wheel-editor-subtabs"
                 content-class="clock-wheel-editor-tab-content"
             >
-                <ClockWheelsFormEntries
+                <basic-info-tab
                     :form="form"
                     :r$="r$"
                     :template-options="templateOptions"
+                />
+                <clock-entries-tab
+                    :form="form"
                     v-model:entries="entries"
                     :add-entry="addEntry"
                     :remove-entry="removeEntry"
@@ -73,7 +76,7 @@
                     :on-entries-reordered="onEntriesReordered"
                     :on-entries-changed="onEntriesChanged"
                 />
-                <FormSchedule v-model:schedule-items="scheduleItems" />
+                <form-schedule v-model:schedule-items="scheduleItems" />
             </tabs>
         </div>
 
@@ -107,7 +110,8 @@ import {useAppRegle} from '~/vendor/regle.ts';
 import {required} from '@regle/rules';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import Tabs from '~/components/Common/Tabs.vue';
-import ClockWheelsFormEntries from '~/components/Stations/ClockWheels/Form/Entries.vue';
+import BasicInfoTab from '~/components/Stations/ClockWheels/Form/BasicInfoTab.vue';
+import ClockEntriesTab from '~/components/Stations/ClockWheels/Form/ClockEntriesTab.vue';
 import FormSchedule from '~/components/Stations/ClockWheels/Form/Schedule.vue';
 import type {ClockWheelScheduleRow} from '~/components/Stations/ClockWheels/Form/ScheduleRow.vue';
 import normalizeStationScheduleDays from '~/functions/normalizeStationScheduleDays';
@@ -172,6 +176,8 @@ const {r$} = useAppRegle(form, {
     separation_artist_minutes: {},
     separation_title_minutes: {},
     burn_rate_max_plays_24h: {},
+    template_id: {},
+    inherits_template_slots: {},
 });
 
 const isEditMode = computed(() => Boolean(props.recordUrl));
@@ -238,8 +244,13 @@ const loadEditor = async () => {
             const {data} = await axios.get(props.recordUrl);
             populateForm(data as Record<string, unknown>);
         }
-    } catch (err: any) {
-        error.value = err?.response?.data?.message ?? $gettext('Could not load this clock wheel.');
+    } catch (err: unknown) {
+        const message = typeof err === 'object'
+            && err !== null
+            && 'response' in err
+            ? (err as {response?: {data?: {message?: string}}}).response?.data?.message
+            : null;
+        error.value = message ?? $gettext('Could not load this clock wheel.');
     } finally {
         loading.value = false;
     }
@@ -379,8 +390,13 @@ const doSubmit = async () => {
         }
         notifySuccess($gettext('Clock Wheel saved.'));
         emit('saved');
-    } catch (err: any) {
-        error.value = err?.response?.data?.message ?? $gettext('Could not save this clock wheel.');
+    } catch (err: unknown) {
+        const message = typeof err === 'object'
+            && err !== null
+            && 'response' in err
+            ? (err as {response?: {data?: {message?: string}}}).response?.data?.message
+            : null;
+        error.value = message ?? $gettext('Could not save this clock wheel.');
     } finally {
         loading.value = false;
     }
