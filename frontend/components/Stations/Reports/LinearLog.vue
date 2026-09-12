@@ -121,7 +121,7 @@
             </div>
 
             <div v-if="allItems.length" class="stats-bar">
-                <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('tracks') }}</span>
+                <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
                 <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
                 <span><strong>{{ snapshotHours }}</strong> {{ $gettext('hour snapshot') }}</span>
                 <span v-if="builtAt">
@@ -172,7 +172,7 @@
             />
 
             <footer class="linear-log-footer">
-                {{ $gettext('AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview. The report does not change DJ cooldowns, shift state or live TTS playback.') }}
+                {{ $gettext('Strict scheduled programmes are shown as authoritative programme blocks because their exact internal track sequence is owned by Liquidsoap. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
             </footer>
         </section>
     </div>
@@ -219,6 +219,7 @@ const columnOptions = [
 const visibleColumns = ref(["time", "title", "source", "type", "rules", "duration"]);
 
 const typeFilters = [
+    {key: "programme", label: $gettext("Scheduled Programme"), activeClass: "btn-primary"},
     {key: "music", label: $gettext("Music"), activeClass: "btn-success"},
     {key: "talk", label: $gettext("Talk"), activeClass: "btn-warning"},
     {key: "id", label: $gettext("Station ID"), activeClass: "btn-danger"},
@@ -238,6 +239,7 @@ function toggleType(key: string): void {
 }
 
 function resolveType(item: LinearLogItem): string {
+    if (item.source_type === "scheduled_programme" || item.media_type === "programme") return "programme";
     if (item.is_request) return "request";
     if (item.clock_wheel) return "clock_wheel";
     if (item.top_of_hour_legal_id || item.media_type === "id") return "id";
