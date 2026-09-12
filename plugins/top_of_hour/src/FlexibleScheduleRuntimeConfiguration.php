@@ -4,255 +4,163 @@ declare(strict_types=1);
 
 namespace Plugin\TopOfHour;
 
-use App\Entity\Enums\PlaylistOrders;
-use App\Entity\Enums\PlaylistSources;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Event\Radio\WriteLiquidsoapConfiguration;
 use App\Radio\Backend\Liquidsoap\ConfigWriter;
-use App\Radio\Backend\Liquidsoap\PlaylistFileWriter;
 use App\Utilities\ScheduleRecurrence;
 use Carbon\CarbonImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Gives ordinary flexible playlist schedules a bounded amount of lateness.
+ * Bounded timing for ordinary flexible playlist schedules.
  *
- * The existing BroadcastClockPlanner/QueueBuilder path remains the first line
- * of defence: it backtimes toward the nominal schedule boundary, selects a
- * track that fits when possible and lets Stretch/Squeeze close small gaps.
- * This runtime is only the deadline backstop for a track that is already on air
- * and therefore cannot be shortened retroactively by PHP queue planning.
+ * The normal flexible path remains flexible. BroadcastClockPlanner and
+ * QueueBuilder still aim at the nominal wall-clock boundary first: they backtime
+ * ordinary music, prefer a track that fits the remaining window, preserve
+ * crossfade math and let the existing Stretch/Squeeze metadata close small
+ * timing gaps.
  *
- * Flexible is intentionally still different from rigid/strict scheduling:
+ * This subscriber adds only the missing runtime backstop for audio that has
+ * already been handed to Liquidsoap and therefore cannot be shortened later by
+ * PHP queue planning. At nominal start + 60 seconds it checks the final on-air
+ * metadata. If the scheduled playlist is already on air, nothing happens. If a
+ * different AutoDJ queue row is still on air, it performs the same one-shot
+ * clean AutoDJ cut used by the proven Top-of-Hour/rigid paths. The existing
+ * schedule source then takes over through AzuraCast's normal graph.
  *
- *   nominal start ---- natural handoff allowed ---- +60s deadline
+ * This deliberately does NOT create another playlist source or another switch:
+ * that preserves sequential/shuffle state, remote-stream connections, playlist
+ * groups, request playlists, crossfade, Stretch/Squeeze and the nested-clock fix
+ * from the rigid scheduling work.
  *
- * If the scheduled playlist is already on air before the deadline, this layer
- * does nothing. If it is still late at the deadline, it uses the same clean
- * AutoDJ cut primitive as the proven rigid/Top-of-Hour paths and takes over
- * with an isolated native source. Strict schedules, emergency schedules,
- * interrupting playlists, live DJs, Clock Wheels and Top-of-Hour are excluded
- * and keep their existing authorities.
- *
- * Only native Songs playlists are forced here. Remote streams are deliberately
- * left on their existing scheduler path: opening a second independent HTTP
- * input merely to enforce the grace deadline can reconnect a stream that is
- * already on air. Scheduler::getPlaylistScheduleDuration() already prevents a
- * late remote programme from cascading its lateness into following events.
+ * Strict starts, emergency/interrupting schedules and live DJs remain outside
+ * this policy. Clock Wheels retain their own flexible/strict scheduler and TOH
+ * retains exact wall-clock authority.
  */
 final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInterface
 {
+    /**
+     * Conservative broadcast default: flexible may breathe, but never by minutes.
+     * Kept in one place so it can become a station setting without changing the
+     * scheduling/runtime contract.
+     */
     public const int FLEXIBLE_GRACE_SECONDS = 60;
 
     public static function getSubscribedEvents(): array
     {
-        // ConfigWriter has already created the normal station graph. This wrapper
-        // sits outside crossfade/AutoDJ, but below rigid (16) and TOH (15):
-        // TOH -> rigid -> bounded flexible -> live/AutoDJ.
+        // Run after ConfigWriter (playlists/crossfade/live), rigid (16) and TOH
+        // (15). We do not wrap `radio`; we only observe the final on-air metadata
+        // and, when necessary, advance the shared AutoDJ transport once.
         return [
-            WriteLiquidsoapConfiguration::class => ['writeRuntime', 17],
+            WriteLiquidsoapConfiguration::class => ['writeRuntime', 14],
         ];
     }
 
     public function writeRuntime(WriteLiquidsoapConfiguration $event): void
     {
         $station = $event->getStation();
-        $branches = [];
-        $branchData = [];
+        $checks = [];
 
         foreach ($station->playlists as $playlist) {
             if (!$playlist->is_enabled) {
                 continue;
             }
 
-            // Playlist Groups and Requests are resolved through PHP AutoDJ and do
-            // not own an isolated native media source. Remote streams are excluded
-            // for the reconnect-safety reason documented above.
-            if (PlaylistSources::Songs !== $playlist->source) {
-                continue;
-            }
-
-            if (count($playlist->group_memberships) > 0) {
-                continue;
-            }
-
-            $flexibleSchedules = [];
-            foreach ($playlist->schedule_items as $scheduleItem) {
-                if ($this->isFlexibleSchedule($playlist, $scheduleItem)) {
-                    $flexibleSchedules[] = $scheduleItem;
-                }
-            }
-
-            if ([] === $flexibleSchedules) {
-                continue;
-            }
-
-            $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
-            $playlistVarName = 'bounded_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
-
-            $this->writeDedicatedSource($event, $playlist, $playlistVarName);
-
-            foreach ($flexibleSchedules as $scheduleItem) {
-                $playTime = $this->getBoundedPlaylistPlayTime($event, $scheduleItem);
-                if ('false' === $playTime) {
+            foreach ($playlist->schedule_items as $schedule) {
+                if (!$this->isFlexibleSchedule($playlist, $schedule)) {
                     continue;
                 }
 
-                $scheduleKey = isset($scheduleItem->id)
-                    ? $scheduleItem->id
-                    : spl_object_id($scheduleItem);
-                $stateName = 'bounded_flexible_' . $scheduleKey . '_active';
-                $predicateName = 'bounded_flexible_' . $scheduleKey . '_should_play';
-                $enterName = 'bounded_flexible_' . $scheduleKey . '_enter';
+                $deadlineWindow = $this->getDeadlineWindow($event, $schedule);
+                if ('false' === $deadlineWindow) {
+                    continue;
+                }
 
-                $branchData[] = [
-                    'playlist_id' => (string)$playlistId,
-                    'playlist_name' => $playlist->name,
-                    'source' => $playlistVarName,
-                    'play_time' => $playTime,
-                    'state' => $stateName,
-                    'predicate' => $predicateName,
-                    'enter' => $enterName,
-                ];
+                $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
+                $scheduleKey = isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
+                $triggeredRef = 'bounded_flexible_' . $scheduleKey . '_triggered';
+                $checkName = 'bounded_flexible_' . $scheduleKey . '_check';
+
+                $event->appendLines([
+                    $triggeredRef . ' = ref(false)',
+                    'def ' . $checkName . '() =',
+                    '    in_deadline_window = (' . $deadlineWindow . ')',
+                    '',
+                    '    if in_deadline_window then',
+                    '        if not ' . $triggeredRef . '() then',
+                    '            ' . $triggeredRef . ' := true',
+                    '',
+                    '            # Never take the microphone away from a live DJ.',
+                    '            if not azuracast.live_enabled() then',
+                    '                target_playlist = ' . ConfigWriter::toRawString((string)$playlistId),
+                    '                current_playlist = bounded_flexible_current_playlist_id()',
+                    '                current_sq = bounded_flexible_current_sq_id()',
+                    '',
+                    '                if current_playlist == target_playlist then',
+                    '                    log(' . ConfigWriter::toRawString(
+                        'Bounded Flexible: "' . $playlist->name
+                        . '" reached air naturally inside the grace window.'
+                    ) . ')',
+                    '                elsif current_sq != "" then',
+                    '                    # Only cut a real AutoDJ queue request. Native playlists,',
+                    '                    # remote streams, rigid/TOH lanes and other non-queue sources',
+                    '                    # are deliberately never skipped by this watchdog.',
+                    '                    azuracast.discard_autodj_current_cleanly()',
+                    '                    log(' . ConfigWriter::toRawString(
+                        'Bounded Flexible: 60-second grace deadline reached for "'
+                        . $playlist->name . '"; cleanly advancing the late AutoDJ row.'
+                    ) . ')',
+                    '                end',
+                    '            end',
+                    '        end',
+                    '    else',
+                    '        # Re-arm after this one-minute deadline window so the next',
+                    '        # daily/weekly/recurring occurrence can enforce independently.',
+                    '        ' . $triggeredRef . ' := false',
+                    '    end',
+                    'end',
+                    '',
+                ]);
+
+                $checks[] = $checkName . '()';
             }
         }
 
-        if ([] === $branchData) {
+        if ([] === $checks) {
             return;
         }
 
         $event->appendBlock(
             <<<'LIQ'
-            # Bounded flexible scheduling state.
-            # Capture the playlist identity that is really on the underlying air
-            # path. Static playlist files and AutoDJ annotations both carry this
-            # field, so a schedule that made a natural handoff inside the grace
-            # window will not be interrupted again at the deadline.
+            # Bounded flexible scheduling observes the FINAL station graph. Both
+            # native playlist files and AutoDJ queue annotations can carry a
+            # playlist_id; sq_id specifically identifies a PHP AutoDJ queue row.
             bounded_flexible_current_playlist_id = ref("")
+            bounded_flexible_current_sq_id = ref("")
 
             def bounded_flexible_capture_metadata(m) =
                 bounded_flexible_current_playlist_id := list.assoc(default="", "playlist_id", m)
+                bounded_flexible_current_sq_id := list.assoc(default="", "sq_id", m)
             end
 
-            radio_before_bounded_flexible = radio
-            source.methods(radio_before_bounded_flexible).on_metadata(
+            source.methods(radio).on_metadata(
                 synchronous=false,
                 bounded_flexible_capture_metadata
             )
             LIQ
         );
 
-        $allStateNames = array_column($branchData, 'state');
-        $clearStateLines = implode("\n                ", array_map(
-            static fn(string $state): string => $state . ' := false',
-            $allStateNames,
-        ));
-
-        foreach ($branchData as $data) {
-            $event->appendLines([
-                $data['state'] . ' = ref(false)',
-                'def ' . $data['predicate'] . '() =',
-                '    in_deadline_window = (' . $data['play_time'] . ')',
-                '',
-                '    if not in_deadline_window then',
-                '        ' . $data['state'] . ' := false',
-                '        false',
-                '    elsif ' . $data['state'] . '() then',
-                '        true',
-                '    elsif azuracast.live_enabled() then',
-                '        # Flexible automation never takes the microphone away from a live DJ.',
-                '        false',
-                '    else',
-                '        bounded_flexible_current_playlist_id() != ' . ConfigWriter::toRawString($data['playlist_id']),
-                '    end',
-                'end',
-                '',
-                'def ' . $data['enter'] . '(_, new) =',
-                '    ' . str_replace("\n                ", "\n    ", $clearStateLines),
-                '    ' . $data['state'] . ' := true',
-                '',
-                '    if not azuracast.live_enabled() then',
-                '        azuracast.discard_autodj_current_cleanly()',
-                '        log(' . ConfigWriter::toRawString(
-                    'Bounded Flexible: grace deadline reached for "' . $data['playlist_name']
-                    . '"; cleanly advancing from late AutoDJ audio.'
-                ) . ')',
-                '    end',
-                '',
-                '    new',
-                'end',
-                '',
-            ]);
-
-            $branches[] = '({' . $data['predicate'] . '()}, ' . $data['source'] . ')';
-        }
-
+        $body = implode("\n    ", $checks);
         $event->appendBlock(
             <<<LIQ
-            def bounded_flexible_exit(_, new) =
-                {$clearStateLines}
-                new
-            end
+            # Poll four times per second so the one-minute deadline predicate is
+            # reliable without adding another audio source, switch or clock.
+            thread.run.recurrent(delay=0.25, {
+                {$body}
+            })
             LIQ
         );
-
-        $transitions = implode(
-            ', ',
-            [...array_column($branchData, 'enter'), 'bounded_flexible_exit'],
-        );
-        $branches[] = '({true}, radio_before_bounded_flexible)';
-
-        $event->appendLines([
-            '# Bounded flexible schedule wall-clock deadline lane.',
-            'radio = switch(',
-            '    id="bounded_flexible_schedule_runtime",',
-            '    track_sensitive=false,',
-            '    replay_metadata=true,',
-            '    transition_length=0.0,',
-            '    transitions=[' . $transitions . '],',
-            '    [',
-            '        ' . implode(",\n        ", $branches),
-            '    ]',
-            ')',
-        ]);
-    }
-
-    private function writeDedicatedSource(
-        WriteLiquidsoapConfiguration $event,
-        StationPlaylist $playlist,
-        string $playlistVarName,
-    ): void {
-        $playlistMode = match ($playlist->order) {
-            PlaylistOrders::Sequential => 'normal',
-            PlaylistOrders::Shuffle, PlaylistOrders::SmartShuffle => 'randomize',
-            PlaylistOrders::Random => 'random',
-        };
-
-        $playlistParams = [
-            'id=' . ConfigWriter::toRawString($playlistVarName),
-            'mime_type="audio/x-mpegurl"',
-            'mode="' . $playlistMode . '"',
-            'reload_mode="watch"',
-            ConfigWriter::toRawString(PlaylistFileWriter::getPlaylistFilePath($playlist)),
-        ];
-
-        $event->appendLines([
-            '# Dedicated native source for bounded flexible deadline enforcement.',
-            $playlistVarName . ' = playlist(' . implode(',', $playlistParams) . ')',
-        ]);
-
-        if ($playlist->backendMerge()) {
-            $event->appendLines([
-                $playlistVarName . ' = merge_tracks(id="merge_' . $playlistVarName . '", ' . $playlistVarName . ')',
-            ]);
-        }
-
-        if ($playlist->is_jingle) {
-            $event->appendLines([
-                $playlistVarName . ' = azuracast.utilities.drop_metadata(' . $playlistVarName . ')',
-            ]);
-        }
     }
 
     private function isFlexibleSchedule(
@@ -265,12 +173,10 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
     }
 
     /**
-     * Return the schedule window that begins at nominal start + grace and ends
-     * at the original schedule end. Ordinary weekly schedules are emitted as
-     * native Liquidsoap time predicates; recurrence schedules use absolute epoch
-     * ranges so DST/date recurrence behavior stays identical to the scheduler.
+     * Build a one-minute station-local deadline window beginning exactly at
+     * nominal start + grace. A ref prevents more than one action per occurrence.
      */
-    private function getBoundedPlaylistPlayTime(
+    private function getDeadlineWindow(
         WriteLiquidsoapConfiguration $event,
         StationSchedule $schedule,
     ): string {
@@ -288,25 +194,21 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
 
             $parts = [];
             foreach ($occurrences as $occurrence) {
-                $start = CarbonImmutable::instance($occurrence->start)
+                $deadline = CarbonImmutable::instance($occurrence->start)
                     ->setTimezone($tz)
                     ->addSeconds(self::FLEXIBLE_GRACE_SECONDS);
-                $end = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
+                $windowEnd = $deadline->addSeconds(59);
 
-                if (!$start->isBefore($end)) {
-                    continue;
-                }
-
-                $parts[] = '(time() >= ' . $start->getTimestamp()
-                    . '. and time() <= ' . $end->getTimestamp() . '.)';
+                $parts[] = '(time() >= ' . $deadline->getTimestamp()
+                    . '. and time() <= ' . $windowEnd->getTimestamp() . '.)';
             }
 
             if ([] === $parts) {
                 return 'false';
             }
 
-            $method = 'bounded_flexible_' . (isset($schedule->id) ? $schedule->id : spl_object_id($schedule))
-                . '_recurrence';
+            $key = isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
+            $method = 'bounded_flexible_' . $key . '_deadline_recurrence';
             $event->appendLines([
                 'def ' . $method . '() =',
                 '    (' . implode(' or ', $parts) . ')',
@@ -316,61 +218,32 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
             return $method . '()';
         }
 
-        [$startSeconds, $dayOffset] = $this->shiftStartByGrace($schedule->start_time);
-        $endSeconds = $this->timeCodeToSeconds($schedule->end_time);
+        [$deadlineSeconds, $dayOffset] = $this->shiftStartByGrace($schedule->start_time);
+        $windowEndSeconds = $deadlineSeconds + 59;
+        $windowEndDayOffset = $dayOffset + intdiv($windowEndSeconds, 86400);
+        $windowEndSeconds %= 86400;
 
-        // A play-once schedule is represented by equal start/end values. Keep a
-        // one-minute predicate at the grace deadline; predicate.at_most behavior
-        // in the underlying playlist still controls single-track schedules.
-        if ($schedule->start_time === $schedule->end_time) {
-            $playTime = $this->formatSecondsCode($startSeconds);
-            $days = $this->shiftDays($schedule->days, $dayOffset);
+        $days = $this->shiftDays($schedule->days, $dayOffset);
+        $endDays = $this->shiftDays($schedule->days, $windowEndDayOffset);
+
+        if ($dayOffset === $windowEndDayOffset) {
+            $playTime = $this->formatSecondsCode($deadlineSeconds)
+                . '-' . $this->formatSecondsCode($windowEndSeconds);
+
             if ([] !== $days && count($days) < 7) {
                 $playTime = '(' . $this->formatDays($days) . ') and ' . $playTime;
             }
-
-            return $this->applyScheduleDateRangeBounds($event, $schedule, $playTime);
-        }
-
-        $overnight = $schedule->start_time > $schedule->end_time;
-
-        if (!$overnight && 0 === $dayOffset && $startSeconds >= $endSeconds) {
-            // Grace consumed the entire short schedule window.
-            return 'false';
-        }
-
-        $parts = [];
-
-        if ($overnight && 0 === $dayOffset && $startSeconds > $endSeconds) {
-            $currentDays = $schedule->days;
-            $nextDays = $this->shiftDays($schedule->days, 1);
-
-            $first = $this->formatSecondsCode($startSeconds) . '-23h59m59s';
-            $second = '00h00m00s-' . $this->formatSecondsCode($endSeconds);
-
-            if ([] !== $currentDays && count($currentDays) < 7) {
-                $first = '(' . $this->formatDays($currentDays) . ') and ' . $first;
-                $second = '(' . $this->formatDays($nextDays) . ') and ' . $second;
-            }
-
-            $parts = [$first, $second];
         } else {
-            $effectiveDays = $this->shiftDays($schedule->days, $dayOffset);
-            if ($startSeconds >= $endSeconds) {
-                return 'false';
+            $first = $this->formatSecondsCode($deadlineSeconds) . '-23h59m59s';
+            $second = '00h00m00s-' . $this->formatSecondsCode($windowEndSeconds);
+
+            if ([] !== $days && count($days) < 7) {
+                $first = '(' . $this->formatDays($days) . ') and ' . $first;
+                $second = '(' . $this->formatDays($endDays) . ') and ' . $second;
             }
 
-            $single = $this->formatSecondsCode($startSeconds)
-                . '-' . $this->formatSecondsCode($endSeconds);
-            if ([] !== $effectiveDays && count($effectiveDays) < 7) {
-                $single = '(' . $this->formatDays($effectiveDays) . ') and ' . $single;
-            }
-            $parts = [$single];
+            $playTime = '(' . $first . ') or (' . $second . ')';
         }
-
-        $playTime = count($parts) > 1
-            ? '(' . implode(') or (', $parts) . ')'
-            : $parts[0];
 
         return $this->applyScheduleDateRangeBounds($event, $schedule, $playTime);
     }
@@ -387,6 +260,7 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
     private function timeCodeToSeconds(int $timeCode): int
     {
         $padded = str_pad((string)$timeCode, 4, '0', STR_PAD_LEFT);
+
         return ((int)substr($padded, 0, 2) * 3600)
             + ((int)substr($padded, 2, 2) * 60);
     }
@@ -439,7 +313,7 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
 
         $tz = $event->getStation()->getTimezoneObject();
         $key = isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
-        $method = 'bounded_flexible_' . $key . '_date_range';
+        $method = 'bounded_flexible_' . $key . '_deadline_date_range';
         $body = ['def ' . $method . '() ='];
         $conditions = [];
 
@@ -454,11 +328,10 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
         if (!empty($endDate)) {
             $endDateObj = CarbonImmutable::createFromFormat('Y-m-d', $endDate, $tz);
             if (null !== $endDateObj) {
-                // One extra grace minute may cross midnight. Extending the
-                // upper bound by exactly the grace amount preserves that final
-                // occurrence instead of silently dropping its deadline.
+                // A deadline can cross midnight by one grace minute. Keep that
+                // final occurrence eligible without broadening later days.
                 $rangeEnd = $endDateObj->setTime(23, 59, 59)
-                    ->addSeconds(self::FLEXIBLE_GRACE_SECONDS);
+                    ->addSeconds(self::FLEXIBLE_GRACE_SECONDS + 59);
                 $body[] = '    range_end = ' . $rangeEnd->getTimestamp() . '.';
                 $conditions[] = 'current_time <= range_end';
             }
