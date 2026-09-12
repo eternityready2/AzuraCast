@@ -147,16 +147,13 @@ class Icecast extends AbstractFrontend
         $baseUrl = $settingsBaseUrl ?? new Uri('http://localhost');
         $hostname = $baseUrl->getHost();
 
-        // Icecast 2.5 warns when the built-in placeholder contact is used. Prefer
-        // the already-configured ACME contact address; otherwise use a host-scoped
-        // technical contact rather than the reserved default literal.
-        $adminContact = trim((string)($settings->acme_email ?? ''));
-        if ('' === $adminContact) {
-            $contactHost = '' !== $hostname && 'localhost' !== $hostname
-                ? $hostname
-                : 'localhost.localdomain';
-            $adminContact = 'icemaster@' . $contactHost;
-        }
+        // Icecast 2.5 warns when its reserved placeholder contact is used. Do not
+        // reuse ACME's registration email here because <admin> is public in Icecast
+        // status output. Generate a non-sensitive host-scoped technical contact.
+        $contactHost = '' !== $hostname && 'localhost' !== $hostname
+            ? $hostname
+            : 'localhost.localdomain';
+        $adminContact = 'icemaster@' . $contactHost;
 
         [$certPath, $certKey] = Acme::getCertificatePaths();
 
@@ -165,7 +162,11 @@ class Icecast extends AbstractFrontend
             'admin' => $adminContact,
             'hostname' => $hostname,
             'limits' => [
-                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners * 2 : 2500,
+                // Icecast 2.5 has no server-wide <max-listeners> tag. Its global
+                // <clients> limit is the aggregate cap across all mount points.
+                // Use the configured station-wide maximum here instead of copying
+                // it to every mount, which would allow the total to multiply.
+                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners : 2500,
                 'sources' => IcecastConfig::getSourceLimit($station->mounts->count()),
                 'queue-size' => 524288,
                 'client-timeout' => 30,
@@ -241,12 +242,6 @@ class Icecast extends AbstractFrontend
                 'charset' => $charset,
                 'stream-name' => $station->name,
             ];
-
-            // Icecast 2.5 accepts max-listeners on a mount, not under global
-            // <limits>. Keep the station-wide setting by applying it to each mount.
-            if (!empty($frontendConfig->max_listeners)) {
-                $mount['max-listeners'] = $frontendConfig->max_listeners;
-            }
 
             if ($station->max_bitrate !== 0) {
                 $maxBitrateInBps = $station->max_bitrate * 1024 + 2500;
