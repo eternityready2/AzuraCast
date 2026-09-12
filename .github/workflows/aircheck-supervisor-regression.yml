@@ -45,6 +45,13 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
 
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
       - name: PHPStan AirCheck recorder
         shell: bash
         run: |
