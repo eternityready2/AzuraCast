@@ -76,7 +76,7 @@ jobs:
           test -f backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php
 
           # Strict runtime owns only explicitly strict/emergency rows and exposes
-          # the exact native source cursor used by both planning and live queue views.
+          # the exact native source cursor used by planning/reporting surfaces.
           grep -q 'mode="normal"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q '\.register_command(' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q '"forecast"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
@@ -84,12 +84,17 @@ jobs:
           grep -q 'playlist.files(mime_type="audio/x-mpegurl"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           ! grep -q '\|\| \$playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
 
-          # The 24-hour Linear Log is the day-ahead planner. Upcoming Queue and
-          # Playing Next must use only the currently active native source cursor.
+          # The 24-hour Linear Log remains the full planner. Upcoming Queue keeps
+          # its normal configured/track-count lookahead and splices Strict songs
+          # into only that same short horizon. Playing Next uses the active cursor.
           grep -q 'function getActiveUpcoming' backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
-          grep -q 'getActiveUpcoming' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'getActiveUpcoming' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          ! grep -q 'getActiveForecast' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'autodj_queue_lookahead_minutes' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getUnplayedQueue' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getWindows' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getForecast' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'isSuppressedByRigidWindow' backend/src/Controller/Api/Stations/QueueController.php
+          ! grep -q 'listRigidScheduleQueue' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'getForecast' backend/src/Radio/AutoDJ/LinearLogBuilder.php
           grep -q 'mapRigidForecastItem' backend/src/Radio/AutoDJ/LinearLogBuilder.php
 
