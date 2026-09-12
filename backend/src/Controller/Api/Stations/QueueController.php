@@ -55,7 +55,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
         summary: 'Retrieve details of a single queued item.',
         tags: [OpenApi::TAG_STATIONS_QUEUE],
         parameters: [
-            new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+            new OpenApi\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
             new OA\Parameter(
                 name: 'id',
                 description: 'Queue Item ID',
@@ -84,7 +84,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
         summary: 'Delete a single queued item.',
         tags: [OpenApi::TAG_STATIONS_QUEUE],
         parameters: [
-            new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+            new OpenApi\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
             new OA\Parameter(
                 name: 'id',
                 description: 'Queue Item ID',
@@ -183,19 +183,20 @@ final class QueueController extends AbstractStationApiCrudController
 
         $rows = [];
 
-        // The actual strict native source is authoritative. Convert its exact
-        // remaining playlist cursor into read-only queue rows instead of showing
-        // the unrelated ordinary AutoDJ queue that is waiting underneath it.
+        // During Strict / Exact Time playback the dedicated native Liquidsoap
+        // source is the operational queue. Read only that source's CURRENT
+        // remaining cursor here. Do not expand later schedule windows like the
+        // 24-hour Linear Log planner does.
         if (!$hasGroupFilter) {
-            foreach ($this->rigidScheduleForecast->getActiveForecast($station, $now, 1000) as $forecastItem) {
-                if (null !== $filterPlaylistId && $forecastItem->playlist->id !== $filterPlaylistId) {
+            foreach ($this->rigidScheduleForecast->getActiveUpcoming($station, $now, 250) as $upcomingItem) {
+                if (null !== $filterPlaylistId && $upcomingItem->playlist->id !== $filterPlaylistId) {
                     continue;
                 }
-                if (!$this->forecastMatchesSearch($forecastItem, $searchPhrase)) {
+                if (!$this->upcomingMatchesSearch($upcomingItem, $searchPhrase)) {
                     continue;
                 }
 
-                $rows[] = $this->viewForecastRecord($station, $forecastItem);
+                $rows[] = $this->viewActiveUpcomingRecord($station, $upcomingItem);
             }
         }
 
@@ -225,7 +226,7 @@ final class QueueController extends AbstractStationApiCrudController
         return Paginator::fromArray($rows, $request)->write($response);
     }
 
-    private function forecastMatchesSearch(
+    private function upcomingMatchesSearch(
         RigidScheduleForecastItem $item,
         ?string $searchPhrase,
     ): bool {
@@ -258,10 +259,13 @@ final class QueueController extends AbstractStationApiCrudController
     }
 
     /** @return array<string, mixed> */
-    private function viewForecastRecord(
+    private function viewActiveUpcomingRecord(
         \App\Entity\Station $station,
         RigidScheduleForecastItem $item,
     ): array {
+        // The row shape is reused by the queue UI, but this record comes from the
+        // actual native source cursor and is intentionally read-only. It is not a
+        // fabricated PHP AutoDJ database row and cannot be deleted from the page.
         $record = $this->rigidScheduleForecast->toQueueRow($station, $item);
         $row = $this->queueApiGenerator->__invoke($record);
 
