@@ -91,8 +91,8 @@ export const detectPlaylistBehavior = (input: PlaylistBehaviorInput): PlaylistBe
         return {
             behavior: 'programme',
             reason: hasStrictRow
-                ? 'Show or programme content was detected. Strict rows keep their separate exact-time authority.'
-                : 'A scheduled show or programme was detected.',
+                ? 'Show or program content was detected. Strict rows keep their separate exact-time authority.'
+                : 'A scheduled show or program was detected.',
         };
     }
 
