@@ -374,6 +374,14 @@ final class StationPlaylistMediaRepository extends Repository
             );
         }
 
+        // Bulk DQL updates bypass Doctrine's managed entity state. Refresh any
+        // StationPlaylistMedia rows already in the identity map so sequential/shuffle
+        // resets advance correctly inside the same long-running AutoDJ process.
+        $this->resyncManagedEntities(
+            StationPlaylistMedia::class,
+            static fn(StationPlaylistMedia $spm): bool => $spm->playlist === $playlist
+        );
+
         $now ??= Time::nowUtc();
 
         $playlist->queue_reset_at = $now;
