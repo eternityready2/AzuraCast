@@ -60,7 +60,7 @@ final class ManualPlaylistAction implements SingleActionInterface
         }
 
         if ('schedule_once' === $mode) {
-            return $this->scheduleOnce($request, $response, $playlist, $body);
+            return $this->scheduleOnce($response, $playlist, $body);
         }
 
         if (!in_array($mode, ['queue_next', 'play_now'], true)) {
@@ -126,7 +126,6 @@ final class ManualPlaylistAction implements SingleActionInterface
      * @param array<string, mixed> $body
      */
     private function scheduleOnce(
-        ServerRequest $request,
         Response $response,
         StationPlaylist $playlist,
         array $body
@@ -164,6 +163,13 @@ final class ManualPlaylistAction implements SingleActionInterface
         $schedule->strict_start = (bool)($body['strict_start'] ?? true);
 
         $this->em->persist($schedule);
+
+        $station = $playlist->station;
+        if ($station->backend_config->use_manual_autodj) {
+            $station->needs_restart = true;
+            $this->em->persist($station);
+        }
+
         $this->em->flush();
 
         return $response->withJson(
