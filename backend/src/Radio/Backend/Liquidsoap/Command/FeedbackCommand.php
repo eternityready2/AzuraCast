@@ -7,6 +7,7 @@ namespace App\Radio\Backend\Liquidsoap\Command;
 use App\Cache\NowPlayingCache;
 use App\Container\EntityManagerAwareTrait;
 use App\Entity\Repository\SongHistoryRepository;
+use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelLegalIdPlaybackService;
 use App\Entity\Song;
@@ -24,6 +25,7 @@ final class FeedbackCommand extends AbstractCommand
 
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
+        private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly SongHistoryRepository $historyRepo,
         private readonly NowPlayingCache $nowPlayingCache,
         private readonly ClockWheelLegalIdPlaybackService $legalIdPlaybackService,
@@ -133,6 +135,21 @@ final class FeedbackCommand extends AbstractCommand
             $playlist = $this->em->find(StationPlaylist::class, $payload['playlist_id']);
             if ($playlist instanceof StationPlaylist) {
                 $history->playlist = $playlist;
+
+                // Manual AutoDJ / static Liquidsoap fallback playback can bypass the
+                // normal AzuraCast queue row entirely. Mark the corresponding playlist
+                // slot played here so its rotation advances instead of selecting the same
+                // track again when QueueBuilder resumes.
+                $spm = $this->spmRepo->findByPlaylistAndMedia($playlist, $media);
+                if (null !== $spm) {
+                    $spm->played();
+                    $this->em->persist($spm);
+                    $this->em->flush();
+
+                    if ($this->spmRepo->isQueueEmpty($playlist)) {
+                        $this->spmRepo->resetQueue($playlist);
+                    }
+                }
             }
         }
 
