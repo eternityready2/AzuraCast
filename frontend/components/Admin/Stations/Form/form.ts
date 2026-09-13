@@ -26,7 +26,9 @@ export type StationRecord = Omit<
         Required<StationBackendConfiguration>,
         | 'stereo_tool_configuration_path' | 'custom_config_top' | 'custom_config_pre_playlists'
         | 'custom_config_pre_live' | 'custom_config_pre_fade' | 'custom_config' | 'custom_config_bottom'
-    >,
+    > & {
+        reset_sequential_queues_on_restart: boolean,
+    },
     media_storage_location: string | number,
     recordings_storage_location: string | number,
     podcasts_storage_location: string | number,
