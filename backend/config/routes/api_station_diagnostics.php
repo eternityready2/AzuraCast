@@ -25,6 +25,13 @@ return static function (RouteCollectorProxy $group): void {
                 ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
                 ->add(Middleware\RequireLogin::class);
 
+            $group->delete(
+                '/features/aircheck/history',
+                Controller\Api\Stations\Features\ClearAirCheckHistoryAction::class
+            )->setName('api:stations:aircheck:history:clear')
+                ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
+                ->add(Middleware\RequireLogin::class);
+
             $group->get(
                 '/diagnostics',
                 Controller\Api\Stations\Diagnostics\ViewAction::class
