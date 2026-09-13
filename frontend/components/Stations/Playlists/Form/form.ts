@@ -21,6 +21,7 @@ export type StationPlaylistsRecord = Required<
     >
 > & {
     id: number | null,
+    preserve_queue_on_restart: boolean,
     is_sponsor: boolean,
     sponsor_name: string | null,
     sponsor_guaranteed_plays_per_day: number | null,
