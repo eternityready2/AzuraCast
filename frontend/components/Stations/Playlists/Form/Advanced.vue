@@ -1,6 +1,6 @@
 <template>
     <tab
-        :label="$gettext('Advanced')"
+        :label="$gettext('Advanced (Optional)')"
         :item-header-class="tabClass"
     >
         <div class="row g-3">
