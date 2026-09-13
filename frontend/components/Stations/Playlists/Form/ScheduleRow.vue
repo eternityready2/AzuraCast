@@ -263,6 +263,39 @@
                 </div>
 
                 <div class="col-12">
+                    <label class="request-option">
+                        <input
+                            :id="'scheduling_reset_queue_'+index"
+                            v-model="row.reset_queue_at_start"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span>
+                            <strong>{{ $gettext('Reset playlist rotation when this schedule starts') }}</strong>
+                            <small>{{ $gettext('Starts this scheduled block from a fresh internal playlist queue instead of continuing the previous rotation position.') }}</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div
+                    v-if="isPlaylistGroup && row.reset_queue_at_start"
+                    class="col-12"
+                >
+                    <label class="request-option">
+                        <input
+                            :id="'scheduling_reset_queue_recursive_'+index"
+                            v-model="row.reset_queue_recursive"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span>
+                            <strong>{{ $gettext('Also reset nested Playlist Group members') }}</strong>
+                            <small>{{ $gettext('Recursively resets nested Playlist Groups and their member playlists when this schedule begins.') }}</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="col-12">
                     <details class="calendar-rules">
                         <summary>
                             <span class="option-title-with-help">
@@ -382,6 +415,8 @@ interface PlaylistScheduleRow {
     days: number[],
     loop_once: boolean,
     prevent_requests: boolean,
+    reset_queue_at_start: boolean,
+    reset_queue_recursive: boolean,
     strict_start: boolean,
     recurrence_type: string | null,
     recurrence_interval: number,
@@ -394,9 +429,12 @@ interface PlaylistScheduleRow {
     recurrence_end_date: string | null,
 }
 
-defineProps<{
+const props = defineProps<{
     index: number,
+    isPlaylistGroup?: boolean,
 }>();
+
+const {index, isPlaylistGroup = false} = props;
 
 const row = defineModel<PlaylistScheduleRow>('row', {required: true});
 
@@ -472,6 +510,15 @@ const {r$} = useAppScopedRegle(
     },
     {
         namespace: 'stations-playlists'
+    }
+);
+
+watch(
+    () => row.value.reset_queue_at_start,
+    (enabled) => {
+        if (!enabled) {
+            row.value.reset_queue_recursive = false;
+        }
     }
 );
 
