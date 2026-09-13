@@ -295,9 +295,10 @@ const {start: scheduleHide, stop: cancelHide} = useTimeoutFn(() => {
 
 const onOverlayEdit = () => {
     if (!overlayProps.event) return;
+    const ev = overlayProps.event;
     overlayProps.visible = false;
     destroyPopper();
-    emit('editEvent', overlayProps.event);
+    emit('click', ev);
 };
 
 const onOverlayDelete = () => {
