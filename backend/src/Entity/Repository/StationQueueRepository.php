@@ -9,10 +9,12 @@ use App\Entity\Interfaces\SongInterface;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
+use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use Doctrine\ORM\Query\Expr\Join;
 use Doctrine\ORM\QueryBuilder;
 
 /**
@@ -413,15 +415,20 @@ final class StationQueueRepository extends AbstractStationBasedRepository
 
     public function clearUpcomingQueue(Station $station): void
     {
-        $this->em->createQuery(
-            <<<'DQL'
-                DELETE FROM App\Entity\StationQueue sq
-                WHERE sq.station = :station
-                AND sq.sent_to_autodj = 0
-                AND sq.top_of_hour_legal_id = 0
-            DQL
-        )->setParameter('station', $station)
-            ->execute();
+        $this->em->getConnection()->transactional(function () use ($station): void {
+            // Restore playlist media slots before removing unsent ordinary AutoDJ rows.
+            $this->restorePlaylistQueueSlots($station, true, true);
+
+            $this->em->createQuery(
+                <<<'DQL'
+                    DELETE FROM App\Entity\StationQueue sq
+                    WHERE sq.station = :station
+                    AND sq.sent_to_autodj = 0
+                    AND sq.top_of_hour_legal_id = 0
+                DQL
+            )->setParameter('station', $station)
+                ->execute();
+        });
     }
 
     public function getNextToSendToAutoDj(Station $station): ?StationQueue
@@ -485,16 +492,72 @@ final class StationQueueRepository extends AbstractStationBasedRepository
 
     public function clearUnplayed(?Station $station = null): void
     {
-        $qb = $this->em->createQueryBuilder()
-            ->delete(StationQueue::class, 'sq')
+        $this->em->getConnection()->transactional(function () use ($station): void {
+            // Restore playlist media slots before removing any unplayed queue rows.
+            $this->restorePlaylistQueueSlots($station, false, false);
+
+            $qb = $this->em->createQueryBuilder()
+                ->delete(StationQueue::class, 'sq')
+                ->where('sq.is_played = 0');
+
+            if (null !== $station) {
+                $qb->andWhere('sq.station = :station')
+                    ->setParameter('station', $station);
+            }
+
+            $qb->getQuery()->execute();
+        });
+    }
+
+    /**
+     * Re-queue playlist-media slots represented by queue rows that are about to be
+     * discarded so sequential/shuffle rotations do not silently skip content.
+     * Playlist Group member slots cannot be restored from StationQueue because the
+     * queue row stores only the group chain names, matching upstream #8613 behavior.
+     */
+    private function restorePlaylistQueueSlots(
+        ?Station $station,
+        bool $onlyUnsentToAutoDj,
+        bool $excludeTopOfHourLegalIds,
+    ): void {
+        $restoreSlotsQueryBuilder = $this->em->createQueryBuilder()
+            ->update(StationPlaylistMedia::class, 'spm')
+            ->set('spm.is_queued', 1);
+
+        $queuedUnplayedMediaQueryBuilder = $this->em->createQueryBuilder()
+            ->select('spm2.id')
+            ->from(StationPlaylistMedia::class, 'spm2')
+            ->join(
+                join: StationQueue::class,
+                alias: 'sq',
+                conditionType: Join::WITH,
+                condition: 'sq.media = spm2.media AND sq.playlist = spm2.playlist'
+            )
             ->where('sq.is_played = 0');
 
         if (null !== $station) {
-            $qb->andWhere('sq.station = :station')
-                ->setParameter('station', $station);
+            $queuedUnplayedMediaQueryBuilder->andWhere('sq.station = :station');
+            $restoreSlotsQueryBuilder->setParameter('station', $station);
         }
 
-        $qb->getQuery()->execute();
+        if ($onlyUnsentToAutoDj) {
+            $queuedUnplayedMediaQueryBuilder->andWhere('sq.sent_to_autodj = 0');
+        }
+
+        if ($excludeTopOfHourLegalIds) {
+            $queuedUnplayedMediaQueryBuilder->andWhere('sq.top_of_hour_legal_id = 0');
+        }
+
+        $restoreSlotsQueryBuilder->where(
+            $restoreSlotsQueryBuilder->expr()->in('spm.id', $queuedUnplayedMediaQueryBuilder->getDQL())
+        );
+
+        $restoreSlotsQueryBuilder->getQuery()->execute();
+
+        $this->resyncManagedEntities(
+            StationPlaylistMedia::class,
+            static fn(StationPlaylistMedia $spm): bool => !$spm->is_queued
+        );
     }
 
     public function cleanup(int $daysToKeep): void
