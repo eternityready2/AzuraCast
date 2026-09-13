@@ -17,6 +17,8 @@ use App\Entity\StationRequest;
 use App\Event\Radio\AnnotateNextSong;
 use App\Utilities\Time;
 use App\Utilities\Types;
+use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -25,11 +27,14 @@ final class Annotations implements EventSubscriberInterface
 {
     use EntityManagerAwareTrait;
 
+    private const int MAX_STALE_QUEUE_ROWS = 100;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly CustomFieldRepository $customFieldRepo,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly AutoCueCache $autoCueCache,
+        private readonly Scheduler $scheduler,
     ) {
     }
 
@@ -57,16 +62,69 @@ final class Annotations implements EventSubscriberInterface
         Station $station,
         bool $asAutoDj = false,
     ): string {
-        $queueRow = $this->queueRepo->getNextToSendToAutoDj($station);
+        $queueRow = null;
+
+        // A schedule/enable toggle can change after a queue row was planned. Queue::buildQueue()
+        // already drops stale unsent rows while rebuilding, but the final AutoDJ handoff must
+        // enforce the same invariant so a disabled or out-of-window playlist can never be sent
+        // to Liquidsoap merely because it was queued earlier.
+        for ($attempt = 0; $attempt < self::MAX_STALE_QUEUE_ROWS; $attempt++) {
+            $queueRow = $this->queueRepo->getNextToSendToAutoDj($station);
+
+            if (null === $queueRow) {
+                throw new RuntimeException('Queue is empty!');
+            }
+
+            if ($this->isQueueRowStillEligible($queueRow)) {
+                break;
+            }
+
+            $this->em->remove($queueRow);
+            $this->em->flush();
+            $queueRow = null;
+        }
 
         if (null === $queueRow) {
-            throw new RuntimeException('Queue is empty!');
+            throw new RuntimeException('Queue contains too many stale scheduled items; rebuild the station queue.');
         }
 
         $event = AnnotateNextSong::fromStationQueue($queueRow, $asAutoDj);
         $this->eventDispatcher->dispatch($event);
 
         return $event->buildAnnotations();
+    }
+
+    private function isQueueRowStillEligible(StationQueue $queueRow): bool
+    {
+        // These station/clock boundary items are governed by the dedicated boundary
+        // planner and must not be invalidated by ordinary playlist schedule ownership.
+        if ($queueRow->top_of_hour_legal_id || $queueRow->clock_wheel_legal_id_substitute) {
+            return true;
+        }
+
+        $playlist = $queueRow->playlist;
+        if (null === $playlist) {
+            return true;
+        }
+
+        if (!$playlist->is_enabled) {
+            return false;
+        }
+
+        $now = Time::nowUtc();
+        $expectedPlayTime = $queueRow->timestamp_played instanceof DateTimeInterface
+            ? CarbonImmutable::instance($queueRow->timestamp_played)
+            : $now;
+
+        if ($expectedPlayTime < $now) {
+            $expectedPlayTime = $now;
+        }
+
+        return $this->scheduler->isPlaylistScheduledToPlayNow(
+            $playlist,
+            $expectedPlayTime,
+            true
+        );
     }
 
     public function annotateSongPath(AnnotateNextSong $event): void
