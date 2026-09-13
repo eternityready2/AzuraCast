@@ -53,14 +53,14 @@
 import {ref} from "vue";
 import SidebarMenu from "~/components/Common/SidebarMenu.vue";
 import {toRefs, useIntervalFn} from "@vueuse/core";
-import {useStationsMenu} from "~/components/Stations/menu";
+import {useOrganizedStationsMenu} from "~/components/Stations/useOrganizedStationsMenu.ts";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useLuxon} from "~/vendor/luxon.ts";
 import {StationPermissions} from "~/entities/ApiInterfaces.ts";
 import {useStationData} from "~/functions/useStationQuery.ts";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
 
-const menuItems = useStationsMenu();
+const menuItems = useOrganizedStationsMenu();
 const {userAllowedForStation} = useUserAllowedForStation();
 
 const stationData = useStationData();
