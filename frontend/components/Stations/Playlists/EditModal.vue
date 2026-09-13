@@ -13,6 +13,7 @@
         <tabs>
             <form-basic-info/>
             <form-schedule v-model:schedule-items="form.schedule_items" />
+            <form-advanced/>
         </tabs>
     </modal-form>
 </template>
@@ -20,6 +21,7 @@
 <script setup lang="ts">
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
+import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
 import {useTranslate} from "~/vendor/gettext";
