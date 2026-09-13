@@ -137,6 +137,15 @@
                     :label="$gettext('Song Playback Order')"
                 />
 
+                <form-group-checkbox
+                    v-if="form.order !== 'random'"
+                    id="form_edit_preserve_queue_on_restart"
+                    class="col-md-6"
+                    :field="r$.preserve_queue_on_restart"
+                    :label="$gettext('Keep Queue on Restart')"
+                    :description="$gettext('Prevent this playlist\'s internal queue from being reset on station restarts or configuration rewrites.')"
+                />
+
                 <form-group-field
                     id="form_edit_rotation_goal_days"
                     class="col-md-6"
@@ -250,6 +259,15 @@
                     :field="r$.avoid_duplicates"
                     :label="$gettext('Avoid Duplicate Artists/Titles')"
                     :description="$gettext('Applies to all member playlists in this group unless a member overrides it.')"
+                />
+
+                <form-group-checkbox
+                    v-if="form.order !== 'random'"
+                    id="form_edit_preserve_queue_on_restart_group"
+                    class="col-md-6"
+                    :field="r$.preserve_queue_on_restart"
+                    :label="$gettext('Keep Queue on Restart')"
+                    :description="$gettext('Prevent this Playlist Group\'s internal member rotation from being reset on station restarts or configuration rewrites.')"
                 />
             </div>
 
