@@ -248,9 +248,13 @@ final class ConfigWriter implements EventSubscriberInterface
                 continue;
             }
 
-            // Playlists that are members of a Playlist Group are not scheduled directly by
-            // Liquidsoap -- their airtime comes entirely from their parent group's own slot.
-            if (count($playlist->group_memberships) > 0) {
+            $scheduleItems = $playlist->schedule_items;
+
+            // Unscheduled Playlist Group members are owned by their parent group's slot.
+            // A group member with its own schedule is deliberately written here too, so
+            // manual AutoDJ/Liquidsoap mode can play it independently outside the parent
+            // group's active schedule, matching upstream Playlist Group scheduling rules.
+            if (count($playlist->group_memberships) > 0 && $scheduleItems->count() === 0) {
                 continue;
             }
 
@@ -267,8 +271,6 @@ final class ConfigWriter implements EventSubscriberInterface
             if (in_array($playlistVarName, $playlistVarNames, true)) {
                 $playlistVarName .= '_' . $playlist->id;
             }
-
-            $scheduleItems = $playlist->schedule_items;
 
             $playlistVarNames[] = $playlistVarName;
             $playlistConfigLines = [];
@@ -541,7 +543,6 @@ final class ConfigWriter implements EventSubscriberInterface
         $requestsQueueName = LiquidsoapQueues::Requests->value;
         $interruptingQueueName = LiquidsoapQueues::Interrupting->value;
 
-
         if ($duckEnabled) {
             $interruptingBlock = <<<LIQ
             radio = azuracast.duck(id="interrupting_fallback", voiceover=interrupting_queue, radio)
@@ -551,7 +552,6 @@ final class ConfigWriter implements EventSubscriberInterface
             radio = fallback(id="interrupting_fallback", track_sensitive = false, [interrupting_queue, radio])
             LIQ;
         }
-
 
         $event->appendBlock(
             <<< LIQ
@@ -578,7 +578,6 @@ final class ConfigWriter implements EventSubscriberInterface
                 );
             }
         }
-
     }
 
     public function writeNewsBulletinConfiguration(WriteLiquidsoapConfiguration $event): void
@@ -664,11 +663,9 @@ final class ConfigWriter implements EventSubscriberInterface
     private static function buildActiveHoursCheck(?string $activeHours, DateTimeZone $timezone): string
     {
         if (empty($activeHours)) {
-            // No active_hours configured - always active
             return 'def is_within_active_hours() = true end';
         }
 
-        // Parse "HH:MM-HH:MM" format
         if (!preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
             return 'def is_within_active_hours() = true end';
         }
@@ -678,18 +675,14 @@ final class ConfigWriter implements EventSubscriberInterface
         $endHour = (int) $matches[3];
         $endMin = (int) $matches[4];
 
-        // Convert to minutes for easier comparison
         $startMinutes = $startHour * 60 + $startMin;
         $endMinutes = $endHour * 60 + $endMin;
 
-        // Liquidsoap's time() always returns UTC, so the embedded minute
-        // values must be adjusted from the station's local timezone to UTC.
         $tzOffsetMinutes = (int)($timezone->getOffset(new \DateTimeImmutable('now', $timezone)) / 60);
         $utcStart = ($startMinutes - $tzOffsetMinutes + 1440) % 1440;
         $utcEnd   = ($endMinutes   - $tzOffsetMinutes + 1440) % 1440;
 
         if ($utcStart <= $utcEnd) {
-            // Normal range (e.g., 06:00-22:00)
             return <<<LIQ
 def is_within_active_hours() =
   # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
@@ -701,7 +694,6 @@ def is_within_active_hours() =
 end
 LIQ;
         } else {
-            // Overnight range (e.g., 22:00-06:00, or TZ-adjusted wrap)
             return <<<LIQ
 def is_within_active_hours() =
   # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
@@ -739,10 +731,8 @@ LIQ;
 
     public function writeCrossfadeConfiguration(WriteLiquidsoapConfiguration $event): void
     {
-        // Write pre-crossfade section.
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_PRE_FADE);
 
-        // Amplify and Skip
         $event->appendBlock(
             <<<LIQ
             # Allow Telnet to skip the current track.
@@ -755,7 +745,6 @@ LIQ;
             LIQ
         );
 
-        // Replaygain metadata
         $settings = $event->getBackendConfig();
 
         if ($settings->enable_replaygain_metadata) {
@@ -768,7 +757,6 @@ LIQ;
             );
         }
 
-        // Add debug logging for metadata.
         $event->appendBlock(
             <<<LS
             # Log current metadata for debugging.
@@ -947,7 +935,6 @@ LIQ;
             LIQ
         );
 
-        // Custom configuration
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_PRE_BROADCAST);
     }
 
@@ -959,7 +946,6 @@ LIQ;
             return;
         }
 
-        // @var Collection<EncodableInterface> $encodables
         $encodables = [
             $station->mounts,
             $station->remotes,
@@ -1007,7 +993,6 @@ LIQ;
             '# Local Broadcasts',
         ];
 
-        // Configure the outbound broadcast.
         $i = 0;
         foreach ($station->mounts as $mountRow) {
             $i++;
@@ -1035,10 +1020,8 @@ LIQ;
             '# HLS Broadcasting',
         ];
 
-        // Configure the outbound broadcast.
         $hlsStreams = [];
 
-        // Build the HLS stream encoder destinations.
         foreach ($station->hls_streams as $hlsStream) {
             $streamVarName = self::cleanUpVarName($hlsStream->name);
 
@@ -1076,7 +1059,6 @@ LIQ;
             $hlsStreams
         ) . "\n" . ']';
 
-        // Build an aggregate source composed of the various encoders.
         if ($shareEncoders) {
             $i = 0;
             $hlsSourceTracks = [];
@@ -1156,7 +1138,6 @@ LIQ;
             '# Remote Relays',
         ];
 
-        // Set up broadcast to remote relays.
         $i = 0;
         foreach ($station->remotes as $remoteRow) {
             $i++;
@@ -1182,7 +1163,6 @@ LIQ;
             return;
         }
 
-        // If LS editing is disabled, don't add custom blocks to the written code.
         $settings = $this->settingsRepo->readSettings();
         if (!$settings->enable_liquidsoap_editing) {
             return;
@@ -1210,7 +1190,6 @@ LIQ;
 
         switch ($settings->getAudioProcessingMethodEnum()) {
             case AudioProcessingMethods::Liquidsoap:
-                // NRJ normalization
                 $event->appendBlock(
                     <<<LIQ
                     # Normalization and Compression
@@ -1221,8 +1200,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::MasterMe:
-                // MasterMe Presets
-
                 $lines = [
                     'radio = ladspa.master_me(',
                 ];
@@ -1252,7 +1229,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::StereoTool:
-                // Stereo Tool processing
                 if (!StereoTool::isReady($station)) {
                     return;
                 }
@@ -1289,7 +1265,6 @@ LIQ;
                     };
 
                     if (!file_exists($stereoToolLibrary)) {
-                        // Stereo Tool 10.0 uploaded using a different format.
                         $is64Bit = in_array($serverArch, ['x86_64', 'arm64'], true);
                         if ($is64Bit && file_exists($stereoToolLibraryPath . '/libStereoTool_64.so')) {
                             $stereoToolLibrary = $stereoToolLibraryPath . '/libStereoTool_64.so';
@@ -1318,7 +1293,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::None:
-                // Noop
                 break;
         }
     }
@@ -1328,9 +1302,6 @@ LIQ;
         return chr(7);
     }
 
-    /**
-     * Given a scheduled playlist, return the time criteria that Liquidsoap can use to determine when to play it.
-     */
     private function getScheduledPlaylistPlayTime(
         WriteLiquidsoapConfiguration $event,
         StationSchedule $playlistSchedule
@@ -1369,7 +1340,6 @@ LIQ;
         $startTime = $playlistSchedule->start_time;
         $endTime = $playlistSchedule->end_time;
 
-        // Handle multi-day (overnight) playlists.
         if ($startTime > $endTime) {
             $playTimes = [
                 self::formatTimeCode($startTime) . '-23h59m59s',
@@ -1396,14 +1366,9 @@ LIQ;
             }
 
             $playTime = '(' . implode(') or (', $playTimes) . ')';
-
-            // Same start/end-date boundary handling as the once-per-day branch below --
-            // without this, a one-time (non-recurring) overnight event would repeat
-            // every matching day forever instead of playing only on its scheduled date.
             return $this->applyScheduleDateRangeBounds($event, $playlistSchedule, $playTime);
         }
 
-        // Handle once-per-day playlists.
         $playTime = ($startTime === $endTime)
             ? self::formatTimeCode($startTime)
             : self::formatTimeCode($startTime) . '-' . self::formatTimeCode($endTime);
@@ -1421,11 +1386,6 @@ LIQ;
         return $this->applyScheduleDateRangeBounds($event, $playlistSchedule, $playTime);
     }
 
-    /**
-     * Wraps a Liquidsoap time predicate with a start_date/end_date boundary check, if either
-     * is set on the schedule. Shared by both the once-per-day and overnight branches above so
-     * a one-time event (start_date == end_date) is bounded to its exact date either way.
-     */
     private function applyScheduleDateRangeBounds(
         WriteLiquidsoapConfiguration $event,
         StationSchedule $playlistSchedule,
@@ -1439,12 +1399,9 @@ LIQ;
         }
 
         $tzObject = $event->getStation()->getTimezoneObject();
-
         $customFunctionBody = [];
-
         $scheduleMethod = 'schedule_' . $playlistSchedule->id . '_date_range';
         $customFunctionBody[] = 'def ' . $scheduleMethod . '() =';
-
         $conditions = [];
 
         if (!empty($startDate)) {
@@ -1452,7 +1409,6 @@ LIQ;
 
             if (null !== $startDateObj) {
                 $startDateObj = $startDateObj->setTime(0, 0);
-
                 $customFunctionBody[] = '    # ' . $startDateObj->__toString();
                 $customFunctionBody[] = '    range_start = ' . $startDateObj->getTimestamp() . '.';
                 $conditions[] = 'range_start <= current_time';
@@ -1464,10 +1420,8 @@ LIQ;
 
             if (null !== $endDateObj) {
                 $endDateObj = $endDateObj->setTime(23, 59, 59);
-
                 $customFunctionBody[] = '    # ' . $endDateObj->__toString();
                 $customFunctionBody[] = '    range_end = ' . $endDateObj->getTimestamp() . '.';
-
                 $conditions[] = 'current_time <= range_end';
             }
         }
@@ -1481,9 +1435,6 @@ LIQ;
         return $scheduleMethod . '() and ' . $playTime;
     }
 
-    /**
-     * Given outbound broadcast information, produce a suitable LiquidSoap configuration line for the stream.
-     */
     private function getOutputString(
         WriteLiquidsoapConfiguration $event,
         OutputtableSource $source,
@@ -1495,9 +1446,7 @@ LIQ;
         $shareEncoders = $event->getBackendConfig()->share_encoders;
 
         $encoding = $source->encoding;
-
         $outputParams = [];
-
         $container = $encoding->format->getFfmpegContainer();
 
         if ($shareEncoders) {
@@ -1508,7 +1457,6 @@ LIQ;
         }
 
         $outputParams[] = 'id="' . $idPrefix . $id . '"';
-
         $outputParams[] = 'host = ' . self::toRawString($source->host);
         $outputParams[] = 'port = ' . (int)$source->port;
 
@@ -1517,7 +1465,6 @@ LIQ;
         }
 
         $password = $source->password;
-
         $adapterType = $source->adapterType;
         if (FrontendAdapters::Shoutcast === $adapterType) {
             $password .= ':#' . $id;
@@ -1534,7 +1481,6 @@ LIQ;
             if (empty($mountPoint)) {
                 $mountPoint = '/';
             }
-
             $outputParams[] = 'mount = ' . self::toRawString($mountPoint);
         }
 
@@ -1633,9 +1579,6 @@ LIQ;
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_BOTTOM);
     }
 
-    /**
-     * Convert an integer or float into a Liquidsoap configuration compatible float.
-     */
     public static function toFloat(float|int|string $number, int $decimals = 2): string
     {
         return number_format(
@@ -1654,14 +1597,10 @@ LIQ;
         return $hours . 'h' . $mins . 'm';
     }
 
-    /**
-     * Filter a user-supplied string to be a valid LiquidSoap config entry.
-     */
     public static function cleanUpString(?string $string): string
     {
         $string = str_replace(['"', "\n", "\r"], ['\'', '', ''], $string ?? '');
 
-        // Remove strings that are interpolated
         $string = preg_replace(
             '/#{(.*)}/U',
             '$1',
@@ -1688,10 +1627,6 @@ LIQ;
         return '"' . $escaped . '"';
     }
 
-    /**
-     * Apply a more aggressive string filtering to variable names used in Liquidsoap.
-     * @return string The cleaned up, variable-name-friendly string.
-     */
     public static function cleanUpVarName(string $str): string
     {
         $str = strtolower(
@@ -1713,9 +1648,6 @@ LIQ;
         return self::cleanUpVarName('playlist_' . StationPlaylist::generateShortName($playlist->name));
     }
 
-    /**
-     * Given a value, convert it into an annotation-friendly quoted string.
-     */
     public static function annotateValue(string|int|float|bool $dataVal, bool $preserveType = false): string
     {
         if ($preserveType) {
@@ -1734,11 +1666,6 @@ LIQ;
         return str_replace(['"', "\n", "\t", "\r"], ['\"', '', '', ''], $strVal);
     }
 
-    /**
-     * Apply an array of string keys/values into an annotations string.
-     *
-     * @param array<string, string|int|float|bool|null> $values
-     */
     public static function annotateArray(array $values): string
     {
         $values = array_filter(
