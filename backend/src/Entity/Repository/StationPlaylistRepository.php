@@ -188,6 +188,14 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
             );
         }
 
+        // Bulk DQL updates bypass Doctrine's managed entity state. Refresh any group
+        // members already in the identity map so repeated queue builds in one process
+        // advance the rotation instead of replaying stale member state.
+        $this->resyncManagedEntities(
+            StationPlaylistGroup::class,
+            static fn(StationPlaylistGroup $spg): bool => $spg->playlist_group === $playlist
+        );
+
         $now ??= Time::nowUtc();
         $playlist->queue_reset_at = $now;
         $this->em->persist($playlist);
