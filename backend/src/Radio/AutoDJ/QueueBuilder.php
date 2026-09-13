@@ -24,7 +24,6 @@ use App\Entity\StationPlaylistGroup;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
-use App\Radio\AutoDJ\ClockWheel;
 use App\Radio\PlaylistParser;
 use App\Radio\SmartBlock\SmartBlockPlaybackPreparer;
 use App\Service\HolidayOverrideService;
@@ -96,9 +95,6 @@ final class QueueBuilder implements EventSubscriberInterface
         foreach ($station->playlists as $playlist) {
             /** @var StationPlaylist $playlist */
             if ($playlist->playlist_groups->count() > 0) {
-                // A group member with its own schedule may play independently while no
-                // ancestor Playlist Group schedule currently owns it. This is upstream
-                // Playlist Group behavior and is separate from this fork's Clock Wheels.
                 if (
                     0 === $playlist->schedule_items->count()
                     || $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $expectedPlayTime)
@@ -133,16 +129,15 @@ final class QueueBuilder implements EventSubscriberInterface
         $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $expectedPlayTime);
         if ($holidayPlaylist !== null) {
             foreach ([false, true] as $allowDuplicates) {
-                if (
-                    $event->setNextSongs(
-                        $this->playSongFromPlaylist(
-                            $holidayPlaylist,
-                            $recentSongHistoryForDuplicatePrevention,
-                            $expectedPlayTime,
-                            $allowDuplicates
-                        )
-                    )
-                ) {
+                $selection = $this->playSongFromPlaylist(
+                    $holidayPlaylist,
+                    $recentSongHistoryForDuplicatePrevention,
+                    $expectedPlayTime,
+                    $allowDuplicates
+                );
+
+                if (null !== $selection) {
+                    $event->setNextSongs($selection);
                     $this->logger->info(
                         'Holiday override playlist is active.',
                         ['playlist_id' => $holidayPlaylist->id]
@@ -207,17 +202,15 @@ final class QueueBuilder implements EventSubscriberInterface
             foreach ([false, true] as $allowDuplicates) {
                 foreach ($eligiblePlaylists as $playlistId => $weight) {
                     $playlist = $activePlaylistsByType[$currentPlaylistType][$playlistId];
+                    $selection = $this->playSongFromPlaylist(
+                        $playlist,
+                        $recentSongHistoryForDuplicatePrevention,
+                        $expectedPlayTime,
+                        $allowDuplicates
+                    );
 
-                    if (
-                        $event->setNextSongs(
-                            $this->playSongFromPlaylist(
-                                $playlist,
-                                $recentSongHistoryForDuplicatePrevention,
-                                $expectedPlayTime,
-                                $allowDuplicates
-                            )
-                        )
-                    ) {
+                    if (null !== $selection) {
+                        $event->setNextSongs($selection);
                         $this->logger->info(
                             'Playable track(s) found and registered.',
                             ['next_song' => (string)$event]
@@ -482,7 +475,8 @@ final class QueueBuilder implements EventSubscriberInterface
 
         $selectionEntries = is_array($selection) ? array_values($selection) : [$selection];
         foreach ($selectionEntries as $queueEntry) {
-            $queueEntry->group_playlist = $group;
+            $existingChain = $queueEntry->playlist_chain ?? [];
+            $queueEntry->playlist_chain = [$group->name, ...$existingChain];
             $this->em->persist($queueEntry);
         }
 
@@ -499,11 +493,6 @@ final class QueueBuilder implements EventSubscriberInterface
         return $selection;
     }
 
-    /**
-     * Play one complete rotation pass of a Playlist Group as one queued block.
-     * This ports upstream's merged-group behavior without involving the custom
-     * Clock Wheel implementation.
-     */
     private function playBlockFromGroup(
         StationPlaylist $group,
         array $recentSongHistory,
@@ -515,7 +504,7 @@ final class QueueBuilder implements EventSubscriberInterface
         $remainingIterations = $this->getGroupBlockIterationCap($group, $expectedPlayTime);
         $slotQueue = $this->getPlaylistGroupQueueForOrder($group);
 
-        while ([] !== $slotQueue && $remainingIterations-- > 0) {
+        while ([] !== $slotQueue && $remainingIterations > 0) {
             $membership = $slotQueue[0];
             $selection = $this->playGroupMember(
                 $group,
@@ -544,13 +533,13 @@ final class QueueBuilder implements EventSubscriberInterface
             if (PlaylistOrders::Random === $group->order) {
                 array_shift($slotQueue);
             } else {
-                // Do not use getPlaylistGroupQueueForOrder here: that method refills an
-                // empty queue, which would start a second pass inside the same merged block.
                 $slotQueue = $this->playlistRepo->getPlaylistGroupQueue($group);
             }
+
+            $remainingIterations--;
         }
 
-        if (0 === $remainingIterations && [] !== $slotQueue) {
+        if ($remainingIterations <= 0 && [] !== $slotQueue) {
             $this->logger->warning(
                 sprintf('Merged Playlist Group "%s" reached its safety iteration cap.', $group->name),
                 ['playlist_group_id' => $group->id, 'block_entries' => count($blockEntries)]
@@ -784,9 +773,6 @@ final class QueueBuilder implements EventSubscriberInterface
         DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
-        // Reordering is limited to standalone general rotation. Scheduled shows
-        // and playlist groups retain operator ordering and rely on the shared
-        // broadcast-clock stretch/squeeze/cue-out path at the anchor.
         if (
             PlaylistTypes::Standard !== $playlist->type
             || 0 !== $playlist->schedule_items->count()
@@ -1278,8 +1264,6 @@ final class QueueBuilder implements EventSubscriberInterface
                 continue;
             }
 
-            // A scheduled Playlist Group member only applies its top-level request
-            // rules while it is outside an active ancestor-group schedule.
             if (
                 $playlist->playlist_groups->count() > 0
                 && $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $expectedPlayTime)
