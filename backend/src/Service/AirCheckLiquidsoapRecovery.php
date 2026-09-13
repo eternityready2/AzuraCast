@@ -29,7 +29,7 @@ final class AirCheckLiquidsoapRecovery
      *
      * This deliberately does not perform a Git rollback. Runtime recovery should never
      * mutate application source code; when current code generates an invalid Liquidsoap
-     * configuration, the validation error and a short log hint are returned instead.
+     * configuration, the validation error and a short sanitized diagnostic are returned instead.
      *
      * @param array<string, mixed> $result
      * @return array<string, mixed>
@@ -90,9 +90,9 @@ final class AirCheckLiquidsoapRecovery
             ];
         } catch (Throwable $e) {
             $reason = $this->shortReason($e->getMessage());
-            $logHint = $this->getLogHint($adapter, $station);
-            if (null !== $logHint && !str_contains($reason, $logHint)) {
-                $reason .= ' | liquidsoap.log: ' . $logHint;
+            $logCategory = $this->getSanitizedLogCategory($adapter, $station);
+            if (null !== $logCategory && !str_contains($reason, $logCategory)) {
+                $reason .= ' | ' . $logCategory;
             }
 
             $failures = array_values(array_filter(
@@ -152,7 +152,12 @@ final class AirCheckLiquidsoapRecovery
         $this->em->flush();
     }
 
-    private function getLogHint(Liquidsoap $adapter, Station $station): ?string
+    /**
+     * Inspect the Liquidsoap log only to classify the failure. AirCheck is available
+     * to users with Broadcasting permission, while raw station logs require Logs
+     * permission, so raw log text must never be returned or persisted here.
+     */
+    private function getSanitizedLogCategory(Liquidsoap $adapter, Station $station): ?string
     {
         $path = $adapter->getLogPath($station);
         if (!is_readable($path)) {
@@ -188,21 +193,35 @@ final class AirCheckLiquidsoapRecovery
         }
 
         $lines = preg_split('/\R/', $tail) ?: [];
-        $fallback = null;
 
         foreach (array_reverse($lines) as $line) {
-            $line = trim($line);
+            $line = strtolower(trim($line));
             if ('' === $line) {
                 continue;
             }
 
-            $fallback ??= $line;
-            if (preg_match('/\b(error|fatal|exception|invalid|failed|failure|syntax|parse)\b/i', $line)) {
-                return $this->shortReason($line);
+            if (preg_match('/\b(syntax|parse|parser|invalid)\b/', $line)) {
+                return 'Liquidsoap log indicates a configuration syntax/parse error; see Logs for details.';
+            }
+
+            if (str_contains($line, 'address already in use') || preg_match('/\bbind\b/', $line)) {
+                return 'Liquidsoap log indicates a port/bind conflict; see Logs for details.';
+            }
+
+            if (str_contains($line, 'permission denied')) {
+                return 'Liquidsoap log indicates a file or socket permission problem; see Logs for details.';
+            }
+
+            if (str_contains($line, 'no such file') || str_contains($line, 'not found')) {
+                return 'Liquidsoap log indicates a missing file or referenced path; see Logs for details.';
+            }
+
+            if (preg_match('/\b(error|fatal|exception|failed|failure)\b/', $line)) {
+                return 'Liquidsoap log reports a startup/runtime error; see Logs for details.';
             }
         }
 
-        return null !== $fallback ? $this->shortReason($fallback) : null;
+        return null;
     }
 
     private function shortReason(string $reason): string
@@ -227,11 +246,11 @@ final class AirCheckLiquidsoapRecovery
             return 'Check for a conflicting process or duplicate Liquidsoap/frontend port before retrying.';
         }
 
-        if (str_contains($lower, 'permission denied')) {
+        if (str_contains($lower, 'permission denied') || str_contains($lower, 'permission problem')) {
             return 'Check station media/config/log file ownership and permissions.';
         }
 
-        if (str_contains($lower, 'no such file') || str_contains($lower, 'not found')) {
+        if (str_contains($lower, 'no such file') || str_contains($lower, 'not found') || str_contains($lower, 'missing file')) {
             return 'Check referenced media, playlists, custom Liquidsoap includes, and generated file paths.';
         }
 
