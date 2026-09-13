@@ -17,8 +17,6 @@ use App\Entity\StationRequest;
 use App\Event\Radio\AnnotateNextSong;
 use App\Utilities\Time;
 use App\Utilities\Types;
-use Carbon\CarbonImmutable;
-use DateTimeInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -111,11 +109,11 @@ final class Annotations implements EventSubscriberInterface
             return false;
         }
 
+        // Validate against the row's projected cue time rather than only "now". This
+        // keeps future scheduled rows eligible until their own window while still
+        // preventing an overdue stale row from escaping a schedule that has ended.
         $now = Time::nowUtc();
-        $expectedPlayTime = $queueRow->timestamp_played instanceof DateTimeInterface
-            ? CarbonImmutable::instance($queueRow->timestamp_played)
-            : $now;
-
+        $expectedPlayTime = $queueRow->timestamp_cued;
         if ($expectedPlayTime < $now) {
             $expectedPlayTime = $now;
         }
