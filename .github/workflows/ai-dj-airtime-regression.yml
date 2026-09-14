@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'fix/playlist-loop-labels-and-ai-dj-airtime'
+      - 'fix/ai-news-piper-timeout-sept14'
     paths:
       - 'backend/config/events.php'
       - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
@@ -106,16 +107,19 @@ jobs:
           grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
           grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
 
-          # Shared Piper stays inside the AI DJ 90-second caller ceiling while AI
-          # News still gets one bounded, sentence-safe retry on a stalled inference.
-          grep -q 'PRIMARY_TIMEOUT_SECONDS = 65' util/docker/web/scripts/piper
+          # Production logs showed the first shortened Piper retry can also time
+          # out on a loaded host. Keep all three attempts inside the caller ceiling.
+          grep -q 'PRIMARY_TIMEOUT_SECONDS = 55' util/docker/web/scripts/piper
           grep -q 'RETRY_TIMEOUT_SECONDS = 20' util/docker/web/scripts/piper
+          grep -q 'EMERGENCY_TIMEOUT_SECONDS = 10' util/docker/web/scripts/piper
           grep -q 'RETRY_MAX_CHARS = 800' util/docker/web/scripts/piper
+          grep -q 'EMERGENCY_MAX_CHARS = 240' util/docker/web/scripts/piper
           grep -q 'bounded_retry_text' util/docker/web/scripts/piper
+          grep -q 'emergency_retry_text' util/docker/web/scripts/piper
           grep -q '/usr/local/bin/piper-real' util/docker/web/setup/piper.sh
           grep -q 'chmod a+x /usr/local/bin/piper' util/docker/web/setup/piper.sh
 
-          # LOGS(7) runtime regressions.
+          # Existing runtime regressions.
           grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
           ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
           grep -q 'if (!\$this->isRunning(\$station))' backend/src/Radio/AbstractLocalAdapter.php
