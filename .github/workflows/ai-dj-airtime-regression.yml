@@ -151,13 +151,15 @@ jobs:
 
           # Named AI DJ voice identity is authoritative. Kokoro gets one bounded
           # retry with the SAME configured speaker; never substitute a generic Piper
-          # voice that makes Bella/Onyx suddenly sound like somebody else.
+          # voice that makes Bella/Onyx suddenly sound like somebody else. The
+          # wrapper reports the exact voice identity it rendered for diagnostics.
           grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
           grep -q 'KOKORO_RETRY_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
           grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
           grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
           grep -q 'same-voice retry failed' util/docker/kokoro/kokoro_tts.py
           grep -q '"engine": "kokoro"' util/docker/kokoro/kokoro_tts.py
+          grep -q '"voice": voice' util/docker/kokoro/kokoro_tts.py
           ! grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
           ! grep -q 'PIPER_FEMALE' util/docker/kokoro/kokoro_tts.py
           ! grep -q 'REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
