@@ -40,7 +40,20 @@ final class QueueInterruptingTracks extends AbstractTask
      */
     public function run(bool $force = false): void
     {
-        foreach ($this->iterateStations() as $station) {
+        // Queue building can flush or open its own nested Doctrine transactions.
+        // Do not run it inside ReadWriteBatchIteratorAggregate's outer transaction:
+        // production logs showed the iterator attempting to release a savepoint
+        // already consumed by nested queue work, crashing azuracast:sync:task with
+        // SQLSTATE 1305 (SAVEPOINT DOCTRINE_2 does not exist). This task does not
+        // need a write batch wrapper; each queue operation persists its own state.
+        /** @var Station[] $stations */
+        $stations = $this->em->createQuery(
+            <<<'DQL'
+                SELECT s FROM App\Entity\Station s
+            DQL
+        )->getResult();
+
+        foreach ($stations as $station) {
             $this->logger->pushProcessor(
                 function (LogRecord $record) use ($station) {
                     $record->extra['station'] = [
