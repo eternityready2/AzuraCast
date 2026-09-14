@@ -148,10 +148,30 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
             $cueOut = min($mediaLength, $cueIn + 1.0);
         }
 
-        $event->addAnnotations([
+        $annotations = [
             'autocue_cue_out' => $cueOut,
             'duration' => $cueOut,
-        ]);
+        ];
+
+        // Very short hard caps can be smaller than fade metadata that was cached
+        // for the full song. Liquidsoap cannot build a crossfade when the fade
+        // consumes the entire playable window (production: a 1.0s cap with a
+        // 1.5s fade-in / 1.0s fade-out produced an invalid max-start duration).
+        // Keep each existing fade inside half of the actual capped window so a
+        // valid non-negative body remains on both sides of the transition.
+        $playableSeconds = max(0.0, $cueOut - $cueIn);
+        $maxFadeSeconds = $playableSeconds / 2.0;
+
+        foreach (['autocue_fade_in', 'autocue_fade_out'] as $fadeKey) {
+            if (isset($existing[$fadeKey])) {
+                $annotations[$fadeKey] = min(
+                    max(0.0, (float)$existing[$fadeKey]),
+                    $maxFadeSeconds,
+                );
+            }
+        }
+
+        $event->addAnnotations($annotations);
 
         $queue->duration = $cueOut;
     }
