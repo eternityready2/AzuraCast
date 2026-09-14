@@ -8,6 +8,7 @@ use App\Entity\AiDj;
 use App\Entity\AiDjSchedule;
 use App\Entity\SongHistory;
 use App\Entity\Station;
+use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiDjQueueListener;
@@ -163,15 +164,28 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $cadenceKey = 'ai_dj_talk_cadence_' . $station->id . '_' . $dj->getId();
         $this->cache->set($cadenceKey, 1.0, self::STATE_TTL_SECONDS);
 
-        $beforeId = $lastBreak?->id;
-        $this->queueListener->onBuildQueue($event);
-        $afterBreak = $this->findLatestDjBreak($station, $dj, $startsAt, $endsAt);
+        // Keep two facts separate:
+        // 1. StationQueue tells us whether this heartbeat successfully submitted a
+        //    fresh direct request to Liquidsoap.
+        // 2. SongHistory tells us whether speech actually reached air.
+        // A queued clip normally cannot be in SongHistory before this synchronous
+        // method returns, so using only airtime history here would falsely classify
+        // every successful enqueue as a generation failure and clear its cooldown.
+        $beforeSubmission = $this->findLatestSubmittedDjClip($station, $dj, $startsAt, $endsAt);
+        $beforeAirId = $lastBreak?->id;
 
-        if ($afterBreak?->id === $beforeId) {
-            // Nothing new has actually reached air yet. This can be a protected
-            // TOH/news window, a pending AI DJ request, or a TTS/API failure. Keep
-            // the cadence opportunity live; the queue guards prevent stacking while
-            // a successfully rendered clip waits for its track boundary.
+        $this->queueListener->onBuildQueue($event);
+
+        $afterSubmission = $this->findLatestSubmittedDjClip($station, $dj, $startsAt, $endsAt);
+        $afterBreak = $this->findLatestDjBreak($station, $dj, $startsAt, $endsAt);
+        $submittedNewClip = $afterSubmission?->id !== $beforeSubmission?->id;
+        $airedNewClip = $afterBreak?->id !== $beforeAirId;
+
+        if (!$submittedNewClip && !$airedNewClip) {
+            // No new request was submitted and nothing new reached air. This is a
+            // genuine skipped/failed opportunity (protected TOH/news window, busy
+            // request queue, unavailable content or TTS/API failure), so preserve
+            // the opportunity and remove the cooldown for the next safe heartbeat.
             $this->cache->set($cadenceKey, 1.0, self::STATE_TTL_SECONDS);
             $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
         }
@@ -182,6 +196,50 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $frequency = max(0.01, min(1.0, $frequency));
 
         return (int)ceil(self::TALK_BASE_INTERVAL_SECONDS / $frequency);
+    }
+
+    private function findLatestSubmittedDjClip(
+        Station $station,
+        AiDj $dj,
+        DateTimeImmutable $startsAt,
+        DateTimeImmutable $endsAt,
+    ): ?StationQueue {
+        try {
+            $utc = new DateTimeZone('UTC');
+            $normalizedDjName = strtolower(trim($dj->getName()));
+
+            return $this->em->createQuery(
+                <<<'DQL'
+                    SELECT q FROM App\Entity\StationQueue q
+                    WHERE q.station = :station
+                    AND q.media IS NULL
+                    AND q.autodj_custom_uri IS NOT NULL
+                    AND (
+                        LOWER(q.artist) = :dj_name
+                        OR LOWER(q.artist) LIKE :dj_suffix
+                    )
+                    AND q.timestamp_cued >= :startsAt
+                    AND q.timestamp_cued < :endsAt
+                    ORDER BY q.id DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('dj_name', $normalizedDjName)
+                ->setParameter('dj_suffix', '% - ' . $normalizedDjName)
+                ->setParameter('startsAt', $startsAt->setTimezone($utc))
+                ->setParameter('endsAt', $endsAt->setTimezone($utc))
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+        } catch (Throwable $e) {
+            $this->logger->error('AI DJ: Runtime submission marker lookup failed.', [
+                'station_id' => $station->id,
+                'dj' => $dj->getName(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            // Fail closed: an uncertain submission state must not encourage a
+            // duplicate talk break on the next heartbeat.
+            throw $e;
+        }
     }
 
     private function findLatestDjBreak(
