@@ -103,9 +103,14 @@ jobs:
           # Requests are never flushed, and concrete shift identity owns pending speech.
           grep -q 'purgePendingAiDjSpeech' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'ai_dj_runtime_shift_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_control.clear' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_control.pending' backend/src/Radio/Backend/Liquidsoap.php
           grep -Fq "LiquidsoapQueues::AiDj->value . '.queue'" backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -Fq "sprintf('%s.remove %d', LiquidsoapQueues::AiDj->value" backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           ! grep -q 'Requests->value.*remove' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'source.is_ready(ai_dj_queue)' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+          grep -q 'ai_dj_queue.set_queue(\[\])' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+          grep -q 'ai_dj_queue.skip()' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
 
           # Cadence and lifecycle durability must reflect actual on-air speech, not
           # synthetic StationQueue rows that were merely submitted to Liquidsoap.
@@ -144,16 +149,18 @@ jobs:
           grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
-          # Kokoro is bounded below the PHP 90-second ceiling. Full scripts already
-          # bounded by AiDjGenerator are split into safe chunks, not truncated, and
-          # the emergency fallback calls the real Piper binary directly.
+          # Named AI DJ voice identity is authoritative. Kokoro gets one bounded
+          # retry with the SAME configured speaker; never substitute a generic Piper
+          # voice that makes Bella/Onyx suddenly sound like somebody else.
           grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
-          grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
+          grep -q 'KOKORO_RETRY_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
           grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
           grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
-          grep -q 'REAL_PIPER_BIN = "/usr/local/share/piper/piper"' util/docker/kokoro/kokoro_tts.py
-          grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
-          grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
+          grep -q 'same-voice retry failed' util/docker/kokoro/kokoro_tts.py
+          grep -q '"engine": "kokoro"' util/docker/kokoro/kokoro_tts.py
+          ! grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
+          ! grep -q 'PIPER_FEMALE' util/docker/kokoro/kokoro_tts.py
+          ! grep -q 'REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
 
           # Piper is owned by the production-log repair (#196). This AI-DJ branch
           # must remain compatible both before and after that PR is merged.
