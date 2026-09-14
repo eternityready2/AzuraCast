@@ -14,6 +14,7 @@ use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiDjQueueListener;
 use App\Radio\AutoDJ\AiDjShiftLifecycleListener;
 use App\Radio\Backend\Liquidsoap;
+use App\Radio\Enums\LiquidsoapQueues;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -39,6 +40,14 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
      * by talk frequency: 50% ~= 10 minutes (Bella), 75% ~= 6m40s (Onyx).
      */
     private const int TALK_BASE_INTERVAL_SECONDS = 300;
+
+    /**
+     * Production main normally lands around 3-5 heard DJ breaks per hour. Keep the
+     * deterministic wall-clock scheduler from exceeding that natural ceiling when
+     * many short tracks produce unusually frequent safe boundaries. Mandatory
+     * lifecycle sign-offs are intentionally not blocked by this normal-talk cap.
+     */
+    private const int MAX_TALK_BREAKS_PER_HOUR = 5;
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
@@ -84,17 +93,22 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
     private function runForStation(Station $station): void
     {
         $backend = $this->adapters->getBackendAdapter($station);
-        if ($backend instanceof Liquidsoap && !$backend->isRunning($station)) {
+        if (!$backend instanceof Liquidsoap) {
+            return;
+        }
+
+        if (!$backend->isRunning($station)) {
             $this->logger->debug('AI DJ: Runtime scheduling skipped because Liquidsoap is not running.', [
                 'station_id' => $station->id,
             ]);
             return;
         }
 
-        // Human live presenters own their broadcast. Do not render or queue new
-        // automated speech while a streamer is connected; the generated Liquidsoap
-        // lane has the same guard as a second line of defense at playout time.
+        // Human live presenters own their broadcast. A request that was queued a few
+        // seconds before live takeover must not sit parked in source.available() and
+        // suddenly speak when the presenter disconnects.
         if (null !== $station->current_streamer) {
+            $this->purgePendingAiDjSpeech($station, $backend, 'live streamer takeover');
             $this->logger->debug('AI DJ: Runtime scheduling skipped while a live streamer is active.', [
                 'station_id' => $station->id,
             ]);
@@ -102,22 +116,39 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         }
 
         $now = new DateTimeImmutable('now', $station->getTimezoneObject());
+        $schedule = $this->scheduler->findActiveSchedule($station->id, $now);
+        $runtimeShiftKey = 'ai_dj_runtime_shift_' . $station->id;
+
+        if (!$schedule instanceof AiDjSchedule) {
+            // Speech has no owner once the scheduled shift ends. The dedicated AI DJ
+            // queue can safely be cleared without touching listener Requests.
+            $this->purgePendingAiDjSpeech($station, $backend, 'no active AI DJ shift');
+            $this->cache->delete($runtimeShiftKey);
+            return;
+        }
+
+        $dj = $schedule->getAiDj();
+        $shift = $this->scheduler->getShiftWindow($station, $schedule, $now);
+        $startsAt = $shift['starts_at'];
+        $endsAt = $shift['ends_at'];
+
+        // A queued request belongs to the concrete schedule window that created it.
+        // If the schedule identity changes before that request airs, discard the old
+        // dedicated-queue tail before the new shift can welcome or speak. This closes
+        // the production 06:00 class where an Onyx welcome/commentary escaped after
+        // the overnight shift had already ended.
+        $shiftIdentity = $schedule->getId() . ':' . $startsAt->getTimestamp();
+        $previousShiftIdentity = $this->cache->get($runtimeShiftKey);
+        if (null !== $previousShiftIdentity && $previousShiftIdentity !== $shiftIdentity) {
+            $this->purgePendingAiDjSpeech($station, $backend, 'AI DJ shift changed');
+        }
+        $this->cache->set($runtimeShiftKey, $shiftIdentity, self::STATE_TTL_SECONDS);
+
         $event = new BuildQueue($station, $now, $now);
 
         // Lifecycle owns the deterministic shift sign-off and welcome guard. It runs
         // here, not in BuildQueue, so TTS latency can never hold up music selection.
         $this->lifecycleListener->onBuildQueue($event);
-
-        $schedule = $this->scheduler->findActiveSchedule($station->id, $now);
-        if (!$schedule instanceof AiDjSchedule) {
-            return;
-        }
-
-        $dj = $schedule->getAiDj();
-
-        $shift = $this->scheduler->getShiftWindow($station, $schedule, $now);
-        $startsAt = $shift['starts_at'];
-        $endsAt = $shift['ends_at'];
 
         $welcomeRecoveryEndsAt = min(
             $endsAt->getTimestamp(),
@@ -145,6 +176,15 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
 
         $frequency = $dj->getTalkFrequency();
         if ($frequency <= 0.0) {
+            return;
+        }
+
+        if ($this->countRecentDjBreaks($station, $dj, $now) >= self::MAX_TALK_BREAKS_PER_HOUR) {
+            $this->logger->debug('AI DJ: Hourly on-air talk ceiling reached.', [
+                'station_id' => $station->id,
+                'dj' => $dj->getName(),
+                'limit' => self::MAX_TALK_BREAKS_PER_HOUR,
+            ]);
             return;
         }
 
@@ -196,6 +236,104 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $frequency = max(0.01, min(1.0, $frequency));
 
         return (int)ceil(self::TALK_BASE_INTERVAL_SECONDS / $frequency);
+    }
+
+    private function countRecentDjBreaks(
+        Station $station,
+        AiDj $dj,
+        DateTimeImmutable $now,
+    ): int {
+        try {
+            $utc = new DateTimeZone('UTC');
+            $normalizedDjName = strtolower(trim($dj->getName()));
+            $windowEnd = $now->setTimezone($utc);
+            $windowStart = $windowEnd->modify('-1 hour');
+
+            return (int)$this->em->createQuery(
+                <<<'DQL'
+                    SELECT COUNT(sh.id) FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.media IS NULL
+                    AND (
+                        LOWER(sh.artist) = :dj_name
+                        OR LOWER(sh.artist) LIKE :dj_suffix
+                    )
+                    AND sh.timestamp_start > :windowStart
+                    AND sh.timestamp_start <= :windowEnd
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('dj_name', $normalizedDjName)
+                ->setParameter('dj_suffix', '% - ' . $normalizedDjName)
+                ->setParameter('windowStart', $windowStart)
+                ->setParameter('windowEnd', $windowEnd)
+                ->getSingleScalarResult();
+        } catch (Throwable $e) {
+            $this->logger->error('AI DJ: Hourly cadence history lookup failed.', [
+                'station_id' => $station->id,
+                'dj' => $dj->getName(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            // Fail closed so a database/history outage cannot create chatter bursts.
+            return self::MAX_TALK_BREAKS_PER_HOUR;
+        }
+    }
+
+    private function purgePendingAiDjSpeech(
+        Station $station,
+        Liquidsoap $backend,
+        string $reason,
+    ): void {
+        try {
+            $queueResult = $backend->command(
+                $station,
+                LiquidsoapQueues::AiDj->value . '.queue',
+            );
+            $responseText = trim(implode(' ', $queueResult));
+            $responseLower = strtolower($responseText);
+
+            // Old generated station configurations do not have the dedicated lane.
+            // Never flush legacy Requests here because that queue can contain real
+            // listener requests unrelated to AI DJ speech.
+            if (
+                '' === $responseText
+                || str_contains($responseLower, 'unknown command')
+                || str_contains($responseLower, 'no such command')
+                || str_contains($responseLower, 'invalid command')
+            ) {
+                return;
+            }
+
+            $requestIds = preg_split('/\s+/', $responseText) ?: [];
+            $removed = 0;
+            foreach ($requestIds as $requestId) {
+                if (!ctype_digit($requestId)) {
+                    continue;
+                }
+
+                $backend->command(
+                    $station,
+                    sprintf('%s.remove %d', LiquidsoapQueues::AiDj->value, (int)$requestId),
+                );
+                $removed++;
+            }
+
+            if ($removed > 0) {
+                $this->logger->info('AI DJ: Purged stale dedicated speech requests.', [
+                    'station_id' => $station->id,
+                    'removed' => $removed,
+                    'reason' => $reason,
+                ]);
+            }
+        } catch (Throwable $e) {
+            // Compatibility/deployment races must never interrupt normal radio. The
+            // regenerated dedicated queue will be cleaned on the next minute pass.
+            $this->logger->debug('AI DJ: Dedicated speech purge unavailable.', [
+                'station_id' => $station->id,
+                'reason' => $reason,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function findLatestSubmittedDjClip(
