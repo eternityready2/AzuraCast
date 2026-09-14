@@ -19,7 +19,6 @@
             @mouseenter="cancelHide"
             @mouseleave="scheduleHide"
         >
-            <!-- Header -->
             <div class="card-header d-flex align-items-center gap-2 p-2 border-bottom border-2"
                  :style="`background: ${overlayProps.eventColor}18; border-left: 4px solid ${overlayProps.eventColor} !important;`"
             >
@@ -34,15 +33,14 @@
                 >{{ overlayProps.headerCount }}</span>
             </div>
 
-            <!-- Body -->
             <div class="card-body p-2 d-flex flex-column gap-2">
                 <div
-                    v-if="overlayProps.event.extendedProps.group_schedule_warning"
-                    class="d-flex align-items-start gap-2 text-warning"
+                    v-if="overlayProps.event.extendedProps.plays_via_group_schedule"
+                    class="d-flex align-items-start gap-2 text-info"
                 >
-                    <span class="flex-shrink-0 mt-1">⚠</span>
+                    <span class="flex-shrink-0 mt-1">ℹ</span>
                     <span class="small">
-                        {{ $gettext("This playlist only plays while its group is scheduled. Its current schedule falls outside the group's window, so it will not play during this time.") }}
+                        {{ $gettext("This playlist is a Playlist Group member and this entire event is covered by an active parent-group schedule, so it plays through the group during this window. Its own schedule can still play independently outside the parent group's active window.") }}
                     </span>
                 </div>
 
@@ -78,7 +76,6 @@
                     >
                         {{ $gettext('Jingle Mode') }}
                     </span>
-                    <!-- Source type badge -->
                     <span
                         class="badge"
                         :style="`background:${overlayProps.eventColor}; color:#fff;`"
@@ -88,7 +85,6 @@
                 </div>
             </div>
 
-            <!-- Member list -->
             <ul
                 v-if="overlayProps.members && overlayProps.members.length > 0"
                 class="list-group list-group-flush overflow-y-auto border-top"
@@ -115,9 +111,8 @@
                 </li>
             </ul>
 
-            <!-- Quick action buttons -->
             <div
-                v-if="!overlayProps.event.extendedProps.group_schedule_warning && overlayProps.event.extendedProps.edit_url"
+                v-if="overlayProps.event.extendedProps.edit_url"
                 class="card-footer d-flex gap-2 p-2"
                 style="background: transparent;"
             >
@@ -201,7 +196,6 @@ const getOrderLabel = (order: string): string => {
     }
 };
 
-// ── Source type color + label ─────────────────────────────────────────────────
 const sourceColor = (ep: Record<string, any>): string => {
     if (ep.is_clock_wheel) return '#f59e0b';
     if (ep.is_smart_block) return '#8b5cf6';
@@ -216,7 +210,6 @@ const sourceLabel = (ep: Record<string, any>): string => {
     return $gettext('Playlist');
 };
 
-// ── Overlay ───────────────────────────────────────────────────────────────────
 type OverlayMember = {id: number, name: string, source?: string, consecutive_plays: number, play_full_cycle: boolean};
 
 const overlayProps = reactive<{
@@ -300,7 +293,6 @@ const {start: scheduleHide, stop: cancelHide} = useTimeoutFn(() => {
     destroyPopper();
 }, 200, {immediate: false});
 
-// ── Overlay quick actions ─────────────────────────────────────────────────────
 const onOverlayEdit = () => {
     if (!overlayProps.event) return;
     overlayProps.visible = false;
@@ -324,7 +316,6 @@ const onOverlayDuplicate = () => {
     emit('duplicateEvent', ev);
 };
 
-// ── Calendar options ──────────────────────────────────────────────────────────
 const calendarOptions = computed(() => {
     const rawUrls = props.scheduleUrl;
     const urls = Array.isArray(rawUrls)
@@ -361,34 +352,26 @@ const onMouseLeave = (_arg: EventHoveringArg) => {
 };
 
 const onClick = (arg: EventClickArg) => {
-    if (arg.event.extendedProps.group_schedule_warning) {
-        void buildOverlay(arg.event, arg.el);
-        return;
-    }
     overlayProps.visible = false;
     destroyPopper();
     emit('click', arg.event);
 };
 
-// ── Color coding on mount ─────────────────────────────────────────────────────
 const onEventMount = (arg: EventMountArg) => {
     const ep = arg.event.extendedProps;
 
-    // Color by source type
     const color = sourceColor(ep);
     arg.el.style.setProperty('--fc-event-bg-color', color);
     arg.el.style.setProperty('--fc-event-border-color', color);
     arg.el.style.backgroundColor = color;
     arg.el.style.borderColor = color;
 
-    // Disabled playlist styling
     if (ep.is_enabled === false) {
         arg.el.style.opacity = '0.5';
         arg.el.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,0.15) 6px, rgba(255,255,255,0.15) 12px)';
         arg.el.title = (arg.el.title ? arg.el.title + ' — ' : '') + 'This playlist is disabled and will not play.';
     }
 
-    // Source icon
     if (ep.source) {
         const iconMap: Record<string, string> = {
             songs: '♫',
@@ -406,18 +389,15 @@ const onEventMount = (arg: EventMountArg) => {
         }
     }
 
-    // Group warning indicator
-    if (ep.group_schedule_warning) {
-        const warnEl = document.createElement('span');
-        warnEl.textContent = ' ⚠';
-        warnEl.style.cssText = 'color: #ffc107;';
+    if (ep.plays_via_group_schedule) {
+        const infoEl = document.createElement('span');
+        infoEl.textContent = ' ℹ';
+        infoEl.style.cssText = 'color: #0dcaf0;';
         const titleEl = arg.el.querySelector('.fc-event-title');
-        if (titleEl) titleEl.appendChild(warnEl);
-        arg.el.style.opacity = '0.8';
+        if (titleEl) titleEl.appendChild(infoEl);
     }
 };
 
-// ── Drag-to-move existing events ──────────────────────────────────────────────
 const onEventDrop = (info: any) => {
     emit('eventMove', {
         event: info.event as EventImpl,
@@ -427,7 +407,6 @@ const onEventDrop = (info: any) => {
     });
 };
 
-// ── Drag-to-resize existing events ───────────────────────────────────────────
 const onEventResize = (info: any) => {
     emit('eventMove', {
         event: info.event as EventImpl,
@@ -437,7 +416,6 @@ const onEventResize = (info: any) => {
     });
 };
 
-// ── External drag source init ─────────────────────────────────────────────────
 const $schedule = useTemplateRef('$schedule');
 
 const getCalendarApi = (): Calendar | undefined => {

@@ -85,12 +85,17 @@ final class StationScheduleRepository extends Repository
                 static fn (int $d) => $d >= 1 && $d <= 7
             )));
             $record->loop_once = $item['loop_once'] ?? false;
+            $record->prevent_requests = (bool)($item['prevent_requests'] ?? false);
+            $record->reset_queue_at_start = (bool)($item['reset_queue_at_start'] ?? false);
+            $record->reset_queue_recursive = (bool)($item['reset_queue_recursive'] ?? false);
             $record->is_emergency = (bool)($item['is_emergency'] ?? false);
             $record->strict_start = (bool)($item['strict_start'] ?? false);
 
             if ($relation instanceof StationClockWheel) {
                 $record->loop_once = false;
                 $record->strict_start = false;
+                $record->reset_queue_at_start = false;
+                $record->reset_queue_recursive = false;
                 $modeRaw = $item['clock_wheel_mode'] ?? ClockWheelScheduleMode::Flexible->value;
                 $record->clock_wheel_mode = is_string($modeRaw)
                     ? (ClockWheelScheduleMode::tryFrom($modeRaw) ?? ClockWheelScheduleMode::Flexible)
@@ -308,13 +313,12 @@ final class StationScheduleRepository extends Repository
 
                                 if ($end->greaterThan($maxEndDateTime)) {
                                     $i = $i->addDay();
-                                    continue; // Skip this event - it exceeds the configured date range
+                                    continue;
                                 }
                             }
                         }
                     }
 
-                    // Skip events that have already happened today.
                     if ($end->lessThan($now)) {
                         $i = $i->addDay();
                         continue;

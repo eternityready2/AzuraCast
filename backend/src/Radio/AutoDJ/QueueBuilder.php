@@ -24,7 +24,6 @@ use App\Entity\StationPlaylistGroup;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
-use App\Radio\AutoDJ\ClockWheel;
 use App\Radio\PlaylistParser;
 use App\Radio\SmartBlock\SmartBlockPlaybackPreparer;
 use App\Service\HolidayOverrideService;
@@ -96,7 +95,12 @@ final class QueueBuilder implements EventSubscriberInterface
         foreach ($station->playlists as $playlist) {
             /** @var StationPlaylist $playlist */
             if ($playlist->playlist_groups->count() > 0) {
-                continue;
+                if (
+                    0 === $playlist->schedule_items->count()
+                    || $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $expectedPlayTime)
+                ) {
+                    continue;
+                }
             }
 
             $isEligible = $playlist->isPlayable($event->isInterrupting())
@@ -125,16 +129,15 @@ final class QueueBuilder implements EventSubscriberInterface
         $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $expectedPlayTime);
         if ($holidayPlaylist !== null) {
             foreach ([false, true] as $allowDuplicates) {
-                if (
-                    $event->setNextSongs(
-                        $this->playSongFromPlaylist(
-                            $holidayPlaylist,
-                            $recentSongHistoryForDuplicatePrevention,
-                            $expectedPlayTime,
-                            $allowDuplicates
-                        )
-                    )
-                ) {
+                $selection = $this->playSongFromPlaylist(
+                    $holidayPlaylist,
+                    $recentSongHistoryForDuplicatePrevention,
+                    $expectedPlayTime,
+                    $allowDuplicates
+                );
+
+                if (null !== $selection) {
+                    $event->setNextSongs($selection);
                     $this->logger->info(
                         'Holiday override playlist is active.',
                         ['playlist_id' => $holidayPlaylist->id]
@@ -199,17 +202,15 @@ final class QueueBuilder implements EventSubscriberInterface
             foreach ([false, true] as $allowDuplicates) {
                 foreach ($eligiblePlaylists as $playlistId => $weight) {
                     $playlist = $activePlaylistsByType[$currentPlaylistType][$playlistId];
+                    $selection = $this->playSongFromPlaylist(
+                        $playlist,
+                        $recentSongHistoryForDuplicatePrevention,
+                        $expectedPlayTime,
+                        $allowDuplicates
+                    );
 
-                    if (
-                        $event->setNextSongs(
-                            $this->playSongFromPlaylist(
-                                $playlist,
-                                $recentSongHistoryForDuplicatePrevention,
-                                $expectedPlayTime,
-                                $allowDuplicates
-                            )
-                        )
-                    ) {
+                    if (null !== $selection) {
+                        $event->setNextSongs($selection);
                         $this->logger->info(
                             'Playable track(s) found and registered.',
                             ['next_song' => (string)$event]
@@ -276,6 +277,7 @@ final class QueueBuilder implements EventSubscriberInterface
             return $this->playSongFromRequestsPlaylist(
                 $playlist,
                 $expectedPlayTime,
+                $recentSongHistory,
                 $deferQueuePersistence,
             );
         }
@@ -291,7 +293,7 @@ final class QueueBuilder implements EventSubscriberInterface
         if ($playlist->backendMerge() && !$singleTrackOnly) {
             $this->spmRepo->resetQueue($playlist);
 
-            $queueEntries = array_filter(
+            $queueEntries = array_values(array_filter(
                 array_map(
                     function (StationPlaylistQueue $validTrack) use (
                         $playlist,
@@ -307,7 +309,7 @@ final class QueueBuilder implements EventSubscriberInterface
                     },
                     $this->spmRepo->getQueue($playlist)
                 )
-            );
+            ));
 
             if (!empty($queueEntries)) {
                 $playlist->played_at = $expectedPlayTime;
@@ -381,76 +383,27 @@ final class QueueBuilder implements EventSubscriberInterface
         DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates,
     ): StationQueue|array|null {
-        foreach ($this->getPlaylistGroupQueueForOrder($group) as $membership) {
-            $memberPlaylist = $membership->playlist;
-
-            if (!$this->scheduler->shouldPlaylistPlayNow($memberPlaylist, $expectedPlayTime)) {
-                $membership->played($expectedPlayTime->getTimestamp(), forceAdvance: true);
-                $this->em->persist($membership);
-                continue;
-            }
-
-            $isFullCycleMember = $membership->play_full_cycle
-                && PlaylistSources::Songs === $memberPlaylist->source
-                && in_array(
-                    $memberPlaylist->order,
-                    [PlaylistOrders::Sequential, PlaylistOrders::Shuffle],
-                    true
-                );
-
-            $queuedBeforePlay = $isFullCycleMember
-                ? count($this->spmRepo->getQueue($memberPlaylist))
-                : 0;
-
-            $selection = $this->playSongFromPlaylist(
-                $memberPlaylist,
+        if ($group->backendMerge()) {
+            return $this->playBlockFromGroup(
+                $group,
                 $recentSongHistory,
                 $expectedPlayTime,
                 $allowDuplicates,
-                true,
-                true,
+            );
+        }
+
+        foreach ($this->getPlaylistGroupQueueForOrder($group) as $membership) {
+            $selection = $this->playGroupMember(
+                $group,
+                $membership,
+                $recentSongHistory,
+                $expectedPlayTime,
+                $allowDuplicates,
             );
 
-            if (null === $selection && !$allowDuplicates) {
-                $selection = $this->playSongFromPlaylist(
-                    $memberPlaylist,
-                    $recentSongHistory,
-                    $expectedPlayTime,
-                    true,
-                    true,
-                    true,
-                );
-            }
-
             if (null !== $selection) {
-                $group->played_at = $expectedPlayTime;
-                $this->em->persist($group);
-
-                if (is_array($selection)) {
-                    foreach ($selection as $queueEntry) {
-                        $queueEntry->group_playlist = $group;
-                        $this->em->persist($queueEntry);
-                    }
-                } else {
-                    $selection->group_playlist = $group;
-                    $this->em->persist($selection);
-                }
-
-                if ($isFullCycleMember && $queuedBeforePlay === 0) {
-                    $queuedBeforePlay = $memberPlaylist->media_items->count();
-                }
-
-                $membership->played(
-                    $expectedPlayTime->getTimestamp(),
-                    keepQueued: $isFullCycleMember && $queuedBeforePlay > 1
-                );
-                $this->em->persist($membership);
-
                 return $selection;
             }
-
-            $membership->played($expectedPlayTime->getTimestamp(), forceAdvance: true);
-            $this->em->persist($membership);
         }
 
         $this->logger->warning(
@@ -459,6 +412,171 @@ final class QueueBuilder implements EventSubscriberInterface
         );
 
         return null;
+    }
+
+    private function playGroupMember(
+        StationPlaylist $group,
+        StationPlaylistGroup $membership,
+        array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
+        bool $allowDuplicates,
+    ): StationQueue|array|null {
+        $memberPlaylist = $membership->playlist;
+
+        if (!$this->scheduler->shouldPlaylistPlayNow($memberPlaylist, $expectedPlayTime)) {
+            $membership->played($expectedPlayTime->getTimestamp(), forceAdvance: true);
+            $this->em->persist($membership);
+            return null;
+        }
+
+        $isFullCycleMember = $membership->play_full_cycle
+            && $membership->supportsPlayFullCycle();
+        $isRequestsMember = PlaylistSources::Requests === $memberPlaylist->source;
+
+        $queuedBeforePlay = 0;
+        if ($isFullCycleMember) {
+            $queuedBeforePlay = $isRequestsMember
+                ? count($this->requestRepo->getPlayableRequests(
+                    $memberPlaylist->station,
+                    $expectedPlayTime,
+                    $recentSongHistory,
+                ))
+                : count($this->spmRepo->getQueue($memberPlaylist));
+        }
+
+        $selection = $this->playSongFromPlaylist(
+            $memberPlaylist,
+            $recentSongHistory,
+            $expectedPlayTime,
+            $allowDuplicates,
+            true,
+            true,
+        );
+
+        if (null === $selection && !$allowDuplicates) {
+            $selection = $this->playSongFromPlaylist(
+                $memberPlaylist,
+                $recentSongHistory,
+                $expectedPlayTime,
+                true,
+                true,
+                true,
+            );
+        }
+
+        if (null === $selection) {
+            $membership->played($expectedPlayTime->getTimestamp(), forceAdvance: true);
+            $this->em->persist($membership);
+            return null;
+        }
+
+        $group->played_at = $expectedPlayTime;
+        $this->em->persist($group);
+
+        $selectionEntries = is_array($selection) ? array_values($selection) : [$selection];
+        foreach ($selectionEntries as $queueEntry) {
+            $existingChain = $queueEntry->playlist_chain ?? [];
+            $queueEntry->playlist_chain = [$group->name, ...$existingChain];
+            $this->em->persist($queueEntry);
+        }
+
+        if ($isFullCycleMember && !$isRequestsMember && 0 === $queuedBeforePlay) {
+            $queuedBeforePlay = $memberPlaylist->media_items->count();
+        }
+
+        $membership->played(
+            $expectedPlayTime->getTimestamp(),
+            keepQueued: $isFullCycleMember && $queuedBeforePlay > 1
+        );
+        $this->em->persist($membership);
+
+        return $selection;
+    }
+
+    private function playBlockFromGroup(
+        StationPlaylist $group,
+        array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
+        bool $allowDuplicates,
+    ): ?array {
+        $blockEntries = [];
+        $blockHistory = $recentSongHistory;
+        $remainingIterations = $this->getGroupBlockIterationCap($group, $expectedPlayTime);
+        $slotQueue = $this->getPlaylistGroupQueueForOrder($group);
+
+        while ([] !== $slotQueue && $remainingIterations > 0) {
+            $membership = $slotQueue[0];
+            $selection = $this->playGroupMember(
+                $group,
+                $membership,
+                $blockHistory,
+                $expectedPlayTime,
+                $allowDuplicates,
+            );
+
+            if (null !== $selection) {
+                $entries = is_array($selection) ? array_values($selection) : [$selection];
+                foreach ($entries as $entry) {
+                    $blockEntries[] = $entry;
+                    $blockHistory[] = [
+                        'song_id' => $entry->song_id,
+                        'text' => $entry->text,
+                        'artist' => $entry->artist,
+                        'title' => $entry->title,
+                        'timestamp_played' => $expectedPlayTime->getTimestamp(),
+                    ];
+                }
+            }
+
+            $this->em->flush();
+
+            if (PlaylistOrders::Random === $group->order) {
+                array_shift($slotQueue);
+            } else {
+                $slotQueue = $this->playlistRepo->getPlaylistGroupQueue($group);
+            }
+
+            $remainingIterations--;
+        }
+
+        if ($remainingIterations <= 0 && [] !== $slotQueue) {
+            $this->logger->warning(
+                sprintf('Merged Playlist Group "%s" reached its safety iteration cap.', $group->name),
+                ['playlist_group_id' => $group->id, 'block_entries' => count($blockEntries)]
+            );
+        }
+
+        return [] !== $blockEntries ? $blockEntries : null;
+    }
+
+    private function getGroupBlockIterationCap(
+        StationPlaylist $group,
+        DateTimeImmutable $expectedPlayTime,
+    ): int {
+        $iterationCap = 0;
+        $playableRequestCount = null;
+
+        foreach ($group->playlists as $membership) {
+            $iterationCap++;
+
+            if (!$membership->play_full_cycle) {
+                $iterationCap += max(1, $membership->consecutive_plays);
+                continue;
+            }
+
+            if (PlaylistSources::Requests === $membership->playlist->source) {
+                $playableRequestCount ??= count($this->requestRepo->getPlayableRequests(
+                    $group->station,
+                    $expectedPlayTime,
+                ));
+                $iterationCap += max(1, $playableRequestCount);
+                continue;
+            }
+
+            $iterationCap += max(1, $membership->playlist->media_items->count());
+        }
+
+        return max(1, $iterationCap);
     }
 
     /** @return StationPlaylistGroup[] */
@@ -480,6 +598,7 @@ final class QueueBuilder implements EventSubscriberInterface
     private function playSongFromRequestsPlaylist(
         StationPlaylist $playlist,
         DateTimeImmutable $expectedPlayTime,
+        array $recentSongHistory = [],
         bool $deferQueuePersistence = false,
     ): ?StationQueue {
         if ($this->areRequestsBlockedByAncestors($playlist, $expectedPlayTime)) {
@@ -488,7 +607,8 @@ final class QueueBuilder implements EventSubscriberInterface
 
         $request = $this->requestRepo->getNextPlayableRequest(
             $playlist->station,
-            $expectedPlayTime
+            $expectedPlayTime,
+            $recentSongHistory,
         );
 
         if (null === $request) {
@@ -653,9 +773,6 @@ final class QueueBuilder implements EventSubscriberInterface
         DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
-        // Reordering is limited to standalone general rotation. Scheduled shows
-        // and playlist groups retain operator ordering and rely on the shared
-        // broadcast-clock stretch/squeeze/cue-out path at the anchor.
         if (
             PlaylistTypes::Standard !== $playlist->type
             || 0 !== $playlist->schedule_items->count()
@@ -1143,7 +1260,13 @@ final class QueueBuilder implements EventSubscriberInterface
                 !$playlist->is_enabled
                 || $playlist->source !== PlaylistSources::Playlists
                 || $playlist->schedule_items->count() === 0
-                || $playlist->playlist_groups->count() > 0
+            ) {
+                continue;
+            }
+
+            if (
+                $playlist->playlist_groups->count() > 0
+                && $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $expectedPlayTime)
             ) {
                 continue;
             }

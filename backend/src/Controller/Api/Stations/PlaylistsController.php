@@ -11,7 +11,6 @@ use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
-use Carbon\CarbonImmutable;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
@@ -155,9 +154,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
             ->where('sp.station = :station')
             ->setParameter('station', $station);
 
-        // Used by the dedicated Smart Blocks page to show only Smart Block playlists
-        // (and, conversely, by the main Playlists page to hide them, since they're
-        // fully managed on their own page).
         $smartBlockFilter = $request->getParam('is_smart_block');
         if ('1' === $smartBlockFilter) {
             $qb->andWhere('sp.is_smart_block = true');
@@ -165,10 +161,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
             $qb->andWhere('sp.is_smart_block = false');
         }
 
-        // Same pattern for Remote URL (Web/Remote Stream) playlists: they're fully
-        // managed on the dedicated Web / Remote Streams page, so the main Playlists
-        // page excludes them by default. Pass include_remote_url=1 to get them back
-        // (used by the Web / Remote Streams page itself).
         $includeRemoteUrl = $request->getParam('include_remote_url');
         if ('1' === $includeRemoteUrl) {
             $qb->andWhere('sp.source = :remoteUrlSource')
@@ -199,12 +191,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
         return $this->listPaginatedFromQuery($request, $response, $qb->getQuery());
     }
 
-    /**
-     * Controller used to respond to AJAX requests from the playlist "Schedule View".
-     *
-     * @param ServerRequest $request
-     * @param Response $response
-     */
     public function scheduleAction(
         ServerRequest $request,
         Response $response
@@ -246,7 +232,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
                         'api:stations:playlist',
                         ['station_id' => $station->id, 'id' => $playlist->id]
                     ),
-                    // Playlist detail fields for the hover overlay panel
                     'source' => $playlist->source->value,
                     'order' => $playlist->order->value,
                     'playlist_type' => $playlist->type->value,
@@ -273,59 +258,13 @@ final class PlaylistsController extends AbstractScheduledEntityController
                         ]
                     )->toArray(),
                     'is_member_of_group' => $playlist->group_memberships->count() > 0,
-                    'group_schedule_warning' => $this->hasGroupScheduleConflict(
+                    'plays_via_group_schedule' => $this->scheduler->isPlaylistFullyCoveredByGroupSchedule(
                         $playlist,
                         $dateRange
                     ),
                 ];
             }
         );
-    }
-
-    /**
-     * @return mixed[]
-     */
-    /**
-     * Check whether a playlist's schedule window falls outside all of its parent group's
-     * schedule windows. If so, the playlist would show on the calendar but never actually
-     * play (since group members only play when their parent group is also scheduled/active).
-     */
-    private function hasGroupScheduleConflict(
-        StationPlaylist $playlist,
-        DateRange $memberDateRange
-    ): bool {
-        if ($playlist->group_memberships->count() === 0) {
-            return false;
-        }
-
-        $tz = $playlist->station->getTimezoneObject();
-        $memberStart = CarbonImmutable::instance($memberDateRange->start)->setTimezone($tz);
-        $memberEnd = CarbonImmutable::instance($memberDateRange->end)->setTimezone($tz);
-
-        foreach ($playlist->group_memberships as $membership) {
-            $group = $membership->group;
-
-            // No schedule on the parent group = it runs continuously, no conflict possible.
-            if ($group->schedule_items->count() === 0) {
-                return false;
-            }
-
-            foreach ($group->schedule_items as $groupScheduleItem) {
-                $groupStart = StationSchedule::getDateTime($groupScheduleItem->start_time, $tz, $memberStart);
-                $groupEnd = StationSchedule::getDateTime($groupScheduleItem->end_time, $tz, $memberStart);
-
-                if ($groupEnd->lte($groupStart)) {
-                    $groupEnd = $groupEnd->addDay();
-                }
-
-                // Check if this group schedule covers the member's event window.
-                if ($memberStart->gte($groupStart) && $memberEnd->lte($groupEnd)) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
     }
 
     protected function viewRecord(object $record, ServerRequest $request): array
