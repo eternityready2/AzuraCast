@@ -10,9 +10,11 @@ import sys
 from pathlib import Path
 
 REAL_PIPER = "/usr/local/share/piper/piper"
-PRIMARY_TIMEOUT_SECONDS = 65
+PRIMARY_TIMEOUT_SECONDS = 55
 RETRY_TIMEOUT_SECONDS = 20
+EMERGENCY_TIMEOUT_SECONDS = 10
 RETRY_MAX_CHARS = 800
+EMERGENCY_MAX_CHARS = 240
 
 
 def output_path(args: list[str]) -> str | None:
@@ -43,10 +45,8 @@ def bounded_retry_text(text: str) -> str:
     if not clean:
         return clean
 
-    # News scripts are paragraph-oriented. Keep the opening and, where practical,
-    # the final outro while dropping middle stories only after the primary render
-    # has demonstrably stalled. The shortened retry has a deliberately small text
-    # budget so it can finish inside RETRY_TIMEOUT_SECONDS on a busy host.
+    # Keep the opening and, where practical, the final outro while dropping
+    # middle material only after the complete primary render demonstrably stalls.
     paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", clean) if paragraph.strip()]
     outro = paragraphs[-1] if len(paragraphs) > 1 else ""
     reserve = min(240, len(outro) + 2) if outro else 0
@@ -62,6 +62,18 @@ def bounded_retry_text(text: str) -> str:
         prefix = sentence_prefix(clean, max(180, int(len(clean) * 0.60)))
 
     return prefix
+
+
+def emergency_retry_text(text: str) -> str:
+    """Return a tiny complete-sentence fallback that can render under heavy load."""
+    clean = text.strip()
+    if not clean:
+        return clean
+
+    emergency = sentence_prefix(clean, EMERGENCY_MAX_CHARS)
+    if emergency == clean and len(clean) > 120:
+        emergency = sentence_prefix(clean, max(120, int(len(clean) * 0.35)))
+    return emergency
 
 
 def relay(result: subprocess.CompletedProcess[str]) -> None:
@@ -116,20 +128,44 @@ def main() -> int:
         Path(out).unlink(missing_ok=True)
         retry = run_piper(args, retry_text, RETRY_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
+        retry = None
+
+    if retry is not None:
+        relay(retry)
+        if retry.returncode == 0:
+            print(
+                "Piper primary render timed out; completed a sentence-safe shortened retry.",
+                file=sys.stderr,
+            )
+        return retry.returncode
+
+    # The Sept. 13 production log showed that the primary plus shortened retry
+    # could both time out on a resource-starved host. Keep one final tiny fallback
+    # inside the caller budget so speech degrades gracefully instead of vanishing.
+    emergency_text = emergency_retry_text(retry_text)
+    if not emergency_text:
+        print("Piper retries timed out and no emergency text was available.", file=sys.stderr)
+        return 124
+
+    try:
+        Path(out).unlink(missing_ok=True)
+        emergency = run_piper(args, emergency_text, EMERGENCY_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
         print(
-            f"Piper render exceeded {PRIMARY_TIMEOUT_SECONDS}s and the bounded retry "
-            f"exceeded {RETRY_TIMEOUT_SECONDS}s.",
+            f"Piper render exceeded {PRIMARY_TIMEOUT_SECONDS}s, retry exceeded "
+            f"{RETRY_TIMEOUT_SECONDS}s, and emergency retry exceeded "
+            f"{EMERGENCY_TIMEOUT_SECONDS}s.",
             file=sys.stderr,
         )
         return 124
 
-    relay(retry)
-    if retry.returncode == 0:
+    relay(emergency)
+    if emergency.returncode == 0:
         print(
-            "Piper primary render timed out; completed a sentence-safe shortened retry.",
+            "Piper primary and shortened retry timed out; completed an emergency short retry.",
             file=sys.stderr,
         )
-    return retry.returncode
+    return emergency.returncode
 
 
 if __name__ == "__main__":
