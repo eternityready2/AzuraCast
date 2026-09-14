@@ -19,10 +19,10 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * The dedicated lane keeps listener requests separate and lets welcomes,
  * regular breaks and sign-offs air at the next safe track boundary inside a
- * Strict programme. TopOfHourRuntimeConfiguration is registered immediately
- * after this subscriber at the same priority, so the final authority order is:
- *
- *     Top-of-Hour ID -> AI DJ -> Strict programme -> live/AutoDJ
+ * Strict programme. It is gated off whenever a human live streamer is active,
+ * so automated speech never talks over a live presenter. TopOfHourRuntimeConfiguration
+ * is registered immediately after this subscriber at the same priority, so TOH
+ * remains the final authority over the complete station graph.
  */
 final class AiDjRuntimeConfiguration implements EventSubscriberInterface
 {
@@ -45,11 +45,20 @@ final class AiDjRuntimeConfiguration implements EventSubscriberInterface
                 timeout=settings.azuracast.request_timeout()
             )
 
+            # A human presenter always wins over automated speech. source.available
+            # keeps a queued clip parked while live is active; the PHP runtime also
+            # stops generating new clips during live sessions, so a presenter cannot
+            # be interrupted by a welcome, liner or sign-off generated mid-show.
+            ai_dj_available = source.available(
+                ai_dj_queue,
+                predicate.activates({ not azuracast.live_enabled() })
+            )
+
             radio = fallback(
                 id="ai_dj_runtime",
                 track_sensitive=true,
                 transition_length=0.0,
-                [ai_dj_queue, radio]
+                [ai_dj_available, radio]
             )
             LIQ
         );
