@@ -181,6 +181,25 @@ final class Liquidsoap extends AbstractLocalAdapter
             $station,
             sprintf('%s.queue', $queue->value)
         );
+
+        // A station can be running an older generated Liquidsoap configuration
+        // while the new PHP code is already deployed. In that compatibility
+        // window the dedicated AI DJ command may return an "unknown command"
+        // string instead of throwing. Treat that exactly like a missing lane and
+        // inspect the legacy Requests queue, which is also where enqueue() falls
+        // back for AI DJ audio until configuration is regenerated.
+        if (
+            LiquidsoapQueues::AiDj === $queue
+            && $this->isUnknownCommandResponse($queueResult)
+        ) {
+            $legacyQueueResult = $this->command(
+                $station,
+                sprintf('%s.queue', LiquidsoapQueues::Requests->value)
+            );
+
+            return empty($legacyQueueResult[0]);
+        }
+
         if (!empty($queueResult[0])) {
             return false;
         }
