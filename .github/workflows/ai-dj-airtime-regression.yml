@@ -94,6 +94,15 @@ jobs:
           grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'current_streamer' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
 
+          # Cadence and lifecycle durability must reflect actual on-air speech, not
+          # synthetic StationQueue rows that were merely submitted to Liquidsoap.
+          grep -q 'use App\\Entity\\SongHistory;' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'SELECT sh FROM App\\Entity\\SongHistory sh' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'sh.timestamp_start' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          ! grep -q 'timestamp_played' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$queueEntry->sent_to_autodj = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          ! grep -q '\$queueEntry->is_played = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+
           # Dedicated speech lane must preserve old-config compatibility and never
           # interrupt a connected human live presenter.
           grep -q 'LiquidsoapQueues::AiDj === \$queue' backend/src/Radio/Backend/Liquidsoap.php
@@ -150,6 +159,7 @@ jobs:
         run: |
           php -l backend/config/events.php
           php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          php -l backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           php -l backend/src/Radio/Backend/Liquidsoap.php
           php -l plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
           php -l backend/src/MessageQueue/QueueManager.php
@@ -189,6 +199,7 @@ jobs:
           EOF
           vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
             backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
+            backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php \
             backend/src/Radio/Backend/Liquidsoap.php \
             plugins/top_of_hour/src/AiDjRuntimeConfiguration.php \
             backend/src/MessageQueue/QueueManager.php \
