@@ -91,6 +91,9 @@ jobs:
           grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'ai_dj_talk_cadence_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'findLatestSubmittedDjClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$submittedNewClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$airedNewClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'current_streamer' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
 
@@ -102,8 +105,18 @@ jobs:
           ! grep -q 'timestamp_played' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$queueEntry->is_played = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           grep -q '\$queueEntry->timestamp_played = null;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$queueEntry->timestamp_played = null;' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q '\$alreadySignedOff = \$this->hasDurableShiftMarker' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           ! grep -q 'ai_dj_outro_' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+
+          # Queue-planning lookahead must not silence normal AI DJ speech for 10-30
+          # minutes. Only the real :54:30 airtime cutoff and news windows are speech
+          # exclusions, and a request crossing into the next hour is always blocked.
+          ! grep -q 'isInLookaheadZone' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q 'TOH_SPEECH_CUTOFF_SECONDS = 3270' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q '\$airSecondsIntoHour' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q '\$crossesHour' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          ! grep -q '\$minute >= 50' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
           # Dedicated speech lane must preserve old-config compatibility and never
           # interrupt a connected human live presenter.
@@ -161,6 +174,7 @@ jobs:
         run: |
           php -l backend/config/events.php
           php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          php -l backend/src/Radio/AutoDJ/AiDjQueueListener.php
           php -l backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           php -l backend/src/Radio/Backend/Liquidsoap.php
           php -l plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
@@ -201,6 +215,7 @@ jobs:
           EOF
           vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
             backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
+            backend/src/Radio/AutoDJ/AiDjQueueListener.php \
             backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php \
             backend/src/Radio/Backend/Liquidsoap.php \
             plugins/top_of_hour/src/AiDjRuntimeConfiguration.php \
