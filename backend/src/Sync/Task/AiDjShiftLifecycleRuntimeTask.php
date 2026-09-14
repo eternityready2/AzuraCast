@@ -133,13 +133,16 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $endsAt = $shift['ends_at'];
 
         // A queued request belongs to the concrete schedule window that created it.
-        // If the schedule identity changes before that request airs, discard the old
-        // dedicated-queue tail before the new shift can welcome or speak. This closes
-        // the production 06:00 class where an Onyx welcome/commentary escaped after
-        // the overnight shift had already ended.
+        // If ownership state is absent (for example after Redis/runtime state loss),
+        // do not trust any request still parked in Liquidsoap: it may belong to the
+        // previous shift. Purging a legitimate current-shift pending clip is safe
+        // because SongHistory/cadence recovery can regenerate it; airing stale speech
+        // after state loss is not safe.
         $shiftIdentity = $schedule->getId() . ':' . $startsAt->getTimestamp();
         $previousShiftIdentity = $this->cache->get($runtimeShiftKey);
-        if (null !== $previousShiftIdentity && $previousShiftIdentity !== $shiftIdentity) {
+        if (null === $previousShiftIdentity) {
+            $this->purgePendingAiDjSpeech($station, $backend, 'AI DJ shift ownership state initialized');
+        } elseif ($previousShiftIdentity !== $shiftIdentity) {
             $this->purgePendingAiDjSpeech($station, $backend, 'AI DJ shift changed');
         }
         $this->cache->set($runtimeShiftKey, $shiftIdentity, self::STATE_TTL_SECONDS);
