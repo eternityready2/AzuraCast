@@ -24,4 +24,13 @@ final class AiDjRuntimeCadenceTest extends Unit
 
         self::assertSame(300, $method->invoke($task, 1.00));
     }
+
+    public function testProductionHourlyTalkCeiling(): void
+    {
+        $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
+
+        // The live production target is conversational, not continuous chatter:
+        // normal AI DJ speech should stay in the observed 3-5 breaks/hour range.
+        self::assertSame(5, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
+    }
 }
