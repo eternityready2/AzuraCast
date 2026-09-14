@@ -78,6 +78,21 @@ final class ContentTypeCrossfadeAnnotator implements EventSubscriberInterface
             return;
         }
 
+        // A protected-boundary hard cap can reduce a normal song to only a few
+        // seconds (production observed 1.0s). Never re-apply full-song crossfade
+        // values after ClockWheelAnnotator has shortened that row; doing so can
+        // make fade-in/out consume the complete playable window and Liquidsoap
+        // rejects the resulting crossfade geometry.
+        if (
+            ($queue->clock_wheel_enforce_cap || $queue->hour_boundary_enforce_cap)
+            && null !== $queue->duration
+            && $queue->duration > 0
+        ) {
+            $maxFadeSeconds = $queue->duration / 2.0;
+            $fades['fade_in'] = min(max(0.0, (float)$fades['fade_in']), $maxFadeSeconds);
+            $fades['fade_out'] = min(max(0.0, (float)$fades['fade_out']), $maxFadeSeconds);
+        }
+
         $event->addAnnotations([
             'autocue_fade_in' => $fades['fade_in'],
             'autocue_fade_out' => $fades['fade_out'],
