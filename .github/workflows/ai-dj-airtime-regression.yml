@@ -100,8 +100,10 @@ jobs:
           grep -q 'SELECT sh FROM App\\Entity\\SongHistory sh' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'sh.timestamp_start' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           ! grep -q 'timestamp_played' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
-          grep -q '\$queueEntry->sent_to_autodj = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
-          ! grep -q '\$queueEntry->is_played = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$queueEntry->is_played = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$queueEntry->timestamp_played = null;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$alreadySignedOff = \$this->hasDurableShiftMarker' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          ! grep -q 'ai_dj_outro_' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
 
           # Dedicated speech lane must preserve old-config compatibility and never
           # interrupt a connected human live presenter.
