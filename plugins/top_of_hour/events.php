@@ -5,11 +5,13 @@ declare(strict_types=1);
 use App\CallableEventDispatcherInterface;
 use App\Event\GetSyncTasks;
 use App\Sync\Task\StageTopOfHourStationIdTask;
+use Plugin\TopOfHour\AiDjRuntimeConfiguration;
 use Plugin\TopOfHour\FlexibleScheduleRuntimeConfiguration;
 use Plugin\TopOfHour\RigidScheduleRuntimeConfiguration;
 use Plugin\TopOfHour\TopOfHourQueueClockConstraint;
 use Plugin\TopOfHour\TopOfHourRuntimeConfiguration;
 
+require_once __DIR__ . '/src/AiDjRuntimeConfiguration.php';
 require_once __DIR__ . '/src/FlexibleScheduleRuntimeConfiguration.php';
 require_once __DIR__ . '/src/RigidScheduleRuntimeConfiguration.php';
 require_once __DIR__ . '/src/TopOfHourQueueClockConstraint.php';
@@ -20,6 +22,9 @@ return static function (CallableEventDispatcherInterface $dispatcher): void {
         FlexibleScheduleRuntimeConfiguration::class,
         RigidScheduleRuntimeConfiguration::class,
         TopOfHourQueueClockConstraint::class,
+        // Keep AI DJ immediately before TOH at the same priority: strict is built
+        // first (priority 16), then AI DJ, then TOH wraps both and stays authoritative.
+        AiDjRuntimeConfiguration::class,
         TopOfHourRuntimeConfiguration::class,
     ]);
 
