@@ -45,6 +45,23 @@ final class AiDjRuntimeConfiguration implements EventSubscriberInterface
                 timeout=settings.azuracast.request_timeout()
             )
 
+            # A request.queue item can already be resolved/prefetched and no longer
+            # appear in the interactive `.queue` listing before it actually reaches
+            # air. Clear the waiting queue first, then skip any current/prefetched
+            # request so stale speech cannot survive a shift/live ownership change.
+            def ai_dj_clear(_) =
+                ai_dj_queue.set_queue([])
+                ai_dj_queue.skip()
+                "Done!"
+            end
+            server.register(
+                namespace="ai_dj_control",
+                usage="clear",
+                description="Clear waiting and prefetched AI DJ speech.",
+                "clear",
+                ai_dj_clear
+            )
+
             # A human presenter always wins over automated speech. source.available
             # keeps a queued clip parked while live is active; the PHP runtime also
             # stops generating new clips during live sessions, so a presenter cannot
