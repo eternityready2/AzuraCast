@@ -33,9 +33,9 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
 
     private const int WELCOME_WINDOW_SECONDS = 1800;
 
-    // Reserve a wider final window so a normal 3-5 minute song plus bounded TTS
-    // cannot make a shift lose its required goodbye.
-    private const int OUTRO_WINDOW_SECONDS = 600;
+    // Reserve a wider final window so normal songs, extended worship tracks and
+    // bounded TTS cannot make a shift lose its required goodbye.
+    private const int OUTRO_WINDOW_SECONDS = 900;
 
     private const int OUTRO_SCAN_SECONDS = 1800;
 
@@ -90,17 +90,13 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $estimatedAirTime = $this->resolveDirectRequestAirTime($station, $now);
 
         $scheduleNow = $this->scheduler->findActiveSchedule($station->id, $now);
-        $scheduleAtAirTime = $this->scheduler->findActiveSchedule($station->id, $estimatedAirTime);
-
-        // Lifecycle speech is valid only when this same concrete shift owns both
-        // now and the next track boundary where the dedicated AI DJ lane can air.
-        if (
-            !$scheduleNow instanceof AiDjSchedule
-            || !$scheduleAtAirTime instanceof AiDjSchedule
-            || $scheduleNow->getId() !== $scheduleAtAirTime->getId()
-        ) {
+        if (!$scheduleNow instanceof AiDjSchedule) {
             return;
         }
+
+        $scheduleAtAirTime = $this->scheduler->findActiveSchedule($station->id, $estimatedAirTime);
+        $sameShiftOwnsAirTime = $scheduleAtAirTime instanceof AiDjSchedule
+            && $scheduleNow->getId() === $scheduleAtAirTime->getId();
 
         $dj = $scheduleNow->getAiDj();
         $shift = $this->scheduler->getShiftWindow($station, $scheduleNow, $now);
@@ -108,11 +104,11 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $endsAt = $shift['ends_at'];
 
         // Welcome is now owned by lifecycle itself instead of depending on the
-        // ordinary talk listener's post-hour/request guards. This makes the shift
-        // intro deterministic: queue it at the first safe track boundary inside
-        // the scheduled shift, including Strict programmes.
+        // ordinary talk listener's post-hour/request guards. Only stage an intro
+        // when the next track boundary still belongs to this same concrete shift.
         if (
-            $this->ensureWelcome(
+            $sameShiftOwnsAirTime
+            && $this->ensureWelcome(
                 $station,
                 $backend,
                 $scheduleNow,
@@ -127,7 +123,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         }
 
         $outroWindow = $this->resolveOutroWindow($station, $startsAt, $endsAt);
-        if (null === $outroWindow || $estimatedAirTime < $outroWindow['starts_at']) {
+        if (null === $outroWindow || $now < $outroWindow['starts_at']) {
             return;
         }
 
@@ -143,13 +139,13 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             return;
         }
 
-        // Once the sign-off window begins, reserve the remaining shift for the
-        // goodbye. Ordinary chatter must never consume the last safe song boundary
-        // and make the required exit speech disappear.
+        // Once the wall clock enters the sign-off window, reserve the remaining
+        // shift for the goodbye. Do not let a future-schedule projection bypass
+        // wind-down before we even evaluate whether the next real boundary is safe.
         $this->cache->set($winddownKey, $endsAt->getTimestamp(), $ttl);
 
-        if ($estimatedAirTime > $outroWindow['ends_at']) {
-            $this->logger->warning('AI DJ: Shift sign-off window was missed.', [
+        if (!$sameShiftOwnsAirTime || $estimatedAirTime > $outroWindow['ends_at']) {
+            $this->logger->warning('AI DJ: Shift sign-off boundary is not currently safe; retrying next minute.', [
                 'dj' => $dj->getName(),
                 'shift_end' => $endsAt->format(DATE_ATOM),
                 'estimated_air_time' => $estimatedAirTime->format(DATE_ATOM),
@@ -407,14 +403,18 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 return true;
             }
 
+            // A cued StationQueue row is not proof that speech actually aired.
+            // Only an on-air timestamp is durable; if Liquidsoap lost a pending
+            // request during a restart, lifecycle must be free to regenerate it.
             $queueCount = (int)$this->em->createQuery(
                 <<<'DQL'
                     SELECT COUNT(q.id) FROM App\Entity\StationQueue q
                     WHERE q.station = :station
                     AND q.artist = :artist
                     AND q.title = :title
-                    AND q.timestamp_cued >= :startsAt
-                    AND q.timestamp_cued < :endsAt
+                    AND q.timestamp_played IS NOT NULL
+                    AND q.timestamp_played >= :startsAt
+                    AND q.timestamp_played < :endsAt
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('artist', $dj->getName())
@@ -477,7 +477,6 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             // regenerated.
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
-
             $this->logger->info('AI DJ: Queued deterministic shift welcome.', [
                 'dj' => $dj->getName(),
                 'clip' => basename($clipPath),
