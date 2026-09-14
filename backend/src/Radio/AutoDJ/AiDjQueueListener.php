@@ -14,7 +14,6 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\Adapters;
-use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use App\Entity\AiDjContent;
@@ -83,7 +82,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly ReloadableEntityManagerInterface $em,
         private readonly CacheInterface $cache,
         private readonly StationQueueRepository $stationQueueRepo,
-        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly AiDjArtistHistoryService $artistHistoryService,
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
     ) {
@@ -176,11 +174,12 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $this->cache->delete($winddownKey);
         }
 
-        // Skip if top-of-hour protection is active at the actual likely request airtime.
-        if ($this->hourBoundaryPlanner->isInLookaheadZone($station, $directAirTime)) {
-            $this->logger->debug('AI DJ: Skipped - in top-of-hour lookahead zone.');
-            return;
-        }
+        // Do not use the station's configurable Top-of-Hour LOOKAHEAD horizon as a
+        // speech blackout. That horizon is for queue planning and can be 10-30
+        // minutes long; production Bella timelines showed the resulting large silent
+        // gap after roughly :25/:30. Real speech protection is enforced below using
+        // the actual direct-air boundary: the first 3 minutes after the hour, AI News
+        // windows and the final :54:30-to-:00 exclusion remain authoritative.
 
         // Also skip the first 3 minutes after the hour to let legal IDs and news finish.
         $minute = (int)$now->format('i');
@@ -710,10 +709,13 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $queueEntry = new StationQueue($station, $song);
             $queueEntry->is_visible = true;
             $queueEntry->autodj_custom_uri = $clipPath;
-            // Already played via the Requests queue (enqueue above), so mark it sent/played
-            // to prevent the main next_song queue from also playing it. Still visible for
-            // now-playing/history.
+            // This direct request has already been submitted to Liquidsoap, so mark
+            // the synthetic row consumed to keep it out of the normal AutoDJ queue.
+            // StationQueue's setter stamps timestamp_played when is_played becomes
+            // true; clear that queue-time timestamp because only SongHistory proves
+            // the AI DJ clip actually reached air.
             $queueEntry->is_played = true;
+            $queueEntry->timestamp_played = null;
 
             $this->em->persist($queueEntry);
             $this->em->flush();
