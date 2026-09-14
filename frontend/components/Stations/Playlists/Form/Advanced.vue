@@ -1,6 +1,6 @@
 <template>
     <tab
-        :label="$gettext('Advanced (Optional)')"
+        :label="$gettext('Advanced')"
         :item-header-class="tabClass"
     >
         <div class="row g-3">
@@ -66,7 +66,6 @@ import FormFieldset from "~/components/Form/FormFieldset.vue";
 import Tab from "~/components/Common/Tab.vue";
 import {storeToRefs} from "pinia";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form.ts";
-import {PlaylistSources} from "~/entities/ApiInterfaces";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
 import {computed} from "vue";
 
@@ -76,31 +75,22 @@ const tabClass = useFormTabClass(computed(() => r$.value.$groups.advancedTab));
 
 const {$gettext} = useTranslate();
 
-const backendOptions = computed(() =>
-    form.value.source === PlaylistSources.Playlists
-        ? [
-            {
-                value: 'merge',
-                text: $gettext("Play the group's entire rotation as a single block.")
-            }
-        ]
-        : [
-            {
-                value: 'interrupt',
-                text: $gettext('Interrupt other songs to play at scheduled time.')
-            },
-            {
-                value: 'single_track',
-                text: $gettext('Only play one track at scheduled time.')
-            },
-            {
-                value: 'merge',
-                text: $gettext('Merge playlist to play as a single track.')
-            },
-            {
-                value: 'prioritize',
-                text: $gettext('Prioritize over listener requests.')
-            }
-        ]
-);
+const backendOptions = [
+    {
+        value: 'interrupt',
+        text: $gettext('Interrupt other songs to play at scheduled time.')
+    },
+    {
+        value: 'single_track',
+        text: $gettext('Only play one track at scheduled time.')
+    },
+    {
+        value: 'merge',
+        text: $gettext('Merge playlist to play as a single track.')
+    },
+    {
+        value: 'prioritize',
+        text: $gettext('Prioritize over listener requests.')
+    }
+];
 </script>
