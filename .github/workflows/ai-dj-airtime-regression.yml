@@ -154,7 +154,8 @@ jobs:
           # A named DJ must never silently become the generator's default Piper voice
           # because an older/duplicate scheduled profile has no voice selected.
           grep -q 'getVoiceModelPath' backend/src/Service/AiDjScheduler.php
-          grep -q "null === \\$voiceModelPath || '' === trim(\\$voiceModelPath)" backend/src/Service/AiDjScheduler.php
+          grep -Fq 'null === $voiceModelPath' backend/src/Service/AiDjScheduler.php
+          grep -Fq 'trim($voiceModelPath)' backend/src/Service/AiDjScheduler.php
 
           # Named AI DJ voice identity is authoritative. Kokoro gets one bounded
           # retry with the SAME configured speaker; never substitute a generic Piper
