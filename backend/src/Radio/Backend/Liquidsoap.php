@@ -181,7 +181,32 @@ final class Liquidsoap extends AbstractLocalAdapter
             $station,
             sprintf('%s.queue', $queue->value)
         );
-        return empty($queueResult[0]);
+        if (!empty($queueResult[0])) {
+            return false;
+        }
+
+        // AI DJ speech is submitted through the same PHP path that historically
+        // used listener Requests, but now has its own Liquidsoap lane so Strict
+        // programmes cannot trap a DJ clip for hours. Treat a waiting AI DJ clip
+        // as occupying the ordinary request boundary too; this prevents a listener
+        // request or a second DJ break from stacking immediately behind it.
+        if (LiquidsoapQueues::Requests === $queue) {
+            try {
+                $aiDjQueueResult = $this->command(
+                    $station,
+                    sprintf('%s.queue', LiquidsoapQueues::AiDj->value)
+                );
+
+                if (!$this->isUnknownCommandResponse($aiDjQueueResult)) {
+                    return empty($aiDjQueueResult[0]);
+                }
+            } catch (\Throwable) {
+                // Older/plugin-disabled station configurations do not have the
+                // dedicated queue. Preserve the legacy Requests-only behavior.
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -192,10 +217,42 @@ final class Liquidsoap extends AbstractLocalAdapter
         LiquidsoapQueues $queue,
         string $musicFile
     ): array {
+        // Keep the AI DJ call sites backward-compatible while moving their actual
+        // playout into the dedicated speech lane. Generated AI DJ audio always
+        // lives under the station's /ai_dj/ directory; ordinary listener requests
+        // and jingles do not. If the lane is unavailable, fail open to the legacy
+        // Requests queue so stations without the plugin continue to play speech.
+        if (LiquidsoapQueues::Requests === $queue && str_contains($musicFile, '/ai_dj/')) {
+            try {
+                $response = $this->command(
+                    $station,
+                    sprintf('%s.push %s', LiquidsoapQueues::AiDj->value, $musicFile)
+                );
+
+                if (!$this->isUnknownCommandResponse($response)) {
+                    return $response;
+                }
+            } catch (\Throwable) {
+                // Fall through to the legacy Requests queue.
+            }
+        }
+
         return $this->command(
             $station,
             sprintf('%s.push %s', $queue->value, $musicFile)
         );
+    }
+
+    /**
+     * @param string[] $response
+     */
+    private function isUnknownCommandResponse(array $response): bool
+    {
+        $text = strtolower(implode("\n", $response));
+
+        return str_contains($text, 'unknown command')
+            || str_contains($text, 'no such command')
+            || str_contains($text, 'invalid command');
     }
 
     /**
