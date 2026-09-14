@@ -177,6 +177,17 @@ final class Liquidsoap extends AbstractLocalAdapter
         Station $station,
         LiquidsoapQueues $queue
     ): bool {
+        // New AI DJ configs expose source-level pending state. request.queue can
+        // resolve/prefetch a request and remove it from the interactive `.queue`
+        // listing before it actually airs, so the listing alone is not a reliable
+        // "one speech break at a time" guard.
+        if (LiquidsoapQueues::AiDj === $queue) {
+            $aiDjPending = $this->getAiDjPendingState($station);
+            if (null !== $aiDjPending) {
+                return !$aiDjPending;
+            }
+        }
+
         $queueResult = $this->command(
             $station,
             sprintf('%s.queue', $queue->value)
@@ -206,11 +217,16 @@ final class Liquidsoap extends AbstractLocalAdapter
 
         // AI DJ speech is submitted through the same PHP path that historically
         // used listener Requests, but now has its own Liquidsoap lane so Strict
-        // programmes cannot trap a DJ clip for hours. Treat a waiting AI DJ clip
-        // as occupying the ordinary request boundary too; this prevents a listener
-        // request or a second DJ break from stacking immediately behind it.
+        // programmes cannot trap a DJ clip for hours. Treat a waiting OR prefetched
+        // AI DJ clip as occupying the ordinary request boundary too; this prevents a
+        // listener request or a second DJ break from stacking immediately behind it.
         if (LiquidsoapQueues::Requests === $queue) {
             try {
+                $aiDjPending = $this->getAiDjPendingState($station);
+                if (null !== $aiDjPending) {
+                    return !$aiDjPending;
+                }
+
                 $aiDjQueueResult = $this->command(
                     $station,
                     sprintf('%s.queue', LiquidsoapQueues::AiDj->value)
@@ -225,6 +241,31 @@ final class Liquidsoap extends AbstractLocalAdapter
             }
         }
 
+        return true;
+    }
+
+    private function getAiDjPendingState(Station $station): ?bool
+    {
+        try {
+            $response = $this->command($station, 'ai_dj_control.pending');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($this->isUnknownCommandResponse($response)) {
+            return null;
+        }
+
+        $value = strtolower(trim(implode(' ', $response)));
+        if ('true' === $value) {
+            return true;
+        }
+        if ('false' === $value) {
+            return false;
+        }
+
+        // Fail closed on an unexpected response. It is safer to postpone a DJ break
+        // than to stack two pieces of speech because pending state was ambiguous.
         return true;
     }
 
