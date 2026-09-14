@@ -51,6 +51,12 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
 
+      - name: Prepare AzuraCast analysis runtime
+        shell: bash
+        run: |
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
       - name: PHPStan changed files
         shell: bash
         run: |
