@@ -74,6 +74,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
     /** Keep cadence credit through a full shift, but let it naturally reset overnight. */
     private const int TALK_CADENCE_TTL_SECONDS = 12 * 3600;
 
+    /** Keep a normal DJ clip's tail out of the final 5m30s before the hour. */
+    private const int TOH_SPEECH_CUTOFF_SECONDS = 3270;
+
     public function __construct(
         private readonly AiDjScheduler $scheduler,
         private readonly AiDjGenerator $generator,
@@ -188,24 +191,22 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        // Quiet window: keep the AI DJ off the air before the top of the hour so it never
-        // steps on the station ID or news. A DJ request airs at the current-song boundary,
-        // so use that direct airtime rather than a far-ahead database queue projection.
+        // Quiet window: a DJ request airs at the current-song boundary. Protect the
+        // actual expected airtime rather than a broad wall-clock minute range. This
+        // allows safe speech at :50-:54 while still blocking a request whose boundary
+        // is at/after :54:30 or crosses into the next hour.
         $playMinute = (int)$directAirTime->format('i');
-        $songEnd = $this->getCurrentSongEndTime($station);
-        $endSecOfHour = -1;
-        if ($songEnd !== null) {
-            $endLocal = $songEnd->setTimezone($station->getTimezoneObject());
-            $endSecOfHour = ((int)$endLocal->format('i')) * 60 + (int)$endLocal->format('s');
-        }
-        // A DJ clip airs when the current song ends and then runs ~15-30s. To keep even
-        // the clip's TAIL out of the :55-:00 window, block from :54:30 (3270s into the
-        // hour) onward - a break that aired at :54:55 once bled ~19s past :55.
-        if ($minute >= 50 || $playMinute >= 55 || $endSecOfHour >= 3270) {
+        $playSecond = (int)$directAirTime->format('s');
+        $airSecondsIntoHour = ($playMinute * 60) + $playSecond;
+        $crossesHour = $directAirTime->format('Y-m-d H') !== $now->format('Y-m-d H');
+
+        // A DJ clip airs when the current song ends and then runs ~15-30s. To keep
+        // even the clip's tail out of the :55-:00 window, block from :54:30 onward.
+        if ($crossesHour || $airSecondsIntoHour >= self::TOH_SPEECH_CUTOFF_SECONDS) {
             $this->logger->debug('AI DJ: Skipped - DJ winding down before top of hour.', [
-                'now_min' => $minute,
-                'air_min' => $playMinute,
-                'song_end_sec' => $endSecOfHour,
+                'air_time' => $directAirTime->format(DATE_ATOM),
+                'air_seconds_into_hour' => $airSecondsIntoHour,
+                'crosses_hour' => $crossesHour,
             ]);
             return;
         }
