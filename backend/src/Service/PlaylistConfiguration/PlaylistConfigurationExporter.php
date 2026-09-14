@@ -180,6 +180,8 @@ final class PlaylistConfigurationExporter
                 endDate: $schedule->end_date,
                 loopOnce: $schedule->loop_once,
                 preventRequests: $schedule->prevent_requests,
+                resetQueueAtStart: $schedule->reset_queue_at_start,
+                resetQueueRecursive: $schedule->reset_queue_recursive,
                 strictStart: $schedule->strict_start,
                 isEmergency: $schedule->is_emergency,
                 recurrenceType: $schedule->recurrence_type?->value,

@@ -51,6 +51,7 @@
                     :key="index"
                     v-model:row="scheduleItems[index]"
                     :index="index"
+                    :is-playlist-group="form.source === 'playlists'"
                     @remove="remove(index)"
                 />
 
@@ -304,6 +305,8 @@ const add = () => {
         days: [],
         loop_once: false,
         prevent_requests: false,
+        reset_queue_at_start: false,
+        reset_queue_recursive: false,
         strict_start: false,
         recurrence_type: 'weekly',
         recurrence_interval: 1,
@@ -423,10 +426,6 @@ const scheduleSummary = computed(() => {
     align-items: flex-start;
 }
 
-/* The simple editor presents Flexible and Strict as coherent bundles. The
-   opposite playout choices stay visible for clarity but are muted and cannot
-   be selected until the operator switches Scheduling Mode. Mixed legacy rows
-   remain editable without forced lockout. */
 .timing-flexible :deep(.choice-grid-start .choice-option:nth-child(1)),
 .timing-flexible :deep(.choice-grid-start .choice-option:nth-child(3)),
 .timing-flexible :deep(.choice-grid-end .choice-option:nth-child(1)),
