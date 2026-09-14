@@ -1,0 +1,65 @@
+name: Short Cap Crossfade Regression
+
+on:
+  push:
+    branches:
+      - 'fix/broadcast-clock-short-cap-crossfade-sept14'
+    paths:
+      - 'backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php'
+      - 'backend/src/Radio/AutoDJ/ContentTypeCrossfadeAnnotator.php'
+      - '.github/workflows/short-cap-crossfade-regression.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php'
+      - 'backend/src/Radio/AutoDJ/ContentTypeCrossfadeAnnotator.php'
+      - '.github/workflows/short-cap-crossfade-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate hard-cap fade contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+          grep -q 'maxFadeSeconds = $playableSeconds / 2.0' backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php
+          grep -q 'maxFadeSeconds = $queue->duration / 2.0' backend/src/Radio/AutoDJ/ContentTypeCrossfadeAnnotator.php
+          grep -q "'autocue_fade_in'" backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php
+          grep -q "'autocue_fade_out'" backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php
+
+      - name: PHP syntax check
+        run: |
+          php -l backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php
+          php -l backend/src/Radio/AutoDJ/ContentTypeCrossfadeAnnotator.php
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: PHPStan changed files
+        shell: bash
+        run: |
+          cat > phpstan.short-cap.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.short-cap.neon --memory-limit=-1 --no-progress \
+            backend/src/Radio/AutoDJ/ClockWheel/ClockWheelAnnotator.php \
+            backend/src/Radio/AutoDJ/ContentTypeCrossfadeAnnotator.php
