@@ -383,6 +383,9 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             $startsAtUtc = $startsAt->setTimezone($utc);
             $endsAtUtc = $endsAt->setTimezone($utc);
 
+            // Synthetic AI DJ StationQueue rows are marked sent immediately so the
+            // main AutoDJ transport cannot replay them. Only SongHistory proves the
+            // clip actually reached air; a queued row must never suppress recovery.
             $historyCount = (int)$this->em->createQuery(
                 <<<'DQL'
                     SELECT COUNT(sh.id) FROM App\Entity\SongHistory sh
@@ -399,31 +402,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 ->setParameter('endsAt', $endsAtUtc)
                 ->getSingleScalarResult();
 
-            if ($historyCount > 0) {
-                return true;
-            }
-
-            // A cued StationQueue row is not proof that speech actually aired.
-            // Only an on-air timestamp is durable; if Liquidsoap lost a pending
-            // request during a restart, lifecycle must be free to regenerate it.
-            $queueCount = (int)$this->em->createQuery(
-                <<<'DQL'
-                    SELECT COUNT(q.id) FROM App\Entity\StationQueue q
-                    WHERE q.station = :station
-                    AND q.artist = :artist
-                    AND q.title = :title
-                    AND q.timestamp_played IS NOT NULL
-                    AND q.timestamp_played >= :startsAt
-                    AND q.timestamp_played < :endsAt
-                DQL
-            )->setParameter('station', $station)
-                ->setParameter('artist', $dj->getName())
-                ->setParameter('title', $title)
-                ->setParameter('startsAt', $startsAtUtc)
-                ->setParameter('endsAt', $endsAtUtc)
-                ->getSingleScalarResult();
-
-            return $queueCount > 0;
+            return $historyCount > 0;
         } catch (Throwable $e) {
             $this->logger->error('AI DJ: Shift marker lookup failed.', [
                 'title' => $title,
@@ -572,7 +551,9 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $queueEntry = new StationQueue($station, $song);
         $queueEntry->is_visible = true;
         $queueEntry->autodj_custom_uri = $clipPath;
-        $queueEntry->is_played = true;
+        // It has already been submitted directly to Liquidsoap, so keep it out of
+        // normal AutoDJ selection without fabricating a playback timestamp.
+        $queueEntry->sent_to_autodj = true;
 
         $this->em->persist($queueEntry);
         $this->em->flush();
