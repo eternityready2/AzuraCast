@@ -117,10 +117,9 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             $welcomeRecoveryOpen
             && !$this->hasDurableWelcome($station, $dj, $startsAt, $endsAt)
         ) {
-            // A successful welcome always leaves a durable queue/history marker.
-            // If the previous render failed, clear all volatile guards so the next
-            // minute retries instead of silently waiting through a five-minute
-            // cooldown or a stale "already welcomed" cache entry.
+            // A successful welcome only becomes durable after it actually airs.
+            // If the previous render/queue entry was lost before playback, clear
+            // volatile guards so lifecycle/listener safety checks can retry it.
             $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
             $this->cache->delete('ai_dj_last_active_' . $station->id);
             $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
@@ -228,14 +227,17 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             $startsAtUtc = $startsAt->setTimezone($utc);
             $endsAtUtc = $endsAt->setTimezone($utc);
 
+            // A queued marker can survive a Liquidsoap restart even when the clip
+            // never reached air. Only a played timestamp makes the welcome durable.
             $queueCount = (int)$this->em->createQuery(
                 <<<'DQL'
                     SELECT COUNT(q.id) FROM App\Entity\StationQueue q
                     WHERE q.station = :station
                     AND q.artist = :artist
                     AND q.title = :title
-                    AND q.timestamp_cued >= :startsAt
-                    AND q.timestamp_cued < :endsAt
+                    AND q.timestamp_played IS NOT NULL
+                    AND q.timestamp_played >= :startsAt
+                    AND q.timestamp_played < :endsAt
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('artist', $dj->getName())
