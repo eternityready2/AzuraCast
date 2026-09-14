@@ -21,6 +21,11 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
 {
     protected string $entityClass = StationPlaylist::class;
 
+    public function __construct(
+        private readonly StationPlaylistMediaRepository $spmRepo
+    ) {
+    }
+
     /**
      * @return StationPlaylist[]
      */
@@ -139,6 +144,33 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
             ->setParameter('playlistGroup', $playlist);
     }
 
+    /**
+     * Reset playlist-internal queues when station configuration is rewritten or the
+     * station restarts, honoring the station-wide sequential policy and per-playlist
+     * preserve option from upstream #8613. Playlist Groups are reset alongside song
+     * playlists so their internal member rotation cannot be left in a stale state.
+     */
+    public function resetAllQueues(Station $station): void
+    {
+        $now = Time::nowUtc();
+        $resetSequential = $station->backend_config->reset_sequential_queues_on_restart;
+
+        foreach ($station->playlists as $playlist) {
+            if (
+                $playlist->preserve_queue_on_restart
+                || (!$resetSequential && PlaylistOrders::Sequential === $playlist->order)
+            ) {
+                continue;
+            }
+
+            match ($playlist->source) {
+                PlaylistSources::Songs => $this->spmRepo->resetQueue($playlist, $now),
+                PlaylistSources::Playlists => $this->resetPlaylistGroupQueue($playlist, $now),
+                default => null,
+            };
+        }
+    }
+
     public function resetPlaylistGroupQueue(
         StationPlaylist $playlist,
         ?CarbonImmutable $now = null
@@ -187,6 +219,14 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
                 }
             );
         }
+
+        // Bulk DQL updates bypass Doctrine's managed entity state. Refresh any group
+        // members already in the identity map so repeated queue builds in one process
+        // advance the rotation instead of replaying stale member state.
+        $this->resyncManagedEntities(
+            StationPlaylistGroup::class,
+            static fn(StationPlaylistGroup $spg): bool => $spg->playlist_group === $playlist
+        );
 
         $now ??= Time::nowUtc();
         $playlist->queue_reset_at = $now;

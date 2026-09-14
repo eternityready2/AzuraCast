@@ -304,6 +304,15 @@ final class StationPlaylist implements
     public bool $avoid_duplicates = true;
 
     #[
+        OA\Property(
+            description: "Don't reset this playlist's queue when the station is restarted or its configuration is rewritten.",
+            example: false
+        ),
+        ORM\Column
+    ]
+    public bool $preserve_queue_on_restart = false;
+
+    #[
         OA\Property(example: false),
         ORM\Column(options: ['default' => false])
     ]

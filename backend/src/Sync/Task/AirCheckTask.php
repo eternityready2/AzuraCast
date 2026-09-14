@@ -7,6 +7,8 @@ namespace App\Sync\Task;
 use App\Controller\Api\Stations\Features\FeatureSuiteController;
 use App\Service\AirCheckDiagnosticsRecorder;
 use App\Service\AirCheckHealthMonitor;
+use App\Service\AirCheckHistoryRetention;
+use App\Service\AirCheckLiquidsoapRecovery;
 use Psr\SimpleCache\CacheInterface;
 
 final class AirCheckTask extends AbstractTask
@@ -15,6 +17,8 @@ final class AirCheckTask extends AbstractTask
 
     public function __construct(
         private readonly FeatureSuiteController $featureSuiteController,
+        private readonly AirCheckLiquidsoapRecovery $liquidsoapRecovery,
+        private readonly AirCheckHistoryRetention $historyRetention,
         private readonly AirCheckDiagnosticsRecorder $diagnosticsRecorder,
         private readonly AirCheckHealthMonitor $healthMonitor,
         private readonly CacheInterface $cache,
@@ -38,6 +42,8 @@ final class AirCheckTask extends AbstractTask
                 continue;
             }
 
+            $result = $this->liquidsoapRecovery->recover($station, $result);
+            $this->historyRetention->trim($station);
             $this->diagnosticsRecorder->recordRecoveryResult($station, $result);
 
             $health = $this->healthMonitor->getSnapshot($station);

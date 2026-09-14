@@ -7,6 +7,7 @@ namespace App\Radio\AutoDJ;
 use App\Cache\QueueLogCache;
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationMedia;
@@ -32,6 +33,7 @@ final class Queue
     public function __construct(
         private readonly EventDispatcherInterface $dispatcher,
         private readonly StationQueueRepository $queueRepo,
+        private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly Scheduler $scheduler,
         private readonly BroadcastClockPlanner $broadcastClockPlanner,
         private readonly QueueLogCache $queueLogCache
@@ -120,7 +122,10 @@ final class Queue
 
         foreach ($upcomingQueue as $queueRow) {
             if (!$queueRow->sent_to_autodj) {
+                // A queued row is only a projection. Re-evaluate it against the
+                // playlist's current enabled/schedule state before retaining it.
                 if (!$this->isQueueRowStillValid($queueRow, $expectedPlayTime)) {
+                    $this->restorePlaylistQueueSlot($queueRow);
                     $this->em->remove($queueRow);
                     continue;
                 }
@@ -613,6 +618,26 @@ final class Queue
             : min($queueRow->duration, (float)$targetSeconds);
     }
 
+    /**
+     * Restore the playlist-media slot represented by an invalidated projected
+     * queue row. This prevents disabled/out-of-schedule cleanup from silently
+     * consuming the slot from a sequential or shuffled playlist rotation.
+     */
+    private function restorePlaylistQueueSlot(StationQueue $queueRow): void
+    {
+        $playlist = $queueRow->playlist;
+        $media = $queueRow->media;
+        if (null === $playlist || null === $media) {
+            return;
+        }
+
+        $spm = $this->spmRepo->findByPlaylistAndMedia($playlist, $media);
+        if (null !== $spm) {
+            $spm->is_queued = true;
+            $this->em->persist($spm);
+        }
+    }
+
     private function isQueueRowStillValid(
         StationQueue $queueRow,
         DateTimeImmutable $expectedPlayTime
@@ -649,6 +674,9 @@ final class Queue
             return true;
         }
 
+        // Playlist Group members with their own schedule can intentionally be
+        // eligible outside the parent group's active window. Scheduler resolves
+        // that ownership; the queue only asks whether this row is still valid now.
         if (
             !$playlist->is_enabled
             || !$this->scheduler->isPlaylistScheduledToPlayNow(

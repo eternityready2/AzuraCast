@@ -26,7 +26,9 @@ export type StationRecord = Omit<
         Required<StationBackendConfiguration>,
         | 'stereo_tool_configuration_path' | 'custom_config_top' | 'custom_config_pre_playlists'
         | 'custom_config_pre_live' | 'custom_config_pre_fade' | 'custom_config' | 'custom_config_bottom'
-    >,
+    > & {
+        reset_sequential_queues_on_restart: boolean,
+    },
     media_storage_location: string | number,
     recordings_storage_location: string | number,
     podcasts_storage_location: string | number,
@@ -86,6 +88,7 @@ export const useAdminStationsForm = defineStore(
                 linear_log_enabled: false,
                 linear_log_hours: 24,
                 use_manual_autodj: false,
+                reset_sequential_queues_on_restart: false,
                 charset: 'UTF-8',
                 performance_mode: 'disabled',
                 duplicate_prevention_time_range: 120,
@@ -201,6 +204,7 @@ export const useAdminStationsForm = defineStore(
                         fields.backend_config.linear_log_enabled,
                         fields.backend_config.linear_log_hours,
                         fields.backend_config.use_manual_autodj,
+                        fields.backend_config.reset_sequential_queues_on_restart,
                         fields.backend_config.charset,
                         fields.backend_config.performance_mode,
                         fields.backend_config.duplicate_prevention_time_range,

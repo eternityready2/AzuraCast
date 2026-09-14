@@ -179,7 +179,7 @@ abstract class CestAbstract
         throw new RuntimeException('Test station is not established.');
     }
 
-    protected function uploadTestSong(): StationMedia
+    protected function uploadTestSong(string $destPath = 'test.mp3'): StationMedia
     {
         $testStation = $this->getTestStation();
 
@@ -190,12 +190,17 @@ abstract class CestAbstract
         $storageLocationRepo = $this->di->get(StorageLocationRepository::class);
         $storageFs = $storageLocationRepo->getAdapter($storageLocation)->getFilesystem();
 
-        $storageFs->upload($songSrc, 'test.mp3');
+        $storageFs->upload($songSrc, $destPath);
 
         /** @var MediaProcessor $mediaProcessor */
         $mediaProcessor = $this->di->get(MediaProcessor::class);
 
-        return $mediaProcessor->process($storageLocation, 'test.mp3');
+        $media = $mediaProcessor->process($storageLocation, $destPath);
+        if ($media === null) {
+            throw new RuntimeException('Failed to process the test song.');
+        }
+
+        return $media;
     }
 
     protected function _cleanTables(): void

@@ -238,7 +238,9 @@
                                         :model-value="member.play_full_cycle"
                                         @update:model-value="doUpdatePlayFullCycle(index, $event)"
                                         :input-attrs="{disabled: saving}"
-                                        :label="$gettext('Play fully before advancing')"
+                                        :label="member.source === PlaylistSources.Requests
+                                            ? $gettext('Play all requests')
+                                            : $gettext('Play fully before advancing')"
                                     />
 
                                     <div class="btn-group btn-group-sm mt-2">
@@ -575,8 +577,11 @@ const doUpdateConsecutivePlays = (index: number, value: number | null) => {
 };
 
 const isFullCyclePlayable = (member: GroupMember) =>
-    member.source === PlaylistSources.Songs
-    && [PlaylistOrders.Sequential, PlaylistOrders.Shuffle].includes(member.order as PlaylistOrders);
+    member.source === PlaylistSources.Requests
+    || (
+        member.source === PlaylistSources.Songs
+        && [PlaylistOrders.Sequential, PlaylistOrders.Shuffle].includes(member.order as PlaylistOrders)
+    );
 
 const doUpdatePlayFullCycle = (index: number, value: boolean | null) => {
     const updated = [...playlistMembers.value];

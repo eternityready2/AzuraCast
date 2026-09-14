@@ -274,6 +274,14 @@
                     </form-group-checkbox>
 
                     <form-group-checkbox
+                        id="edit_form_backend_reset_sequential_queues_on_restart"
+                        class="col-md-12"
+                        :field="r$.backend_config.reset_sequential_queues_on_restart"
+                        :label="$gettext('Reset Sequential Playlist Queues on Restart')"
+                        :description="$gettext('Reset sequential song playlists and Playlist Groups back to the beginning when the station restarts or its configuration is rewritten. Existing stations keep this enabled after migration; individual playlists can override it with Keep Queue on Restart.')"
+                    />
+
+                    <form-group-checkbox
                         id="edit_form_backend_config_write_playlists_to_liquidsoap"
                         class="col-md-12"
                         :field="r$.backend_config.write_playlists_to_liquidsoap"

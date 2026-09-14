@@ -123,6 +123,7 @@
                     <div class="feature-card-body">
                         <ul class="feature-checks mb-0">
                             <li>{{ $gettext('Automatically recovers Liquidsoap and the station broadcast frontend') }}</li>
+                            <li>{{ $gettext('Validates and rewrites the current generated Liquidsoap configuration before a recovery retry') }}</li>
                             <li>{{ $gettext('Monitors shared container services such as MariaDB, Redis, Nginx, PHP and workers') }}</li>
                             <li>{{ $gettext('Shared infrastructure is monitor-only and is never restarted by a station health check') }}</li>
                             <li>{{ $gettext('Recovery problems are written to Custom Feature Diagnostics') }}</li>
@@ -199,9 +200,20 @@
                             <h2>{{ $gettext('Intervention History') }}</h2>
                             <p>{{ $gettext('Station service restarts and recovery attempts') }}</p>
                         </div>
-                        <div v-if="settings.last_check > 0" class="small text-body-secondary text-end">
-                            {{ $gettext('Last check') }}<br>
-                            <strong class="text-body">{{ formatTimestamp(settings.last_check) }}</strong>
+                        <div class="d-flex align-items-center gap-2">
+                            <div v-if="settings.last_check > 0" class="small text-body-secondary text-end">
+                                {{ $gettext('Last check') }}<br>
+                                <strong class="text-body">{{ formatTimestamp(settings.last_check) }}</strong>
+                            </div>
+                            <button
+                                v-if="0 < settings.interventions.length"
+                                type="button"
+                                class="btn btn-sm btn-outline-danger"
+                                :disabled="busy"
+                                @click="clearHistory"
+                            >
+                                {{ $gettext('Clear History') }}
+                            </button>
                         </div>
                     </div>
 
@@ -245,7 +257,14 @@
         </div>
 
         <div v-if="lastResult" class="alert mt-4" :class="lastResult.healthy ? 'alert-success' : 'alert-warning'">
-            {{ resultMessage }}
+            <div>{{ resultMessage }}</div>
+            <div v-if="0 < lastResult.failures.length" class="small mt-2">
+                {{ lastResult.failures.join('; ') }}
+            </div>
+            <div v-if="lastResult.liquidsoap_recovery?.suggestion" class="small mt-1">
+                <strong>{{ $gettext('Suggested fix:') }}</strong>
+                {{ lastResult.liquidsoap_recovery.suggestion }}
+            </div>
         </div>
     </div>
 </template>
@@ -264,7 +283,18 @@ import {useTranslate} from "~/vendor/gettext";
 
 type AirCheckIntervention = { timestamp: number, services: string[], failures: string[], manual: boolean };
 type AirCheckSettings = { enabled: boolean, interval_minutes: number, last_check: number, interventions: AirCheckIntervention[] };
-type AirCheckResult = { checked: boolean, healthy: boolean, restarted: string[], failures: string[], timestamp: number };
+type AirCheckResult = {
+    checked: boolean,
+    healthy: boolean,
+    restarted: string[],
+    failures: string[],
+    timestamp: number,
+    liquidsoap_recovery?: {
+        recovered: boolean,
+        reason: string,
+        suggestion?: string,
+    },
+};
 type AirCheckService = {
     key: string,
     name: string,
@@ -288,8 +318,9 @@ const {$gettext} = useTranslate();
 const {axios} = useAxios();
 const {getStationApiUrl} = useApiRouter();
 const settingsUrl = getStationApiUrl('/features/aircheck');
-const runUrl = getStationApiUrl('/features/aircheck/run');
+const runUrl = getStationApiUrl('/features/aircheck/check');
 const healthUrl = getStationApiUrl('/features/aircheck/health');
+const historyUrl = getStationApiUrl('/features/aircheck/history');
 
 const busy = ref(false);
 const lastResult = ref<AirCheckResult | null>(null);
@@ -303,7 +334,9 @@ const overallHealthy = computed(() => health.value?.healthy ?? true);
 const resultMessage = computed(() => {
     if (!lastResult.value) return '';
     if (lastResult.value.healthy) return $gettext('All station recovery targets are running normally.');
-    if (0 < lastResult.value.restarted.length) return $gettext('AirCheck restarted one or more station services.');
+    if (0 < lastResult.value.restarted.length && 0 === lastResult.value.failures.length) {
+        return $gettext('AirCheck restarted one or more station services.');
+    }
     return $gettext('The station recovery check completed with one or more errors.');
 });
 
@@ -351,6 +384,19 @@ const runNow = async () => {
     try {
         const response = await axios.post<AirCheckResult>(runUrl.value);
         lastResult.value = response.data;
+        await load();
+    } finally {
+        busy.value = false;
+    }
+};
+const clearHistory = async () => {
+    if (!window.confirm($gettext('Clear all AirCheck intervention history?'))) {
+        return;
+    }
+
+    busy.value = true;
+    try {
+        await axios.delete(historyUrl.value);
         await load();
     } finally {
         busy.value = false;

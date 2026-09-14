@@ -7,7 +7,7 @@ namespace App\Radio;
 use App\Container\EntityManagerAwareTrait;
 use App\Container\EnvironmentAwareTrait;
 use App\Entity\Enums\PlaylistTypes;
-use App\Entity\Repository\StationPlaylistMediaRepository;
+use App\Entity\Repository\StationPlaylistRepository;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
 use App\Exception;
@@ -40,7 +40,7 @@ final class Configuration
     public function __construct(
         private readonly Adapters $adapters,
         private readonly SupervisorInterface $supervisor,
-        private readonly StationPlaylistMediaRepository $spmRepo,
+        private readonly StationPlaylistRepository $playlistRepo,
     ) {
     }
 
@@ -77,7 +77,7 @@ final class Configuration
 
         $this->em->flush();
 
-        $this->spmRepo->resetAllQueues($station);
+        $this->playlistRepo->resetAllQueues($station);
     }
 
     /**

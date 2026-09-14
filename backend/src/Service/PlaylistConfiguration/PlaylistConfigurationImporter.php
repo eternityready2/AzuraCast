@@ -107,6 +107,7 @@ final class PlaylistConfigurationImporter
             $playlist->is_enabled = $entry->isEnabled;
             $playlist->is_jingle = $entry->isJingle;
             $playlist->avoid_duplicates = $entry->avoidDuplicates;
+            $playlist->preserve_queue_on_restart = $entry->preserveQueueOnRestart;
             $playlist->include_in_requests = $entry->includeInRequests;
             $playlist->include_in_on_demand = $entry->includeInOnDemand;
             $playlist->play_per_songs = $entry->playPerSongs;
@@ -329,6 +330,8 @@ final class PlaylistConfigurationImporter
             $schedule->end_date = $scheduleEntry->endDate;
             $schedule->loop_once = $scheduleEntry->loopOnce;
             $schedule->prevent_requests = $scheduleEntry->preventRequests;
+            $schedule->reset_queue_at_start = $scheduleEntry->resetQueueAtStart;
+            $schedule->reset_queue_recursive = $scheduleEntry->resetQueueRecursive;
             $schedule->strict_start = $scheduleEntry->strictStart;
             $schedule->is_emergency = $scheduleEntry->isEmergency;
             $schedule->recurrence_type = $this->tryEnum(RecurrenceType::class, $scheduleEntry->recurrenceType);
