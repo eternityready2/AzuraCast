@@ -45,6 +45,25 @@ final class AiDjRuntimeConfiguration implements EventSubscriberInterface
                 timeout=settings.azuracast.request_timeout()
             )
 
+            # request.queue may resolve/prefetch its next request before that request
+            # reaches air. Once prefetched it may no longer appear in `.queue`, so PHP
+            # needs a source-level readiness check to keep "one DJ break at a time"
+            # authoritative until the pending clip actually airs or is cleared.
+            def ai_dj_pending(_) =
+                if source.is_ready(ai_dj_queue) or not list.is_empty(ai_dj_queue.queue()) then
+                    "true"
+                else
+                    "false"
+                end
+            end
+            server.register(
+                namespace="ai_dj_control",
+                usage="pending",
+                description="Report whether AI DJ speech is waiting or prefetched.",
+                "pending",
+                ai_dj_pending
+            )
+
             # A request.queue item can already be resolved/prefetched and no longer
             # appear in the interactive `.queue` listing before it actually reaches
             # air. Clear the waiting queue first, then skip any current/prefetched
