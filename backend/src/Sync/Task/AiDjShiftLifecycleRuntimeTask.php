@@ -29,7 +29,9 @@ use Throwable;
  */
 final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
 {
-    private const int WELCOME_RECOVERY_SECONDS = 3600;
+    // Keep runtime recovery identical to the lifecycle listener's welcome window.
+    // After 30 minutes a "welcome" is no longer a sensible mid-shift recovery.
+    private const int WELCOME_RECOVERY_SECONDS = 1800;
 
     /**
      * Production-main history lands at roughly a five-minute base interval scaled
@@ -83,6 +85,16 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $backend = $this->adapters->getBackendAdapter($station);
         if ($backend instanceof Liquidsoap && !$backend->isRunning($station)) {
             $this->logger->debug('AI DJ: Runtime scheduling skipped because Liquidsoap is not running.', [
+                'station_id' => $station->id,
+            ]);
+            return;
+        }
+
+        // Human live presenters own their broadcast. Do not render or queue new
+        // automated speech while a streamer is connected; the generated Liquidsoap
+        // lane has the same guard as a second line of defense at playout time.
+        if (null !== $station->current_streamer) {
+            $this->logger->debug('AI DJ: Runtime scheduling skipped while a live streamer is active.', [
                 'station_id' => $station->id,
             ]);
             return;
