@@ -6,8 +6,8 @@ namespace App\Sync\Task;
 
 use App\Entity\AiDj;
 use App\Entity\AiDjSchedule;
+use App\Entity\SongHistory;
 use App\Entity\Station;
-use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiDjQueueListener;
@@ -129,9 +129,9 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             $welcomeRecoveryOpen
             && !$this->hasDurableWelcome($station, $dj, $startsAt, $endsAt)
         ) {
-            // A successful welcome only becomes durable after it actually airs.
-            // If the previous render/queue entry was lost before playback, clear
-            // volatile guards so lifecycle/listener safety checks can retry it.
+            // A welcome becomes durable only after Liquidsoap reports it on air and
+            // SongHistory records the metadata. If rendering/queueing was lost before
+            // playout, clear volatile guards so a later heartbeat can recover it.
             $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
             $this->cache->delete('ai_dj_last_active_' . $station->id);
             $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
@@ -148,7 +148,7 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         }
 
         $lastBreak = $this->findLatestDjBreak($station, $dj, $startsAt, $endsAt);
-        $lastBreakAt = $lastBreak?->timestamp_played?->getTimestamp()
+        $lastBreakAt = $lastBreak?->timestamp_start->getTimestamp()
             ?? $startsAt->getTimestamp();
         $targetInterval = $this->getTalkIntervalSeconds($frequency);
 
@@ -168,9 +168,10 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $afterBreak = $this->findLatestDjBreak($station, $dj, $startsAt, $endsAt);
 
         if ($afterBreak?->id === $beforeId) {
-            // No clip was durably queued. This can be a protected TOH/news window,
-            // a busy Requests queue, or a TTS/API failure. Do not consume the talk
-            // opportunity or cooldown; retry safely on the next minute heartbeat.
+            // Nothing new has actually reached air yet. This can be a protected
+            // TOH/news window, a pending AI DJ request, or a TTS/API failure. Keep
+            // the cadence opportunity live; the queue guards prevent stacking while
+            // a successfully rendered clip waits for its track boundary.
             $this->cache->set($cadenceKey, 1.0, self::STATE_TTL_SECONDS);
             $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
         }
@@ -188,25 +189,27 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         AiDj $dj,
         DateTimeImmutable $startsAt,
         DateTimeImmutable $endsAt,
-    ): ?StationQueue {
+    ): ?SongHistory {
         try {
             $utc = new DateTimeZone('UTC');
             $normalizedDjName = strtolower(trim($dj->getName()));
 
+            // StationQueue is intentionally not used as the cadence clock. AI DJ
+            // speech is submitted directly to Liquidsoap and synthetic queue rows
+            // may be marked sent before airtime. SongHistory is written only when
+            // Liquidsoap reports the speech metadata on air.
             return $this->em->createQuery(
                 <<<'DQL'
-                    SELECT q FROM App\Entity\StationQueue q
-                    WHERE q.station = :station
-                    AND q.media IS NULL
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    AND sh.media IS NULL
                     AND (
-                        LOWER(q.artist) = :dj_name
-                        OR LOWER(q.artist) LIKE :dj_suffix
+                        LOWER(sh.artist) = :dj_name
+                        OR LOWER(sh.artist) LIKE :dj_suffix
                     )
-                    AND q.autodj_custom_uri IS NOT NULL
-                    AND q.timestamp_played IS NOT NULL
-                    AND q.timestamp_played >= :startsAt
-                    AND q.timestamp_played < :endsAt
-                    ORDER BY q.timestamp_played DESC, q.id DESC
+                    AND sh.timestamp_start >= :startsAt
+                    AND sh.timestamp_start < :endsAt
+                    ORDER BY sh.timestamp_start DESC, sh.id DESC
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('dj_name', $normalizedDjName)
@@ -239,33 +242,13 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             $startsAtUtc = $startsAt->setTimezone($utc);
             $endsAtUtc = $endsAt->setTimezone($utc);
 
-            // A queued marker can survive a Liquidsoap restart even when the clip
-            // never reached air. Only a played timestamp makes the welcome durable.
-            $queueCount = (int)$this->em->createQuery(
-                <<<'DQL'
-                    SELECT COUNT(q.id) FROM App\Entity\StationQueue q
-                    WHERE q.station = :station
-                    AND q.artist = :artist
-                    AND q.title = :title
-                    AND q.timestamp_played IS NOT NULL
-                    AND q.timestamp_played >= :startsAt
-                    AND q.timestamp_played < :endsAt
-                DQL
-            )->setParameter('station', $station)
-                ->setParameter('artist', $dj->getName())
-                ->setParameter('title', 'AI DJ Welcome')
-                ->setParameter('startsAt', $startsAtUtc)
-                ->setParameter('endsAt', $endsAtUtc)
-                ->getSingleScalarResult();
-
-            if ($queueCount > 0) {
-                return true;
-            }
-
+            // Only SongHistory is an on-air marker for direct AI DJ speech. A
+            // StationQueue row merely proves the request was submitted.
             $historyCount = (int)$this->em->createQuery(
                 <<<'DQL'
                     SELECT COUNT(sh.id) FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
+                    AND sh.media IS NULL
                     AND sh.artist = :artist
                     AND sh.title = :title
                     AND sh.timestamp_start >= :startsAt
