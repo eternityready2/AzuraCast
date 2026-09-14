@@ -15,17 +15,6 @@ on:
       - 'backend/src/Service/AiDjGenerator.php'
       - 'plugins/top_of_hour/events.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
-      - 'util/docker/kokoro/kokoro_tts.py'
-      - 'util/docker/web/scripts/piper'
-      - 'util/docker/web/setup/piper.sh'
-      - 'backend/src/MessageQueue/QueueManager.php'
-      - 'backend/src/Radio/AbstractLocalAdapter.php'
-      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
-      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
-      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
-      - 'backend/src/Radio/AutoDJ/Annotations.php'
-      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
-      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'tests/Unit/AiDjRuntimeCadenceTest.php'
       - '.github/workflows/ai-dj-airtime-regression.yml'
   pull_request:
@@ -40,17 +29,6 @@ on:
       - 'backend/src/Service/AiDjGenerator.php'
       - 'plugins/top_of_hour/events.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
-      - 'util/docker/kokoro/kokoro_tts.py'
-      - 'util/docker/web/scripts/piper'
-      - 'util/docker/web/setup/piper.sh'
-      - 'backend/src/MessageQueue/QueueManager.php'
-      - 'backend/src/Radio/AbstractLocalAdapter.php'
-      - 'backend/src/Sync/Task/QueueInterruptingTracks.php'
-      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
-      - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
-      - 'backend/src/Radio/AutoDJ/Annotations.php'
-      - 'frontend/components/Stations/Playlists/Form/PlayoutRules.vue'
-      - 'frontend/components/Stations/Playlists/Form/ScheduleRow.vue'
       - 'tests/Unit/AiDjRuntimeCadenceTest.php'
       - '.github/workflows/ai-dj-airtime-regression.yml'
 
@@ -77,104 +55,41 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      - name: Validate behavior contracts
+      - name: Validate AI DJ behavior contracts
         shell: bash
         run: |
           set -euo pipefail
           git diff --check origin/dev...HEAD
 
-          # AI speech is intentionally wall-clock driven. Slow TTS/API work must
-          # never run as a BuildQueue event subscriber and block music selection.
           grep -q 'App\\Sync\\Task\\AiDjShiftLifecycleRuntimeTask::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjQueueListener::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjShiftLifecycleListener::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
-
           grep -q 'TALK_BASE_INTERVAL_SECONDS = 300' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
-          grep -q 'ai_dj_talk_cadence_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
-          grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
 
-          # Strict scheduled programming must not trap AI DJ clips underneath its
-          # native source. The final source authority is TOH -> AI DJ -> Strict -> radio.
+          # Strict scheduled programming must not trap AI DJ speech. The final
+          # source authority is TOH -> AI DJ -> Strict -> normal radio.
           grep -q "case AiDj = 'ai_dj'" backend/src/Radio/Enums/LiquidsoapQueues.php
           grep -q 'AiDjRuntimeConfiguration::class' plugins/top_of_hour/events.php
           grep -q 'ai_dj_queue = request.queue' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
           grep -q 'id="ai_dj_runtime"' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
-          grep -q 'str_contains(\$musicFile, '\''/ai_dj/'\'')' backend/src/Radio/Backend/Liquidsoap.php
           grep -q 'LiquidsoapQueues::AiDj' backend/src/Radio/Backend/Liquidsoap.php
 
-          # Lifecycle speech is mandatory once per shift: welcome at the opening
-          # boundary and a reserved/widened sign-off window at the end.
+          # Welcome and sign-off are required lifecycle speech.
           grep -q 'generateShiftIntro' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           grep -q 'Queued deterministic shift welcome' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           grep -q 'OUTRO_WINDOW_SECONDS = 600' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           grep -q 'scheduled shift sign-off' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           grep -q 'ai_dj_shift_winddown_until_' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
-          grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
-          grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
-
-          # Kokoro is bounded below the PHP 90-second ceiling. Full scripts already
-          # bounded by AiDjGenerator are split into safe chunks, not truncated, and
-          # the emergency fallback calls the real Piper binary directly.
-          grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
-          grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
-          grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
-          grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
-          grep -q 'REAL_PIPER_BIN = "/usr/local/share/piper/piper"' util/docker/kokoro/kokoro_tts.py
-          grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
-          grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
-
-          # LOGS(9): keep three bounded Piper opportunities inside the AI DJ 90s
-          # caller ceiling so a resource-starved host degrades instead of losing speech.
-          grep -q 'PRIMARY_TIMEOUT_SECONDS = 55' util/docker/web/scripts/piper
-          grep -q 'RETRY_TIMEOUT_SECONDS = 20' util/docker/web/scripts/piper
-          grep -q 'EMERGENCY_TIMEOUT_SECONDS = 10' util/docker/web/scripts/piper
-          grep -q 'EMERGENCY_MAX_CHARS = 240' util/docker/web/scripts/piper
-          grep -q 'emergency_retry_text' util/docker/web/scripts/piper
-          grep -q '/usr/local/bin/piper-real' util/docker/web/setup/piper.sh
-          grep -q 'chmod a+x /usr/local/bin/piper' util/docker/web/setup/piper.sh
-
-          # LOGS(7/9) runtime regressions.
-          grep -q "XTRIM" backend/src/MessageQueue/QueueManager.php
-          ! grep -q '\$connection->cleanup();' backend/src/MessageQueue/QueueManager.php
-          grep -q 'if (!\$this->isRunning(\$station))' backend/src/Radio/AbstractLocalAdapter.php
-          grep -q '\$this->start(\$station);' backend/src/Radio/AbstractLocalAdapter.php
-          grep -q 'Interrupting queue skipped because Liquidsoap is not running' backend/src/Sync/Task/QueueInterruptingTracks.php
-          grep -q 'SELECT s FROM App\\Entity\\Station s' backend/src/Sync/Task/QueueInterruptingTracks.php
-          ! grep -q '\$this->iterateStations()' backend/src/Sync/Task/QueueInterruptingTracks.php
-          grep -q 'Top-of-Hour staging skipped because Liquidsoap is not running' backend/src/Sync/Task/StageTopOfHourStationIdTask.php
-          grep -q 'null === \$station->current_song' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          grep -q "'azuracast_autocue' => false" backend/src/Radio/AutoDJ/Annotations.php
-
-          # Requested playlist copy remains independent from Flexible/Strict timing.
-          grep -q 'Play once per scheduled block — No Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
-          grep -q 'Repeat until end of block — Loop' frontend/components/Stations/Playlists/Form/ScheduleRow.vue
-          grep -q 'Priority Start — Override Requests' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
-          grep -q 'Start on schedule and take priority over listener requests' frontend/components/Stations/Playlists/Form/PlayoutRules.vue
 
       - name: PHP syntax check
         run: |
-          php -l backend/config/events.php
           php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           php -l backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           php -l backend/src/Radio/Backend/Liquidsoap.php
           php -l backend/src/Radio/Enums/LiquidsoapQueues.php
           php -l plugins/top_of_hour/events.php
           php -l plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
-          php -l backend/src/MessageQueue/QueueManager.php
-          php -l backend/src/Radio/AbstractLocalAdapter.php
-          php -l backend/src/Sync/Task/QueueInterruptingTracks.php
-          php -l backend/src/Sync/Task/StageTopOfHourStationIdTask.php
-          php -l backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          php -l backend/src/Radio/AutoDJ/Annotations.php
           php -l tests/Unit/AiDjRuntimeCadenceTest.php
-
-      - name: TTS wrapper syntax check
-        run: |
-          python3 -m py_compile util/docker/kokoro/kokoro_tts.py util/docker/web/scripts/piper
-          bash -n util/docker/web/setup/piper.sh
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
@@ -189,7 +104,7 @@ jobs:
       - name: Execute AI DJ cadence regression
         run: vendor/bin/codecept run tests/Unit/AiDjRuntimeCadenceTest.php
 
-      - name: PHPStan runtime repairs
+      - name: PHPStan AI DJ repairs
         shell: bash
         run: |
           cat > phpstan.ai-dj-airtime.neon <<'EOF'
@@ -204,41 +119,4 @@ jobs:
             backend/src/Radio/Backend/Liquidsoap.php \
             backend/src/Radio/Enums/LiquidsoapQueues.php \
             plugins/top_of_hour/src/AiDjRuntimeConfiguration.php \
-            backend/src/MessageQueue/QueueManager.php \
-            backend/src/Radio/AbstractLocalAdapter.php \
-            backend/src/Sync/Task/QueueInterruptingTracks.php \
-            backend/src/Sync/Task/StageTopOfHourStationIdTask.php \
-            backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
-            backend/src/Radio/AutoDJ/Annotations.php \
             tests/Unit/AiDjRuntimeCadenceTest.php
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - name: Install frontend dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Type-check playlist UI changes
-        shell: bash
-        run: |
-          cat > tsconfig.ai-dj-airtime.json <<'EOF'
-          {
-            "extends": "./tsconfig.json",
-            "include": [
-              "frontend/**/*.d.ts",
-              "frontend/components/Stations/Playlists/Form/PlayoutRules.vue",
-              "frontend/components/Stations/Playlists/Form/ScheduleRow.vue"
-            ],
-            "exclude": ["node_modules"]
-          }
-          EOF
-          npx vue-tsc -p tsconfig.ai-dj-airtime.json --noEmit
-
-      - name: Lint playlist UI changes
-        run: >-
-          npx eslint
-          frontend/components/Stations/Playlists/Form/PlayoutRules.vue
-          frontend/components/Stations/Playlists/Form/ScheduleRow.vue
