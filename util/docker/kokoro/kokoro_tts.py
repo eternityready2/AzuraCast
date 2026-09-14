@@ -195,6 +195,8 @@ def main() -> None:
                 f"same-voice retry failed ({retry_failure})"
             )
 
+    # Emit the exact requested/rendered voice identity so the PHP caller and
+    # production diagnostics can verify that a named DJ was never substituted.
     print(json.dumps({
         "status": "ok",
         "output": output_path,
