@@ -383,9 +383,9 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             $startsAtUtc = $startsAt->setTimezone($utc);
             $endsAtUtc = $endsAt->setTimezone($utc);
 
-            // Synthetic AI DJ StationQueue rows are marked sent immediately so the
-            // main AutoDJ transport cannot replay them. Only SongHistory proves the
-            // clip actually reached air; a queued row must never suppress recovery.
+            // Direct AI DJ queue rows are consumed from AutoDJ immediately but do
+            // not carry an on-air timestamp. Only SongHistory proves that speech
+            // actually reached air, so queued rows never suppress recovery.
             $historyCount = (int)$this->em->createQuery(
                 <<<'DQL'
                     SELECT COUNT(sh.id) FROM App\Entity\SongHistory sh
@@ -538,9 +538,13 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $queueEntry = new StationQueue($station, $song);
         $queueEntry->is_visible = true;
         $queueEntry->autodj_custom_uri = $clipPath;
-        // It has already been submitted directly to Liquidsoap, so keep it out of
-        // normal AutoDJ selection without fabricating a playback timestamp.
-        $queueEntry->sent_to_autodj = true;
+        // This row represents a direct Liquidsoap submission, not a pending AutoDJ
+        // selection. Mark it consumed so getUnplayedQueue()/upcoming-song logic cannot
+        // suppress later DJ breaks. The StationQueue setter assigns a timestamp when
+        // is_played becomes true, so clear that timestamp immediately: only
+        // SongHistory is authoritative proof that the clip actually reached air.
+        $queueEntry->is_played = true;
+        $queueEntry->timestamp_played = null;
 
         $this->em->persist($queueEntry);
         $this->em->flush();
