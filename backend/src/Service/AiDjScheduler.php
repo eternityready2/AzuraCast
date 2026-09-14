@@ -35,12 +35,28 @@ final class AiDjScheduler
         }
 
         $stationTime = $this->getStationTime($station, $timestamp);
-
-        return $this->scheduleRepo->findActiveForTimeSlot(
+        $schedule = $this->scheduleRepo->findActiveForTimeSlot(
             $stationId,
             (int) $stationTime->format('N'),
             $stationTime->format('H:i:s'),
         );
+
+        if (!$schedule instanceof AiDjSchedule) {
+            return null;
+        }
+
+        // A named DJ must never silently fall through to AiDjGenerator's default
+        // Piper voice. voice_model_path is nullable in the legacy schema/UI, so a
+        // duplicate or older scheduled profile can otherwise appear on-air under
+        // the same DJ name with a completely different voice. Treat a missing voice
+        // as an inactive AI-DJ schedule: normal radio continues, but no impersonating
+        // speech is generated until that profile has an explicit voice selected.
+        $voiceModelPath = $schedule->getAiDj()->getVoiceModelPath();
+        if (null === $voiceModelPath || '' === trim($voiceModelPath)) {
+            return null;
+        }
+
+        return $schedule;
     }
 
     /**
