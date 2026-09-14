@@ -127,14 +127,17 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             return;
         }
 
-        $outroKey = $this->getOutroKey($station, $scheduleNow, $startsAt);
         $winddownKey = 'ai_dj_shift_winddown_until_' . $station->id;
         $ttl = $this->getStateTtl($endsAt, $now);
-        $alreadySignedOff = $this->cache->get($outroKey)
-            || $this->hasDurableShiftMarker($station, $dj, 'AI DJ Sign-off', $startsAt, $endsAt);
+        $alreadySignedOff = $this->hasDurableShiftMarker(
+            $station,
+            $dj,
+            'AI DJ Sign-off',
+            $startsAt,
+            $endsAt,
+        );
 
         if ($alreadySignedOff) {
-            $this->cache->set($outroKey, true, $ttl);
             $this->cache->set($winddownKey, $endsAt->getTimestamp(), $ttl);
             return;
         }
@@ -163,21 +166,18 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             return;
         }
 
-        $this->cache->set($outroKey, true, $ttl);
-
-        if (
-            !$this->pushOutroClip(
-                $dj,
-                $station,
-                $backend,
-                $scheduleNow,
-                $outroWindow['starts_at'],
-                $outroWindow['ends_at'],
-            )
-        ) {
-            // Keep wind-down reserved and retry the goodbye on the next minute.
-            $this->cache->delete($outroKey);
-        }
+        // Do not mark the sign-off complete just because push succeeds. The speech
+        // lane itself prevents duplicate pending clips, while SongHistory is the only
+        // durable proof that the goodbye actually reached air. If Liquidsoap loses a
+        // queued request during a restart, the next minute heartbeat can retry it.
+        $this->pushOutroClip(
+            $dj,
+            $station,
+            $backend,
+            $scheduleNow,
+            $outroWindow['starts_at'],
+            $outroWindow['ends_at'],
+        );
     }
 
     private function ensureWelcome(
@@ -410,19 +410,6 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             ]);
             return false;
         }
-    }
-
-    private function getOutroKey(
-        Station $station,
-        AiDjSchedule $schedule,
-        DateTimeImmutable $startsAt,
-    ): string {
-        return sprintf(
-            'ai_dj_outro_%d_%d_%d',
-            $station->id,
-            $schedule->getId(),
-            $startsAt->getTimestamp(),
-        );
     }
 
     private function getStateTtl(DateTimeImmutable $endsAt, DateTimeImmutable $now): int
