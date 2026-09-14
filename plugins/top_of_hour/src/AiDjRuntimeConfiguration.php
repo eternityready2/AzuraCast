@@ -48,7 +48,6 @@ final class AiDjRuntimeConfiguration implements EventSubscriberInterface
             radio = fallback(
                 id="ai_dj_runtime",
                 track_sensitive=true,
-                transition_length=0.0,
                 [ai_dj_queue, radio]
             )
             LIQ
