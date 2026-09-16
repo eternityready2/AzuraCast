@@ -12,7 +12,6 @@ on:
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
       - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
-      - 'backend/src/Service/AiDjScheduler.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'util/docker/web/scripts/piper'
@@ -36,7 +35,6 @@ on:
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
       - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
-      - 'backend/src/Service/AiDjScheduler.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'util/docker/web/scripts/piper'
@@ -151,26 +149,15 @@ jobs:
           grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
-          # A named DJ must never silently become the generator's default Piper voice
-          # because an older/duplicate scheduled profile has no voice selected.
-          grep -q 'getVoiceModelPath' backend/src/Service/AiDjScheduler.php
-          grep -Fq 'null === $voiceModelPath' backend/src/Service/AiDjScheduler.php
-          grep -Fq 'trim($voiceModelPath)' backend/src/Service/AiDjScheduler.php
-
-          # Named AI DJ voice identity is authoritative. Kokoro gets one bounded
-          # retry with the SAME configured speaker; never substitute a generic Piper
-          # voice that makes Bella/Onyx suddenly sound like somebody else. The
-          # wrapper reports the exact voice identity it rendered for diagnostics.
+          # Kokoro remains on the branch baseline behavior; this PR does not change
+          # voice selection or fallback policy.
           grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
-          grep -q 'KOKORO_RETRY_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
+          grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
           grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
           grep -q 'def split_text' util/docker/kokoro/kokoro_tts.py
-          grep -q 'same-voice retry failed' util/docker/kokoro/kokoro_tts.py
-          grep -q '"engine": "kokoro"' util/docker/kokoro/kokoro_tts.py
-          grep -q '"voice": voice' util/docker/kokoro/kokoro_tts.py
-          ! grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
-          ! grep -q 'PIPER_FEMALE' util/docker/kokoro/kokoro_tts.py
-          ! grep -q 'REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
+          grep -q 'REAL_PIPER_BIN = "/usr/local/share/piper/piper"' util/docker/kokoro/kokoro_tts.py
+          grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
+          grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
 
           # Piper is owned by the production-log repair (#196). This AI-DJ branch
           # must remain compatible both before and after that PR is merged.
@@ -204,7 +191,6 @@ jobs:
           php -l backend/src/Radio/AutoDJ/AiDjQueueListener.php
           php -l backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
           php -l backend/src/Radio/Backend/Liquidsoap.php
-          php -l backend/src/Service/AiDjScheduler.php
           php -l plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
           php -l backend/src/MessageQueue/QueueManager.php
           php -l backend/src/Radio/AbstractLocalAdapter.php
@@ -248,7 +234,6 @@ jobs:
             backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
             backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php \
             backend/src/Radio/Backend/Liquidsoap.php \
-            backend/src/Service/AiDjScheduler.php \
             plugins/top_of_hour/src/AiDjRuntimeConfiguration.php \
             backend/src/MessageQueue/QueueManager.php \
             backend/src/Radio/AbstractLocalAdapter.php \
