@@ -40,26 +40,7 @@ final class QueueInterruptingTracks extends AbstractTask
      */
     public function run(bool $force = false): void
     {
-        // Queue building can flush/open its own transaction state. The normal
-        // ReadWriteBatchIteratorAggregate wraps each station in a Doctrine write
-        // transaction/savepoint, which can conflict with nested queue persistence.
-        // Read only station IDs here, then clear/refetch one station at a time so
-        // there is no outer iterator transaction and the identity map stays bounded.
-        /** @var array<int, array{id: int|string}> $stationRows */
-        $stationRows = $this->em->createQuery(
-            <<<'DQL'
-                SELECT s.id AS id FROM App\Entity\Station s
-            DQL
-        )->getScalarResult();
-
-        foreach ($stationRows as $stationRow) {
-            $this->em->clear();
-
-            $station = $this->em->find(Station::class, (int)$stationRow['id']);
-            if (!$station instanceof Station) {
-                continue;
-            }
-
+        foreach ($this->iterateStations() as $station) {
             $this->logger->pushProcessor(
                 function (LogRecord $record) use ($station) {
                     $record->extra['station'] = [
@@ -84,8 +65,6 @@ final class QueueInterruptingTracks extends AbstractTask
                 $this->logger->popProcessor();
             }
         }
-
-        $this->em->clear();
     }
 
     private function queueForStation(Station $station): void
