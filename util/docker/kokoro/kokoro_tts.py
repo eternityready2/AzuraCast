@@ -12,14 +12,19 @@ from kokoro_onnx import Kokoro
 
 MODEL_PATH = "/opt/kokoro/kokoro-v1.0.onnx"
 VOICES_PATH = "/opt/kokoro/voices-v1.0.bin"
+REAL_PIPER_BIN = "/usr/local/share/piper/piper"
 
 # Keep the outer PHP process comfortably below AiDjGenerator's 90-second ceiling.
-# If the first render stalls or fails, retry the SAME Kokoro voice once. Never
-# substitute a different Piper voice for a named AI DJ persona.
 KOKORO_TIMEOUT_SECONDS = 35
-KOKORO_RETRY_TIMEOUT_SECONDS = 35
+PIPER_TIMEOUT_SECONDS = 40
 KOKORO_CHUNK_CHARS = 260
 CHUNK_PAUSE_SECONDS = 0.12
+
+PIPER_FEMALE = "/usr/local/share/piper-voices/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
+PIPER_MALE_CANDIDATES = [
+    "/usr/local/share/piper-voices/en/en_US/joe/medium/en_US-joe-medium.onnx",
+    "/usr/local/share/piper-voices/en/en_US/ryan/medium/en_US-ryan-medium.onnx",
+]
 
 
 def split_text(text: str, limit: int = KOKORO_CHUNK_CHARS) -> list[str]:
@@ -102,13 +107,7 @@ def kokoro_child(text: str, voice: str, output_path: str, speed: float) -> None:
     sf.write(output_path, np.concatenate(rendered), expected_rate)
 
 
-def run_kokoro_with_timeout(
-    text: str,
-    voice: str,
-    output_path: str,
-    speed: float,
-    timeout_seconds: int,
-) -> tuple[bool, str]:
+def run_kokoro_with_timeout(text: str, voice: str, output_path: str, speed: float) -> tuple[bool, str]:
     command = [
         sys.executable,
         __file__,
@@ -125,11 +124,11 @@ def run_kokoro_with_timeout(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_seconds,
+            timeout=KOKORO_TIMEOUT_SECONDS,
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return False, f"Kokoro exceeded {timeout_seconds}s"
+        return False, f"Kokoro exceeded {KOKORO_TIMEOUT_SECONDS}s"
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "Kokoro child failed").strip()
@@ -141,12 +140,51 @@ def run_kokoro_with_timeout(
     return True, ""
 
 
-def remove_partial_output(output_path: str) -> None:
-    try:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
-    except OSError:
-        pass
+def choose_piper_model(voice: str) -> str:
+    male_voice = voice.startswith(("am_", "bm_", "em_", "hm_", "im_", "jm_", "pm_", "zm_"))
+    candidates = PIPER_MALE_CANDIDATES if male_voice else [PIPER_FEMALE]
+
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+
+    # Last-resort cross-gender fallback is preferable to a completely silent DJ.
+    all_candidates = [PIPER_FEMALE, *PIPER_MALE_CANDIDATES]
+    for candidate in all_candidates:
+        if Path(candidate).is_file():
+            return candidate
+
+    raise RuntimeError("No Piper fallback voice model is installed")
+
+
+def run_piper_fallback(text: str, voice: str, output_path: str, speed: float) -> None:
+    model = choose_piper_model(voice)
+
+    # Call the real Piper binary directly here. AI News intentionally uses the
+    # /usr/local/bin/piper timeout/retry wrapper, but Kokoro already owns a strict
+    # 40-second fallback budget. Nesting the wrapper under that shorter timeout can
+    # kill the wrapper while its real Piper child continues running as an orphan.
+    command = [REAL_PIPER_BIN, "--model", model, "--output_file", output_path]
+
+    if speed != 1.0:
+        command.extend(["--length_scale", str(1.0 / speed)])
+
+    result = subprocess.run(
+        command,
+        input=text,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=PIPER_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "Piper fallback failed").strip()
+        raise RuntimeError(detail[-1000:])
+
+    if not Path(output_path).is_file() or Path(output_path).stat().st_size == 0:
+        raise RuntimeError("Piper fallback produced no audio")
 
 
 def main() -> None:
@@ -163,47 +201,27 @@ def main() -> None:
     output_path = sys.argv[3]
     speed = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
 
-    ok, first_failure = run_kokoro_with_timeout(
-        text,
-        voice,
-        output_path,
-        speed,
-        KOKORO_TIMEOUT_SECONDS,
-    )
-    retried = False
+    ok, reason = run_kokoro_with_timeout(text, voice, output_path, speed)
+    engine = "kokoro"
 
     if not ok:
-        # Voice identity is part of the named AI DJ persona. A previous emergency
-        # fallback rendered female DJs with Piper Lessac (and male DJs with a generic
-        # Piper male voice), which made a host suddenly sound like somebody else.
-        # Retry the configured Kokoro speaker once instead. If that also fails, let
-        # the caller skip this break and retry on a later heartbeat rather than air
-        # an impersonating voice.
-        retried = True
-        remove_partial_output(output_path)
-        ok, retry_failure = run_kokoro_with_timeout(
-            text,
-            voice,
-            output_path,
-            speed,
-            KOKORO_RETRY_TIMEOUT_SECONDS,
-        )
-        if not ok:
-            remove_partial_output(output_path)
-            raise RuntimeError(
-                f"Kokoro voice {voice} failed ({first_failure}); "
-                f"same-voice retry failed ({retry_failure})"
-            )
+        # A stuck Kokoro render must not make a scheduled host disappear. Use a
+        # local Piper voice as an emergency fail-open path; the next break will try
+        # the configured Kokoro voice again normally. Preserve the complete script
+        # already bounded by AiDjGenerator rather than cutting artist facts/payoffs.
+        try:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+            run_piper_fallback(text, voice, output_path, speed)
+            engine = "piper_fallback"
+        except Exception as exc:
+            raise RuntimeError(f"Kokoro failed ({reason}); Piper fallback failed: {exc}") from exc
 
-    # Emit the exact requested/rendered voice identity so the PHP caller and
-    # production diagnostics can verify that a named DJ was never substituted.
     print(json.dumps({
         "status": "ok",
         "output": output_path,
-        "engine": "kokoro",
-        "voice": voice,
-        "retried": retried,
-        "first_failure": first_failure if retried else None,
+        "engine": engine,
+        "kokoro_failure": reason if engine != "kokoro" else None,
     }))
 
 
