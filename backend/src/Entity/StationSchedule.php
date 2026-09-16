@@ -131,6 +131,34 @@ final class StationSchedule implements IdentifiableEntityInterface
     ]
     public bool $prevent_requests = false;
 
+    #[
+        OA\Property(
+            description: "Reset the playlist's internal queue when this schedule window becomes active.",
+            example: false
+        ),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $reset_queue_at_start = false {
+        set {
+            $this->reset_queue_at_start = $value;
+
+            if (!$value) {
+                $this->reset_queue_recursive = false;
+            }
+        }
+    }
+
+    #[
+        OA\Property(
+            description: "Also reset nested playlist groups and member playlists (playlist groups only).",
+            example: false
+        ),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $reset_queue_recursive = false {
+        set => $value && $this->reset_queue_at_start;
+    }
+
     /**
      * When true, this playlist schedule holds rigidly to its exact start time,
      * cutting the currently playing track if needed rather than waiting for it

@@ -145,7 +145,6 @@ final class StationPlaylistMediaRepository extends Repository
             throw new RuntimeException('This playlist is not meant to contain songs!');
         }
 
-        // Only update existing record for random-order playlists.
         $isNonSequential = PlaylistOrders::Sequential !== $playlist->order;
 
         $record = ($isNonSequential)
@@ -188,12 +187,6 @@ final class StationPlaylistMediaRepository extends Repository
         return $weight;
     }
 
-    /**
-     * Add a direct media membership only when one does not already exist.
-     *
-     * Unlike addMediaToPlaylist(), this is idempotent for sequential playlists.
-     * Folder-derived memberships do not count as direct memberships.
-     */
     public function addMediaToPlaylistIfMissing(
         StationMedia $media,
         StationPlaylist $playlist
@@ -242,14 +235,6 @@ final class StationPlaylistMediaRepository extends Repository
         return (int)$highestWeight;
     }
 
-    /**
-     * Remove all playlist associations from the specified media object.
-     *
-     * @param StationMedia $media
-     * @param Station|null $station
-     *
-     * @return array<int, int> Affected Playlist records (id => id)
-     */
     public function clearPlaylistsFromMedia(
         StationMedia $media,
         ?Station $station = null
@@ -270,16 +255,14 @@ final class StationPlaylistMediaRepository extends Repository
             $affectedPlaylists[$playlist->id] = $playlist->id;
 
             $this->queueRepo->clearForMediaAndPlaylist($media, $playlist);
-
             $this->em->remove($spmRow);
         }
 
         return $affectedPlaylists;
     }
 
-    public function emptyPlaylist(
-        StationPlaylist $playlist
-    ): void {
+    public function emptyPlaylist(StationPlaylist $playlist): void
+    {
         $this->em->createQuery(
             <<<'DQL'
                 DELETE FROM App\Entity\StationPlaylistMedia spm
@@ -291,16 +274,6 @@ final class StationPlaylistMediaRepository extends Repository
         $this->queueRepo->clearForPlaylist($playlist);
     }
 
-    /**
-     * Set the order of the media, specified as
-     * [
-     *    media_id => new_weight,
-     *    ...
-     * ]
-     *
-     * @param StationPlaylist $playlist
-     * @param array $mapping
-     */
     public function setMediaOrder(StationPlaylist $playlist, array $mapping): void
     {
         $updateQuery = $this->em->createQuery(
@@ -367,15 +340,18 @@ final class StationPlaylistMediaRepository extends Repository
                         $updateSpmWeightQuery->setParameter('id', $spmId)
                             ->setParameter('weight', $weight)
                             ->execute();
-
                         $weight++;
                     }
                 }
             );
         }
 
-        $now ??= Time::nowUtc();
+        $this->resyncManagedEntities(
+            StationPlaylistMedia::class,
+            static fn(StationPlaylistMedia $spm): bool => $spm->playlist === $playlist
+        );
 
+        $now ??= Time::nowUtc();
         $playlist->queue_reset_at = $now;
         $this->em->persist($playlist);
         $this->em->flush();
@@ -394,9 +370,6 @@ final class StationPlaylistMediaRepository extends Repository
         }
     }
 
-    /**
-     * @return StationPlaylistQueue[]
-     */
     public function getQueue(StationPlaylist $playlist): array
     {
         if (PlaylistSources::Songs !== $playlist->source) {
@@ -417,19 +390,6 @@ final class StationPlaylistMediaRepository extends Repository
             ->from(StationMedia::class, 'sm')
             ->join('sm.playlists', 'spm')
             ->where('spm.playlist = :playlist')
-            // Station-ID / legal-ID typed media must ONLY ever be selected by the
-            // dedicated top-of-hour and clock-wheel legal-ID resolvers (which query
-            // StationMedia directly by type), never by ordinary playlist rotation.
-            // Without this, a legal ID accidentally added to a normal rotation
-            // playlist (e.g. "General Mix", "Promos, Ads") can be shuffled in at any
-            // random point in the hour -- which is indistinguishable on-air from the
-            // mandatory top-of-hour ID misfiring, but is actually a completely
-            // separate bug with a completely separate cause.
-            // NULL-safe: some rows may have a literal NULL type in the DB (nullable
-            // column, PHP-side default of 'music' only applies to new entities), and
-            // "NULL NOT IN (...)" evaluates to NULL/false in SQL -- which would
-            // silently exclude ordinary untyped tracks from every playlist. The
-            // explicit "OR sm.type IS NULL" keeps those included.
             ->andWhere('sm.type NOT IN (:excludedTypes) OR sm.type IS NULL')
             ->setParameter('playlist', $playlist)
             ->setParameter('excludedTypes', StationMediaTypes::stationIdTypeValues());
@@ -459,19 +419,6 @@ final class StationPlaylistMediaRepository extends Repository
         );
     }
 
-    /**
-     * Airtime Pro resolves a Dynamic Smart Block's tracklist fresh at the moment it's
-     * actually needed for playback, so newly-uploaded matching media shows up
-     * immediately rather than waiting for the next scheduled sync. This gives the same
-     * behavior cheaply: whenever AutoDJ asks this playlist for its queue, if it's a
-     * Dynamic Smart Block and hasn't been resynced very recently, resync it inline
-     * first (throttled so rapid repeated calls in one AutoDJ cycle don't hammer the DB).
-     *
-     * Static Smart Blocks and ordinary playlists are untouched -- this only ever
-     * affects `is_smart_block = true` playlists with `smart_block_type = Dynamic`.
-     * Failures here are swallowed (falling back to whatever membership already exists)
-     * so a Smart Block issue never breaks AutoDJ playback itself.
-     */
     private function maybeResyncDynamicSmartBlock(StationPlaylist $playlist): void
     {
         if (!$playlist->is_smart_block || SmartBlockType::Dynamic !== $playlist->smart_block_type) {
@@ -491,12 +438,12 @@ final class StationPlaylistMediaRepository extends Repository
         try {
             $this->smartBlockSyncer->sync($playlist);
         } catch (Throwable) {
-            // Deliberately ignored -- see method docblock.
         }
     }
 
     public function isQueueCompletelyFilled(StationPlaylist $playlist): bool
-    {        if (PlaylistSources::Songs !== $playlist->source) {
+    {
+        if (PlaylistSources::Songs !== $playlist->source) {
             return true;
         }
 
@@ -532,6 +479,31 @@ final class StationPlaylistMediaRepository extends Repository
             ->getSingleScalarResult();
 
         return $notQueuedMediaCount === $totalMediaCount;
+    }
+
+    public function isMediaInPlaylist(StationMedia $media, StationPlaylist $playlist): bool
+    {
+        if (PlaylistSources::Songs === $playlist->source) {
+            return (int)$this->em->createQuery(
+                <<<'DQL'
+                    SELECT COUNT(spm.id)
+                    FROM App\Entity\StationPlaylistMedia spm
+                    WHERE spm.playlist = :playlist AND spm.media = :media
+                DQL
+            )->setParameter('playlist', $playlist)
+                ->setParameter('media', $media)
+                ->getSingleScalarResult() > 0;
+        }
+
+        if (PlaylistSources::Playlists === $playlist->source) {
+            foreach ($playlist->playlists as $membership) {
+                if ($this->isMediaInPlaylist($media, $membership->playlist)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function getCountPlaylistMediaBaseQuery(StationPlaylist $playlist): QueryBuilder
