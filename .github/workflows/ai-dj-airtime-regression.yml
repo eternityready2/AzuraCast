@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - 'fix/playlist-loop-labels-and-ai-dj-airtime'
+      - 'fix/ai-dj-strict-lifecycle-sept14'
     paths:
       - 'backend/config/events.php'
       - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
+      - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'util/docker/web/scripts/piper'
       - 'util/docker/web/setup/piper.sh'
@@ -30,7 +33,9 @@ on:
       - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
+      - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
       - 'util/docker/kokoro/kokoro_tts.py'
       - 'util/docker/web/scripts/piper'
       - 'util/docker/web/setup/piper.sh'
@@ -82,10 +87,59 @@ jobs:
           ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
 
           grep -q 'TALK_BASE_INTERVAL_SECONDS = 300' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'MAX_TALK_BREAKS_PER_HOUR = 5' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'WELCOME_RECOVERY_SECONDS = 1800' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'ai_dj_talk_cadence_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'countRecentDjBreaks' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'findLatestSubmittedDjClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$submittedNewClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$airedNewClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'current_streamer' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+
+          # Stale speech is only purged from the dedicated AI DJ queue. Listener
+          # Requests are never flushed, and concrete shift identity owns pending speech.
+          grep -q 'purgePendingAiDjSpeech' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_runtime_shift_' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_control.clear' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'ai_dj_control.pending' backend/src/Radio/Backend/Liquidsoap.php
+          grep -Fq "LiquidsoapQueues::AiDj->value . '.queue'" backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -Fq "sprintf('%s.remove %d', LiquidsoapQueues::AiDj->value" backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          ! grep -q 'Requests->value.*remove' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'source.is_ready(ai_dj_queue)' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+          grep -q 'ai_dj_queue.set_queue(\[\])' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+          grep -q 'ai_dj_queue.skip()' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+
+          # Cadence and lifecycle durability must reflect actual on-air speech, not
+          # synthetic StationQueue rows that were merely submitted to Liquidsoap.
+          grep -q 'use App\\Entity\\SongHistory;' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'SELECT sh FROM App\\Entity\\SongHistory sh' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'sh.timestamp_start' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          ! grep -q 'timestamp_played' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q '\$queueEntry->is_played = true;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$queueEntry->timestamp_played = null;' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          grep -q '\$queueEntry->timestamp_played = null;' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q '\$alreadySignedOff = \$this->hasDurableShiftMarker' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          ! grep -q 'ai_dj_outro_' backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+
+          # Queue-planning lookahead must not silence normal AI DJ speech for 10-30
+          # minutes. Only the real :54:30 airtime cutoff and news windows are speech
+          # exclusions, and a request crossing into the next hour is always blocked.
+          ! grep -q 'isInLookaheadZone' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q 'TOH_SPEECH_CUTOFF_SECONDS = 3270' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q '\$airSecondsIntoHour' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          grep -q '\$crossesHour' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          ! grep -q '\$minute >= 50' backend/src/Radio/AutoDJ/AiDjQueueListener.php
+
+          # Dedicated speech lane must preserve old-config compatibility and never
+          # interrupt a connected human live presenter.
+          grep -q 'LiquidsoapQueues::AiDj === \$queue' backend/src/Radio/Backend/Liquidsoap.php
+          grep -q 'LiquidsoapQueues::Requests->value' backend/src/Radio/Backend/Liquidsoap.php
+          grep -q 'isUnknownCommandResponse' backend/src/Radio/Backend/Liquidsoap.php
+          grep -q 'predicate.activates({ not azuracast.live_enabled() })' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
+          grep -q 'ai_dj_available' plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
 
           # Preserve the welcome, sign-off and artist-history paths the station uses.
           grep -q 'generateShiftIntro' backend/src/Radio/AutoDJ/AiDjQueueListener.php
@@ -95,9 +149,8 @@ jobs:
           grep -q 'AiDjArtistHistoryService' backend/src/Radio/AutoDJ/AiDjQueueListener.php
           grep -q 'pushArtistHistoryClip' backend/src/Radio/AutoDJ/AiDjQueueListener.php
 
-          # Kokoro is bounded below the PHP 90-second ceiling. Full scripts already
-          # bounded by AiDjGenerator are split into safe chunks, not truncated, and
-          # the emergency fallback calls the real Piper binary directly.
+          # Kokoro remains on the branch baseline behavior; this PR does not change
+          # voice selection or fallback policy.
           grep -q 'KOKORO_TIMEOUT_SECONDS = 35' util/docker/kokoro/kokoro_tts.py
           grep -q 'PIPER_TIMEOUT_SECONDS = 40' util/docker/kokoro/kokoro_tts.py
           grep -q 'KOKORO_CHUNK_CHARS = 260' util/docker/kokoro/kokoro_tts.py
@@ -106,9 +159,9 @@ jobs:
           grep -q 'command = \[REAL_PIPER_BIN' util/docker/kokoro/kokoro_tts.py
           grep -q 'run_piper_fallback' util/docker/kokoro/kokoro_tts.py
 
-          # Shared Piper stays inside the AI DJ 90-second caller ceiling while AI
-          # News still gets one bounded, sentence-safe retry on a stalled inference.
-          grep -q 'PRIMARY_TIMEOUT_SECONDS = 65' util/docker/web/scripts/piper
+          # Piper is owned by the production-log repair (#196). This AI-DJ branch
+          # must remain compatible both before and after that PR is merged.
+          grep -Eq 'PRIMARY_TIMEOUT_SECONDS = (55|65)' util/docker/web/scripts/piper
           grep -q 'RETRY_TIMEOUT_SECONDS = 20' util/docker/web/scripts/piper
           grep -q 'RETRY_MAX_CHARS = 800' util/docker/web/scripts/piper
           grep -q 'bounded_retry_text' util/docker/web/scripts/piper
@@ -135,6 +188,10 @@ jobs:
         run: |
           php -l backend/config/events.php
           php -l backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          php -l backend/src/Radio/AutoDJ/AiDjQueueListener.php
+          php -l backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php
+          php -l backend/src/Radio/Backend/Liquidsoap.php
+          php -l plugins/top_of_hour/src/AiDjRuntimeConfiguration.php
           php -l backend/src/MessageQueue/QueueManager.php
           php -l backend/src/Radio/AbstractLocalAdapter.php
           php -l backend/src/Sync/Task/QueueInterruptingTracks.php
@@ -170,8 +227,14 @@ jobs:
           parameters:
             reportUnmatchedIgnoredErrors: false
           EOF
+          # AiDjQueueListener is covered above by syntax and behavioral contracts.
+          # It has four pre-existing static warnings unrelated to this repair; keep
+          # this targeted PHPStan gate focused on files changed semantically here.
           vendor/bin/phpstan analyze -c phpstan.ai-dj-airtime.neon --memory-limit=-1 --no-progress \
             backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php \
+            backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php \
+            backend/src/Radio/Backend/Liquidsoap.php \
+            plugins/top_of_hour/src/AiDjRuntimeConfiguration.php \
             backend/src/MessageQueue/QueueManager.php \
             backend/src/Radio/AbstractLocalAdapter.php \
             backend/src/Sync/Task/QueueInterruptingTracks.php \

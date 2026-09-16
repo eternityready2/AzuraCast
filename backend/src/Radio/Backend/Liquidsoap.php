@@ -177,11 +177,96 @@ final class Liquidsoap extends AbstractLocalAdapter
         Station $station,
         LiquidsoapQueues $queue
     ): bool {
+        // New AI DJ configs expose source-level pending state. request.queue can
+        // resolve/prefetch a request and remove it from the interactive `.queue`
+        // listing before it actually airs, so the listing alone is not a reliable
+        // "one speech break at a time" guard.
+        if (LiquidsoapQueues::AiDj === $queue) {
+            $aiDjPending = $this->getAiDjPendingState($station);
+            if (null !== $aiDjPending) {
+                return !$aiDjPending;
+            }
+        }
+
         $queueResult = $this->command(
             $station,
             sprintf('%s.queue', $queue->value)
         );
-        return empty($queueResult[0]);
+
+        // A station can be running an older generated Liquidsoap configuration
+        // while the new PHP code is already deployed. In that compatibility
+        // window the dedicated AI DJ command may return an "unknown command"
+        // string instead of throwing. Treat that exactly like a missing lane and
+        // inspect the legacy Requests queue, which is also where enqueue() falls
+        // back for AI DJ audio until configuration is regenerated.
+        if (
+            LiquidsoapQueues::AiDj === $queue
+            && $this->isUnknownCommandResponse($queueResult)
+        ) {
+            $legacyQueueResult = $this->command(
+                $station,
+                sprintf('%s.queue', LiquidsoapQueues::Requests->value)
+            );
+
+            return empty($legacyQueueResult[0]);
+        }
+
+        if (!empty($queueResult[0])) {
+            return false;
+        }
+
+        // AI DJ speech is submitted through the same PHP path that historically
+        // used listener Requests, but now has its own Liquidsoap lane so Strict
+        // programmes cannot trap a DJ clip for hours. Treat a waiting OR prefetched
+        // AI DJ clip as occupying the ordinary request boundary too; this prevents a
+        // listener request or a second DJ break from stacking immediately behind it.
+        if (LiquidsoapQueues::Requests === $queue) {
+            try {
+                $aiDjPending = $this->getAiDjPendingState($station);
+                if (null !== $aiDjPending) {
+                    return !$aiDjPending;
+                }
+
+                $aiDjQueueResult = $this->command(
+                    $station,
+                    sprintf('%s.queue', LiquidsoapQueues::AiDj->value)
+                );
+
+                if (!$this->isUnknownCommandResponse($aiDjQueueResult)) {
+                    return empty($aiDjQueueResult[0]);
+                }
+            } catch (\Throwable) {
+                // Older/plugin-disabled station configurations do not have the
+                // dedicated queue. Preserve the legacy Requests-only behavior.
+            }
+        }
+
+        return true;
+    }
+
+    private function getAiDjPendingState(Station $station): ?bool
+    {
+        try {
+            $response = $this->command($station, 'ai_dj_control.pending');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($this->isUnknownCommandResponse($response)) {
+            return null;
+        }
+
+        $value = strtolower(trim(implode(' ', $response)));
+        if ('true' === $value) {
+            return true;
+        }
+        if ('false' === $value) {
+            return false;
+        }
+
+        // Fail closed on an unexpected response. It is safer to postpone a DJ break
+        // than to stack two pieces of speech because pending state was ambiguous.
+        return true;
     }
 
     /**
@@ -192,10 +277,42 @@ final class Liquidsoap extends AbstractLocalAdapter
         LiquidsoapQueues $queue,
         string $musicFile
     ): array {
+        // Keep the AI DJ call sites backward-compatible while moving their actual
+        // playout into the dedicated speech lane. Generated AI DJ audio always
+        // lives under the station's /ai_dj/ directory; ordinary listener requests
+        // and jingles do not. If the lane is unavailable, fail open to the legacy
+        // Requests queue so stations without the plugin continue to play speech.
+        if (LiquidsoapQueues::Requests === $queue && str_contains($musicFile, '/ai_dj/')) {
+            try {
+                $response = $this->command(
+                    $station,
+                    sprintf('%s.push %s', LiquidsoapQueues::AiDj->value, $musicFile)
+                );
+
+                if (!$this->isUnknownCommandResponse($response)) {
+                    return $response;
+                }
+            } catch (\Throwable) {
+                // Fall through to the legacy Requests queue.
+            }
+        }
+
         return $this->command(
             $station,
             sprintf('%s.push %s', $queue->value, $musicFile)
         );
+    }
+
+    /**
+     * @param string[] $response
+     */
+    private function isUnknownCommandResponse(array $response): bool
+    {
+        $text = strtolower(implode("\n", $response));
+
+        return str_contains($text, 'unknown command')
+            || str_contains($text, 'no such command')
+            || str_contains($text, 'invalid command');
     }
 
     /**
