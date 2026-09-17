@@ -715,8 +715,12 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // StationQueue's setter stamps timestamp_played when is_played becomes
             // true; clear that queue-time timestamp because only SongHistory proves
             // the AI DJ clip actually reached air.
+            // Mark the synthetic row consumed so the normal AutoDJ queue does not
+            // also try to play it. The setter stamps timestamp_played to now, which
+            // accurately reflects when the clip was submitted to Liquidsoap. Do NOT
+            // null it out afterwards - doing so re-dirties the entity and can cause
+            // Doctrine to emit a second UPDATE that produces duplicate history rows.
             $queueEntry->is_played = true;
-            $queueEntry->timestamp_played = null;
 
             $this->em->persist($queueEntry);
             $this->em->flush();

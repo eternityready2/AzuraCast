@@ -36,18 +36,23 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
     private const int WELCOME_RECOVERY_SECONDS = 1800;
 
     /**
-     * Production-main history lands at roughly a five-minute base interval scaled
-     * by talk frequency: 50% ~= 10 minutes (Bella), 75% ~= 6m40s (Onyx).
+     * Production-main history shows Onyx (~75% freq) talking roughly every 6 minutes
+     * and Bella (~50% freq) every 8-9 minutes. The formula is:
+     *   interval = TALK_BASE_INTERVAL_SECONDS / talk_frequency
+     * At 270s base: Onyx (0.75) -> 360s (6 min), Bella (0.50) -> 540s (9 min).
+     * The previous value of 300 pushed Bella out to 600s (10 min) and Onyx to 400s,
+     * which was noticeably quieter than production.
      */
-    private const int TALK_BASE_INTERVAL_SECONDS = 300;
+    private const int TALK_BASE_INTERVAL_SECONDS = 270;
 
     /**
-     * Production history shows Onyx commonly reaching about 7-8 heard breaks/hour
-     * while Bella naturally stays lower at her 50% cadence. Keep a hard ceiling for
-     * runaway protection without artificially suppressing the overnight production
-     * cadence. Mandatory lifecycle sign-offs are not blocked by this normal-talk cap.
+     * Production history shows Onyx reaching 8-10 on-air breaks per hour during
+     * active overnight shifts. The previous ceiling of 8 was cutting Onyx off
+     * early in the hour; raised to 10 to match observed production cadence while
+     * still preventing runaway chatter. Mandatory lifecycle sign-offs (welcome /
+     * sign-off) are not counted against this cap.
      */
-    private const int MAX_TALK_BREAKS_PER_HOUR = 8;
+    private const int MAX_TALK_BREAKS_PER_HOUR = 10;
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
