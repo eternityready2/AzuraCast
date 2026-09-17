@@ -24,4 +24,13 @@ final class AiDjRuntimeCadenceTest extends Unit
 
         self::assertSame(300, $method->invoke($task, 1.00));
     }
+
+    public function testProductionHourlyTalkCeiling(): void
+    {
+        $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
+
+        // Production Onyx commonly lands around 7-8 heard breaks/hour while Bella
+        // naturally remains lower because her configured 50% cadence is slower.
+        self::assertSame(8, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
+    }
 }
