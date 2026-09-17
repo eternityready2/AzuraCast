@@ -484,6 +484,15 @@ final class StationPlaylist implements
             return false;
         }
 
+        // A scheduled playlist's interrupt behavior belongs to its schedule row
+        // (strict_start), not the legacy playlist-wide interrupt option. Keeping
+        // scheduled playlists out of legacy interrupt eligibility prevents a
+        // Flexible programme from being selected by the Smart Duck queue before
+        // QueueInterruptingTracks can validate it.
+        if ($interrupting && $this->schedule_items->count() > 0) {
+            return false;
+        }
+
         if ($interrupting !== $this->backendInterruptOtherSongs()) {
             return false;
         }
