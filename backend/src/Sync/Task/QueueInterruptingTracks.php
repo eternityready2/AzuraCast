@@ -156,25 +156,6 @@ final class QueueInterruptingTracks extends AbstractTask
         }
 
         foreach ($songsToPlay as $sq) {
-            $playlist = $sq->playlist;
-
-            if (
-                null !== $playlist
-                && $playlist->schedule_items->count() > 0
-                && !$this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $now)
-                && !isset($sponsorPlaylistIdsBehindPace[$playlist->id])
-            ) {
-                $this->logger->warning(
-                    'Skipping Flexible scheduled playlist from interrupting queue; schedule row does not request Strict start.',
-                    [
-                        'queue_id' => $sq->id,
-                        'playlist_id' => $playlist->id,
-                        'playlist_name' => $playlist->name,
-                    ]
-                );
-                continue;
-            }
-
             $event = AnnotateNextSong::fromStationQueue($sq, true);
             $this->eventDispatcher->dispatch($event);
 
