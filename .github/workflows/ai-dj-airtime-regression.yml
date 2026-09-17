@@ -87,7 +87,7 @@ jobs:
           ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
 
           grep -q 'TALK_BASE_INTERVAL_SECONDS = 300' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
-          grep -q 'MAX_TALK_BREAKS_PER_HOUR = 5' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'MAX_TALK_BREAKS_PER_HOUR = 8' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'WELCOME_RECOVERY_SECONDS = 1800' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
