@@ -29,8 +29,8 @@ final class AiDjRuntimeCadenceTest extends Unit
     {
         $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
 
-        // The live production target is conversational, not continuous chatter:
-        // normal AI DJ speech should stay in the observed 3-5 breaks/hour range.
-        self::assertSame(5, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
+        // Production Onyx commonly lands around 7-8 heard breaks/hour while Bella
+        // naturally remains lower because her configured 50% cadence is slower.
+        self::assertSame(8, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
     }
 }
