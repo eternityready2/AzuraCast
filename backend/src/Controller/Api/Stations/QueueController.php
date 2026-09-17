@@ -15,10 +15,13 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Paginator;
+use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleForecastItem;
 use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
+use App\Radio\Backend\Liquidsoap;
+use App\Radio\Enums\LiquidsoapQueues;
 use App\Utilities\Time;
 use App\Utilities\Types;
 use Carbon\CarbonImmutable;
@@ -114,6 +117,7 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly StationQueueApiGenerator $queueApiGenerator,
         private readonly StationQueueRepository $queueRepo,
         private readonly QueueLogCache $queueLogCache,
+        private readonly Adapters $adapters,
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
@@ -138,6 +142,7 @@ final class QueueController extends AbstractStationApiCrudController
         $hourEnd = $this->getCurrentHourEnd($station, $now);
         $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $hourEnd);
         $aiNewsTimes = $this->aiNewsScheduleForecast->getForecast($station, $now, $hourEnd);
+        $pendingAiDjRow = $this->getPendingAiDjRuntimeRow($station);
 
         $qb = $this->queueRepo->getUnplayedBaseQuery($station);
 
@@ -175,7 +180,7 @@ final class QueueController extends AbstractStationApiCrudController
 
         // With no runtime-owned content to add or reconcile, preserve the native
         // upstream queue endpoint behavior exactly.
-        if ([] === $rigidWindows && [] === $aiNewsTimes) {
+        if ([] === $rigidWindows && [] === $aiNewsTimes && null === $pendingAiDjRow) {
             return $this->listPaginatedFromQuery(
                 $request,
                 $response,
@@ -196,8 +201,8 @@ final class QueueController extends AbstractStationApiCrudController
             }
 
             // Strict only suppresses ordinary playlist underlay. Real runtime rows
-            // such as AI DJ custom-URI clips, requests and TOH IDs remain visible;
-            // the queue page reports those rows but does not create or reschedule them.
+            // such as requests and TOH IDs remain visible; the queue page reports
+            // those rows but does not create or reschedule them.
             if ($this->isSuppressedByRigidWindow($queueRow, $rigidWindows)) {
                 continue;
             }
@@ -208,6 +213,14 @@ final class QueueController extends AbstractStationApiCrudController
         $hasGroupFilter = null !== $filterGroup || $filterViaGroup;
 
         if (!$hasGroupFilter) {
+            if (
+                null !== $pendingAiDjRow
+                && null === $filterPlaylistId
+                && $this->aiDjMatchesSearch($pendingAiDjRow, $searchPhrase)
+            ) {
+                $rows[] = $this->viewPendingAiDjRecord($pendingAiDjRow);
+            }
+
             foreach ($this->rigidScheduleForecast->getForecast($station, $now, $hourEnd, 500) as $forecastItem) {
                 if (null !== $filterPlaylistId && $forecastItem->playlist->id !== $filterPlaylistId) {
                     continue;
@@ -251,6 +264,41 @@ final class QueueController extends AbstractStationApiCrudController
     {
         $expectedAt = $row->timestamp_played ?? $row->timestamp_cued;
         return $expectedAt >= $boundary;
+    }
+
+    private function getPendingAiDjRuntimeRow(Station $station): ?StationQueue
+    {
+        $backend = $this->adapters->getBackendAdapter($station);
+        if (!$backend instanceof Liquidsoap) {
+            return null;
+        }
+
+        try {
+            if ($backend->isQueueEmpty($station, LiquidsoapQueues::AiDj)) {
+                return null;
+            }
+        } catch (\Throwable) {
+            // Reporting must never interfere with playout if runtime inspection fails.
+            return null;
+        }
+
+        /** @var StationQueue|null $row */
+        $row = $this->em->createQuery(
+            <<<'DQL'
+                SELECT sq FROM App\Entity\StationQueue sq
+                WHERE sq.station = :station
+                AND sq.is_played = 1
+                AND sq.timestamp_played IS NULL
+                AND sq.autodj_custom_uri IS NOT NULL
+                AND sq.autodj_custom_uri LIKE :aiDjPath
+                ORDER BY sq.timestamp_cued DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('aiDjPath', '%/ai_dj/%')
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return $row;
     }
 
     /**
@@ -298,6 +346,23 @@ final class QueueController extends AbstractStationApiCrudController
         return false !== mb_stripos($haystack, $searchPhrase);
     }
 
+    private function aiDjMatchesSearch(StationQueue $row, ?string $searchPhrase): bool
+    {
+        if (null === $searchPhrase) {
+            return true;
+        }
+
+        return false !== mb_stripos(
+            implode(' ', [
+                'AI DJ',
+                (string)$row->title,
+                (string)$row->artist,
+                (string)$row->text,
+            ]),
+            $searchPhrase,
+        );
+    }
+
     private function aiNewsMatchesSearch(?string $searchPhrase): bool
     {
         if (null === $searchPhrase) {
@@ -308,6 +373,29 @@ final class QueueController extends AbstractStationApiCrudController
             'News Hour Eternity Ready News Bulletin Hourly news bulletin AI News',
             $searchPhrase,
         );
+    }
+
+    /** @return array<string, mixed> */
+    private function viewPendingAiDjRecord(StationQueue $record): array
+    {
+        $row = $this->queueApiGenerator->__invoke($record);
+        // Synthetic AI DJ rows are marked consumed in the database so normal
+        // AutoDJ can never replay them. For this read-only reporting view, expose
+        // the row as upcoming only while Liquidsoap confirms AI DJ speech is pending.
+        $row->played_at = $record->timestamp_cued->getTimestamp();
+
+        $apiResponse = new StationQueueDetailed();
+        $apiResponse->sent_to_autodj = true;
+        $apiResponse->is_played = false;
+        $apiResponse->autodj_custom_uri = null;
+        $apiResponse->media_type = 'speech';
+        $apiResponse->log = [];
+        $apiResponse->links = [];
+
+        return [
+            ...get_object_vars($row),
+            ...get_object_vars($apiResponse),
+        ];
     }
 
     /** @return array<string, mixed> */
