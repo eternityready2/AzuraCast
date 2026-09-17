@@ -36,23 +36,26 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
     private const int WELCOME_RECOVERY_SECONDS = 1800;
 
     /**
-     * Production-main history shows Onyx (~75% freq) talking roughly every 6 minutes
-     * and Bella (~50% freq) every 8-9 minutes. The formula is:
-     *   interval = TALK_BASE_INTERVAL_SECONDS / talk_frequency
-     * At 270s base: Onyx (0.75) -> 360s (6 min), Bella (0.50) -> 540s (9 min).
-     * The previous value of 300 pushed Bella out to 600s (10 min) and Onyx to 400s,
-     * which was noticeably quieter than production.
+     * Talk interval formula: TALK_BASE_INTERVAL_SECONDS / talk_frequency
+     *
+     * Confirmed DJ settings:
+     *   Onyx  = 100% (1.0)  -> interval = 270s (~4.5 min between breaks)
+     *   Bella =  75% (0.75) -> interval = 360s (~6   min between breaks)
+     *
+     * The previous value of 300 gave Onyx 300s (5 min, slightly quiet) and
+     * Bella 400s (~6.7 min). At 270 Onyx is more chatty, matching the 100%
+     * intent, and Bella stays natural at ~6 min.
      */
     private const int TALK_BASE_INTERVAL_SECONDS = 270;
 
     /**
-     * Production history shows Onyx reaching 8-10 on-air breaks per hour during
-     * active overnight shifts. The previous ceiling of 8 was cutting Onyx off
-     * early in the hour; raised to 10 to match observed production cadence while
-     * still preventing runaway chatter. Mandatory lifecycle sign-offs (welcome /
-     * sign-off) are not counted against this cap.
+     * Onyx runs at 100% talk frequency. In a busy overnight hour that can
+     * legitimately produce 10-12 on-air breaks (roughly every 4-5 minutes
+     * across ~50 usable minutes after IDs/news). The previous ceiling of 8
+     * was silencing Onyx for the last 20+ minutes of many hours.
+     * Mandatory lifecycle sign-offs (welcome/sign-off) are not counted here.
      */
-    private const int MAX_TALK_BREAKS_PER_HOUR = 10;
+    private const int MAX_TALK_BREAKS_PER_HOUR = 12;
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
