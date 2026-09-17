@@ -87,7 +87,7 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
         self::assertStringNotContainsString('discard_autodj_current_cleanly()', $config);
     }
 
-    public function testEmergencyAndInterruptingSchedulesRemainOutsideFlexiblePolicy(): void
+    public function testEmergencyStaysOutsideFlexiblePolicyButLegacyInterruptFlagStillGetsWatchdog(): void
     {
         [$station, $playlist, $schedule] = $this->makeScheduledProgram(false);
         $schedule->is_emergency = true;
@@ -104,10 +104,10 @@ final class FlexibleScheduleRuntimeConfigurationTest extends Unit
 
         $event = new WriteLiquidsoapConfiguration($station, false, false);
         (new FlexibleScheduleRuntimeConfiguration())->writeRuntime($event);
-        self::assertStringNotContainsString(
-            'bounded_flexible_current_playlist_id',
-            $event->buildConfiguration(),
-        );
+        $config = $event->buildConfiguration();
+
+        self::assertStringContainsString('bounded_flexible_current_playlist_id', $config);
+        self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
     }
 
     public function testRemoteStreamUsesSameDeadlineWatchdogWithoutOpeningSecondInput(): void
