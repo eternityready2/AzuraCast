@@ -42,12 +42,12 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
     private const int TALK_BASE_INTERVAL_SECONDS = 300;
 
     /**
-     * Production main normally lands around 3-5 heard DJ breaks per hour. Keep the
-     * deterministic wall-clock scheduler from exceeding that natural ceiling when
-     * many short tracks produce unusually frequent safe boundaries. Mandatory
-     * lifecycle sign-offs are intentionally not blocked by this normal-talk cap.
+     * Production history shows Onyx commonly reaching about 7-8 heard breaks/hour
+     * while Bella naturally stays lower at her 50% cadence. Keep a hard ceiling for
+     * runaway protection without artificially suppressing the overnight production
+     * cadence. Mandatory lifecycle sign-offs are not blocked by this normal-talk cap.
      */
-    private const int MAX_TALK_BREAKS_PER_HOUR = 5;
+    private const int MAX_TALK_BREAKS_PER_HOUR = 8;
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
