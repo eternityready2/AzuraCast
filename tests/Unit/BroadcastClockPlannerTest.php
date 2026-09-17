@@ -49,6 +49,26 @@ final class BroadcastClockPlannerTest extends Unit
         self::assertSame(90, $seconds);
     }
 
+    public function testLegacyInterruptOptionDoesNotOverrideFlexibleScheduleOwnership(): void
+    {
+        [$station, $program] = $this->makeScheduledProgram(1100, 1200);
+        $program->backend_options = [StationPlaylist::OPTION_INTERRUPT_OTHER_SONGS];
+
+        self::assertSame(
+            90,
+            $this->planner->secondsUntilNextSoftAnchor(
+                $station,
+                $this->time('2026-09-04 10:58:30'),
+            ),
+        );
+        self::assertTrue(
+            $this->planner->isProgramWindowActive(
+                $station,
+                $this->time('2026-09-04 11:30:00'),
+            ),
+        );
+    }
+
     public function testSoftAnchorContentDurationIncludesCrossfadeOverlap(): void
     {
         [$station] = $this->makeScheduledProgram(1100, 1200);
