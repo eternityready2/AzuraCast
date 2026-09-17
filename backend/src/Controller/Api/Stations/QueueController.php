@@ -15,6 +15,7 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Paginator;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleForecastItem;
 use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
@@ -115,6 +116,7 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly QueueLogCache $queueLogCache,
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
+        private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
@@ -129,14 +131,13 @@ final class QueueController extends AbstractStationApiCrudController
         $station = $request->getStation();
         $now = Time::nowUtc();
 
-        // Preserve the normal Upcoming Song Queue horizon. If the station uses a
-        // wall-clock lookahead (for example 30-60 minutes), use that exact horizon.
-        // If it uses the upstream track-count queue instead, derive the horizon from
-        // the real rows that are already queued. Strict scheduled songs are spliced
-        // into this SAME window; they do not replace it with a separate queue mode.
-        $operationalQueue = $this->queueRepo->getUnplayedQueue($station);
-        $horizonEnd = $this->getUpcomingHorizonEnd($station, $operationalQueue, $now);
-        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $horizonEnd);
+        // This endpoint remains a read-only view of what the existing playout
+        // systems say is upcoming. Runtime-owned projections are deliberately
+        // limited to the remainder of the current station-local clock hour so a
+        // long Strict block never turns this page into a multi-hour programme log.
+        $hourEnd = $this->getCurrentHourEnd($station, $now);
+        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $hourEnd);
+        $aiNewsTimes = $this->aiNewsScheduleForecast->getForecast($station, $now, $hourEnd);
 
         $qb = $this->queueRepo->getUnplayedBaseQuery($station);
 
@@ -172,9 +173,9 @@ final class QueueController extends AbstractStationApiCrudController
             ->addOrderBy('sq.timestamp_cued', 'ASC')
             ->addOrderBy('sq.id', 'ASC');
 
-        // No Strict / Exact Time window intersects the normal live queue horizon,
-        // so keep the upstream/native queue endpoint behavior completely unchanged.
-        if ([] === $rigidWindows) {
+        // With no runtime-owned content to add or reconcile, preserve the native
+        // upstream queue endpoint behavior exactly.
+        if ([] === $rigidWindows && [] === $aiNewsTimes) {
             return $this->listPaginatedFromQuery(
                 $request,
                 $response,
@@ -186,25 +187,28 @@ final class QueueController extends AbstractStationApiCrudController
         $queueRows = $qb->getQuery()->getResult();
         $rows = [];
 
-        // Keep all real queue rows that can actually reach air in this lookahead.
-        // Rows whose expected start falls inside a Strict native window are the
-        // AutoDJ underlay and will not air then, so hide those misleading rows.
-        // TOH IDs remain because they retain higher wall-clock authority.
         foreach ($queueRows as $queueRow) {
+            // Keep the page focused on this clock hour. A TOH Legal ID is the
+            // intentional exception because its existing lookahead may queue the
+            // next boundary during the latter half of the current hour.
+            if (!$queueRow->top_of_hour_legal_id && $this->startsAtOrAfter($queueRow, $hourEnd)) {
+                continue;
+            }
+
+            // Strict only suppresses ordinary playlist underlay. Real runtime rows
+            // such as AI DJ custom-URI clips, requests and TOH IDs remain visible;
+            // the queue page reports those rows but does not create or reschedule them.
             if ($this->isSuppressedByRigidWindow($queueRow, $rigidWindows)) {
                 continue;
             }
+
             $rows[] = $this->viewRecord($queueRow, $request);
         }
 
         $hasGroupFilter = null !== $filterGroup || $filterViaGroup;
 
-        // Fill the SAME normal lookahead with songs from every Strict local-song
-        // schedule that intersects it, including a schedule that starts later in
-        // the window. This is intentionally a short live queue forecast, not the
-        // full 24-hour Linear Log.
         if (!$hasGroupFilter) {
-            foreach ($this->rigidScheduleForecast->getForecast($station, $now, $horizonEnd, 500) as $forecastItem) {
+            foreach ($this->rigidScheduleForecast->getForecast($station, $now, $hourEnd, 500) as $forecastItem) {
                 if (null !== $filterPlaylistId && $forecastItem->playlist->id !== $filterPlaylistId) {
                     continue;
                 }
@@ -213,6 +217,16 @@ final class QueueController extends AbstractStationApiCrudController
                 }
 
                 $rows[] = $this->viewRigidForecastRecord($station, $forecastItem);
+            }
+
+            if (null === $filterPlaylistId) {
+                foreach ($aiNewsTimes as $newsTime) {
+                    if (!$this->aiNewsMatchesSearch($searchPhrase)) {
+                        continue;
+                    }
+
+                    $rows[] = $this->viewAiNewsForecastRecord($station, $newsTime);
+                }
             }
         }
 
@@ -224,50 +238,19 @@ final class QueueController extends AbstractStationApiCrudController
         return Paginator::fromArray($rows, $request)->write($response);
     }
 
-    /**
-     * @param array<array-key, StationQueue> $queueRows
-     */
-    private function getUpcomingHorizonEnd(
-        Station $station,
-        array $queueRows,
-        DateTimeImmutable $now,
-    ): CarbonImmutable {
-        $horizonEnd = CarbonImmutable::instance($now);
-        $lookaheadMinutes = max(0, $station->backend_config->autodj_queue_lookahead_minutes);
+    private function getCurrentHourEnd(Station $station, DateTimeImmutable $now): CarbonImmutable
+    {
+        return CarbonImmutable::instance($now)
+            ->setTimezone($station->getTimezoneObject())
+            ->startOfHour()
+            ->addHour()
+            ->utc();
+    }
 
-        if ($lookaheadMinutes > 0) {
-            $horizonEnd = $horizonEnd->addMinutes($lookaheadMinutes);
-        }
-
-        // Zero lookahead means upstream's normal track-count behavior. Preserve
-        // that by extending through the rows already in the operational queue.
-        // Even when a time lookahead is configured, never shorten an already-built
-        // queue if its final row reaches slightly farther than the configured mark.
-        foreach ($queueRows as $queueRow) {
-            $rowStart = $queueRow->timestamp_played ?? $queueRow->timestamp_cued;
-            $rowEnd = CarbonImmutable::instance($rowStart)->addSeconds(
-                (int)max(1, ceil($queueRow->duration ?? 1.0))
-            );
-
-            if ($rowEnd > $horizonEnd) {
-                $horizonEnd = $rowEnd;
-            }
-        }
-
-        // If the ordinary queue is temporarily empty during an active Strict
-        // program and no wall-clock lookahead is configured, still expose the
-        // active source's near-term songs instead of returning an empty page.
-        if ($horizonEnd <= $now) {
-            $activeWindow = $this->rigidScheduleWindowResolver->getActiveWindow($station, $now);
-            if (null !== $activeWindow) {
-                $horizonEnd = CarbonImmutable::instance($now)->addMinutes(60);
-                if ($horizonEnd > $activeWindow['end']) {
-                    $horizonEnd = $activeWindow['end'];
-                }
-            }
-        }
-
-        return $horizonEnd;
+    private function startsAtOrAfter(StationQueue $row, DateTimeImmutable $boundary): bool
+    {
+        $expectedAt = $row->timestamp_played ?? $row->timestamp_cued;
+        return $expectedAt >= $boundary;
     }
 
     /**
@@ -277,7 +260,11 @@ final class QueueController extends AbstractStationApiCrudController
         StationQueue $row,
         array $rigidWindows,
     ): bool {
-        if ($row->top_of_hour_legal_id) {
+        if (
+            $row->top_of_hour_legal_id
+            || null !== $row->autodj_custom_uri
+            || null === $row->playlist
+        ) {
             return false;
         }
 
@@ -311,6 +298,18 @@ final class QueueController extends AbstractStationApiCrudController
         return false !== mb_stripos($haystack, $searchPhrase);
     }
 
+    private function aiNewsMatchesSearch(?string $searchPhrase): bool
+    {
+        if (null === $searchPhrase) {
+            return true;
+        }
+
+        return false !== mb_stripos(
+            'News Hour Eternity Ready News Bulletin Hourly news bulletin AI News',
+            $searchPhrase,
+        );
+    }
+
     /** @return array<string, mixed> */
     private function viewRigidForecastRecord(
         Station $station,
@@ -327,6 +326,28 @@ final class QueueController extends AbstractStationApiCrudController
         $apiResponse->is_played = false;
         $apiResponse->autodj_custom_uri = null;
         $apiResponse->media_type = $item->media->type;
+        $apiResponse->log = [];
+        $apiResponse->links = [];
+
+        return [
+            ...get_object_vars($row),
+            ...get_object_vars($apiResponse),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function viewAiNewsForecastRecord(
+        Station $station,
+        DateTimeImmutable $playedAt,
+    ): array {
+        $record = $this->aiNewsScheduleForecast->toQueueRow($station, $playedAt);
+        $row = $this->queueApiGenerator->__invoke($record);
+
+        $apiResponse = new StationQueueDetailed();
+        $apiResponse->sent_to_autodj = true;
+        $apiResponse->is_played = false;
+        $apiResponse->autodj_custom_uri = null;
+        $apiResponse->media_type = 'news';
         $apiResponse->log = [];
         $apiResponse->links = [];
 
