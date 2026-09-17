@@ -131,9 +131,13 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
         $queueRow->hour_boundary_max_play_seconds = $targetSeconds;
         $queueRow->hour_boundary_enforce_cap = true;
         $queueRow->clock_wheel_stretch_ratio = null;
-        $queueRow->duration = null === $queueRow->duration
-            ? (float)$targetSeconds
-            : min($queueRow->duration, (float)$targetSeconds);
+
+        // Keep StationQueue::duration as the media's projected/full duration.
+        // The runtime playout limit is represented independently by
+        // hour_boundary_max_play_seconds and consumed by the annotator/Liquidsoap
+        // cue-out path. Replacing duration with the remaining wall-clock window
+        // makes Upcoming Queue/API clients report a 3-4 minute song as only a few
+        // seconds long even though the underlying media duration is unchanged.
     }
 
     private function resolveLikelyStart(Station $station): DateTimeImmutable
