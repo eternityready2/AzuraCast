@@ -126,10 +126,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Requests);
+        // Check the dedicated AI DJ speech lane. A clip already waiting or
+        // prefetched in that lane means it is not yet safe to queue another.
+        // Using the AiDj queue (not Requests) avoids a false positive: listener
+        // requests live in Requests and must not block AI DJ generation.
+        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::AiDj);
 
         if (!$queueEmpty) {
-            $this->logger->debug('AI DJ: Skipped - Liquidsoap requests queue is not empty.');
+            $this->logger->debug('AI DJ: Skipped - AI DJ speech lane is not empty.');
             return;
         }
 
