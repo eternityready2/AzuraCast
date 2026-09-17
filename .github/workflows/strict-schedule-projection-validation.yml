@@ -8,6 +8,7 @@ on:
     paths:
       - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/AiNewsScheduleForecastService.php'
       - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
@@ -19,6 +20,7 @@ on:
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
       - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/AiNewsScheduleForecastServiceTest.php'
       - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleWindowResolverTest.php'
       - '.github/workflows/strict-schedule-projection-validation.yml'
@@ -27,6 +29,7 @@ on:
     paths:
       - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php'
+      - 'backend/src/Radio/AutoDJ/AiNewsScheduleForecastService.php'
       - 'backend/src/Radio/AutoDJ/LinearLogBuilder.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php'
       - 'backend/src/Radio/AutoDJ/RigidScheduleForecastService.php'
@@ -38,6 +41,7 @@ on:
       - 'frontend/components/Stations/Reports/LinearLog.vue'
       - 'frontend/components/Stations/Reports/LinearLogSchedule.vue'
       - 'frontend/functions/playlistBehaviorDetector.ts'
+      - 'tests/Unit/AiNewsScheduleForecastServiceTest.php'
       - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleWindowResolverTest.php'
       - '.github/workflows/strict-schedule-projection-validation.yml'
@@ -74,6 +78,7 @@ jobs:
           test -f backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php
           test -f backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
           test -f backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php
+          test -f backend/src/Radio/AutoDJ/AiNewsScheduleForecastService.php
 
           # Strict runtime owns only explicitly strict/emergency rows and exposes
           # the exact native source cursor used by planning/reporting surfaces.
@@ -84,13 +89,16 @@ jobs:
           grep -q 'playlist.files(mime_type="audio/x-mpegurl"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           ! grep -q '\|\| \$playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
 
-          # The 24-hour Linear Log remains the full planner. Upcoming Queue keeps
-          # its normal configured/track-count lookahead and splices Strict songs
-          # into only that same short horizon. Playing Next uses the active cursor.
+          # The 24-hour Linear Log remains the full planner. Upcoming Queue is only
+          # a reporting surface: runtime-owned Strict/AI News projections are capped
+          # at the current station-local hour, while real queued runtime rows remain
+          # authoritative and AI DJ custom-URI rows survive Strict underlay filtering.
           grep -q 'function getActiveUpcoming' backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
           grep -q 'getActiveUpcoming' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          grep -q 'autodj_queue_lookahead_minutes' backend/src/Controller/Api/Stations/QueueController.php
-          grep -q 'getUnplayedQueue' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'getCurrentHourEnd' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'startsAtOrAfter' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'AiNewsScheduleForecastService' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'autodj_custom_uri' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'getWindows' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'getForecast' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'isSuppressedByRigidWindow' backend/src/Controller/Api/Stations/QueueController.php
@@ -168,6 +176,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          vendor/bin/codecept run tests/Unit/AiNewsScheduleForecastServiceTest.php
           vendor/bin/codecept run tests/Unit/RigidScheduleWindowResolverTest.php
           vendor/bin/codecept run tests/Unit/RigidScheduleRuntimeConfigurationTest.php
           vendor/bin/codecept run tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php
@@ -184,11 +193,13 @@ jobs:
           vendor/bin/phpstan analyze -c phpstan.strict-schedule.neon --memory-limit=-1 --no-progress \
             backend/src/Controller/Api/Stations/QueueController.php \
             backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php \
+            backend/src/Radio/AutoDJ/AiNewsScheduleForecastService.php \
             backend/src/Radio/AutoDJ/LinearLogBuilder.php \
             backend/src/Radio/AutoDJ/RigidScheduleForecastItem.php \
             backend/src/Radio/AutoDJ/RigidScheduleForecastService.php \
             backend/src/Radio/AutoDJ/RigidScheduleWindowResolver.php \
             plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
+            tests/Unit/AiNewsScheduleForecastServiceTest.php \
             tests/Unit/RigidScheduleRuntimeConfigurationTest.php \
             tests/Unit/RigidScheduleWindowResolverTest.php
 
