@@ -295,9 +295,18 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
             $startsAt = $shiftStartsAt;
         }
 
+        // ends_at is the SHIFT end, not the scan candidate. The candidate tells us
+        // the latest time at which it is SAFE for the sign-off to air (no TOH/news
+        // overlap). But the actual air time is the current song's end, which can be
+        // anywhere between the candidate and shiftEndsAt. Using latestSafe as ends_at
+        // caused the post-render guard (freshAirTime > outroWindowEndsAt) and the
+        // pre-render guard (estimatedAirTime > outroWindow['ends_at']) to reject any
+        // sign-off whose current song ends even a few seconds past the candidate —
+        // exactly what happened when a hymn ended at :54:39 and the window closed
+        // at :54:00 (shift end :55:00, OUTRO_TAIL_RESERVE_SECONDS=60).
         return [
             'starts_at' => $startsAt,
-            'ends_at' => $latestSafe,
+            'ends_at' => $shiftEndsAt,
         ];
     }
 
@@ -307,23 +316,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $second = (int)$candidate->format('s');
         $secondsIntoHour = ($minute * 60) + $second;
 
-        // Sign-offs are scheduled goodbyes, not casual talk breaks. They must fire
-        // as close to the actual shift end as possible. The ordinary talk cutoff
-        // (TOH_SPEECH_CUTOFF_SECONDS = 54:30) is intentionally conservative for
-        // regular breaks whose tail could bleed into the :55-:00 TOH window.
-        // A sign-off clip is short (~10s) and its boundary is the current song's
-        // end — blocking at :54:30 means any shift that ends at :55:xx loses its
-        // goodbye entirely when the current song ends between :54:30 and :55:00
-        // (exactly what the logs showed for Onyx: estimated_air_time :54:39,
-        // shift_end :55:00, blocked every retry minute for 4 minutes then expired).
-        //
-        // Use the actual TOH news/ID start (:57:00) as the sign-off hard wall.
-        // The post-hour buffer (:00-:03) still applies. This gives sign-offs a safe
-        // window all the way to :56:59 — enough to cover shift ends at any :55-:56
-        // slot without any risk of talking over legal IDs or news.
-        $signOffCutoffSeconds = 57 * 60; // :57:00 — where actual TOH content starts
-
-        if ($minute <= 3 || $secondsIntoHour >= $signOffCutoffSeconds) {
+        if ($minute <= 3 || $secondsIntoHour >= self::TOH_SPEECH_CUTOFF_SECONDS) {
             return false;
         }
 
