@@ -1498,14 +1498,9 @@ LIQ;
         $outputParams[] = 'public = ' . ($source->isPublic ? 'true' : 'false');
         $outputParams[] = 'encoding = ' . self::toRawString($charset);
 
-        // Keep the source connection alive through TTS generation and queue rebuilds.
-        // The default Liquidsoap source timeout (30s) is too short: if the PHP side
-        // is busy generating speech or rebuilding the queue, Icecast logs
-        // "Disconnecting source on /radio.mp3 due to socket timeout" and listeners
-        // get 504s until Liquidsoap reconnects. 120s gives plenty of headroom.
-        // reconnect_delay keeps retry attempts from hammering Icecast.
+        // Keep the Icecast network read/write timeout above Liquidsoap's 30s default.
+        // output.icecast supports timeout, but does not support reconnect_delay.
         $outputParams[] = 'timeout = 120.';
-        $outputParams[] = 'reconnect_delay = 5.';
 
         if (StreamProtocols::Https === $source->protocol) {
             $outputParams[] = 'transport = https_transport';
