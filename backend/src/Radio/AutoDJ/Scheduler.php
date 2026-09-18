@@ -714,11 +714,24 @@ final class Scheduler
     }
 
     /**
-     * True exactly once, during the single minute a playlist's "Strict" schedule
-     * item is due to start -- used to trigger a hard interrupt via the existing
-     * interrupting-queue mechanism, rather than waiting for the current track
-     * to finish naturally.
+     * True during the window in which a playlist's "Strict" schedule item is due
+     * to start -- used to trigger a hard interrupt via the interrupting-queue
+     * mechanism rather than waiting for the current track to finish naturally.
+     *
+     * A 5-minute grace window is intentional. QueueInterruptingTracks runs every
+     * minute, but can be delayed or skipped during station restarts, AirCheck
+     * recovery, or a brief Liquidsoap outage. Without grace, a missed minute means
+     * the show simply never plays (Faith Horizons at 5pm was lost this way after
+     * the 11pm AirCheck crash on 2026-09-16 left the station recovering past 5pm).
+     * Grace allows catch-up: if the task fires at 5:03pm it still hard-interrupts
+     * into Faith Horizons rather than silently skipping it.
+     *
+     * The window only applies while we are still within the show's own scheduled
+     * end_time, so a 30-minute show that started at 5pm cannot be hard-interrupted
+     * at 5:29pm by this logic.
      */
+    private const int STRICT_START_GRACE_MINUTES = 5;
+
     public function isPlaylistStrictStartDueNow(
         StationPlaylist $playlist,
         DateTimeZone $tz,
@@ -732,7 +745,23 @@ final class Scheduler
                 continue;
             }
 
-            if ($schedule->start_time !== $nowMinute) {
+            // Accept the exact start minute or up to STRICT_START_GRACE_MINUTES
+            // afterwards so a delayed sync task can still fire the hard interrupt.
+            $startCode = $schedule->start_time;
+            $startDt = StationSchedule::getDateTime($startCode, $tz, $now);
+            $graceEnd = $startDt->addMinutes(self::STRICT_START_GRACE_MINUTES);
+            $graceEndCode = (int)$graceEnd->format('H') * 100 + (int)$graceEnd->format('i');
+
+            $inGraceWindow = false;
+            if ($startCode <= $graceEndCode) {
+                // Normal (same-hour) case.
+                $inGraceWindow = $nowMinute >= $startCode && $nowMinute < $graceEndCode;
+            } else {
+                // Grace window crosses midnight.
+                $inGraceWindow = $nowMinute >= $startCode || $nowMinute < $graceEndCode;
+            }
+
+            if (!$inGraceWindow) {
                 continue;
             }
 
@@ -742,6 +771,22 @@ final class Scheduler
 
             if (!$this->isScheduleScheduledToPlayToday($schedule, $now->dayOfWeekIso)) {
                 continue;
+            }
+
+            // Only interrupt if we are still within the show's own scheduled
+            // end_time so a late catch-up cannot override an already-ended show.
+            $endCode = $schedule->end_time;
+            if ($endCode !== 0 && $endCode !== $startCode) {
+                if ($endCode > $startCode) {
+                    if ($nowMinute >= $endCode) {
+                        continue;
+                    }
+                } else {
+                    // Overnight show; end_time < start_time.
+                    if ($nowMinute >= $endCode && $nowMinute < $startCode) {
+                        continue;
+                    }
+                }
             }
 
             return true;

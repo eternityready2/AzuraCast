@@ -16,21 +16,23 @@ final class AiDjRuntimeCadenceTest extends Unit
         $task = $reflection->newInstanceWithoutConstructor();
         $method = $reflection->getMethod('getTalkIntervalSeconds');
 
-        // Production main history: Bella (50%) lands around every 10 minutes.
-        self::assertSame(600, $method->invoke($task, 0.50));
+        // Confirmed DJ frequencies from production settings:
+        // Bella = 75%  -> 270 / 0.75 = 360s (~6 min)
+        self::assertSame(360, $method->invoke($task, 0.75));
 
-        // Production main history: Onyx (75%) lands around every 6m40s / 7 min.
-        self::assertSame(400, $method->invoke($task, 0.75));
+        // Onyx = 100% -> 270 / 1.00 = 270s (~4.5 min)
+        self::assertSame(270, $method->invoke($task, 1.00));
 
-        self::assertSame(300, $method->invoke($task, 1.00));
+        // Lower boundary check: 50% -> 270 / 0.50 = 540s (~9 min)
+        self::assertSame(540, $method->invoke($task, 0.50));
     }
 
     public function testProductionHourlyTalkCeiling(): void
     {
         $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
 
-        // Production Onyx commonly lands around 7-8 heard breaks/hour while Bella
-        // naturally remains lower because her configured 50% cadence is slower.
-        self::assertSame(8, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
+        // Onyx at 100% legitimately hits 10-12 on-air breaks per hour.
+        // Ceiling raised from 8 to 12 to stop Onyx going silent mid-hour.
+        self::assertSame(12, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
     }
 }

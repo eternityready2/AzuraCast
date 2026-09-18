@@ -174,8 +174,12 @@ final class QueueController extends AbstractStationApiCrudController
         // The repository's operational queue order intentionally puts rows that
         // have already been handed to Liquidsoap before rows still waiting in PHP.
         // The user-facing queue is chronological instead.
+        // top_of_hour_legal_id rows are pre-staged and share the same timestamp_cued
+        // as songs planned around them. Sort them last within the same second so
+        // the queue page shows the correct play order: songs play, then ID fires.
         $qb->orderBy('sq.timestamp_played', 'ASC')
             ->addOrderBy('sq.timestamp_cued', 'ASC')
+            ->addOrderBy('sq.top_of_hour_legal_id', 'ASC')
             ->addOrderBy('sq.id', 'ASC');
 
         // With no runtime-owned content to add or reconcile, preserve the native

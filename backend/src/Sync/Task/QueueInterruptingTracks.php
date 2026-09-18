@@ -121,12 +121,29 @@ final class QueueInterruptingTracks extends AbstractTask
             $isSponsorBehindPace = isset($sponsorPlaylistIdsBehindPace[$playlist->id]);
 
             if ($playlist->schedule_items->count() > 0) {
-                // A scheduled playlist is interrupting only when its schedule row
-                // explicitly requests a Strict start. Do not inherit an old
-                // playlist-wide interrupt flag into a Flexible schedule.
+                // Hard-interrupt (track_sensitive=false) for Strict-start schedules:
+                // fires exactly at the scheduled minute to cut over immediately.
                 if (
                     $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $now)
                     || $isSponsorBehindPace
+                ) {
+                    $hasInterruptingPlaylist = true;
+                    break;
+                }
+
+                // Flexible scheduled playlists do NOT hard-interrupt mid-song, but
+                // they still need to be pushed into the interrupting queue once we
+                // are inside their active schedule window, otherwise the current
+                // AutoDJ song finishes, Liquidsoap asks for next_song, and the
+                // schedule_switch_playlists Liquidsoap switch (track_sensitive=true)
+                // picks them up on its own. They only fail to start if the queue is
+                // never populated - which is exactly what was happening before this
+                // fix. Check isPlaylistScheduledToPlayNow to confirm we are within
+                // the window, then let the normal interrupting-queue path below push
+                // one song so Liquidsoap transitions at the next track boundary.
+                if (
+                    $playlist->is_enabled
+                    && $this->scheduler->isPlaylistScheduledToPlayNow($playlist, $now)
                 ) {
                     $hasInterruptingPlaylist = true;
                     break;

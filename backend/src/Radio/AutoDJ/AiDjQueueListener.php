@@ -126,10 +126,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Requests);
+        // Check the dedicated AI DJ speech lane. A clip already waiting or
+        // prefetched in that lane means it is not yet safe to queue another.
+        // Using the AiDj queue (not Requests) avoids a false positive: listener
+        // requests live in Requests and must not block AI DJ generation.
+        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::AiDj);
 
         if (!$queueEmpty) {
-            $this->logger->debug('AI DJ: Skipped - Liquidsoap requests queue is not empty.');
+            $this->logger->debug('AI DJ: Skipped - AI DJ speech lane is not empty.');
             return;
         }
 
@@ -710,11 +714,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $queueEntry = new StationQueue($station, $song);
             $queueEntry->is_visible = true;
             $queueEntry->autodj_custom_uri = $clipPath;
-            // This direct request has already been submitted to Liquidsoap, so mark
-            // the synthetic row consumed to keep it out of the normal AutoDJ queue.
-            // StationQueue's setter stamps timestamp_played when is_played becomes
-            // true; clear that queue-time timestamp because only SongHistory proves
-            // the AI DJ clip actually reached air.
+            // Mark the row consumed so the normal AutoDJ queue does not also
+            // play this clip. Clear timestamp_played immediately after the setter
+            // stamps it: only SongHistory is the authoritative proof that the clip
+            // actually reached air, not the StationQueue submission timestamp.
             $queueEntry->is_played = true;
             $queueEntry->timestamp_played = null;
 
