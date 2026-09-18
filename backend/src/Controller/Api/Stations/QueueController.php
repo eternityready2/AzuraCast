@@ -140,7 +140,12 @@ final class QueueController extends AbstractStationApiCrudController
         // limited to the remainder of the current station-local clock hour so a
         // long Strict block never turns this page into a multi-hour programme log.
         $hourEnd = $this->getCurrentHourEnd($station, $now);
-        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $hourEnd);
+        // Extend the window-resolver horizon by the AutoDJ lookahead so that
+        // strict windows starting in the NEXT clock hour appear in the queue
+        // page before they start (Bug 1: Hymns & Favorites invisible before midnight).
+        $lookaheadMinutes = $station->getBackendConfig()->getAutoDjQueueLookaheadMinutes();
+        $lookaheadEnd = $hourEnd->addMinutes($lookaheadMinutes);
+        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $lookaheadEnd);
         $aiNewsTimes = $this->aiNewsScheduleForecast->getForecast($station, $now, $hourEnd);
         $pendingAiDjRow = $this->getPendingAiDjRuntimeRow($station);
 
@@ -493,3 +498,4 @@ final class QueueController extends AbstractStationApiCrudController
         return $response->withJson(Status::deleted());
     }
 }
+
