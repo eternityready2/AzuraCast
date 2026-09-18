@@ -307,7 +307,23 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $second = (int)$candidate->format('s');
         $secondsIntoHour = ($minute * 60) + $second;
 
-        if ($minute <= 3 || $secondsIntoHour >= self::TOH_SPEECH_CUTOFF_SECONDS) {
+        // Sign-offs are scheduled goodbyes, not casual talk breaks. They must fire
+        // as close to the actual shift end as possible. The ordinary talk cutoff
+        // (TOH_SPEECH_CUTOFF_SECONDS = 54:30) is intentionally conservative for
+        // regular breaks whose tail could bleed into the :55-:00 TOH window.
+        // A sign-off clip is short (~10s) and its boundary is the current song's
+        // end — blocking at :54:30 means any shift that ends at :55:xx loses its
+        // goodbye entirely when the current song ends between :54:30 and :55:00
+        // (exactly what the logs showed for Onyx: estimated_air_time :54:39,
+        // shift_end :55:00, blocked every retry minute for 4 minutes then expired).
+        //
+        // Use the actual TOH news/ID start (:57:00) as the sign-off hard wall.
+        // The post-hour buffer (:00-:03) still applies. This gives sign-offs a safe
+        // window all the way to :56:59 — enough to cover shift ends at any :55-:56
+        // slot without any risk of talking over legal IDs or news.
+        $signOffCutoffSeconds = 57 * 60; // :57:00 — where actual TOH content starts
+
+        if ($minute <= 3 || $secondsIntoHour >= $signOffCutoffSeconds) {
             return false;
         }
 
