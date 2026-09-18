@@ -343,12 +343,18 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
     private function getCurrentSongEndTime(Station $station): ?DateTimeImmutable
     {
         try {
+            // Allow any visible on-air item with a positive duration, not only
+            // media-linked songs. During a strict scheduled playlist (e.g. Hymns &
+            // Favorites) songs arrive via Liquidsoap feedback without a media_id and
+            // have SongHistory.media = NULL. Excluding them caused estimatedAirTime to
+            // always collapse to $now, making sign-off and welcome window math
+            // inaccurate during strict programme blocks. AI DJ clip rows have no
+            // duration and are excluded by the duration > 0 guard below.
             $last = $this->em->createQuery(
                 <<<'DQL'
                     SELECT sh FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
                     AND sh.is_visible = 1
-                    AND sh.media IS NOT NULL
                     ORDER BY sh.timestamp_start DESC
                 DQL
             )->setParameter('station', $station)

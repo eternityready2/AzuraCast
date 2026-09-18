@@ -175,6 +175,29 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             // A welcome becomes durable only after Liquidsoap reports it on air and
             // SongHistory records the metadata. If rendering/queueing was lost before
             // playout, clear volatile guards so a later heartbeat can recover it.
+            //
+            // IMPORTANT: During a strict scheduled playlist (e.g. Hymns & Favorites),
+            // songs are played by a native Liquidsoap source that does NOT write
+            // media-linked SongHistory rows. hasDurableWelcome() therefore stays false
+            // until the welcome clip itself airs — which can only happen at the next
+            // track boundary (end of the current hymn). If a welcome clip is already
+            // sitting in the dedicated AI DJ speech lane waiting for that boundary,
+            // thrashing the cache and retrying every minute is pointless: the queue
+            // listener immediately sees the lane as non-empty and skips, so we never
+            // actually queue a second clip — we just silently churn. Detect that case
+            // and wait instead of clearing volatile guards unnecessarily.
+            if (!$backend->isQueueEmpty($station, LiquidsoapQueues::AiDj)) {
+                // A welcome clip is already queued and waiting for the current track
+                // to finish. Leave all cache state intact so it fires cleanly when
+                // the hymn ends, then bail — normal talk is deferred to the next
+                // heartbeat that finds the lane empty and the welcome durable.
+                $this->logger->debug('AI DJ: Welcome pending in speech lane; waiting for track boundary.', [
+                    'station_id' => $station->id,
+                    'dj' => $dj->getName(),
+                ]);
+                return;
+            }
+
             $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
             $this->cache->delete('ai_dj_last_active_' . $station->id);
             $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);

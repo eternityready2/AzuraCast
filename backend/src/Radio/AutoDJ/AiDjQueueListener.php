@@ -527,13 +527,22 @@ final class AiDjQueueListener implements EventSubscriberInterface
     private function getCurrentSongEndTime(Station $station): ?\DateTimeImmutable
     {
         try {
+            // Prefer a media-linked song (AutoDJ queue path) for the most accurate
+            // duration, but fall back to any visible on-air item with a positive
+            // duration. During a strict scheduled playlist (e.g. Hymns & Favorites)
+            // songs are played by a native Liquidsoap source and arrive via Liquidsoap
+            // feedback without a media_id; their SongHistory rows have media = NULL but
+            // do carry a duration from the Liquidsoap track metadata. Excluding them
+            // caused directAirTime to always collapse to $now, making the TOH window
+            // math inaccurate and compounding the welcome-recovery deadlock.
+            // AI DJ clip rows have no duration and are excluded by the duration > 0
+            // guard below, so they never anchor the timing clock.
             /** @var \App\Entity\SongHistory|null $last */
             $last = $this->em->createQuery(
                 <<<'DQL'
                     SELECT sh FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
                     AND sh.is_visible = 1
-                    AND sh.media IS NOT NULL
                     ORDER BY sh.timestamp_start DESC
                 DQL
             )->setParameter('station', $station)
