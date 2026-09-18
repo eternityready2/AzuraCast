@@ -85,9 +85,19 @@ final class AiDjRuntimeConfiguration implements EventSubscriberInterface
             # keeps a queued clip parked while live is active; the PHP runtime also
             # stops generating new clips during live sessions, so a presenter cannot
             # be interrupted by a welcome, liner or sign-off generated mid-show.
+            #
+            # IMPORTANT: do NOT use predicate.activates() here. predicate.activates(p)
+            # only fires on the rising edge — when p transitions from false to true.
+            # During a normal no-live overnight shift, not azuracast.live_enabled() is
+            # always true, so predicate.activates fires once at Liquidsoap startup and
+            # never again. That permanently gates ai_dj_available shut: clips pushed
+            # into ai_dj_queue sit there unplayed for the entire shift (exactly what
+            # caused Onyx's 5h46m silence during Hymns & Favorites). Using a plain
+            # continuous predicate re-evaluates on every fallback availability check,
+            # so the queue plays whenever a clip is ready and live is not active.
             ai_dj_available = source.available(
                 ai_dj_queue,
-                predicate.activates({ not azuracast.live_enabled() })
+                { not azuracast.live_enabled() }
             )
 
             radio = fallback(
