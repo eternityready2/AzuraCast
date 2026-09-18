@@ -61,17 +61,6 @@ final class ConfigWriter implements EventSubscriberInterface
                 proxy_set_header          Cookie "";
                 proxy_connect_timeout     60;
 
-                # Icecast audio streams are long-lived HTTP connections. Explicitly
-                # set long timeouts so any outer proxy (Cloudflare, load balancer,
-                # or an upstream nginx) with a short default does not prematurely
-                # drop the stream and return a 504 to listeners.
-                proxy_read_timeout        21600;
-                proxy_send_timeout        21600;
-
-                # Do not close the upstream Icecast connection when a listener
-                # drops - let Icecast handle its own disconnect detection.
-                proxy_ignore_client_abort on;
-
                 proxy_set_header Host \$host/{$listenBaseUrl};
 
                 set \$args \$args&_ic2=1;
