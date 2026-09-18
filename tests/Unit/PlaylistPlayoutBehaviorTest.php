@@ -7,7 +7,9 @@ namespace Unit;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Event\Radio\WriteLiquidsoapConfiguration;
 use App\Radio\AutoDJ\Scheduler;
+use App\Radio\Backend\Liquidsoap\ConfigWriter;
 use App\Tests\Module;
 use Carbon\CarbonImmutable;
 use Codeception\Test\Unit;
@@ -41,6 +43,41 @@ final class PlaylistPlayoutBehaviorTest extends Unit
         self::assertTrue($playlist->backendAllowOverrun());
         self::assertTrue($playlist->backendPlaySingleTrack());
         self::assertTrue($playlist->backendMerge());
+    }
+
+    public function testScheduledRowsIgnoreLegacyInterruptOptionForBackendRouting(): void
+    {
+        $station = $this->makeStation();
+        $playlist = new StationPlaylist($station);
+        $playlist->name = 'Flexible Scheduled Programme';
+        $playlist->backend_options = [StationPlaylist::OPTION_INTERRUPT_OTHER_SONGS];
+
+        // Unscheduled playlists keep the legacy behavior unchanged.
+        self::assertTrue($playlist->backendInterruptOtherSongs());
+        self::assertTrue(
+            ConfigWriter::shouldWritePlaylist(
+                new WriteLiquidsoapConfiguration($station, false, false),
+                $playlist,
+            ),
+        );
+
+        $schedule = new StationSchedule($playlist);
+        $schedule->start_time = 1100;
+        $schedule->end_time = 1200;
+        $schedule->days = [];
+        $schedule->strict_start = false;
+        $playlist->schedule_items->add($schedule);
+
+        // Once schedule rows exist, their strict_start/emergency settings own
+        // the start behavior. The stale playlist-wide interrupt flag must not
+        // force a native Liquidsoap interrupt source/switch for a Flexible row.
+        self::assertFalse($playlist->backendInterruptOtherSongs());
+        self::assertFalse(
+            ConfigWriter::shouldWritePlaylist(
+                new WriteLiquidsoapConfiguration($station, false, false),
+                $playlist,
+            ),
+        );
     }
 
     public function testFutureDatedScheduleCannotPlayEarly(): void
