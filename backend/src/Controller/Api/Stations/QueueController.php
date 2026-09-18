@@ -143,7 +143,7 @@ final class QueueController extends AbstractStationApiCrudController
         // Extend the window-resolver horizon by the AutoDJ lookahead so that
         // strict windows starting in the NEXT clock hour appear in the queue
         // page before they start (Bug 1: Hymns & Favorites invisible before midnight).
-        $lookaheadMinutes = $station->getBackendConfig()->getAutoDjQueueLookaheadMinutes();
+        $lookaheadMinutes = $station->backend_config->autodj_queue_lookahead_minutes;
         $lookaheadEnd = $hourEnd->addMinutes($lookaheadMinutes);
         $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $lookaheadEnd);
         $aiNewsTimes = $this->aiNewsScheduleForecast->getForecast($station, $now, $hourEnd);
