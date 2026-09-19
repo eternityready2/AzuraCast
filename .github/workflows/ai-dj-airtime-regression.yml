@@ -79,15 +79,31 @@ jobs:
           set -euo pipefail
           git diff --check origin/dev...HEAD
 
-          # AI speech is intentionally wall-clock driven. Slow TTS/API work must
-          # never run as a BuildQueue event subscriber and block music selection.
+          # AI DJ cadence is production-proven to run directly off real BuildQueue
+          # song-boundary events (see main branch AiDjQueueListener, unchanged
+          # architecture, 13-day production log averaging 5.0-5.7 breaks/hr).
+          # Commit 782a069 removed these subscribers from events.php believing
+          # synchronous TTS would block queue building; production runs the same
+          # synchronous TTS calls directly in BuildQueue for 13+ days with no
+          # reported stalls. Removing them collapsed dev's cadence from ~6/hr to
+          # 0-1/hr because AiDjShiftLifecycleRuntimeTask's 1-minute cron alone
+          # cannot reproduce the natural per-song-boundary cadence. All three
+          # must stay registered; the wall-clock task remains ADDITIONALLY
+          # responsible for welcome/sign-off reliability and Strict-playlist
+          # catch-up talk, where no real BuildQueue event fires at all.
           grep -q 'App\\Sync\\Task\\AiDjShiftLifecycleRuntimeTask::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjQueueListener::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjShiftLifecycleListener::class' backend/config/events.php
-          ! grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
+          grep -q 'App\\Radio\\AutoDJ\\AiDjQueueListener::class' backend/config/events.php
+          grep -q 'App\\Radio\\AutoDJ\\AiDjShiftLifecycleListener::class' backend/config/events.php
+          grep -q 'App\\Radio\\AutoDJ\\AiDjCadenceWatchdogSubscriber::class' backend/config/events.php
 
-          grep -q 'TALK_BASE_INTERVAL_SECONDS = 270' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
-          grep -q 'MAX_TALK_BREAKS_PER_HOUR = 12' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          # Wall-clock catch-up interval/ceiling recalibrated against the
+          # production (main branch) 13-day log: Onyx averaged 5.67/hr (max
+          # 7.67/hr), Bella averaged 5.00/hr (max 5.86/hr). 600s base interval
+          # and an 8/hr ceiling reproduce those figures; the previous 270s/12hr
+          # values were untested guesses that targeted far more talk than
+          # production ever actually produces.
+          grep -q 'TALK_BASE_INTERVAL_SECONDS = 600' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'MAX_TALK_BREAKS_PER_HOUR = 8' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'WELCOME_RECOVERY_SECONDS = 1800' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->lifecycleListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q '\$this->queueListener->onBuildQueue(\$event);' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php

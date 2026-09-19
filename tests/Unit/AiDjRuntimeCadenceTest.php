@@ -16,23 +16,29 @@ final class AiDjRuntimeCadenceTest extends Unit
         $task = $reflection->newInstanceWithoutConstructor();
         $method = $reflection->getMethod('getTalkIntervalSeconds');
 
-        // Confirmed DJ frequencies from production settings:
-        // Bella = 75%  -> 270 / 0.75 = 360s (~6 min)
-        self::assertSame(360, $method->invoke($task, 0.75));
+        // Calibrated against the production (main branch) 13-day playback log,
+        // Sept 6-18, deduplicated by unique on-air timestamp:
+        //   Onyx  (100% / 1.0)  averaged 5.67 breaks/hr (range 5.0-6.3/hr)
+        //   Bella ( 75% / 0.75) averaged 5.00 breaks/hr (range 4.2-5.9/hr)
+        // Bella = 75%  -> 600 / 0.75 = 800s (~13.3 min, -> ~4.5/hr)
+        self::assertSame(800, $method->invoke($task, 0.75));
 
-        // Onyx = 100% -> 270 / 1.00 = 270s (~4.5 min)
-        self::assertSame(270, $method->invoke($task, 1.00));
+        // Onyx = 100% -> 600 / 1.00 = 600s (~10 min, -> ~6.0/hr)
+        self::assertSame(600, $method->invoke($task, 1.00));
 
-        // Lower boundary check: 50% -> 270 / 0.50 = 540s (~9 min)
-        self::assertSame(540, $method->invoke($task, 0.50));
+        // Lower boundary check: 50% -> 600 / 0.50 = 1200s (~20 min)
+        self::assertSame(1200, $method->invoke($task, 0.50));
     }
 
     public function testProductionHourlyTalkCeiling(): void
     {
         $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
 
-        // Onyx at 100% legitimately hits 10-12 on-air breaks per hour.
-        // Ceiling raised from 8 to 12 to stop Onyx going silent mid-hour.
-        self::assertSame(12, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
+        // Production's own observed maximum across the 13-day log was 7.67
+        // breaks/hr (Onyx, Sept 11) and 5.86 breaks/hr (Bella, Sept 14).
+        // Ceiling set to 8 as a runaway backstop for the wall-clock catch-up
+        // path used during Strict playlists (Hymns & Favorites), where no
+        // real BuildQueue song-boundary event fires to drive normal cadence.
+        self::assertSame(8, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
     }
 }

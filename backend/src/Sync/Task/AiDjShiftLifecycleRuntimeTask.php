@@ -38,24 +38,39 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
     /**
      * Talk interval formula: TALK_BASE_INTERVAL_SECONDS / talk_frequency
      *
-     * Confirmed DJ settings:
-     *   Onyx  = 100% (1.0)  -> interval = 270s (~4.5 min between breaks)
-     *   Bella =  75% (0.75) -> interval = 360s (~6   min between breaks)
+     * PRODUCTION-CONFIRMED TARGET (main branch, 13-day log, Sept 6-18):
+     * Production does not use an interval formula at all — it uses a flat
+     * 300s (5 min) cooldown plus a per-song-boundary probabilistic roll
+     * gated by talk_frequency (skip when random() > frequency). Measured
+     * results from that log, deduplicated by unique on-air timestamp:
      *
-     * The previous value of 300 gave Onyx 300s (5 min, slightly quiet) and
-     * Bella 400s (~6.7 min). At 270 Onyx is more chatty, matching the 100%
-     * intent, and Bella stays natural at ~6 min.
+     *   Onyx  (100% / 1.0) -> averaged 5.67 breaks/hr (range 5.0-6.3/hr)
+     *   Bella ( 75% / 0.75) -> averaged 5.00 breaks/hr (range 4.2-5.9/hr)
+     *
+     * This wall-clock task exists for a case production does not have to
+     * solve: keeping talk alive through Strict scheduled playlists (Hymns &
+     * Favorites), where no real BuildQueue song-boundary event fires at all.
+     * 270s (4.5 min) was an untested guess that targeted far more talk than
+     * production ever actually produces (up to 12/hr vs. production's
+     * observed max of 7.67/hr). Recalibrated to reproduce production's
+     * measured average: interval = 600s gives Onyx 600/1.0 = 600s (10 min,
+     * -> 6.0/hr, matching the 5.67/hr average) and Bella 600/0.75 = 800s
+     * (13.3 min -> 4.5/hr, matching the 5.0/hr average within normal
+     * night-to-night variance seen in production).
      */
-    private const int TALK_BASE_INTERVAL_SECONDS = 270;
+    private const int TALK_BASE_INTERVAL_SECONDS = 600;
 
     /**
-     * Onyx runs at 100% talk frequency. In a busy overnight hour that can
-     * legitimately produce 10-12 on-air breaks (roughly every 4-5 minutes
-     * across ~50 usable minutes after IDs/news). The previous ceiling of 8
-     * was silencing Onyx for the last 20+ minutes of many hours.
-     * Mandatory lifecycle sign-offs (welcome/sign-off) are not counted here.
+     * Production's own observed maximum across 13 days was 7.67 breaks/hr
+     * (Onyx, Sept 11) and 5.86 breaks/hr (Bella, Sept 14). This ceiling only
+     * matters as a runaway backstop for the wall-clock catch-up path during
+     * Strict playlists; normal cadence during ordinary BuildQueue-driven
+     * hours is governed by AiDjQueueListener's own cadence credit, which
+     * matches production's mechanism now that it is registered as a real
+     * event subscriber again (see events.php). Mandatory lifecycle
+     * sign-offs (welcome/sign-off) are not counted here.
      */
-    private const int MAX_TALK_BREAKS_PER_HOUR = 12;
+    private const int MAX_TALK_BREAKS_PER_HOUR = 8;
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
