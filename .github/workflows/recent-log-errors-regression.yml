@@ -1,0 +1,100 @@
+name: Recent Log Error Regression
+
+on:
+  push:
+    branches:
+      - 'fix/recent-log-errors-sept12'
+    paths:
+      - 'backend/src/Radio/Frontend/Icecast.php'
+      - 'backend/src/Service/Acme.php'
+      - 'backend/src/Sync/NowPlaying/Task/NowPlayingTask.php'
+      - '.github/workflows/recent-log-errors-regression.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'backend/src/Radio/Frontend/Icecast.php'
+      - 'backend/src/Service/Acme.php'
+      - 'backend/src/Sync/NowPlaying/Task/NowPlayingTask.php'
+      - '.github/workflows/recent-log-errors-regression.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate recent-log fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+
+          # Icecast 2.5 rejects these old config locations/keys. Keep the configured
+          # cap aggregate via global clients rather than multiplying it per mount.
+          ! grep -q "'listenurl'" backend/src/Radio/Frontend/Icecast.php
+          ! grep -q "'pidfile'" backend/src/Radio/Frontend/Icecast.php
+          ! grep -q "\$mount\['max-listeners'\]" backend/src/Radio/Frontend/Icecast.php
+          grep -q "'clients' => !empty(\$frontendConfig->max_listeners) ? \$frontendConfig->max_listeners : 2500" backend/src/Radio/Frontend/Icecast.php
+
+          # Icecast's admin field is public; never publish the private ACME address.
+          ! grep -q "settings->acme_email" backend/src/Radio/Frontend/Icecast.php
+          grep -q "\$adminContact = 'icemaster@'" backend/src/Radio/Frontend/Icecast.php
+
+          # Healthy certificate checks must not be failures, and private keys must
+          # always be locked down before Icecast examines them.
+          grep -q "Certificate does not need renewal" backend/src/Service/Acme.php
+          ! grep -q "throw new RuntimeException('Certificate does not need renewal.')" backend/src/Service/Acme.php
+          grep -q "chmod(\$path, 0o600)" backend/src/Service/Acme.php
+          grep -q "securePrivateKey" backend/src/Service/Acme.php
+
+          # Never poll an absent Icecast mount during local-backend startup.
+          grep -q "null === \$station->current_song" backend/src/Sync/NowPlaying/Task/NowPlayingTask.php
+          grep -q "!\$frontend->isRunning(\$station)" backend/src/Sync/NowPlaying/Task/NowPlayingTask.php
+
+      - name: PHP syntax check
+        run: |
+          php -l backend/src/Radio/Frontend/Icecast.php
+          php -l backend/src/Service/Acme.php
+          php -l backend/src/Sync/NowPlaying/Task/NowPlayingTask.php
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
+      - name: PHPStan changed files
+        shell: bash
+        run: |
+          cat > phpstan.recent-log-errors.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.recent-log-errors.neon --memory-limit=-1 --no-progress \
+            backend/src/Radio/Frontend/Icecast.php \
+            backend/src/Service/Acme.php \
+            backend/src/Sync/NowPlaying/Task/NowPlayingTask.php

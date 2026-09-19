@@ -178,10 +178,19 @@ abstract class AbstractLocalAdapter
     /**
      * Restart the executable service.
      *
+     * A recovery caller may deliberately invoke restart() because the service is
+     * already stopped. In that state, trying stop() first raises NotRunning and the
+     * recovery never reaches start(). Start directly instead.
+     *
      * @param Station $station
      */
     public function restart(Station $station): void
     {
+        if (!$this->isRunning($station)) {
+            $this->start($station);
+            return;
+        }
+
         $this->stop($station);
         $this->start($station);
     }

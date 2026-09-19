@@ -1,0 +1,434 @@
+// Final mobile/desktop polish for Clock Management.
+// Loaded after all earlier Clock Wheel styles so these layout decisions win
+// without changing AzuraCast's native theme variables or sidebar structure.
+
+@media (min-width: 992px) {
+    .clock-management-page {
+        max-width: 100%;
+        margin: 0;
+    }
+
+    .clock-management-summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .clock-management-summary-card {
+        min-height: 7.1rem;
+    }
+
+    .clock-management-split {
+        grid-template-columns: minmax(18rem, 21.5rem) minmax(0, 1fr);
+        gap: .85rem;
+    }
+
+    .clock-management-editor-pane {
+        overflow: hidden;
+    }
+
+    .clock-management-editor-pane .clock-wheel-inline-editor,
+    .clock-management-editor-pane .clock-workspace-editor {
+        width: 100% !important;
+        max-width: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content {
+        padding: .9rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table {
+        width: 100% !important;
+        table-layout: fixed;
+    }
+}
+
+@media (max-width: 991.98px) {
+    .clock-management-page {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .clock-management-page .clock-management-header {
+        gap: .65rem;
+        padding-bottom: .75rem;
+    }
+
+    .clock-management-page .clock-management-header .btn {
+        min-height: 2.45rem;
+    }
+
+    .clock-management-summary-grid {
+        gap: .65rem;
+        margin-bottom: .75rem;
+    }
+
+    .clock-management-summary-card {
+        min-height: 0;
+        padding: .72rem .8rem;
+        gap: .65rem;
+        border-radius: .55rem;
+    }
+
+    .clock-management-summary-icon {
+        width: 2.65rem;
+        height: 2.65rem;
+        font-size: 1.15rem;
+    }
+
+    .clock-management-summary-title {
+        font-size: .94rem;
+    }
+
+    .clock-management-summary-copy {
+        font-size: .75rem;
+        line-height: 1.25;
+    }
+
+    .clock-management-summary-count strong {
+        font-size: 1.15rem;
+    }
+
+    .clock-management-summary-count small {
+        font-size: .72rem;
+    }
+
+    .clock-management-nav-wrap {
+        gap: .55rem;
+        padding: .55rem;
+        margin-bottom: .75rem;
+    }
+
+    .clock-management-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .35rem;
+        width: 100%;
+        overflow: visible;
+        padding: 0;
+    }
+
+    .clock-management-tabs .nav-link {
+        width: 100%;
+        min-width: 0;
+        padding: .55rem .45rem;
+        border: 1px solid transparent;
+        font-size: .78rem;
+        line-height: 1.15;
+        text-align: center;
+        white-space: normal;
+    }
+
+    .clock-management-tabs .nav-link:not(.active) {
+        background: var(--bs-tertiary-bg);
+        border-color: var(--bs-border-color);
+    }
+
+    .clock-management-nav-wrap > .dropdown,
+    .clock-management-nav-wrap > .dropdown > .btn {
+        width: 100%;
+    }
+
+    .clock-management-nav-wrap > .dropdown > .btn {
+        min-height: 2.65rem;
+    }
+
+    .clock-management-overview-grid,
+    .clock-management-split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: .7rem;
+    }
+
+    .clock-management-panel,
+    .clock-management-list-pane,
+    .clock-management-editor-pane {
+        border-radius: .55rem;
+    }
+
+    .clock-management-panel {
+        padding: .8rem;
+    }
+
+    .clock-management-flow-step {
+        padding: .72rem;
+    }
+
+    .clock-management-actions-grid {
+        grid-template-columns: 1fr;
+        gap: .45rem;
+    }
+
+    .clock-management-actions-grid .btn {
+        width: 100%;
+        min-height: 2.55rem;
+    }
+
+    .clock-management-split--editing .clock-management-list-pane {
+        display: none;
+    }
+
+    .clock-management-split--editing .clock-management-editor-pane {
+        width: 100%;
+        max-width: 100%;
+        overflow: visible;
+    }
+
+    .clock-management-split--editing .clock-wheel-inline-editor,
+    .clock-management-split--editing .clock-workspace-editor {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        border-radius: .55rem !important;
+        box-shadow: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-hero,
+    .clock-management-editor-pane .clock-workspace-editor__header {
+        padding: .8rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-actions {
+        display: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: .35rem !important;
+        padding: .55rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs .nav-item,
+    .clock-management-editor-pane .clock-wheel-editor-subtabs .nav-link {
+        width: 100% !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-subtabs .nav-link {
+        min-height: 2.35rem !important;
+        padding: .5rem .45rem !important;
+        font-size: .8rem !important;
+        white-space: normal !important;
+        text-align: center !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content {
+        padding: .7rem !important;
+        overflow: visible !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-hour-distribution-card {
+        padding: .8rem !important;
+        margin-bottom: .75rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-timeline {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-timeline > small {
+        margin-bottom: .6rem !important;
+        padding: .65rem .7rem !important;
+        font-size: .76rem !important;
+        line-height: 1.35 !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-timeline__track {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        table-layout: auto !important;
+        border: 0 !important;
+        overflow: visible !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table thead {
+        display: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .7rem !important;
+        width: 100% !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody tr {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .6rem !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: .75rem !important;
+        margin: 0 !important;
+        border: 1px solid var(--bs-border-color) !important;
+        border-radius: .55rem !important;
+        background: var(--bs-body-bg) !important;
+        box-shadow: 0 .1rem .3rem rgba(0, 0, 0, .05) !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .28rem !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        text-align: left !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td::before {
+        content: attr(data-label) !important;
+        display: block !important;
+        margin: 0 !important;
+        color: var(--bs-secondary-color) !important;
+        font-size: .7rem !important;
+        font-weight: 700 !important;
+        letter-spacing: .035em !important;
+        line-height: 1.15 !important;
+        text-transform: uppercase !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td.drag-handle {
+        display: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td[colspan] {
+        display: block !important;
+        width: 100% !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table tbody td[colspan]::before {
+        content: none !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table :is(.form-control, .form-select) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        min-height: 2.6rem !important;
+        font-size: .88rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table input[type='number'],
+    .clock-management-editor-pane .clock-wheel-entries-table input[type='text'] {
+        width: 100% !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table .btn-group {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: .35rem !important;
+        width: 100% !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-entries-table .cw-action-btn,
+    .clock-management-editor-pane .clock-wheel-entries-table .btn-group .btn {
+        width: 100% !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        min-height: 2.55rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-footer,
+    .clock-management-editor-pane .clock-workspace-editor__footer {
+        position: sticky !important;
+        bottom: 0 !important;
+        z-index: 20 !important;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: .5rem !important;
+        width: 100% !important;
+        padding: .7rem !important;
+        margin: .5rem 0 0 !important;
+        border-top: 1px solid var(--bs-border-color) !important;
+        background: color-mix(in srgb, var(--bs-body-bg) 97%, transparent) !important;
+        backdrop-filter: blur(10px) !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-footer .btn,
+    .clock-management-editor-pane .clock-workspace-editor__footer .btn {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 2.7rem !important;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .clock-management-page .clock-management-header h2 {
+        font-size: 1.45rem;
+    }
+
+    .clock-management-page .clock-management-header p {
+        font-size: .84rem;
+        line-height: 1.35;
+    }
+
+    .clock-management-page .clock-management-header .btn {
+        align-self: flex-start;
+        width: auto;
+        padding: .5rem .7rem;
+        font-size: .78rem;
+    }
+
+    .clock-management-summary-card {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        padding: .65rem .72rem;
+    }
+
+    .clock-management-summary-count {
+        grid-column: auto;
+        display: block;
+        width: auto;
+        min-width: 3.2rem;
+        text-align: right;
+    }
+
+    .clock-management-summary-count small {
+        display: block;
+        max-width: 4.4rem;
+        white-space: normal;
+        line-height: 1.1;
+    }
+
+    .clock-management-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .clock-management-flow-step {
+        padding: .65rem;
+    }
+
+    .clock-management-panel h3 {
+        font-size: .95rem;
+    }
+
+    .clock-management-pane-header {
+        padding: .75rem;
+    }
+
+    .clock-management-empty-state {
+        min-height: 12rem;
+        padding: 1.2rem;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-title h2 {
+        font-size: 1.05rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-title p {
+        font-size: .76rem !important;
+    }
+
+    .clock-management-editor-pane .clock-wheel-editor-tab-content {
+        padding: .6rem !important;
+    }
+}

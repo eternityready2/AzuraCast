@@ -1,6 +1,8 @@
 <template>
     <modal-form
         ref="$modal"
+        class="playlist-editor-modal"
+        size="xl"
         :loading="loading"
         :title="langTitle"
         :error="error"
@@ -11,7 +13,6 @@
         <tabs>
             <form-basic-info/>
             <form-schedule v-model:schedule-items="form.schedule_items" />
-            <form-playout-rules v-if="!form.is_smart_block" />
         </tabs>
     </modal-form>
 </template>
@@ -19,7 +20,6 @@
 <script setup lang="ts">
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
-import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
 import {useTranslate} from "~/vendor/gettext";
@@ -175,3 +175,43 @@ defineExpose({
     close
 });
 </script>
+
+<style>
+.playlist-editor-modal .modal-dialog {
+    width: calc(100vw - 2rem);
+    max-width: 1500px;
+    margin: 1rem auto;
+}
+
+.playlist-editor-modal .modal-content {
+    min-height: calc(100vh - 2rem);
+    max-height: calc(100vh - 2rem);
+}
+
+.playlist-editor-modal .modal-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 1.25rem 1.5rem;
+}
+
+.playlist-editor-modal .modal-header,
+.playlist-editor-modal .modal-footer {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 767.98px) {
+    .playlist-editor-modal .modal-dialog {
+        width: calc(100vw - .75rem);
+        margin: .375rem auto;
+    }
+
+    .playlist-editor-modal .modal-content {
+        min-height: calc(100vh - .75rem);
+        max-height: calc(100vh - .75rem);
+    }
+
+    .playlist-editor-modal .modal-body {
+        padding: .9rem;
+    }
+}
+</style>

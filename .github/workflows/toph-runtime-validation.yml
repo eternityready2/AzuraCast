@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'fix/toh-*'
+      - 'fix/bounded-*'
       - 'feature/top-of-hour-plugin-rebuild'
       - dev
     paths:
@@ -17,6 +18,7 @@ on:
       - 'backend/src/Radio/Backend/Liquidsoap/TopOfHourAiNewsConfigurationGuard.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
       - 'tests/Unit/BroadcastClockPlannerTest.php'
+      - 'tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/TopOfHourClockTest.php'
       - 'tests/Unit/TopOfHourQueueClockConstraintTest.php'
@@ -35,6 +37,7 @@ on:
       - 'backend/src/Radio/Backend/Liquidsoap/TopOfHourAiNewsConfigurationGuard.php'
       - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
       - 'tests/Unit/**TopOfHour**'
+      - 'tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
       - '.github/workflows/toph-runtime-validation.yml'
 
@@ -68,6 +71,7 @@ jobs:
           git diff --check origin/dev...HEAD
 
           test -f plugins/top_of_hour/events.php
+          test -f plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
           test -f plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           test -f plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           test -f plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
@@ -79,9 +83,17 @@ jobs:
           ! grep -q 'TopOfHourRuntimeConfiguration' backend/config/events.php
 
           grep -q 'StageTopOfHourStationIdTask' plugins/top_of_hour/events.php
+          grep -q 'FlexibleScheduleRuntimeConfiguration::class' plugins/top_of_hour/events.php
           grep -q 'RigidScheduleRuntimeConfiguration::class' plugins/top_of_hour/events.php
           grep -q 'TopOfHourQueueClockConstraint::class' plugins/top_of_hour/events.php
           grep -q 'TopOfHourRuntimeConfiguration::class' plugins/top_of_hour/events.php
+
+          # Bounded flexible scheduling must remain registered, preserve its
+          # 60-second grace contract, and return a float from recurrent callbacks.
+          grep -q 'FLEXIBLE_GRACE_SECONDS = 60' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q 'thread.run.recurrent(delay=0.25' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q '^                0.25$' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q 'azuracast.discard_autodj_current_cleanly()' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
 
           # The failed quarantine architecture is gone. It created a competing
           # state machine and could recycle freshly sent rows back to unsent.
@@ -151,6 +163,37 @@ jobs:
           docker run --rm --entrypoint liquidsoap \
             -v "$PWD/util/docker/stations/liquidsoap:/liq:ro" \
             -w /liq savonet/liquidsoap:v2.4.5 --check azuracast.liq
+
+      - name: Liquidsoap 2.4.5 bounded flexible recurrent smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/bounded-flexible-smoke.liq <<'EOF'
+          init.daemon := false
+
+          bounded_flexible_triggered = ref(false)
+          deadline_active = ref(false)
+
+          def bounded_flexible_check() =
+            if deadline_active() then
+              if not bounded_flexible_triggered() then
+                bounded_flexible_triggered := true
+              end
+            else
+              bounded_flexible_triggered := false
+            end
+          end
+
+          thread.run.recurrent(delay=0.25, {
+            bounded_flexible_check()
+            0.25
+          })
+
+          output.dummy(blank())
+          EOF
+          docker run --rm --entrypoint liquidsoap \
+            -v /tmp/bounded-flexible-smoke.liq:/tmp/bounded-flexible-smoke.liq:ro \
+            savonet/liquidsoap:v2.4.5 --check /tmp/bounded-flexible-smoke.liq
 
       - name: Liquidsoap 2.4.5 synchronous handoff smoke
         shell: bash
@@ -223,6 +266,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          vendor/bin/codecept run tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php
           vendor/bin/codecept run tests/Unit/RigidScheduleRuntimeConfigurationTest.php
           vendor/bin/codecept run tests/Unit/TopOfHourRuntimeConfigurationTest.php
           vendor/bin/codecept run tests/Unit/TopOfHourQueueClockConstraintTest.php
@@ -241,9 +285,11 @@ jobs:
             backend/src/Radio/AutoDJ/Queue.php \
             backend/src/Radio/AutoDJ/TopOfHour \
             plugins/top_of_hour/events.php \
+            plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php \
             plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
             plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php \
             plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php \
+            tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php \
             tests/Unit/RigidScheduleRuntimeConfigurationTest.php \
             tests/Unit/TopOfHourClockTest.php \
             tests/Unit/TopOfHourQueueClockConstraintTest.php \

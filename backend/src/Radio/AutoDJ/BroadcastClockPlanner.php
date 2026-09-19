@@ -154,7 +154,6 @@ final class BroadcastClockPlanner
             if (
                 !$scheduledPlaylist->is_enabled
                 || PlaylistTypes::Standard !== $scheduledPlaylist->type
-                || $scheduledPlaylist->backendInterruptOtherSongs()
                 || 0 === $scheduledPlaylist->schedule_items->count()
             ) {
                 continue;
@@ -176,10 +175,10 @@ final class BroadcastClockPlanner
 
     private function isClockAnchoredPlaylist(StationPlaylist $playlist): bool
     {
-        if ($playlist->backendInterruptOtherSongs()) {
-            return false;
-        }
-
+        // For scheduled playlists, the schedule row's strict_start/emergency
+        // settings are authoritative. A legacy playlist-level interrupt option
+        // must not erase the soft anchor of a Flexible schedule; the runtime
+        // interrupting queue applies the same ownership rule.
         if (PlaylistTypes::Standard === $playlist->type) {
             return true;
         }
@@ -213,7 +212,7 @@ final class BroadcastClockPlanner
             $playlist->backend_options,
             true,
         );
-        $rigidStart = $this->isRigidStart($playlist, $schedule);
+        $rigidStart = $this->isRigidStart($schedule);
 
         if (ScheduleRecurrence::hasRecurrence($schedule)) {
             $occurrences = ScheduleRecurrence::getOccurrencesInRange(
@@ -268,13 +267,10 @@ final class BroadcastClockPlanner
         return $boundaries;
     }
 
-    private function isRigidStart(
-        StationPlaylist $playlist,
-        StationSchedule $schedule,
-    ): bool {
+    private function isRigidStart(StationSchedule $schedule): bool
+    {
         return $schedule->strict_start
-            || $schedule->is_emergency
-            || $playlist->backendInterruptOtherSongs();
+            || $schedule->is_emergency;
     }
 
     private function secondsUntilNextAiNewsAnchor(

@@ -1,33 +1,30 @@
 <template>
-    <section class="card mb-3">
-        <div class="card-header text-bg-primary d-flex align-items-center">
+    <section class="schedule-card card mb-4">
+        <div class="card-header schedule-card-header d-flex align-items-center">
             <div class="flex-fill">
-                <h2 class="card-title">
+                <h2 class="card-title h5 mb-0">
                     {{ $gettext('Scheduled Time #%{num}', {num: index + 1}) }}
                 </h2>
             </div>
             <div class="flex-shrink-0">
                 <button
                     type="button"
-                    class="btn btn-sm btn-dark"
+                    class="btn btn-sm btn-outline-light"
                     @click="doRemove()"
                 >
                     <icon-ic-remove/>
-
-                    <span>
-                        {{ $gettext('Remove') }}
-                    </span>
+                    <span>{{ $gettext('Remove') }}</span>
                 </button>
             </div>
         </div>
-        <div class="card-body">
+
+        <div class="card-body p-3 p-lg-4">
             <div class="row g-3">
                 <form-group-field
                     :id="'edit_form_start_time_'+index"
-                    class="col-md-4"
+                    class="col-md-6 col-xl-3"
                     :field="r$.start_time"
                     :label="$gettext('Start Time')"
-                    :description="$gettext('To play once per day, set start and end to the same value.')"
                 >
                     <template #default="{id, model, fieldClass}">
                         <playlist-time
@@ -40,10 +37,10 @@
 
                 <form-group-field
                     :id="'edit_form_end_time_'+index"
-                    class="col-md-4"
+                    class="col-md-6 col-xl-3"
                     :field="r$.end_time"
                     :label="$gettext('End Time')"
-                    :description="$gettext('If end is before start, the event plays overnight. To avoid overlapping the next event, you can end at :59 (e.g. 1:59 PM before 2:00 PM).')"
+                    :description="$gettext('If end is before start, the schedule continues overnight.')"
                 >
                     <template #default="{id, model, fieldClass}">
                         <playlist-time
@@ -54,115 +51,31 @@
                     </template>
                 </form-group-field>
 
-                <form-markup
-                    id="station_time_zone"
-                    class="col-md-4"
-                    :label="$gettext('Station Time Zone')"
-                >
-                    <time-zone />
-                </form-markup>
-
                 <form-group-field
                     :id="'edit_form_start_date_'+index"
-                    class="col-md-4"
+                    class="col-md-6 col-xl-3"
                     :field="r$.start_date"
                     input-type="date"
                     :label="$gettext('Start Date')"
-                    :description="$gettext('Required. Use with End date to limit when the schedule runs.')"
+                    :description="$gettext('First date this schedule may run.')"
                 />
 
                 <form-group-field
                     :id="'edit_form_end_date_'+index"
-                    class="col-md-4"
+                    class="col-md-6 col-xl-3"
                     :field="r$.end_date"
                     input-type="date"
                     :label="$gettext('End Date')"
-                    :description="$gettext('Use with Start date to limit when the schedule runs. Recurrence uses this as the last day.')"
+                    :description="$gettext('Last date this schedule may run.')"
                     :required="row.recurrence_end_type !== 'after'"
                     :input-attrs="{ disabled: row.recurrence_end_type === 'after' }"
                 />
 
-                <form-markup
-                    :id="'edit_form_scheduling_'+index"
-                    class="col-12"
-                    :label="$gettext('Scheduling')"
-                >
-                    <div class="d-flex flex-wrap gap-3">
-                        <div class="form-check mb-0">
-                            <input
-                                :id="'scheduling_flexible_'+index"
-                                v-model="schedulingMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="flexible"
-                            >
-                            <label
-                                class="form-check-label"
-                                :for="'scheduling_flexible_'+index"
-                            >
-                                {{ $gettext('Flexible') }}
-                            </label>
-                        </div>
-                        <div class="form-check mb-0">
-                            <input
-                                :id="'scheduling_strict_'+index"
-                                v-model="schedulingMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="strict"
-                            >
-                            <label
-                                class="form-check-label"
-                                :for="'scheduling_strict_'+index"
-                            >
-                                {{ $gettext('Strict') }}
-                            </label>
-                        </div>
-                    </div>
-                    <small class="form-text text-muted d-block mt-2">
-                        {{ $gettext('Flexible prefers full songs when they fit; AutoDJ may cut at anchors only when selection cannot guarantee timing (short slots, strict mode, or no track fits the window).') }}
-                    </small>
-                    <div class="form-check mt-2">
-                        <input
-                            :id="'scheduling_loop_once_'+index"
-                            v-model="row.loop_once"
-                            class="form-check-input"
-                            type="checkbox"
-                        >
-                        <label
-                            class="form-check-label"
-                            :for="'scheduling_loop_once_'+index"
-                        >
-                            {{ $gettext('Loop Once') }}
-                        </label>
-                    </div>
-                    <div class="form-check mt-2">
-                        <input
-                            :id="'scheduling_prevent_requests_'+index"
-                            v-model="row.prevent_requests"
-                            class="form-check-input"
-                            type="checkbox"
-                        >
-                        <label
-                            class="form-check-label"
-                            :for="'scheduling_prevent_requests_'+index"
-                        >
-                            {{ $gettext('Block Request Queue While Active') }}
-                        </label>
-                    </div>
-                    <small class="form-text text-muted d-block mt-1">
-                        {{ $gettext('While this scheduled window is active, listener requests will not be played via the automatic request queue.') }}
-                    </small>
-                    <small class="form-text text-muted d-block mt-1">
-                        {{ $gettext('Independent of Strict/Flexible above') }}
-                    </small>
-                </form-markup>
-
                 <form-group-multi-check
                     :id="'edit_form_days_'+index"
-                    class="col-md-12"
+                    class="col-xl-7"
                     :field="r$.days"
-                    :label="$gettext('Scheduled Play Days of Week')"
+                    :label="$gettext('Days of Week')"
                     :description="daysOfWeekFieldDescription"
                     :options="dayOptions"
                     :required="!isMonthlyDatePattern"
@@ -170,78 +83,311 @@
                     stacked
                 />
 
+                <form-markup
+                    :id="'station_time_zone_'+index"
+                    class="col-xl-5"
+                    :label="$gettext('Station Time Zone')"
+                >
+                    <div class="timezone-card">
+                        <time-zone />
+                    </div>
+                </form-markup>
+
                 <div class="col-12">
-                    <hr class="my-3">
-                    <h6 class="text-muted mb-2">
-                        {{ $gettext('Repeat') }}
-                    </h6>
+                    <hr class="my-1">
                 </div>
-                <form-group-select
-                    :id="'edit_form_recurrence_type_'+index"
-                    class="col-md-4"
-                    :field="r$.recurrence_type"
-                    :label="$gettext('Repeat')"
-                    :description="$gettext('Weekly = every week; Bi-weekly = every 2 weeks; Custom = every N weeks; Monthly = by date or specific day of week.')"
-                    :options="recurrenceTypeOptions"
-                />
-                <form-group-field
-                    v-if="row.recurrence_type === 'custom'"
-                    :id="'edit_form_recurrence_interval_'+index"
-                    class="col-md-4"
-                    :field="r$.recurrence_interval"
-                    input-type="number"
-                    min="1"
-                    max="52"
-                    :label="$gettext('Every (weeks)')"
-                    :description="$gettext('E.g. 3 = every 3 weeks. Set Start date for correct alignment.')"
-                />
-                <template v-if="row.recurrence_type === 'monthly'">
-                    <form-group-select
-                        :id="'edit_form_recurrence_monthly_pattern_'+index"
-                        class="col-md-4"
-                        :field="r$.recurrence_monthly_pattern"
-                        :label="$gettext('Monthly Pattern')"
-                        :options="recurrenceMonthlyPatternOptions"
-                    />
-                    <form-group-field
-                        v-if="row.recurrence_monthly_pattern === 'date'"
-                        :id="'edit_form_recurrence_monthly_day_'+index"
-                        class="col-md-4"
-                        :field="r$.recurrence_monthly_day"
-                        input-type="number"
-                        min="1"
-                        max="31"
-                        :label="$gettext('Day of Month')"
-                        :description="$gettext('Day of the month (1–31).')"
-                    />
-                    <template v-if="row.recurrence_monthly_pattern === 'day_of_week'">
-                        <form-group-select
-                            :id="'edit_form_recurrence_monthly_week_'+index"
-                            class="col-md-4"
-                            :field="r$.recurrence_monthly_week"
-                            :label="$gettext('Week of Month')"
-                            :description="$gettext('For monthly specific day of week.')"
-                            :options="recurrenceMonthlyWeekOptions"
-                        />
+
+                <form-markup
+                    :id="'edit_form_scheduling_'+index"
+                    class="col-xl-6"
+                >
+                    <template #label>
+                        <span class="field-label-with-help">
+                            {{ $gettext('Scheduling Mode') }}
+                            <span
+                                class="info-help"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="schedulingHelp"
+                                :title="schedulingHelp"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
                     </template>
-                </template>
-                <form-group-select
-                    :id="'edit_form_recurrence_end_type_'+index"
-                    class="col-md-4"
-                    :field="r$.recurrence_end_type"
-                    :label="$gettext('Stop Recurrence')"
-                    :description="$gettext('Optional: stop after a number of occurrences or use End date above.')"
-                    :options="recurrenceEndTypeOptions"
-                />
-                <form-group-field
-                    v-if="row.recurrence_end_type === 'after'"
-                    :id="'edit_form_recurrence_end_after_'+index"
-                    class="col-md-4"
-                    :field="r$.recurrence_end_after"
-                    input-type="number"
-                    min="1"
-                    :label="$gettext('Stop After (occurrences)')"
-                />
+
+                    <div class="mode-grid scheduling-mode-grid">
+                        <label
+                            class="mode-option mode-option-scheduling"
+                            :class="{
+                                'is-active': schedulingMode === 'flexible',
+                                'is-muted': schedulingMode !== 'flexible'
+                            }"
+                        >
+                            <input
+                                :id="'scheduling_flexible_'+index"
+                                v-model="schedulingMode"
+                                class="form-check-input"
+                                type="radio"
+                                value="flexible"
+                            >
+                            <span class="mode-copy">
+                                <span class="mode-title-row">
+                                    <strong>{{ $gettext('Flexible') }}</strong>
+                                    <span class="mode-badge">{{ $gettext('Default') }}</span>
+                                </span>
+                                <small>{{ $gettext('Normal AzuraCast-style schedule timing. This schedule row does not add its own hard-start override.') }}</small>
+                                <ul class="mode-detail-list">
+                                    <li>{{ $gettext('Start Behavior below still decides whether the playlist normally interrupts.') }}</li>
+                                    <li>{{ $gettext('Best for normal music flow and schedules that do not need a special exact-time override.') }}</li>
+                                </ul>
+                            </span>
+                        </label>
+
+                        <label
+                            class="mode-option mode-option-scheduling"
+                            :class="{
+                                'is-active': schedulingMode === 'strict',
+                                'is-muted': schedulingMode !== 'strict'
+                            }"
+                        >
+                            <input
+                                :id="'scheduling_strict_'+index"
+                                v-model="schedulingMode"
+                                class="form-check-input"
+                                type="radio"
+                                value="strict"
+                            >
+                            <span class="mode-copy">
+                                <span class="mode-title-row">
+                                    <strong>{{ $gettext('Strict / Exact Time') }}</strong>
+                                    <span class="mode-badge mode-badge-strict">{{ $gettext('Exact') }}</span>
+                                </span>
+                                <small>{{ $gettext('Adds a hard wall-clock start override to this specific schedule row.') }}</small>
+                                <ul class="mode-detail-list">
+                                    <li>{{ $gettext('May cut current audio at the scheduled start if needed.') }}</li>
+                                    <li>{{ $gettext('Overrides a Rotation / wait start for this schedule time only.') }}</li>
+                                </ul>
+                            </span>
+                        </label>
+                    </div>
+
+                    <p class="mode-explainer mb-0">
+                        {{ schedulingMode === 'strict'
+                            ? $gettext('Strict is active for this schedule row. Other playlist playback controls remain available and are not removed.')
+                            : $gettext('Flexible is active by default. Strict-only behavior is inactive until you select Strict / Exact Time.')
+                        }}
+                    </p>
+                </form-markup>
+
+                <form-markup
+                    :id="'edit_form_repeat_mode_'+index"
+                    class="col-xl-6"
+                >
+                    <template #label>
+                        <span class="field-label-with-help">
+                            {{ $gettext('Repeat During Scheduled Window') }}
+                            <span
+                                class="info-help"
+                                tabindex="0"
+                                role="img"
+                                :aria-label="repeatHelp"
+                                :title="repeatHelp"
+                            >
+                                <icon-ic-info />
+                            </span>
+                        </span>
+                    </template>
+
+                    <div class="mode-stack">
+                        <label
+                            class="mode-option"
+                            :class="{'is-active': repeatMode === 'once'}"
+                        >
+                            <input
+                                :id="'scheduling_once_'+index"
+                                v-model="repeatMode"
+                                class="form-check-input"
+                                type="radio"
+                                value="once"
+                            >
+                            <span>
+                                <strong>{{ $gettext('Play once per scheduled block — No Loop') }}</strong>
+                                <small>{{ $gettext('Recommended for shows and programs. The playlist will not start a second cycle in this time slot.') }}</small>
+                            </span>
+                        </label>
+
+                        <label
+                            class="mode-option"
+                            :class="{'is-active': repeatMode === 'repeat'}"
+                        >
+                            <input
+                                :id="'scheduling_repeat_'+index"
+                                v-model="repeatMode"
+                                class="form-check-input"
+                                type="radio"
+                                value="repeat"
+                            >
+                            <span>
+                                <strong>{{ $gettext('Repeat until end of block — Loop') }}</strong>
+                                <small>{{ $gettext('Useful for music rotation. The playlist may begin another cycle while this schedule remains active.') }}</small>
+                            </span>
+                        </label>
+                    </div>
+                </form-markup>
+
+                <div class="col-12">
+                    <label class="request-option">
+                        <input
+                            :id="'scheduling_prevent_requests_'+index"
+                            v-model="row.prevent_requests"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span>
+                            <span class="option-title-with-help">
+                                <strong>{{ $gettext('Block listener requests while this schedule is active') }}</strong>
+                                <span
+                                    class="info-help"
+                                    tabindex="0"
+                                    role="img"
+                                    :aria-label="requestHelp"
+                                    :title="requestHelp"
+                                >
+                                    <icon-ic-info />
+                                </span>
+                            </span>
+                            <small>{{ $gettext('Requests remain queued, but the automatic request queue will not interrupt this scheduled window.') }}</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="col-12">
+                    <label class="request-option">
+                        <input
+                            :id="'scheduling_reset_queue_'+index"
+                            v-model="row.reset_queue_at_start"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span>
+                            <strong>{{ $gettext('Reset playlist rotation when this schedule starts') }}</strong>
+                            <small>{{ $gettext('Starts this scheduled block from a fresh internal playlist queue instead of continuing the previous rotation position.') }}</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div
+                    v-if="isPlaylistGroup && row.reset_queue_at_start"
+                    class="col-12"
+                >
+                    <label class="request-option">
+                        <input
+                            :id="'scheduling_reset_queue_recursive_'+index"
+                            v-model="row.reset_queue_recursive"
+                            class="form-check-input"
+                            type="checkbox"
+                        >
+                        <span>
+                            <strong>{{ $gettext('Also reset nested Playlist Group members') }}</strong>
+                            <small>{{ $gettext('Recursively resets nested Playlist Groups and their member playlists when this schedule begins.') }}</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="col-12">
+                    <details class="calendar-rules">
+                        <summary>
+                            <span class="option-title-with-help">
+                                <strong>{{ $gettext('Calendar Repeat & Date Rules') }}</strong>
+                                <span
+                                    class="info-help"
+                                    tabindex="0"
+                                    role="img"
+                                    :aria-label="calendarHelp"
+                                    :title="calendarHelp"
+                                >
+                                    <icon-ic-info />
+                                </span>
+                            </span>
+                            <small>{{ $gettext('Weekly, bi-weekly, monthly and limited-occurrence scheduling.') }}</small>
+                        </summary>
+
+                        <div class="row g-3 p-3">
+                            <form-group-select
+                                :id="'edit_form_recurrence_type_'+index"
+                                class="col-md-6 col-xl-4"
+                                :field="r$.recurrence_type"
+                                :label="$gettext('Repeat')"
+                                :description="$gettext('Choose how often this scheduled block repeats.')"
+                                :options="recurrenceTypeOptions"
+                            />
+
+                            <form-group-field
+                                v-if="row.recurrence_type === 'custom'"
+                                :id="'edit_form_recurrence_interval_'+index"
+                                class="col-md-6 col-xl-4"
+                                :field="r$.recurrence_interval"
+                                input-type="number"
+                                min="1"
+                                max="52"
+                                :label="$gettext('Every (weeks)')"
+                                :description="$gettext('Example: 3 means every 3 weeks.')"
+                            />
+
+                            <template v-if="row.recurrence_type === 'monthly'">
+                                <form-group-select
+                                    :id="'edit_form_recurrence_monthly_pattern_'+index"
+                                    class="col-md-6 col-xl-4"
+                                    :field="r$.recurrence_monthly_pattern"
+                                    :label="$gettext('Monthly Pattern')"
+                                    :options="recurrenceMonthlyPatternOptions"
+                                />
+
+                                <form-group-field
+                                    v-if="row.recurrence_monthly_pattern === 'date'"
+                                    :id="'edit_form_recurrence_monthly_day_'+index"
+                                    class="col-md-6 col-xl-4"
+                                    :field="r$.recurrence_monthly_day"
+                                    input-type="number"
+                                    min="1"
+                                    max="31"
+                                    :label="$gettext('Day of Month')"
+                                    :description="$gettext('Day of the month from 1 through 31.')"
+                                />
+
+                                <form-group-select
+                                    v-if="row.recurrence_monthly_pattern === 'day_of_week'"
+                                    :id="'edit_form_recurrence_monthly_week_'+index"
+                                    class="col-md-6 col-xl-4"
+                                    :field="r$.recurrence_monthly_week"
+                                    :label="$gettext('Week of Month')"
+                                    :description="$gettext('Used with the selected day or days of week above.')"
+                                    :options="recurrenceMonthlyWeekOptions"
+                                />
+                            </template>
+
+                            <form-group-select
+                                :id="'edit_form_recurrence_end_type_'+index"
+                                class="col-md-6 col-xl-4"
+                                :field="r$.recurrence_end_type"
+                                :label="$gettext('Stop Recurrence')"
+                                :description="$gettext('Use the End Date above or stop after a set number of occurrences.')"
+                                :options="recurrenceEndTypeOptions"
+                            />
+
+                            <form-group-field
+                                v-if="row.recurrence_end_type === 'after'"
+                                :id="'edit_form_recurrence_end_after_'+index"
+                                class="col-md-6 col-xl-4"
+                                :field="r$.recurrence_end_after"
+                                input-type="number"
+                                min="1"
+                                :label="$gettext('Stop After (occurrences)')"
+                            />
+                        </div>
+                    </details>
+                </div>
             </div>
         </div>
     </section>
@@ -258,6 +404,7 @@ import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
 import FormGroupSelect from "~/components/Form/FormGroupSelect.vue";
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useAppScopedRegle} from "~/vendor/regle.ts";
+import IconIcInfo from "~icons/ic/baseline-info";
 import IconIcRemove from "~icons/ic/baseline-remove";
 
 interface PlaylistScheduleRow {
@@ -268,7 +415,8 @@ interface PlaylistScheduleRow {
     days: number[],
     loop_once: boolean,
     prevent_requests: boolean,
-    /** Playlist Flexible/Strict scheduling (independent of loop_once). */
+    reset_queue_at_start: boolean,
+    reset_queue_recursive: boolean,
     strict_start: boolean,
     recurrence_type: string | null,
     recurrence_interval: number,
@@ -283,9 +431,11 @@ interface PlaylistScheduleRow {
 
 const props = defineProps<{
     index: number,
+    isPlaylistGroup?: boolean,
 }>();
 
-/** v-model:row from parent — required so recurrence and other fields mutate the form store on submit */
+const {index, isPlaylistGroup = false} = props;
+
 const row = defineModel<PlaylistScheduleRow>('row', {required: true});
 
 const emit = defineEmits<{
@@ -304,22 +454,31 @@ const requiresDaysOfWeek = computed(() => !isMonthlyDatePattern.value);
 
 const {$gettext} = useTranslate();
 
-/** Flexible/Strict controls strict_start; Loop Once is a separate checkbox on loop_once. */
+const schedulingHelp = $gettext('Flexible is the normal/default schedule behavior. Strict / Exact Time adds a per-schedule hard-start override. Playlist-wide Start Behavior and End Behavior remain separate controls below.');
+const repeatHelp = $gettext('Play once prevents a second playlist cycle inside this scheduled window. Repeat allows another cycle while the same window is still active.');
+const requestHelp = $gettext('This blocks automatic listener-request playback only while this schedule is active. Requests remain queued for later.');
+const calendarHelp = $gettext('These rules control which calendar occurrences of this scheduled time are active. They do not change Flexible versus Strict playback behavior.');
+
 const schedulingMode = computed({
-    get: (): 'flexible' | 'strict' => {
-        return row.value.strict_start ? 'strict' : 'flexible';
-    },
+    get: (): 'flexible' | 'strict' => row.value.strict_start ? 'strict' : 'flexible',
     set: (mode: 'flexible' | 'strict') => {
         row.value.strict_start = mode === 'strict';
     },
 });
 
+const repeatMode = computed({
+    get: (): 'once' | 'repeat' => row.value.loop_once ? 'once' : 'repeat',
+    set: (mode: 'once' | 'repeat') => {
+        row.value.loop_once = mode === 'once';
+    },
+});
+
 const daysOfWeekFieldDescription = computed(() => {
     if (isMonthlyDatePattern.value) {
-        return $gettext('Not used when monthly pattern is "On day of month" — pick the calendar day below instead.');
+        return $gettext('Not used for a monthly "day of month" schedule.');
     }
     if (isMonthlyDayOfWeekPattern.value) {
-        return $gettext('For monthly "specific day of week", select one or more days; each gets that week-of-month (e.g. 1st + Mon–Wed).');
+        return $gettext('For a monthly weekday pattern, select the weekday or weekdays here.');
     }
     return $gettext('Select at least one day of the week.');
 });
@@ -351,6 +510,15 @@ const {r$} = useAppScopedRegle(
     },
     {
         namespace: 'stations-playlists'
+    }
+);
+
+watch(
+    () => row.value.reset_queue_at_start,
+    (enabled) => {
+        if (!enabled) {
+            row.value.reset_queue_recursive = false;
+        }
     }
 );
 
@@ -405,7 +573,7 @@ const recurrenceMonthlyWeekOptions = [
 ];
 
 const recurrenceEndTypeOptions = [
-    {value: 'never', text: $gettext('Never (use End date above to limit range)')},
+    {value: 'never', text: $gettext('Never (use End Date above)')},
     {value: 'after', text: $gettext('After number of occurrences')}
 ];
 
@@ -413,3 +581,176 @@ const doRemove = () => {
     emit('remove');
 };
 </script>
+
+<style scoped>
+.schedule-card {
+    overflow: hidden;
+    border-radius: .75rem;
+}
+
+.schedule-card-header {
+    padding: .8rem 1rem;
+    border-bottom: 0;
+    background: linear-gradient(90deg, #1688f8, #0d6efd);
+    color: #fff;
+}
+
+.mode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem;
+}
+
+.mode-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: .65rem;
+}
+
+.mode-option,
+.request-option {
+    display: flex;
+    align-items: flex-start;
+    gap: .7rem;
+    padding: .8rem .85rem;
+    margin: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .65rem;
+    background: var(--bs-tertiary-bg);
+    cursor: pointer;
+    transition: opacity .15s ease, border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.mode-option.is-active {
+    border-color: #2688ff;
+    background: rgba(38, 136, 255, .08);
+    box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .1);
+}
+
+.mode-option-scheduling.is-muted {
+    opacity: .48;
+    background: rgba(108, 117, 125, .06);
+}
+
+.mode-option-scheduling.is-muted:hover,
+.mode-option-scheduling.is-muted:focus-within {
+    opacity: .82;
+}
+
+.mode-option input,
+.request-option input {
+    margin-top: .2rem;
+}
+
+.mode-copy {
+    min-width: 0;
+}
+
+.mode-title-row,
+.option-title-with-help,
+.field-label-with-help {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.mode-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: .08rem .42rem;
+    border-radius: 999px;
+    background: rgba(13, 110, 253, .14);
+    color: #2688ff;
+    font-size: .65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
+
+.mode-badge-strict {
+    background: rgba(220, 53, 69, .14);
+    color: var(--bs-danger-text-emphasis);
+}
+
+.mode-detail-list {
+    margin: .5rem 0 0;
+    padding-left: 1.1rem;
+    color: var(--bs-secondary-color);
+    font-size: .76rem;
+    line-height: 1.4;
+}
+
+.mode-explainer {
+    margin-top: .6rem;
+    color: var(--bs-secondary-color);
+    font-size: .76rem;
+    line-height: 1.4;
+}
+
+.info-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    flex: 0 0 1.25rem;
+    border-radius: 50%;
+    color: #2688ff;
+    cursor: help;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.info-help:focus {
+    outline: 2px solid rgba(38, 136, 255, .45);
+    outline-offset: 2px;
+}
+
+.mode-option strong,
+.mode-option small,
+.request-option strong,
+.request-option small,
+.calendar-rules summary strong,
+.calendar-rules summary small {
+    display: block;
+}
+
+.mode-option strong,
+.request-option strong {
+    font-size: .86rem;
+}
+
+.mode-option small,
+.request-option small,
+.calendar-rules summary small {
+    margin-top: .2rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.4;
+}
+
+.timezone-card {
+    min-height: 2.4rem;
+    padding: .55rem .7rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .45rem;
+    background: var(--bs-tertiary-bg);
+}
+
+.calendar-rules {
+    border: 1px solid var(--bs-border-color);
+    border-radius: .65rem;
+    background: var(--bs-tertiary-bg);
+    overflow: hidden;
+}
+
+.calendar-rules summary {
+    padding: .8rem .9rem;
+    cursor: pointer;
+}
+
+@media (max-width: 991.98px) {
+    .mode-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>

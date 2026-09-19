@@ -8,6 +8,8 @@ use App\Entity\Station;
 
 final readonly class AirCheckDiagnosticsRecorder
 {
+    private const string SUPERVISOR_SHUTDOWN_STATE = 'SHUTDOWN_STATE';
+
     public function __construct(
         private StationDiagnostics $diagnostics,
     ) {
@@ -26,11 +28,30 @@ final readonly class AirCheckDiagnosticsRecorder
         }
 
         foreach ((array)($result['failures'] ?? []) as $failure) {
+            $failure = (string)$failure;
+
+            if (str_contains($failure, self::SUPERVISOR_SHUTDOWN_STATE)) {
+                // Supervisor rejects start/stop operations while it is itself
+                // shutting down. This is a transient control-plane state, not a
+                // failed station repair. AirCheck will naturally retry on its next
+                // scheduled pass once Supervisor is accepting commands again.
+                $this->diagnostics->warning(
+                    $station,
+                    'AirCheck',
+                    'AirCheck deferred station recovery while Supervisor is shutting down.',
+                    [
+                        'state' => self::SUPERVISOR_SHUTDOWN_STATE,
+                        'recovery' => 'retry_next_check',
+                    ]
+                );
+                continue;
+            }
+
             $this->diagnostics->error(
                 $station,
                 'AirCheck',
                 'AirCheck could not complete a station recovery action.',
-                ['error' => (string)$failure]
+                ['error' => $failure]
             );
         }
     }

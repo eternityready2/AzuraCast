@@ -25,6 +25,27 @@ return static function (RouteCollectorProxy $group): void {
                 ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
                 ->add(Middleware\RequireLogin::class);
 
+            $group->delete(
+                '/features/aircheck/history',
+                Controller\Api\Stations\Features\ClearAirCheckHistoryAction::class
+            )->setName('api:stations:aircheck:history:clear')
+                ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
+                ->add(Middleware\RequireLogin::class);
+
+            $group->post(
+                '/features/playout/manual-playlist',
+                Controller\Api\Stations\PlayoutControls\ManualPlaylistAction::class
+            )->setName('api:stations:playout:manual-playlist')
+                ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
+                ->add(Middleware\RequireLogin::class);
+
+            $group->post(
+                '/features/playout/stop-current',
+                Controller\Api\Stations\PlayoutControls\StopCurrentAction::class
+            )->setName('api:stations:playout:stop-current')
+                ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
+                ->add(Middleware\RequireLogin::class);
+
             $group->get(
                 '/diagnostics',
                 Controller\Api\Stations\Diagnostics\ViewAction::class

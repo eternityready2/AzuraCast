@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Plugin\TopOfHour;
 
-use App\Entity\Enums\PlaylistOrders;
+use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
@@ -16,18 +16,25 @@ use Carbon\CarbonImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Gives rigid scheduled playlists real wall-clock authority over the final
+ * Gives strict scheduled playlists real wall-clock authority over the final
  * station source graph.
  *
  * The plugin writes this wrapper immediately below the TOH ID wrapper. The
  * resulting authority order is:
  *
- *     Top-of-Hour ID -> rigid scheduled programme -> live/AutoDJ
+ *     Top-of-Hour ID -> strict scheduled programme -> live/AutoDJ
  *
- * A rigid takeover uses the same one-shot clean AutoDJ cut as TOH: the real
+ * A strict takeover uses the same one-shot clean AutoDJ cut as TOH: the real
  * request.dynamic leaf is skipped once and the shared cross operator discards
  * its buffered old tail at that forced boundary. There is no secondary gate or
  * backend quarantine state machine.
+ *
+ * Strict branches intentionally use dedicated native source instances. A source
+ * already written by ConfigWriter may live below stretch()/cross() in the normal
+ * radio graph; reusing that same source again above those operators creates a
+ * nested clock graph that Liquidsoap rejects with Error 11. Keeping the strict
+ * source independent preserves the wall-clock takeover while leaving Stretch /
+ * Squeeze and crossfade enabled on the ordinary radio path.
  */
 final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterface
 {
@@ -41,7 +48,6 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
     public function writeRuntime(WriteLiquidsoapConfiguration $event): void
     {
         $station = $event->getStation();
-        $playlistVarNames = [];
         $rigidBranches = [];
 
         foreach ($station->playlists as $playlist) {
@@ -50,7 +56,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
             }
 
             // These sources are resolved through the PHP AutoDJ queue and do not
-            // have a static media file that a native wall-clock source can read.
+            // have a static media file/URL that a native wall-clock source can read.
             if (in_array($playlist->source, [PlaylistSources::Playlists, PlaylistSources::Requests], true)) {
                 continue;
             }
@@ -63,33 +69,24 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
             $rigidSchedules = [];
             foreach ($playlist->schedule_items as $scheduleItem) {
-                if ($this->isRigidSchedule($playlist, $scheduleItem)) {
+                if ($this->isRigidSchedule($scheduleItem)) {
                     $rigidSchedules[] = $scheduleItem;
                 }
             }
 
-            $usesConfiguredNativeSource = ConfigWriter::shouldWritePlaylist($event, $playlist);
-
-            if ($usesConfiguredNativeSource) {
-                // Mirror ConfigWriter's native-variable collision handling across
-                // every playlist it writes, not only the rigid ones.
-                $playlistVarName = ConfigWriter::getPlaylistVariableName($playlist);
-                if (in_array($playlistVarName, $playlistVarNames, true)) {
-                    $playlistVarName .= '_' . $playlist->id;
-                }
-                $playlistVarNames[] = $playlistVarName;
-            } elseif ([] !== $rigidSchedules && PlaylistSources::Songs === $playlist->source) {
-                // A strict-start Songs playlist may be AutoDJ-only. The outer
-                // rigid lane still needs a native source to own the wall clock,
-                // so create one from the playlist file maintained for Songs.
-                $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
-                $playlistVarName = 'rigid_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
-                $this->writeDedicatedSongSource($event, $playlist, $playlistVarName);
-            } else {
+            if ([] === $rigidSchedules) {
                 continue;
             }
 
-            if ([] === $rigidSchedules) {
+            // Never reuse ConfigWriter's source in the outer strict switch. The
+            // configured source can already exist below stretch()/cross(); sharing
+            // it across both sides of that clock boundary creates the nested-clock
+            // startup failure. A single dedicated source per strict playlist keeps
+            // one authoritative cursor across all strict schedule windows.
+            $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
+            $playlistVarName = 'rigid_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
+
+            if (!$this->writeDedicatedSource($event, $playlist, $playlistVarName)) {
                 continue;
             }
 
@@ -101,11 +98,11 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
             }
         }
 
-        // This state is only emitted as a helper definition. With no rigid
+        // This state is only emitted as a helper definition. With no strict
         // branches below, this subscriber does not wrap or replace `radio`.
         $event->appendBlock(
             <<<'LIQ'
-            # Rigid schedule state (Top-of-Hour plugin).
+            # Strict schedule state (Top-of-Hour plugin).
             rigid_schedule_active = ref(false)
             LIQ
         );
@@ -122,7 +119,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
         $event->appendBlock(
             <<<LIQ
-            # Rigid scheduled-programme wall-clock lane (Top-of-Hour plugin).
+            # Strict scheduled-programme wall-clock lane (Top-of-Hour plugin).
             radio_before_rigid_schedule = radio
 
             def rigid_schedule_enter(_, new) =
@@ -131,14 +128,14 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
                 if not azuracast.live_enabled() then
                     # Arm a one-shot destructive cross boundary and skip exactly
                     # one real AutoDJ request. If a HARD TOH immediately preceded
-                    # this rigid item, the pending guard makes this a no-op so the
+                    # this strict item, the pending guard makes this a no-op so the
                     # already-fresh successor cannot be skipped a second time.
                     azuracast.discard_autodj_current_cleanly()
                     log("Rigid Schedule: armed clean cross boundary for interrupted AutoDJ request.")
                 end
 
                 # The PHP strict-start path may have staged a duplicate copy in
-                # the interrupting queue. This native rigid lane is authoritative.
+                # the interrupting queue. This native strict lane is authoritative.
                 interrupting_queue.skip()
                 interrupting_queue.set_queue([])
 
@@ -148,7 +145,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
             def rigid_schedule_exit(_, new) =
                 # Anything staged into the legacy interrupting lane while the
-                # rigid source was on air is stale and must not follow it.
+                # strict source was on air is stale and must not follow it.
                 interrupting_queue.skip()
                 interrupting_queue.set_queue([])
                 rigid_schedule_active := false
@@ -172,48 +169,119 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
         );
     }
 
-    private function writeDedicatedSongSource(
+    /**
+     * Write an isolated native source that mirrors ConfigWriter's source setup
+     * while publishing the exact source cursor used by forecasting/reporting.
+     */
+    private function writeDedicatedSource(
         WriteLiquidsoapConfiguration $event,
         StationPlaylist $playlist,
         string $playlistVarName,
-    ): void {
-        $playlistMode = match ($playlist->order) {
-            PlaylistOrders::Sequential => 'normal',
-            PlaylistOrders::Shuffle, PlaylistOrders::SmartShuffle => 'randomize',
-            PlaylistOrders::Random => 'random',
+    ): bool {
+        if (PlaylistSources::Songs === $playlist->source) {
+            $playlistFilePath = PlaylistFileWriter::getPlaylistFilePath($playlist);
+
+            // A strict programme must have one deterministic future sequence so
+            // Liquidsoap playback, Overview Up Next, Upcoming Queue and the
+            // 24-hour Linear Log can all report the same songs. The generated M3U
+            // already contains the playlist's persisted order. Using native
+            // `normal` mode makes that M3U sequence authoritative for the strict
+            // lane instead of privately reshuffling it inside Liquidsoap where PHP
+            // could not truthfully forecast a later round.
+            $playlistParams = [
+                'id=' . ConfigWriter::toRawString($playlistVarName),
+                'mime_type="audio/x-mpegurl"',
+                'mode="normal"',
+                'reload_mode="watch"',
+                ConfigWriter::toRawString($playlistFilePath),
+            ];
+
+            $event->appendLines([
+                '# Dedicated native source for a strict scheduled programme.',
+                $playlistVarName . ' = playlist(' . implode(',', $playlistParams) . ')',
+                '',
+                '# Publish the exact native playlist cursor to AzuraCast reporting.',
+                $playlistVarName . '.register_command(',
+                '    description="Return exact strict-programme forecast state.",',
+                '    "forecast",',
+                '    fun (_) -> json.stringify({',
+                '        remaining_seconds = ' . $playlistVarName . '.remaining(),',
+                '        remaining_files = ' . $playlistVarName . '.remaining_files(),',
+                '        all_files = playlist.files(mime_type="audio/x-mpegurl", '
+                    . ConfigWriter::toRawString($playlistFilePath) . ')',
+                '    })',
+                ')',
+            ]);
+
+            if ($playlist->backendMerge()) {
+                $event->appendLines([
+                    $playlistVarName . ' = merge_tracks(id="merge_' . $playlistVarName . '", ' . $playlistVarName . ')',
+                ]);
+            }
+
+            if ($playlist->is_jingle) {
+                $event->appendLines([
+                    $playlistVarName . ' = azuracast.utilities.drop_metadata(' . $playlistVarName . ')',
+                ]);
+            }
+
+            return true;
+        }
+
+        if (PlaylistSources::RemoteUrl !== $playlist->source) {
+            return false;
+        }
+
+        $remoteUrl = $playlist->remote_url;
+        if (null === $remoteUrl) {
+            return false;
+        }
+
+        if (PlaylistRemoteTypes::Playlist === $playlist->remote_type) {
+            $event->appendLines([
+                '# Dedicated native source for a strict scheduled programme.',
+                $playlistVarName . ' = playlist(' . ConfigWriter::toRawString($remoteUrl) . ')',
+            ]);
+
+            if ($playlist->is_jingle) {
+                $event->appendLines([
+                    $playlistVarName . ' = azuracast.utilities.drop_metadata(' . $playlistVarName . ')',
+                ]);
+            }
+
+            return true;
+        }
+
+        $buffer = $playlist->remote_buffer;
+        $buffer = ($buffer < 1) ? StationPlaylist::DEFAULT_REMOTE_BUFFER : $buffer;
+
+        $inputFunc = match ($playlist->remote_type) {
+            PlaylistRemoteTypes::Stream => 'input.http',
+            default => 'input.ffmpeg',
         };
 
-        $playlistParams = [
-            'id=' . ConfigWriter::toRawString($playlistVarName),
-            'mime_type="audio/x-mpegurl"',
-            'mode="' . $playlistMode . '"',
-            'reload_mode="watch"',
-            ConfigWriter::toRawString(PlaylistFileWriter::getPlaylistFilePath($playlist)),
-        ];
+        $remoteUrlFunc = 'buffer(buffer=' . $buffer . '., '
+            . $inputFunc . '(' . ConfigWriter::toRawString($remoteUrl) . '))';
 
         $event->appendLines([
-            '# Dedicated native source for an AutoDJ-only rigid scheduled programme.',
-            $playlistVarName . ' = playlist(' . implode(',', $playlistParams) . ')',
+            '# Dedicated native source for a strict scheduled programme.',
+            $playlistVarName . ' = mksafe(' . $remoteUrlFunc . ')',
         ]);
 
-        if ($playlist->is_jingle) {
-            $event->appendLines([
-                $playlistVarName . ' = azuracast.utilities.drop_metadata(' . $playlistVarName . ')',
-            ]);
-        }
+        return true;
     }
 
-    private function isRigidSchedule(
-        StationPlaylist $playlist,
-        StationSchedule $schedule,
-    ): bool {
-        return $schedule->strict_start
-            || $schedule->is_emergency
-            || $playlist->backendInterruptOtherSongs();
+    private function isRigidSchedule(StationSchedule $schedule): bool
+    {
+        // Playlist-wide Start Behavior belongs to ordinary/flexible scheduling.
+        // Only an explicit Strict / Exact Time row (or emergency row) gets the
+        // outer native wall-clock lane. This prevents a playlist-wide Programme
+        // choice from silently converting every Flexible row into Strict.
+        return $schedule->strict_start || $schedule->is_emergency;
     }
 
     /**
-     * Mirrors ConfigWriter's schedule predicate generation so the outer rigid
+     * Mirrors ConfigWriter's schedule predicate generation so the outer strict
      * runtime uses the exact same station-local schedule windows.
      */
     private function getScheduledPlaylistPlayTime(
