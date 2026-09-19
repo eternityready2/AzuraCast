@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\AiDjScheduleRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationRepository;
@@ -36,6 +37,8 @@ final class LinearLogBuilder
         private readonly LinearLogSnapshotStore $snapshotStore,
         private readonly LinearLogPreviewContext $previewContext,
         private readonly AiDjScheduleRepository $aiDjScheduleRepo,
+        private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
+        private readonly RigidScheduleForecastService $rigidScheduleForecast,
     ) {
     }
 
@@ -58,9 +61,7 @@ final class LinearLogBuilder
         $this->build($station, $message->hours);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     public function build(Station $station, ?int $hoursOverride = null): array
     {
         $stationId = $station->id;
@@ -71,7 +72,24 @@ final class LinearLogBuilder
         $buildStartedAt = time();
         $projectionStart = Time::nowUtc();
         $projectionStartTs = $projectionStart->getTimestamp();
-        $projectionEndTs = $projectionStart->modify('+' . $lookaheadMinutes . ' minutes')->getTimestamp();
+        $projectionEnd = $projectionStart->modify('+' . $lookaheadMinutes . ' minutes');
+        $projectionEndTs = $projectionEnd->getTimestamp();
+
+        // Strict / Exact Time schedules are rendered by a dedicated native
+        // Liquidsoap source above the ordinary AutoDJ queue. Capture both the
+        // authoritative windows and that native source's exact song cursor before
+        // starting the isolated PHP queue simulation.
+        $rigidWindows = $this->rigidScheduleWindowResolver->getWindows(
+            $station,
+            $projectionStart,
+            $projectionEnd,
+        );
+        $rigidForecastItems = $this->rigidScheduleForecast->getForecast(
+            $station,
+            $projectionStart,
+            $projectionEnd,
+            $maxTracks,
+        );
 
         $liveQueueIds = [];
         foreach ($this->queueRepo->getUnplayedQueue($station) as $queueRow) {
@@ -79,7 +97,6 @@ final class LinearLogBuilder
         }
 
         $this->snapshotStore->markBuilding($station, $hours);
-
         $this->previewContext->begin();
 
         $connection = $this->em->getConnection();
@@ -115,14 +132,31 @@ final class LinearLogBuilder
                     continue;
                 }
 
-                $duration = max(5.0, $row->duration ?? 0.0);
-                $coverageEnd = max($coverageEnd, $playedAt + (int)ceil($duration));
-                $entries[] = $this->mapQueueRow(
+                $entry = $this->mapQueueRow(
                     $row,
                     ++$sequence,
                     isset($liveQueueIds[$row->id]),
                 );
+                $entry = $this->applyRigidWindowsToQueueEntry($entry, $rigidWindows);
+                if (null === $entry) {
+                    continue;
+                }
+
+                $duration = max(1.0, (float)$entry['duration']);
+                $coverageEnd = max($coverageEnd, $playedAt + (int)ceil($duration));
+                $entries[] = $entry;
             }
+
+            // A PHP preview gap beneath a native strict programme is not a real
+            // on-air gap. The strict native source owns that interval.
+            $gaps = array_values(array_filter(
+                $gaps,
+                fn(array $gap): bool => !$this->rangeOverlapsRigidWindow(
+                    (int)$gap['started_at'],
+                    (int)$gap['started_at'] + (int)$gap['duration'],
+                    $rigidWindows,
+                ),
+            ));
 
             foreach ($gaps as $gap) {
                 $coverageEnd = max(
@@ -130,6 +164,51 @@ final class LinearLogBuilder
                     (int)$gap['started_at'] + (int)$gap['duration'],
                 );
             }
+
+            // Insert the actual songs from the strict native playlist cursor.
+            // These are the same songs exposed by Overview -> Playing Next and
+            // Broadcasting -> Upcoming Song Queue.
+            $forecastedScheduleKeys = [];
+            foreach ($rigidForecastItems as $forecastItem) {
+                $entry = $this->mapRigidForecastItem($forecastItem, ++$sequence);
+                $entries[] = $entry;
+                $forecastedScheduleKeys[$this->scheduleKey($forecastItem->schedule)] = true;
+                $coverageEnd = max(
+                    $coverageEnd,
+                    (int)$entry['played_at'] + (int)ceil((float)$entry['duration']),
+                );
+            }
+
+            // Remote strict sources cannot be expanded into local StationMedia
+            // songs. Keep one truthful programme block for those only; local song
+            // playlists always use the actual per-song rows above.
+            foreach ($rigidWindows as $window) {
+                $scheduleKey = $this->scheduleKey($window['schedule']);
+                if (isset($forecastedScheduleKeys[$scheduleKey])) {
+                    continue;
+                }
+
+                $marker = $this->mapRigidScheduleWindow(
+                    $window,
+                    $projectionStartTs,
+                    $projectionEndTs,
+                );
+                if (null === $marker) {
+                    continue;
+                }
+
+                $entries[] = $marker;
+                $coverageEnd = max(
+                    $coverageEnd,
+                    (int)$marker['played_at'] + (int)ceil((float)$marker['duration']),
+                );
+            }
+
+            usort(
+                $entries,
+                static fn(array $a, array $b): int =>
+                    ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
+            );
         } catch (Throwable $e) {
             $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
             throw $e;
@@ -164,6 +243,147 @@ final class LinearLogBuilder
         );
 
         return $this->snapshotStore->get($station);
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @param list<array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable}> $windows
+     * @return array<string, mixed>|null
+     */
+    private function applyRigidWindowsToQueueEntry(array $entry, array $windows): ?array
+    {
+        if ((bool)$entry['top_of_hour_legal_id']) {
+            return $entry;
+        }
+
+        $start = (int)($entry['played_at'] ?? 0);
+        $end = $start + (int)ceil((float)$entry['duration']);
+
+        foreach ($windows as $window) {
+            $windowStart = $window['start']->getTimestamp();
+            $windowEnd = $window['end']->getTimestamp();
+
+            if ($start >= $windowStart && $start < $windowEnd) {
+                return null;
+            }
+
+            if ($start < $windowStart && $end > $windowStart) {
+                $entry['duration'] = max(1.0, (float)($windowStart - $start));
+                return $entry;
+            }
+        }
+
+        return $entry;
+    }
+
+    /** @return array<string, mixed> */
+    private function mapRigidForecastItem(
+        RigidScheduleForecastItem $item,
+        int $sequence,
+    ): array {
+        $media = $item->media;
+        $playedAt = $item->playedAt->getTimestamp();
+
+        return [
+            'id' => 'strict-forecast-' . $sequence,
+            'queue_id' => 0,
+            'song_id' => $media->song_id,
+            'played_at' => $playedAt,
+            'cued_at' => $playedAt,
+            'duration' => max(1.0, $item->duration),
+            'title' => $media->title,
+            'artist' => $media->artist,
+            'album' => $media->album,
+            'text' => $media->text,
+            'playlist' => $item->playlist->name,
+            'playlist_id' => $item->playlist->id,
+            'playlist_chain' => null,
+            'clock_wheel' => null,
+            'clock_wheel_id' => null,
+            'media_type' => $media->type,
+            'source_type' => 'scheduled_programme',
+            'is_request' => false,
+            'is_live_queue' => false,
+            'sent_to_autodj' => true,
+            'top_of_hour_legal_id' => false,
+            'autodj_custom_uri' => null,
+            'clock_wheel_schedule_mode' => null,
+            'clock_wheel_enforce_cap' => false,
+            'clock_wheel_stretch_ratio' => null,
+            'clock_wheel_legal_id_substitute' => false,
+            'hour_boundary_enforce_cap' => false,
+            'hour_boundary_max_play_seconds' => null,
+            'top_of_hour_pre_id_fade' => false,
+        ];
+    }
+
+    /**
+     * @param array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable} $window
+     * @return array<string, mixed>|null
+     */
+    private function mapRigidScheduleWindow(array $window, int $projectionStartTs, int $projectionEndTs): ?array
+    {
+        $start = max($projectionStartTs, $window['start']->getTimestamp());
+        $end = min($projectionEndTs, $window['end']->getTimestamp());
+        if ($end <= $start) {
+            return null;
+        }
+
+        $playlist = $window['playlist'];
+        $schedule = $window['schedule'];
+
+        return [
+            'id' => 'rigid-schedule-' . $this->scheduleKey($schedule) . '-' . $start,
+            'queue_id' => 0,
+            'song_id' => '',
+            'played_at' => $start,
+            'cued_at' => $start,
+            'duration' => (float)($end - $start),
+            'title' => $playlist->name,
+            'artist' => null,
+            'album' => null,
+            'text' => PlaylistSources::RemoteUrl === $playlist->source
+                ? 'Strict scheduled remote programme'
+                : 'Strict scheduled programme',
+            'playlist' => $playlist->name,
+            'playlist_id' => $playlist->id,
+            'playlist_chain' => null,
+            'clock_wheel' => null,
+            'clock_wheel_id' => null,
+            'media_type' => 'programme',
+            'source_type' => 'scheduled_programme',
+            'is_request' => false,
+            'is_live_queue' => false,
+            'sent_to_autodj' => true,
+            'top_of_hour_legal_id' => false,
+            'autodj_custom_uri' => null,
+            'clock_wheel_schedule_mode' => null,
+            'clock_wheel_enforce_cap' => false,
+            'clock_wheel_stretch_ratio' => null,
+            'clock_wheel_legal_id_substitute' => false,
+            'hour_boundary_enforce_cap' => false,
+            'hour_boundary_max_play_seconds' => null,
+            'top_of_hour_pre_id_fade' => false,
+        ];
+    }
+
+    private function scheduleKey(\App\Entity\StationSchedule $schedule): int
+    {
+        return isset($schedule->id) ? $schedule->id : spl_object_id($schedule);
+    }
+
+    /**
+     * @param list<array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable}> $windows
+     */
+    private function rangeOverlapsRigidWindow(int $start, int $end, array $windows): bool
+    {
+        foreach ($windows as $window) {
+            if ($start < $window['end']->getTimestamp() && $window['start']->getTimestamp() < $end) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -227,9 +447,7 @@ final class LinearLogBuilder
         return $shifts;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     private function mapQueueRow(StationQueue $row, int $sequence, bool $isLiveQueue): array
     {
         $mediaType = match (true) {
@@ -276,7 +494,9 @@ final class LinearLogBuilder
             'clock_wheel_legal_id_substitute' => $row->clock_wheel_legal_id_substitute,
             'hour_boundary_enforce_cap' => $row->hour_boundary_enforce_cap,
             'hour_boundary_max_play_seconds' => $row->hour_boundary_max_play_seconds,
-            'top_of_hour_pre_id_fade' => $row->top_of_hour_pre_id_fade,
+            // Kept in the snapshot schema for backward-compatible frontend data.
+            // The StationQueue entity no longer has this legacy property.
+            'top_of_hour_pre_id_fade' => false,
         ];
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\CallableEventDispatcherInterface;
 use App\Event\GetSyncTasks;
 use App\Sync\Task\StageTopOfHourStationIdTask;
+use Plugin\TopOfHour\AiDjRuntimeConfiguration;
 use Plugin\TopOfHour\RigidScheduleRuntimeConfiguration;
 use Plugin\TopOfHour\TopOfHourQueueClockConstraint;
 use Plugin\TopOfHour\TopOfHourRuntimeConfiguration;
@@ -17,6 +18,7 @@ return static function (CallableEventDispatcherInterface $dispatcher): void {
     $dispatcher->addServiceSubscriber([
         RigidScheduleRuntimeConfiguration::class,
         TopOfHourQueueClockConstraint::class,
+        AiDjRuntimeConfiguration::class,
         TopOfHourRuntimeConfiguration::class,
     ]);
 

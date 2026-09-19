@@ -181,7 +181,25 @@ final class Liquidsoap extends AbstractLocalAdapter
             $station,
             sprintf('%s.queue', $queue->value)
         );
-        return empty($queueResult[0]);
+        if (!empty($queueResult[0])) {
+            return false;
+        }
+
+        if (LiquidsoapQueues::Requests === $queue) {
+            try {
+                $aiDjQueueResult = $this->command(
+                    $station,
+                    sprintf('%s.queue', LiquidsoapQueues::AiDj->value)
+                );
+
+                if (!$this->isUnknownCommandResponse($aiDjQueueResult)) {
+                    return empty($aiDjQueueResult[0]);
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        return true;
     }
 
     /**
