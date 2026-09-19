@@ -150,8 +150,18 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
         $previousShiftIdentity = $this->cache->get($runtimeShiftKey);
         if (null === $previousShiftIdentity) {
             $this->purgePendingAiDjSpeech($station, $backend, 'AI DJ shift ownership state initialized');
+            // Also clear the welcome marker so the first heartbeat on a fresh
+            // Redis/runtime state always tries to welcome, even if a stale key
+            // from a previous deployment survived in cache.
+            $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
         } elseif ($previousShiftIdentity !== $shiftIdentity) {
             $this->purgePendingAiDjSpeech($station, $backend, 'AI DJ shift changed');
+            // A different shift started: the old welcomed marker belongs to the
+            // previous occurrence. Delete it so the new shift gets its own welcome,
+            // even if the same DJ recurs (e.g. Onyx every night 12am-6am).
+            $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
+            $this->cache->delete('ai_dj_last_active_' . $station->id);
+            $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
         }
         $this->cache->set($runtimeShiftKey, $shiftIdentity, self::STATE_TTL_SECONDS);
 
