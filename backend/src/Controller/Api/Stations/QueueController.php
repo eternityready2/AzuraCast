@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Api\Stations;
 
 use App\Cache\QueueLogCache;
+use App\Container\LoggerAwareTrait;
 use App\Entity\Api\StationQueueDetailed;
 use App\Entity\Api\Status;
 use App\Entity\ApiGenerator\StationQueueApiGenerator;
@@ -110,6 +111,8 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 ]
 final class QueueController extends AbstractStationApiCrudController
 {
+    use LoggerAwareTrait;
+
     protected string $entityClass = StationQueue::class;
     protected string $resourceRouteName = 'api:stations:queue:record';
 
@@ -275,6 +278,17 @@ final class QueueController extends AbstractStationApiCrudController
         return $expectedAt >= $boundary;
     }
 
+    /**
+     * A clip normally airs within seconds to a couple minutes of being queued —
+     * the current song has to finish, at most. If Liquidsoap is still reporting
+     * a clip pending well beyond that, something is genuinely stuck (a dead
+     * fallback gate, a file that never resolved, a wedged request), not a
+     * normal wait for a track boundary. Trusting the "pending" signal past
+     * this point is exactly what pins a stale row to the top of the queue
+     * page indefinitely.
+     */
+    private const int PENDING_AI_DJ_STALE_SECONDS = 150;
+
     private function getPendingAiDjRuntimeRow(Station $station): ?StationQueue
     {
         $backend = $this->adapters->getBackendAdapter($station);
@@ -306,6 +320,36 @@ final class QueueController extends AbstractStationApiCrudController
             ->setParameter('aiDjPath', '%/ai_dj/%')
             ->setMaxResults(1)
             ->getOneOrNullResult();
+
+        if (null === $row) {
+            return null;
+        }
+
+        $ageSeconds = Time::nowUtc()->getTimestamp() - $row->timestamp_cued->getTimestamp();
+        if ($ageSeconds > self::PENDING_AI_DJ_STALE_SECONDS) {
+            $this->logger->warning(
+                'AI DJ: Pending clip has not aired within the expected window; ' .
+                'hiding stale row from Upcoming Queue and requesting cleanup.',
+                [
+                    'station_id' => $station->id,
+                    'queue_row_id' => $row->id,
+                    'age_seconds' => $ageSeconds,
+                ]
+            );
+
+            // The row will genuinely never resolve on its own if it has sat this
+            // long — force-clear the dedicated lane so the runtime task's next
+            // heartbeat can detect the empty lane and generate a fresh attempt
+            // instead of the same wedged request sitting there forever.
+            try {
+                $backend->command($station, 'ai_dj_control.clear');
+            } catch (\Throwable) {
+                // Best-effort cleanup; the report itself must never fail because
+                // of this, and the runtime task retries stuck state independently.
+            }
+
+            return null;
+        }
 
         return $row;
     }

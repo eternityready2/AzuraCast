@@ -41,4 +41,17 @@ final class AiDjRuntimeCadenceTest extends Unit
         // real BuildQueue song-boundary event fires to drive normal cadence.
         self::assertSame(8, $reflection->getConstant('MAX_TALK_BREAKS_PER_HOUR'));
     }
+
+    public function testStuckSpeechWatchdogThreshold(): void
+    {
+        $reflection = new ReflectionClass(AiDjShiftLifecycleRuntimeTask::class);
+
+        // A clip only ever needs to wait for the current track to finish plus
+        // TTS render time. 150s is comfortably above any normal wait but tight
+        // enough that a wedged fallback gate or unresolved request cannot leave
+        // a station silent for more than 2.5 minutes before the next heartbeat
+        // force-clears it and tries again.
+        self::assertSame(150, $reflection->getConstant('STUCK_SPEECH_SECONDS'));
+        self::assertTrue($reflection->hasMethod('clearStuckAiDjSpeech'));
+    }
 }

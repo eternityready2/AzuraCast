@@ -10,6 +10,7 @@ on:
       - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
@@ -33,6 +34,7 @@ on:
       - 'backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php'
       - 'backend/src/Radio/AutoDJ/AiDjQueueListener.php'
       - 'backend/src/Radio/AutoDJ/AiDjShiftLifecycleListener.php'
+      - 'backend/src/Controller/Api/Stations/QueueController.php'
       - 'backend/src/Radio/Backend/Liquidsoap.php'
       - 'backend/src/Service/AiDjGenerator.php'
       - 'plugins/top_of_hour/src/AiDjRuntimeConfiguration.php'
@@ -114,6 +116,18 @@ jobs:
           grep -q '\$airedNewClip' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'isRunning(\$station)' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
           grep -q 'current_streamer' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+
+          # Self-healing: a clip stuck pending in Liquidsoap past a reasonable
+          # window (dead fallback gate, unresolved request, stale runtime state
+          # from before a deploy) must be force-cleared automatically every
+          # minute, not left silent until the next scheduled shift boundary.
+          # The Upcoming Queue page must also stop trusting/displaying the same
+          # stale pending row once it has clearly missed its air time, instead
+          # of pinning it at the top indefinitely.
+          grep -q 'clearStuckAiDjSpeech' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'STUCK_SPEECH_SECONDS' backend/src/Sync/Task/AiDjShiftLifecycleRuntimeTask.php
+          grep -q 'PENDING_AI_DJ_STALE_SECONDS' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'ai_dj_control.clear' backend/src/Controller/Api/Stations/QueueController.php
 
           # Stale speech is only purged from the dedicated AI DJ queue. Listener
           # Requests are never flushed, and concrete shift identity owns pending speech.

@@ -74,6 +74,16 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
 
     private const int STATE_TTL_SECONDS = 12 * 3600;
 
+    /**
+     * Longest a single AI DJ clip should ever sit "pending" in Liquidsoap before
+     * it is treated as wedged rather than normally waiting for a track boundary.
+     * Even a long song (5-6 min) plus TTS render time is comfortably under this;
+     * a fallback gate that never opens (or a request that never resolves) would
+     * otherwise leave a station silent, and the Upcoming Queue page pinned to
+     * the same stale row, until the next scheduled shift boundary purges it.
+     */
+    private const int STUCK_SPEECH_SECONDS = 150;
+
     public function __construct(
         private readonly AiDjShiftLifecycleListener $lifecycleListener,
         private readonly AiDjQueueListener $queueListener,
@@ -137,6 +147,16 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             ]);
             return;
         }
+
+        // Self-healing safety net: a clip normally reaches air within seconds to a
+        // couple minutes (it waits, at most, for the current track to finish). If
+        // Liquidsoap is STILL reporting a clip pending well beyond that, something
+        // is genuinely wedged -- a fallback gate that never opens, a request that
+        // never resolves, or stale runtime state left over from before a deploy.
+        // Leaving it alone means total silence until the next shift boundary
+        // purges it. Force-clear it here so the very next heartbeat sees an empty
+        // lane and generates a fresh attempt instead.
+        $this->clearStuckAiDjSpeech($station, $backend);
 
         $now = new DateTimeImmutable('now', $station->getTimezoneObject());
         $schedule = $this->scheduler->findActiveSchedule($station->id, $now);
@@ -335,6 +355,89 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
 
             // Fail closed so a database/history outage cannot create chatter bursts.
             return self::MAX_TALK_BREAKS_PER_HOUR;
+        }
+    }
+
+    /**
+     * Detect a clip that Liquidsoap still reports as pending in the dedicated AI
+     * DJ lane long after it should have aired, and force-clear it. A clip only
+     * ever needs to wait for the current track to finish, plus TTS render time --
+     * both comfortably under STUCK_SPEECH_SECONDS. If the lane is still occupied
+     * past that, either the fallback gate that selects ai_dj_queue is not opening
+     * (e.g. a stale Liquidsoap config still running the pre-fix predicate) or the
+     * request itself never resolved. Either way, waiting for the next scheduled
+     * shift boundary means total silence and a queue page permanently pinned to
+     * the same stale row in the meantime. This method costs one cheap Liquidsoap
+     * query per minute per station and only acts when something is genuinely
+     * wedged, so it is always safe to run.
+     */
+    private function clearStuckAiDjSpeech(Station $station, Liquidsoap $backend): void
+    {
+        try {
+            if ($backend->isQueueEmpty($station, LiquidsoapQueues::AiDj)) {
+                return;
+            }
+        } catch (Throwable) {
+            // Reporting must never block normal playback on an inspection failure.
+            return;
+        }
+
+        try {
+            /** @var StationQueue|null $pending */
+            $pending = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sq FROM App\Entity\StationQueue sq
+                    WHERE sq.station = :station
+                    AND sq.is_played = 1
+                    AND sq.timestamp_played IS NULL
+                    AND sq.autodj_custom_uri IS NOT NULL
+                    AND sq.autodj_custom_uri LIKE :aiDjPath
+                    ORDER BY sq.timestamp_cued DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('aiDjPath', '%/ai_dj/%')
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+        } catch (Throwable $e) {
+            $this->logger->error('AI DJ: Stuck-speech lookup failed.', [
+                'station_id' => $station->id,
+                'exception' => $e->getMessage(),
+            ]);
+            return;
+        }
+
+        if (null === $pending) {
+            // Liquidsoap reports something pending but no matching database row
+            // exists to time it against (e.g. state predates this deploy). Clear
+            // it: an unaccountable pending clip is never safe to leave in place.
+            $this->purgePendingAiDjSpeech($station, $backend, 'pending speech has no matching queue row');
+            return;
+        }
+
+        $ageSeconds = time() - $pending->timestamp_cued->getTimestamp();
+        if ($ageSeconds <= self::STUCK_SPEECH_SECONDS) {
+            return;
+        }
+
+        $this->logger->warning('AI DJ: Clip stuck pending past expected air time; force-clearing.', [
+            'station_id' => $station->id,
+            'queue_row_id' => $pending->id,
+            'age_seconds' => $ageSeconds,
+            'title' => $pending->title,
+            'artist' => $pending->artist,
+        ]);
+
+        $this->purgePendingAiDjSpeech($station, $backend, 'clip stuck pending past expected air time');
+
+        // The stale welcome/talk guard for this shift must also be cleared so the
+        // very next heartbeat is free to generate a fresh attempt rather than
+        // believing this shift was already (unsuccessfully) welcomed/handled.
+        $schedule = $this->scheduler->findActiveSchedule($station->id, new DateTimeImmutable('now', $station->getTimezoneObject()));
+        if ($schedule instanceof AiDjSchedule) {
+            $dj = $schedule->getAiDj();
+            $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());
+            $this->cache->delete('ai_dj_last_active_' . $station->id);
+            $this->cache->delete('ai_dj_talk_cooldown_' . $station->id);
         }
     }
 
