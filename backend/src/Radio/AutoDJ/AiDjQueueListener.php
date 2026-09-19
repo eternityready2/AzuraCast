@@ -258,8 +258,26 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // id) has a different, absent key and so still welcomes.
             $welcomedKey = 'ai_dj_welcomed_' . $station->id . '_' . $currentDjId;
             if (null === $this->cache->get($welcomedKey)) {
-                // Long enough to survive a program gap while remaining shift-local in practice.
-                $this->cache->set($welcomedKey, time(), 72000);
+                // Compute a shift-scoped TTL once so the same DJ can welcome again at
+                // the start of their NEXT shift (e.g. Onyx 12am-6am every night — a
+                // flat 72000s key would suppress the following night's welcome).
+                $welcomeSchedule = $this->scheduler->findActiveSchedule($station->id, $now);
+                $shiftTtl = $welcomeSchedule !== null
+                    ? max(3600, $this->scheduler->getShiftWindow($station, $welcomeSchedule, $now)['ends_at']->getTimestamp() - $now->getTimestamp() + 3600)
+                    : 3600;
+
+                // AiDjShiftLifecycleListener (priority 2, same event) runs before this
+                // listener (priority 1) and may have already queued a welcome clip in the
+                // dedicated AI DJ lane. If a clip is pending, defer to it rather than
+                // stacking a second welcome. Mark the key so we don't retry next event.
+                if (!$backend->isQueueEmpty($station, LiquidsoapQueues::AiDj)) {
+                    $this->cache->set($welcomedKey, time(), $shiftTtl);
+                    $this->trackCurrentSong($station);
+                    return;
+                }
+
+                // No clip pending — queue the welcome ourselves.
+                $this->cache->set($welcomedKey, time(), $shiftTtl);
                 $this->pushIntroShiftClip($dj, $station, $backend);
                 $this->cache->set($cooldownKey, time(), 300);
                 $this->trackCurrentSong($station);

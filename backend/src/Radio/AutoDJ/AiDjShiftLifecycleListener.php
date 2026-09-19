@@ -62,9 +62,13 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
 
     public static function getSubscribedEvents(): array
     {
-        // Run before AiDjQueueListener (priority 1). The wall-clock runtime task
-        // calls this method directly in production, but keeping the subscriber
-        // contract preserves compatibility with direct event-driven callers.
+        // Run before AiDjQueueListener (priority 1). Fires on real BuildQueue
+        // song-boundary events (registered in events.php) so welcomes/sign-offs
+        // are caught as early as possible during normal playback. The wall-clock
+        // runtime task ALSO calls this method directly every minute, which is
+        // still required: during Strict scheduled playlists (Hymns & Favorites)
+        // no real BuildQueue event fires at all, so only the minute-by-minute
+        // cron can catch shift boundaries there.
         return [
             BuildQueue::class => ['onBuildQueue', 2],
         ];
