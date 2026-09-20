@@ -48,8 +48,24 @@ final class TopOfHourClock
     public const float MIN_ID_FADE_SECONDS = 1.0;
     public const float MAX_ID_FADE_SECONDS = 10.0;
 
+    // Requirement 1: duration-matched song swapping. These are operator controls
+    // only, so they live in the backend configuration's forward-compatible extra
+    // data bag and need no schema migration.
+    public const bool DEFAULT_SWAP_ENABLED = true;
+
+    public const int DEFAULT_SWAP_TOLERANCE_SECONDS = 5;
+    public const int MIN_SWAP_TOLERANCE_SECONDS = 1;
+    public const int MAX_SWAP_TOLERANCE_SECONDS = 30;
+
+    public const int DEFAULT_SWAP_MIN_GAP_SECONDS = 45;
+    public const int MIN_SWAP_MIN_GAP_SECONDS = 15;
+    public const int MAX_SWAP_MIN_GAP_SECONDS = 600;
+
     public const string CONFIG_ID_START_SECOND = 'top_of_hour_id_start_second';
     public const string CONFIG_ID_FADE_SECONDS = 'top_of_hour_id_fade_seconds';
+    public const string CONFIG_SWAP_ENABLED = 'top_of_hour_swap_enabled';
+    public const string CONFIG_SWAP_TOLERANCE_SECONDS = 'top_of_hour_swap_tolerance_seconds';
+    public const string CONFIG_SWAP_MIN_GAP_SECONDS = 'top_of_hour_swap_min_gap_seconds';
 
     public function __construct(
         private readonly StationIdSelector $stationIdSelector,
@@ -115,6 +131,75 @@ final class TopOfHourClock
         return round($value, 1);
     }
 
+    /**
+     * Whether the AutoDJ may substitute the final music slot of the hour with a
+     * duration-matched track instead of relying on the runtime pre-fade cut.
+     */
+    public function isSwapEnabled(Station $station): bool
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        if (!array_key_exists(self::CONFIG_SWAP_ENABLED, $raw)) {
+            return self::DEFAULT_SWAP_ENABLED;
+        }
+
+        $value = $raw[self::CONFIG_SWAP_ENABLED];
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array((string)$value, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * How far a candidate track's natural duration may miss the ID deadline and
+     * still be considered a clean landing.
+     */
+    public function getSwapToleranceSeconds(Station $station): int
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (int)($raw[self::CONFIG_SWAP_TOLERANCE_SECONDS] ?? self::DEFAULT_SWAP_TOLERANCE_SECONDS),
+            self::MIN_SWAP_TOLERANCE_SECONDS,
+            self::MAX_SWAP_TOLERANCE_SECONDS,
+            self::DEFAULT_SWAP_TOLERANCE_SECONDS,
+        );
+    }
+
+    /**
+     * The shortest remaining-hour gap worth filling with a whole song. Below
+     * this, the runtime pre-fade soft cut is the correct behaviour: manufacturing
+     * a 12-second music slot is worse radio than a short fade.
+     */
+    public function getSwapMinGapSeconds(Station $station): int
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (int)($raw[self::CONFIG_SWAP_MIN_GAP_SECONDS] ?? self::DEFAULT_SWAP_MIN_GAP_SECONDS),
+            self::MIN_SWAP_MIN_GAP_SECONDS,
+            self::MAX_SWAP_MIN_GAP_SECONDS,
+            self::DEFAULT_SWAP_MIN_GAP_SECONDS,
+        );
+    }
+
+    /**
+     * The exact :59:ss ID deadline for the hour that contains $from. Shared by
+     * queue planning, the swap selector and the runtime staging task so all three
+     * agree on a single deadline without needing a resolved ID file first.
+     */
+    public function getTargetStartFor(
+        Station $station,
+        DateTimeImmutable $from,
+    ): DateTimeImmutable {
+        return CarbonImmutable::instance($this->getNextBoundary($station, $from))
+            ->subMinute()
+            ->startOfMinute()
+            ->addSeconds($this->getIdStartSecond($station))
+            ->toDateTimeImmutable();
+    }
+
     public function getNextBoundary(
         Station $station,
         DateTimeImmutable $from,
@@ -153,10 +238,9 @@ final class TopOfHourClock
         // The operator owns the exact ID start. HARD/SOFT changes what happens
         // at :00, not when the ID begins. This keeps :59:ss a true station clock
         // event and lets operators place IDs according to their real duration.
-        $targetStart = $boundary
-            ->subMinute()
-            ->startOfMinute()
-            ->addSeconds($this->getIdStartSecond($station));
+        $targetStart = CarbonImmutable::instance(
+            $this->getTargetStartFor($station, $from)
+        );
 
         return new TopOfHourPlan(
             mode: $mode,

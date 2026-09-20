@@ -84,6 +84,20 @@ final class PutAction implements SingleActionInterface
         if (array_key_exists(TopOfHourClock::CONFIG_ID_FADE_SECONDS, $body)) {
             $extra[TopOfHourClock::CONFIG_ID_FADE_SECONDS] = (float)$body[TopOfHourClock::CONFIG_ID_FADE_SECONDS];
         }
+        if (array_key_exists(TopOfHourClock::CONFIG_SWAP_ENABLED, $body)) {
+            $extra[TopOfHourClock::CONFIG_SWAP_ENABLED] = filter_var(
+                $body[TopOfHourClock::CONFIG_SWAP_ENABLED],
+                FILTER_VALIDATE_BOOL
+            );
+        }
+        if (array_key_exists(TopOfHourClock::CONFIG_SWAP_TOLERANCE_SECONDS, $body)) {
+            $extra[TopOfHourClock::CONFIG_SWAP_TOLERANCE_SECONDS] =
+                (int)$body[TopOfHourClock::CONFIG_SWAP_TOLERANCE_SECONDS];
+        }
+        if (array_key_exists(TopOfHourClock::CONFIG_SWAP_MIN_GAP_SECONDS, $body)) {
+            $extra[TopOfHourClock::CONFIG_SWAP_MIN_GAP_SECONDS] =
+                (int)$body[TopOfHourClock::CONFIG_SWAP_MIN_GAP_SECONDS];
+        }
         if ([] !== $extra) {
             $backendConfig->fromArray($extra);
         }
@@ -133,6 +147,18 @@ final class PutAction implements SingleActionInterface
             (float)($raw[TopOfHourClock::CONFIG_ID_FADE_SECONDS] ?? TopOfHourClock::DEFAULT_ID_FADE_SECONDS),
             TopOfHourClock::MIN_ID_FADE_SECONDS,
             TopOfHourClock::MAX_ID_FADE_SECONDS,
+        );
+        $this->validateRange(
+            (int)($raw[TopOfHourClock::CONFIG_SWAP_TOLERANCE_SECONDS]
+                ?? TopOfHourClock::DEFAULT_SWAP_TOLERANCE_SECONDS),
+            TopOfHourClock::MIN_SWAP_TOLERANCE_SECONDS,
+            TopOfHourClock::MAX_SWAP_TOLERANCE_SECONDS,
+        );
+        $this->validateRange(
+            (int)($raw[TopOfHourClock::CONFIG_SWAP_MIN_GAP_SECONDS]
+                ?? TopOfHourClock::DEFAULT_SWAP_MIN_GAP_SECONDS),
+            TopOfHourClock::MIN_SWAP_MIN_GAP_SECONDS,
+            TopOfHourClock::MAX_SWAP_MIN_GAP_SECONDS,
         );
     }
 

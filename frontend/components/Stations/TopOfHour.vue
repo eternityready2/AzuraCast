@@ -167,6 +167,54 @@
                                 </template>
                             </form-group>
 
+                            <h3 class="h6 mt-4 mb-3">{{ $gettext('Landing the Hour') }}</h3>
+
+                            <form-group id="top_of_hour_swap_enabled" class="mb-3">
+                                <template #label>{{ $gettext('Swap the last song of the hour to land on the ID') }}</template>
+                                <form-checkbox id="top_of_hour_swap_enabled" v-model="form.top_of_hour_swap_enabled" />
+                                <template #description>
+                                    {{ $gettext('The AutoDJ replaces the final music slot with a track from the same playlist whose natural length ends at the ID deadline. The fade above becomes a rare fallback used only when no match exists.') }}
+                                </template>
+                            </form-group>
+
+                            <form-group id="top_of_hour_swap_tolerance_seconds" class="mb-3">
+                                <template #label>{{ $gettext('Landing tolerance') }}</template>
+                                <div class="input-group">
+                                    <input
+                                        id="top_of_hour_swap_tolerance_seconds"
+                                        v-model.number="form.top_of_hour_swap_tolerance_seconds"
+                                        type="number"
+                                        class="form-control"
+                                        min="1"
+                                        max="30"
+                                        :disabled="!form.top_of_hour_swap_enabled"
+                                    >
+                                    <span class="input-group-text">{{ $gettext('seconds') }}</span>
+                                </div>
+                                <template #description>
+                                    {{ $gettext('How far a track may miss the deadline and still count as a clean landing. Tighter is more accurate but finds fewer matches; widen it on a small library.') }}
+                                </template>
+                            </form-group>
+
+                            <form-group id="top_of_hour_swap_min_gap_seconds" class="mb-3">
+                                <template #label>{{ $gettext('Minimum swap gap') }}</template>
+                                <div class="input-group">
+                                    <input
+                                        id="top_of_hour_swap_min_gap_seconds"
+                                        v-model.number="form.top_of_hour_swap_min_gap_seconds"
+                                        type="number"
+                                        class="form-control"
+                                        min="15"
+                                        max="600"
+                                        :disabled="!form.top_of_hour_swap_enabled"
+                                    >
+                                    <span class="input-group-text">{{ $gettext('seconds') }}</span>
+                                </div>
+                                <template #description>
+                                    {{ $gettext('If less than this much of the hour remains, no song is substituted and the fade fallback is used instead. This prevents very short stub tracks being scheduled just before the ID.') }}
+                                </template>
+                            </form-group>
+
                             <form-group id="top_of_hour_lookahead_minutes" class="mb-3">
                                 <template #label>{{ $gettext('Staging lookahead') }}</template>
                                 <div class="input-group">
@@ -319,6 +367,9 @@ const form = ref<TopOfHourForm>({
     top_of_hour_id_max_seconds: 60,
     top_of_hour_id_start_second: 0,
     top_of_hour_id_fade_seconds: 5,
+    top_of_hour_swap_enabled: true,
+    top_of_hour_swap_tolerance_seconds: 5,
+    top_of_hour_swap_min_gap_seconds: 45,
 });
 
 const nextModeBadge = computed(() => {
@@ -356,6 +407,9 @@ const loadSettings = async () => {
             top_of_hour_id_max_seconds: data.top_of_hour_id_max_seconds ?? 60,
             top_of_hour_id_start_second: data.top_of_hour_id_start_second ?? 0,
             top_of_hour_id_fade_seconds: data.top_of_hour_id_fade_seconds ?? 5,
+            top_of_hour_swap_enabled: data.top_of_hour_swap_enabled ?? true,
+            top_of_hour_swap_tolerance_seconds: data.top_of_hour_swap_tolerance_seconds ?? 5,
+            top_of_hour_swap_min_gap_seconds: data.top_of_hour_swap_min_gap_seconds ?? 45,
         };
         configuredStartLabel.value = data.configured_start_label ?? ':59:00';
         idMediaCount.value = data.id_media_count ?? 0;

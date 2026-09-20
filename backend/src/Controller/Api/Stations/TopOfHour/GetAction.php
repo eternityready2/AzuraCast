@@ -134,6 +134,9 @@ final class GetAction implements SingleActionInterface
             'top_of_hour_id_max_seconds' => $this->clock->getIdMaxSeconds($station),
             'top_of_hour_id_start_second' => $startSecond,
             'top_of_hour_id_fade_seconds' => $fadeSeconds,
+            'top_of_hour_swap_enabled' => $this->clock->isSwapEnabled($station),
+            'top_of_hour_swap_tolerance_seconds' => $this->clock->getSwapToleranceSeconds($station),
+            'top_of_hour_swap_min_gap_seconds' => $this->clock->getSwapMinGapSeconds($station),
             'configured_start_label' => sprintf(':59:%02d', $startSecond),
             'id_media_count' => $idMediaCount,
             'compliance' => $this->eventRepo->getStationTopOfHourLegalIdComplianceSummary(
@@ -150,6 +153,9 @@ final class GetAction implements SingleActionInterface
                 'id_max_seconds' => TopOfHourClock::DEFAULT_ID_MAX_SECONDS,
                 'id_start_second' => TopOfHourClock::DEFAULT_ID_START_SECOND,
                 'id_fade_seconds' => TopOfHourClock::DEFAULT_ID_FADE_SECONDS,
+                'swap_enabled' => TopOfHourClock::DEFAULT_SWAP_ENABLED,
+                'swap_tolerance_seconds' => TopOfHourClock::DEFAULT_SWAP_TOLERANCE_SECONDS,
+                'swap_min_gap_seconds' => TopOfHourClock::DEFAULT_SWAP_MIN_GAP_SECONDS,
             ],
         ]);
     }
