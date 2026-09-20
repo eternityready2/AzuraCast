@@ -19,42 +19,67 @@ use Carbon\CarbonImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Requirement 1: Dynamic Song Swapping (primary Top-of-Hour landing strategy).
+ * Requirement 1: dynamic song swapping, so the last music slot of the hour ENDS
+ * on the Station ID deadline instead of being faded out mid-song.
  *
- * The station ID owns an exact wall-clock second inside minute :59. Historically
- * the only way to protect that deadline was to fade/cut whatever music happened
- * to be on air (requirement 2), which is audible and therefore a fallback, not a
- * plan.
+ * Runs on BuildQueue at priority -1: after the ordinary AutoDJ selector (0) has
+ * made its pick under all its normal playlist/daypart/rotation rules, and before
+ * the DMCA validator (-5) so the replacement is still checked like any other
+ * track.
  *
- * This subscriber runs AFTER the ordinary AutoDJ selector (priority 0) and
- * BEFORE the DMCA validator (priority -5). When the freshly-picked track is the
- * last music slot of the hour, it is replaced with a track from the SAME active
- * playlist whose natural duration lands on the ID deadline within the operator's
- * tolerance. If no such track exists, the pick is left completely untouched and
- * the existing Liquidsoap pre-fade performs the rare soft hard-cut instead.
+ * If a duration-matched track exists, the pick is replaced. If one does not, the
+ * pick is left completely alone and the existing Liquidsoap pre-fade performs
+ * the soft cut. Nothing here ever shortens, caps or rewrites a duration.
  *
- * Deliberate design choices:
- *  - Candidates come only from the playlist the selector already chose, so
- *    daypart/scheduling/rotation rules cannot be bypassed by this swap.
- *  - The replacement is still subject to every lower-priority validator
- *    (DMCA, etc.), because it is written back into the same event.
- *  - Nothing here ever shortens, caps or rewrites a duration. A swap either
- *    happens naturally or does not happen at all.
+ * DELIBERATELY SELF-CONTAINED. This file reads its own settings and derives its
+ * own deadline using only long-stable public API (TopOfHourClock::isEnabled,
+ * ::getNextBoundary, ::getIdStartSecond, ::clockWheelOwnsBoundary). It requires
+ * no edits to TopOfHourClock, the API controllers or the Vue page, so deploying
+ * it cannot regress any of those files.
  */
 final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 {
     use LoggerAwareTrait;
     use EntityManagerAwareTrait;
 
+    // Settings, read from the station's backend_config extra-data bag. Absent
+    // keys use the defaults below, so the feature works with no configuration.
+    public const string CONFIG_SWAP_ENABLED = 'top_of_hour_swap_enabled';
+    public const string CONFIG_SWAP_TOLERANCE = 'top_of_hour_swap_tolerance_seconds';
+    public const string CONFIG_SWAP_MIN_GAP = 'top_of_hour_swap_min_gap_seconds';
+
+    private const bool DEFAULT_SWAP_ENABLED = true;
+    private const float DEFAULT_TOLERANCE_SECONDS = 5.0;
+
     /**
-     * Extra slack applied to the raw `length` column when pre-filtering in SQL.
-     * getCalculatedLength() subtracts cue-in/cue-out, so the stored length can be
-     * a little longer than the audible duration we actually schedule against.
+     * Absolute floor for "is this the final slot of the hour". The EFFECTIVE
+     * value is raised at runtime to the shortest track actually present in the
+     * playlist -- see getMinFillableGap(). A fixed 45s was wrong: with a 60s
+     * remainder this class would decide "another song still fits", hand the
+     * slot back, and then be asked to find a 60-second track. No music
+     * playlist has those, so it fell through to the fade every time. That dead
+     * zone between the configured floor and the shortest real track is
+     * precisely where the cuts you were hearing came from.
+     */
+    private const float DEFAULT_MIN_GAP_SECONDS = 60.0;
+
+    private const float MIN_TOLERANCE_SECONDS = 1.0;
+    private const float MAX_TOLERANCE_SECONDS = 30.0;
+    private const float MIN_MIN_GAP_SECONDS = 15.0;
+    private const float MAX_MIN_GAP_SECONDS = 600.0;
+
+    /**
+     * Extra slack on the raw `length` column when pre-filtering in SQL.
+     * getCalculatedLength() subtracts cue-in/cue-out, so the stored length can
+     * be longer than the audible duration we actually schedule against.
      */
     private const float SQL_PREFILTER_SLACK_SECONDS = 45.0;
 
-    /** How many equally-good candidates to shuffle between, to avoid a rut. */
+    /** Rotate between this many equally-good matches so the hour doesn't rut. */
     private const int CANDIDATE_POOL_SIZE = 5;
+
+    /** @var array<int, float> playlist id => shortest track length, per request. */
+    private array $shortestTrackCache = [];
 
     public function __construct(
         private readonly TopOfHourClock $clock,
@@ -65,20 +90,35 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
-            // After QueueBuilder::calculateNextSong (0), before DmcaComplianceListener (-5).
             BuildQueue::class => ['onBuildQueue', -1],
         ];
     }
 
     public function onBuildQueue(BuildQueue $event): void
     {
-        // An interrupting build is an emergency/strict takeover, not hour planning.
+        try {
+            $this->swap($event);
+        } catch (\Throwable $e) {
+            // A failed swap must never break queue building. Worst case the
+            // original pick stands and the pre-fade handles the deadline.
+            $this->logger->error(
+                'Top-of-Hour swap: failed, leaving the original selection in place.',
+                ['exception' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]
+            );
+        }
+    }
+
+    private function swap(BuildQueue $event): void
+    {
         if ($event->isInterrupting()) {
             return;
         }
 
         $station = $event->getStation();
-        if (!$this->clock->isEnabled($station) || !$this->clock->isSwapEnabled($station)) {
+        if (!$this->clock->isEnabled($station)) {
+            return;
+        }
+        if (!$this->isSwapEnabled($station)) {
             return;
         }
 
@@ -104,10 +144,12 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
 
         $start = CarbonImmutable::instance($event->getExpectedPlayTime());
-        $target = CarbonImmutable::instance($this->clock->getTargetStartFor($station, $start));
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->addSeconds($this->clock->getIdStartSecond($station));
 
-        // A Clock Wheel that supplies its own mandatory ID owns this boundary.
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return;
         }
@@ -117,35 +159,44 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
-        $tolerance = (float)$this->clock->getSwapToleranceSeconds($station);
-        $minGap = (float)$this->clock->getSwapMinGapSeconds($station);
+        $tolerance = $this->getToleranceSeconds($station);
+        $minGap = $this->getMinFillableGap($station, $playlist);
 
-        // Is this actually the final music slot of the hour? It is, if the chosen
-        // track either crosses the deadline or leaves behind a remainder too short
-        // for another whole song to occupy.
+        // Is this actually the last music slot of the hour? It is, if the chosen
+        // track either crosses the deadline or leaves behind a remainder too
+        // short for another whole song to occupy.
         $remainder = $gap - $naturalLength;
         if ($remainder > $minGap) {
             return;
         }
 
-        // The slot is too short for ANY song to land on cleanly. Leave it to the
-        // Liquidsoap pre-fade (requirement 2) rather than manufacturing a stub.
+        // From here on this IS the final slot, so every exit gets logged. If the
+        // feature ever looks inert, these lines say exactly why.
+        $context = [
+            'playlist' => $playlist->name,
+            'playlist_id' => $playlist->id,
+            'slot_starts_at' => $start->toIso8601String(),
+            'id_deadline_at' => $target->toIso8601String(),
+            'seconds_to_fill' => round($gap, 2),
+            'original_media_id' => $media->id,
+            'original_length' => round($naturalLength, 2),
+            'original_overshoot' => round(-$remainder, 2),
+            'tolerance' => $tolerance,
+            'min_fillable_gap' => round($minGap, 2),
+        ];
+
         if ($gap < $minGap) {
-            $this->logger->debug(
-                'Top-of-Hour swap: remaining hour is shorter than the minimum swap gap; deferring to the pre-fade fallback.',
-                ['gap_seconds' => round($gap, 2), 'min_gap_seconds' => $minGap]
+            $this->logger->info(
+                'Top-of-Hour swap: too little of the hour left to fill with a whole song; the pre-fade will handle it.',
+                $context + ['min_gap' => $minGap]
             );
             return;
         }
 
-        // Already lands on the deadline within tolerance: nothing to fix.
         if (abs($remainder) <= $tolerance) {
-            $this->logger->debug(
-                'Top-of-Hour swap: selected track already lands on the ID deadline; no swap needed.',
-                [
-                    'media_id' => $media->id,
-                    'overshoot_seconds' => round(-$remainder, 2),
-                ]
+            $this->logger->info(
+                'Top-of-Hour swap: the selected track already lands on the deadline; no swap needed.',
+                $context
             );
             return;
         }
@@ -156,28 +207,23 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             $gap,
             $tolerance,
             $media->id,
-            $event->getExpectedPlayTime()->getTimestamp(),
             $start,
         );
 
         if (null === $replacement) {
-            $this->logger->info(
-                'Top-of-Hour swap: no duration-matched track available for this hour; the pre-fade soft cut will handle the deadline.',
-                [
-                    'playlist_id' => $playlist->id,
-                    'needed_seconds' => round($gap, 2),
-                    'tolerance_seconds' => $tolerance,
-                    'original_media_id' => $media->id,
-                ]
+            $this->logger->warning(
+                'Top-of-Hour swap: NO duration-matched track in this playlist; falling back to the pre-fade soft cut.',
+                $context
             );
             return;
         }
 
         [$spm, $replacementMedia] = $replacement;
 
+        // fromMedia() -> setSong() already stamps duration from
+        // getCalculatedLength(), so it is deliberately not set again here.
         $newRow = StationQueue::fromMedia($station, $replacementMedia);
         $newRow->playlist = $playlist;
-        $newRow->duration = $replacementMedia->getCalculatedLength();
 
         $spm->played($start->getTimestamp());
         $this->em->persist($spm);
@@ -192,24 +238,19 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $event->setNextSongs($newRow);
 
         $this->logger->info(
-            'Top-of-Hour swap: substituted the final song of the hour with a duration-matched track.',
-            [
-                'playlist_id' => $playlist->id,
-                'original_media_id' => $media->id,
-                'original_length' => round($media->getCalculatedLength(), 2),
+            'Top-of-Hour swap: SWAPPED the final song of the hour for a duration-matched track.',
+            $context + [
                 'replacement_media_id' => $replacementMedia->id,
                 'replacement_length' => round($replacementMedia->getCalculatedLength(), 2),
-                'needed_seconds' => round($gap, 2),
-                'landing_error_seconds' => round($gap - $replacementMedia->getCalculatedLength(), 2),
-                'id_target_at' => $target->toIso8601String(),
+                'landing_error' => round($gap - $replacementMedia->getCalculatedLength(), 2),
             ]
         );
     }
 
     /**
-     * Only ordinary AutoDJ music is eligible for substitution. IDs, legal-ID
-     * substitutes, Clock Wheel rows, listener requests, AI DJ/news rows and any
-     * row already carrying an explicit wall-clock cap are left alone.
+     * Only ordinary AutoDJ music is eligible. IDs, legal-ID substitutes, Clock
+     * Wheel rows, listener requests and any row already carrying an explicit
+     * wall-clock cap are left alone.
      */
     private function isOrdinaryMusicRow(StationQueue $row): bool
     {
@@ -241,7 +282,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         float $neededSeconds,
         float $toleranceSeconds,
         ?int $excludeMediaId,
-        int $nowTimestamp,
         CarbonImmutable $expectedPlayTime,
     ): ?array {
         $recentSongIds = $this->getRecentlySelectedSongIds($station, $expectedPlayTime);
@@ -290,8 +330,8 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
             $candidates[] = [
                 // Landing a hair early is inaudible (the underlay is already
-                // faded); landing late means the ID clips the song's tail. So
-                // overshoot is penalised twice as heavily as undershoot.
+                // faded to silence); landing late means the ID clips the song's
+                // tail. So overshoot is penalised twice as heavily.
                 'score' => $error >= 0.0 ? $error : (abs($error) * 2.0),
                 'spm' => $spm,
                 'media' => $candidateMedia,
@@ -309,8 +349,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 ?: ($a['last_played'] <=> $b['last_played'])
         );
 
-        // Rotate between the best few matches. With a tight tolerance the same
-        // one or two tracks would otherwise close every single hour.
         $pool = array_slice($candidates, 0, self::CANDIDATE_POOL_SIZE);
         $chosen = $pool[random_int(0, count($pool) - 1)];
 
@@ -339,6 +377,88 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
 
         return $ids;
+    }
+
+    /**
+     * The shortest gap worth handing to another whole song, for THIS playlist.
+     *
+     * Anything shorter must be treated as the final slot and solved by swapping
+     * the current pick, because no track in the playlist could fill the
+     * remainder. Without this, a remainder that falls between the configured
+     * floor and the playlist's shortest track is unfillable by construction and
+     * always degrades to the fade.
+     */
+    private function getMinFillableGap(Station $station, StationPlaylist $playlist): float
+    {
+        $configured = $this->getMinGapSeconds($station);
+
+        if (!isset($this->shortestTrackCache[$playlist->id])) {
+            $shortest = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT MIN(m.length) FROM App\Entity\StationPlaylistMedia spm
+                    JOIN spm.media m
+                    WHERE spm.playlist = :playlist AND m.length > 0
+                DQL
+            )->setParameter('playlist', $playlist)
+                ->getSingleScalarResult();
+
+            $this->shortestTrackCache[$playlist->id] = (float)($shortest ?? 0.0);
+        }
+
+        $shortest = $this->shortestTrackCache[$playlist->id];
+
+        // Cap the adaptive raise so one very long outlier in a small playlist
+        // cannot make every slot look like the final one.
+        return min(max($configured, $shortest), self::MAX_MIN_GAP_SECONDS);
+    }
+
+    private function isSwapEnabled(Station $station): bool
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        if (!array_key_exists(self::CONFIG_SWAP_ENABLED, $raw)) {
+            return self::DEFAULT_SWAP_ENABLED;
+        }
+
+        $value = $raw[self::CONFIG_SWAP_ENABLED];
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array((string)$value, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function getToleranceSeconds(Station $station): float
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (float)($raw[self::CONFIG_SWAP_TOLERANCE] ?? self::DEFAULT_TOLERANCE_SECONDS),
+            self::MIN_TOLERANCE_SECONDS,
+            self::MAX_TOLERANCE_SECONDS,
+            self::DEFAULT_TOLERANCE_SECONDS,
+        );
+    }
+
+    private function getMinGapSeconds(Station $station): float
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (float)($raw[self::CONFIG_SWAP_MIN_GAP] ?? self::DEFAULT_MIN_GAP_SECONDS),
+            self::MIN_MIN_GAP_SECONDS,
+            self::MAX_MIN_GAP_SECONDS,
+            self::DEFAULT_MIN_GAP_SECONDS,
+        );
+    }
+
+    private function clamp(float $value, float $min, float $max, float $default): float
+    {
+        if ($value <= 0.0) {
+            return $default;
+        }
+
+        return max($min, min($max, $value));
     }
 
     private function secondsBetween(CarbonImmutable $from, CarbonImmutable $to): float

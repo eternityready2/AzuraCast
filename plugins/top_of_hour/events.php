@@ -28,9 +28,9 @@ return static function (CallableEventDispatcherInterface $dispatcher): void {
         // first (priority 16), then AI DJ, then TOH wraps both and stays authoritative.
         AiDjRuntimeConfiguration::class,
         TopOfHourRuntimeConfiguration::class,
-        // Requirement 1: duration-matched swapping of the final song of the hour.
-        // Subscribes to BuildQueue at priority -1, i.e. after the ordinary AutoDJ
-        // selector has chosen a track and before the DMCA validator inspects it.
+        // Duration-matched swapping of the final song of the hour. Subscribes to
+        // BuildQueue at priority -1: after the ordinary AutoDJ selector makes its
+        // pick, before the DMCA validator checks it.
         TopOfHourSongSwapSelector::class,
     ]);
 
