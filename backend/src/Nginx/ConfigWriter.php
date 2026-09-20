@@ -64,10 +64,6 @@ final class ConfigWriter implements EventSubscriberInterface
                 proxy_redirect            off;
                 proxy_set_header          Cookie "";
                 proxy_connect_timeout     15;
-                proxy_send_timeout        21600;
-                proxy_read_timeout        21600;
-                proxy_request_buffering   off;
-                proxy_buffering            off;
 
                 proxy_set_header Host \$host/{$listenBaseUrl};
 
