@@ -179,7 +179,9 @@ class Icecast extends AbstractFrontend
                 'queue-size' => 524288,
                 'client-timeout' => 30,
                 'header-timeout' => 15,
-                'source-timeout' => 10,
+                // Allow short-lived source stalls to recover without Icecast
+                // immediately dropping a healthy Liquidsoap source.
+                'source-timeout' => 30,
                 'burst-size' => 65535,
             ],
             'authentication' => [
