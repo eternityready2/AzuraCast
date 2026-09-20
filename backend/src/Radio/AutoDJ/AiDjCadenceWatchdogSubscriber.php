@@ -7,7 +7,7 @@ namespace App\Radio\AutoDJ;
 use App\Container\LoggerAwareTrait;
 use App\Doctrine\ReloadableEntityManagerInterface;
 use App\Entity\AiDj;
-use App\Entity\StationQueue;
+use App\Entity\SongHistory;
 use App\Event\Radio\BuildQueue;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
@@ -129,18 +129,21 @@ final class AiDjCadenceWatchdogSubscriber implements EventSubscriberInterface
         try {
             $normalizedDjName = strtolower(trim($djName));
 
+            // SongHistory is the only authoritative on-air proof for AI DJ clips.
+            // StationQueue.timestamp_played is immediately cleared after is_played
+            // is set to true, so it is always null for AI DJ rows and cannot be
+            // used as a cadence clock. SongHistory.timestamp_start is written when
+            // Liquidsoap reports the clip metadata on air, making it reliable here.
             $lastBreak = $this->em->createQuery(
                 <<<'DQL'
-                    SELECT sq FROM App\Entity\StationQueue sq
-                    WHERE sq.station_id = :station_id
-                    AND sq.media IS NULL
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station_id = :station_id
+                    AND sh.media IS NULL
                     AND (
-                        LOWER(sq.artist) = :dj_name
-                        OR LOWER(sq.artist) LIKE :dj_suffix
+                        LOWER(sh.artist) = :dj_name
+                        OR LOWER(sh.artist) LIKE :dj_suffix
                     )
-                    AND sq.autodj_custom_uri IS NOT NULL
-                    AND sq.timestamp_played IS NOT NULL
-                    ORDER BY sq.timestamp_played DESC
+                    ORDER BY sh.timestamp_start DESC
                 DQL
             )->setParameter('station_id', $stationId)
                 ->setParameter('dj_name', $normalizedDjName)
@@ -148,11 +151,11 @@ final class AiDjCadenceWatchdogSubscriber implements EventSubscriberInterface
                 ->setMaxResults(1)
                 ->getOneOrNullResult();
 
-            if (!$lastBreak instanceof StationQueue || $lastBreak->timestamp_played === null) {
+            if (!$lastBreak instanceof SongHistory) {
                 return null;
             }
 
-            return $lastBreak->timestamp_played->getTimestamp();
+            return $lastBreak->timestamp_start->getTimestamp();
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Cadence watchdog lookup failed: %s', $e->getMessage()));
             return null;

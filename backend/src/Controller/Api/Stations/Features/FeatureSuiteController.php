@@ -113,7 +113,7 @@ final class FeatureSuiteController
                 'failures' => $failures,
                 'manual' => $manual,
             ]);
-            $config->aircheck_interventions = array_slice($history, 0, 50);
+            $config->aircheck_interventions = array_slice($history, 0, 20);
         }
 
         $config->aircheck_last_check = $now;

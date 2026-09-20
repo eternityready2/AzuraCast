@@ -87,13 +87,7 @@ final class StationPlaylistGroup implements JsonSerializable, IdentifiableEntity
     ]
     public bool $play_full_cycle = false {
         set (bool $value) {
-            $this->play_full_cycle = $value
-                && PlaylistSources::Songs === $this->playlist->source
-                && in_array(
-                    $this->playlist->order,
-                    [PlaylistOrders::Sequential, PlaylistOrders::Shuffle],
-                    true
-                );
+            $this->play_full_cycle = $value && $this->supportsPlayFullCycle();
 
             if ($this->play_full_cycle) {
                 $this->consecutive_plays = 0;
@@ -141,6 +135,19 @@ final class StationPlaylistGroup implements JsonSerializable, IdentifiableEntity
         $this->is_queued = false;
         $this->consecutive_plays_count = 0;
         return true;
+    }
+
+    public function supportsPlayFullCycle(): bool
+    {
+        return PlaylistSources::Requests === $this->playlist->source
+            || (
+                PlaylistSources::Songs === $this->playlist->source
+                && in_array(
+                    $this->playlist->order,
+                    [PlaylistOrders::Sequential, PlaylistOrders::Shuffle],
+                    true
+                )
+            );
     }
 
     public function jsonSerialize(): array

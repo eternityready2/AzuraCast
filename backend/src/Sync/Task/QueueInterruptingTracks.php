@@ -12,6 +12,7 @@ use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
+use DateTimeImmutable;
 use Monolog\LogRecord;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Throwable;
@@ -33,14 +34,35 @@ final class QueueInterruptingTracks extends AbstractTask
     }
 
     /**
-     * Process playlists that explicitly interrupt normal AutoDJ playback.
+     * Process content that truly owns the interrupting queue.
      *
-     * Flexible/non-interrupting schedules are intentionally not skipped here;
-     * they must be allowed to wait for the current track as configured.
+     * Scheduled playlists use the per-schedule strict_start flag as the
+     * authoritative Flexible-vs-Strict signal. A stale playlist-level
+     * "interrupt" option must not turn a Flexible scheduled programme into an
+     * interrupting Smart Duck voiceover over normal rotation.
      */
     public function run(bool $force = false): void
     {
-        foreach ($this->iterateStations() as $station) {
+        // Queue building can flush/open its own transaction state. The normal
+        // station batch iterator wraps processing in Doctrine transactions and
+        // can leave nested savepoints invalid after those queue writes. Read IDs
+        // first, then refetch one station at a time without the outer iterator
+        // transaction.
+        /** @var array<int, array{id: int|string}> $stationRows */
+        $stationRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT s.id AS id FROM App\Entity\Station s
+            DQL
+        )->getScalarResult();
+
+        foreach ($stationRows as $stationRow) {
+            $this->em->clear();
+
+            $station = $this->em->find(Station::class, (int)$stationRow['id']);
+            if (!$station instanceof Station) {
+                continue;
+            }
+
             $this->logger->pushProcessor(
                 function (LogRecord $record) use ($station) {
                     $record->extra['station'] = [
@@ -65,6 +87,8 @@ final class QueueInterruptingTracks extends AbstractTask
                 $this->logger->popProcessor();
             }
         }
+
+        $this->em->clear();
     }
 
     private function queueForStation(Station $station): void
@@ -83,21 +107,55 @@ final class QueueInterruptingTracks extends AbstractTask
             return;
         }
 
-        $hasInterruptingPlaylist = false;
+        $now = new DateTimeImmutable('now');
         $tz = $station->getTimezoneObject();
+        $sponsorPlaylistIdsBehindPace = [];
+
+        foreach ($this->sponsorGuarantee->getPlaylistsBehindPace($station, $now) as $sponsorPlaylist) {
+            $sponsorPlaylistIdsBehindPace[$sponsorPlaylist->id] = true;
+        }
+
+        $hasInterruptingPlaylist = false;
 
         foreach ($station->playlists as $playlist) {
-            if (
-                $playlist->isPlayable(true)
-                || $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz)
-            ) {
+            $isSponsorBehindPace = isset($sponsorPlaylistIdsBehindPace[$playlist->id]);
+
+            if ($playlist->schedule_items->count() > 0) {
+                // Hard-interrupt (track_sensitive=false) for Strict-start schedules:
+                // fires exactly at the scheduled minute to cut over immediately.
+                if (
+                    $this->scheduler->isPlaylistStrictStartDueNow($playlist, $tz, $now)
+                    || $isSponsorBehindPace
+                ) {
+                    $hasInterruptingPlaylist = true;
+                    break;
+                }
+
+                // Flexible scheduled playlists do NOT hard-interrupt mid-song, but
+                // they still need to be pushed into the interrupting queue once we
+                // are inside their active schedule window, otherwise the current
+                // AutoDJ song finishes, Liquidsoap asks for next_song, and the
+                // schedule_switch_playlists Liquidsoap switch (track_sensitive=true)
+                // picks them up on its own. They only fail to start if the queue is
+                // never populated - which is exactly what was happening before this
+                // fix. Check isPlaylistScheduledToPlayNow to confirm we are within
+                // the window, then let the normal interrupting-queue path below push
+                // one song so Liquidsoap transitions at the next track boundary.
+                if (
+                    $playlist->is_enabled
+                    && $this->scheduler->isPlaylistScheduledToPlayNow($playlist, $now)
+                ) {
+                    $hasInterruptingPlaylist = true;
+                    break;
+                }
+
+                continue;
+            }
+
+            if ($playlist->isPlayable(true) || $isSponsorBehindPace) {
                 $hasInterruptingPlaylist = true;
                 break;
             }
-        }
-
-        if (!$hasInterruptingPlaylist && !empty($this->sponsorGuarantee->getPlaylistsBehindPace($station))) {
-            $hasInterruptingPlaylist = true;
         }
 
         if (!$hasInterruptingPlaylist) {

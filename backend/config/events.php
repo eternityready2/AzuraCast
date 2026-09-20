@@ -160,6 +160,13 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Radio\AutoDJ\Annotations::class,
             App\Radio\AutoDJ\ContentTypeCrossfadeAnnotator::class,
             App\Radio\AutoDJ\ClockWheel\ClockWheelAnnotator::class,
+            // AI DJ speech injection: fire on every real song boundary so breaks
+            // happen at natural track transitions, not only on the 1-minute cron.
+            // The runtime task (AiDjShiftLifecycleRuntimeTask) continues as the
+            // wall-clock driver for strict playlists where BuildQueue does not fire.
+            App\Radio\AutoDJ\AiDjShiftLifecycleListener::class,
+            App\Radio\AutoDJ\AiDjCadenceWatchdogSubscriber::class,
+            App\Radio\AutoDJ\AiDjQueueListener::class,
             App\Radio\AutoDJ\DmcaComplianceListener::class,
             App\Radio\Backend\Liquidsoap\ConfigWriter::class,
             App\Radio\Backend\Liquidsoap\TopOfHourAiNewsConfigurationGuard::class,

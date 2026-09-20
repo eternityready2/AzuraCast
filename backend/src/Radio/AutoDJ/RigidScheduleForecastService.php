@@ -187,7 +187,11 @@ final class RigidScheduleForecastService
                 $state['remaining_seconds'] = null;
             }
 
-            while ($cursor < $window['end'] && count($items) < $limit) {
+            // Bug 2 fix: cap at rangeEnd (the current clock-hour boundary)
+            // so a 12 AM–6 AM strict block only shows songs through 1 AM
+            // on the queue page when viewed at midnight.
+            $rangeEndCarbon = CarbonImmutable::instance($rangeEnd);
+            while ($cursor < $window['end'] && $cursor < $rangeEndCarbon && count($items) < $limit) {
                 if ([] === $state['remaining']) {
                     // The planner/queue horizon may need more than one playlist round.
                     // mode="normal" keeps every later round in this same order.
@@ -356,7 +360,7 @@ final class RigidScheduleForecastService
     /** @return list<StationMedia> */
     private function getPlaylistMedia(StationPlaylist $playlist): array
     {
-        return $this->em->createQuery(
+        $media = $this->em->createQuery(
             <<<'DQL'
                 SELECT DISTINCT sm
                 FROM App\Entity\StationMedia sm
@@ -366,6 +370,25 @@ final class RigidScheduleForecastService
             DQL
         )->setParameter('playlist', $playlist)
             ->getResult();
+
+        // Bug 3 fix: for Shuffle/SmartShuffle playlists the fallback cycle
+        // must be randomised each time we build state. Without this, the
+        // rigid Liquidsoap source restores the same DB-weight order every
+        // night and the same 700-song sequence repeats across days.
+        if (
+            in_array(
+                $playlist->order,
+                [
+                    \App\Entity\Enums\PlaylistOrders::Shuffle,
+                    \App\Entity\Enums\PlaylistOrders::SmartShuffle,
+                ],
+                true,
+            )
+        ) {
+            shuffle($media);
+        }
+
+        return $media;
     }
 
     private function getSourceId(StationPlaylist $playlist): string

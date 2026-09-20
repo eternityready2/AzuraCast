@@ -8,12 +8,16 @@ use App\Controller\SingleActionInterface;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Service\AirCheckDiagnosticsRecorder;
+use App\Service\AirCheckHistoryRetention;
+use App\Service\AirCheckLiquidsoapRecovery;
 use Psr\Http\Message\ResponseInterface;
 
 final readonly class AirCheckRunAction implements SingleActionInterface
 {
     public function __construct(
         private FeatureSuiteController $featureSuiteController,
+        private AirCheckLiquidsoapRecovery $liquidsoapRecovery,
+        private AirCheckHistoryRetention $historyRetention,
         private AirCheckDiagnosticsRecorder $diagnosticsRecorder,
     ) {
     }
@@ -25,6 +29,8 @@ final readonly class AirCheckRunAction implements SingleActionInterface
     ): ResponseInterface {
         $station = $request->getStation();
         $result = $this->featureSuiteController->runAirCheck($station, true);
+        $result = $this->liquidsoapRecovery->recover($station, $result);
+        $this->historyRetention->trim($station);
         $this->diagnosticsRecorder->recordRecoveryResult($station, $result);
 
         return $response->withJson($result);

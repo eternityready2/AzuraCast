@@ -275,8 +275,19 @@ final class StationPlaylist implements
         }
     }
 
+    /**
+     * The playlist-wide interrupt flag is a legacy behavior for unscheduled
+     * playlists. Once a playlist has schedule rows, those rows own start
+     * behavior through strict_start/emergency. Treating the legacy option as
+     * active for scheduled playlists creates a second native Liquidsoap
+     * interrupt lane that can contradict a row configured as Flexible.
+     */
     public function backendInterruptOtherSongs(): bool
     {
+        if ($this->schedule_items->count() > 0) {
+            return false;
+        }
+
         return in_array(self::OPTION_INTERRUPT_OTHER_SONGS, $this->backend_options, true);
     }
 
@@ -481,6 +492,15 @@ final class StationPlaylist implements
     public function isPlayable(bool $interrupting = false): bool
     {
         if (!$this->is_enabled) {
+            return false;
+        }
+
+        // A scheduled playlist's interrupt behavior belongs to its schedule row
+        // (strict_start), not the legacy playlist-wide interrupt option. Keeping
+        // scheduled playlists out of legacy interrupt eligibility prevents a
+        // Flexible programme from being selected by the Smart Duck queue before
+        // QueueInterruptingTracks can validate it.
+        if ($interrupting && $this->schedule_items->count() > 0) {
             return false;
         }
 

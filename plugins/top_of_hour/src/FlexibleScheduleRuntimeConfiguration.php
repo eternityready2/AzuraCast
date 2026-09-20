@@ -34,9 +34,12 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * groups, request playlists, crossfade, Stretch/Squeeze and the nested-clock fix
  * from the rigid scheduling work.
  *
- * Strict starts, emergency/interrupting schedules and live DJs remain outside
- * this policy. Clock Wheels retain their own flexible/strict scheduler and TOH
- * retains exact wall-clock authority.
+ * Strict starts, emergency schedules and live DJs remain outside this policy.
+ * A legacy playlist-level "Interrupt Other Songs" flag does not: schedule rows
+ * configured as Flexible are deliberately kept out of the interrupting queue,
+ * so this watchdog is their authoritative runtime backstop regardless of that
+ * stale playlist flag. Clock Wheels retain their own flexible/strict scheduler
+ * and TOH retains exact wall-clock authority.
  */
 final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInterface
 {
@@ -184,8 +187,7 @@ final class FlexibleScheduleRuntimeConfiguration implements EventSubscriberInter
         StationSchedule $schedule,
     ): bool {
         return !$schedule->strict_start
-            && !$schedule->is_emergency
-            && !$playlist->backendInterruptOtherSongs();
+            && !$schedule->is_emergency;
     }
 
     /**
