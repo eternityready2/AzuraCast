@@ -43,7 +43,7 @@ to install AzuraCast on your own server.
 ## Install AzuraCast using Docker
 
 mkdir -p /var/azuracast && cd /var/azuracast
-curl -fsSL https://raw.githubusercontent.com/eternityready2/AzuraCast/main/docker.sh > docker.sh
+curl -fsSL https://raw.githubusercontent.com/eternityready2/Azura-Cast-Custom/main/docker.sh > docker.sh
 chmod a+x docker.sh
 ./docker.sh install
 The only difference from the official installation is that instead of pointing to the AzuraCast repository, we are pointing to your own repo.
