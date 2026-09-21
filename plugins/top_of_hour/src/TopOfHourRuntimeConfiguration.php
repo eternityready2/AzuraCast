@@ -32,7 +32,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
-            WriteLiquidsoapConfiguration::class => ['writeRuntime', 15],
+            WriteLiquidsoapConfiguration::class => ['writeRuntime', 14],
         ];
     }
 
@@ -87,6 +87,26 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
             top_of_hour_id_active = ref(false)
             top_of_hour_id_hard_boundary = ref(false)
+
+            # Self-contained hook for dropping an interrupted STRICT-lane item
+            # at release. Defaults to a no-op so this NEVER crashes, regardless
+            # of whether this station has any rigid schedule configured at all
+            # (RigidScheduleRuntimeConfiguration only writes its own
+            # rigid_schedule_drop_interrupted ref when the station actually has
+            # one; on a station with none, that identifier is never defined and
+            # calling it directly is a compile-time "Undefined variable" error,
+            # not something try/catch can rescue).
+            #
+            # If this station's plugin config later grows a rigid schedule,
+            # wiring the real function in is a one-line addition to
+            # RigidScheduleRuntimeConfiguration:
+            #   top_of_hour_id_rigid_drop_hook := rigid_schedule_drop_interrupted_item
+            # Until then this safely does nothing, which is correct: there is
+            # no rigid lane item to drop.
+            top_of_hour_id_rigid_drop_hook = ref(fun () -> ())
+            def top_of_hour_id_rigid_drop() =
+                top_of_hour_id_rigid_drop_hook()()
+            end
 
             def top_of_hour_id_on_track(_) =
                 top_of_hour_id_active := true
@@ -288,8 +308,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 # is the old interrupted one rather than whatever the rigid lane
                 # is about to start at :00.
                 if not azuracast.live_enabled() then
-                    drop_interrupted = rigid_schedule_drop_interrupted()
-                    drop_interrupted()
+                    top_of_hour_id_rigid_drop()
                 end
 
                 # HARD :00 may cut a long/mis-timed ID. Discard any current/tail
@@ -305,10 +324,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # still live (see autodj_clean_cut_window). When that happens
                     # the interrupted request is never skipped and it resumes after
                     # the ID. The call is silent in that case, so say so out loud.
-                    if azuracast.autodj_clean_cut_is_live() then
-                        log("Top-of-Hour ID: WARNING - a clean-cut marker is still live at release; discard_autodj_current_cleanly() will NO-OP and the interrupted request will NOT be skipped.")
-                    end
-
                     # Clear any stale clean-cut marker before discarding.
                     #
                     # discard_autodj_current_cleanly() silently REFUSES to do
@@ -322,9 +337,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # At the top of the hour the TOH lane is the authoritative
                     # owner of the transition, so it takes the marker rather than
                     # deferring to whoever armed it seconds earlier.
-                    azuracast.autodj_clean_cut_pending := false
-                    azuracast.autodj_clean_cut_armed_at := 0.0
-
                     # Arm the crossfade to reject its buffered old tail, then skip
                     # the real request.dynamic leaf. Because the underlay kept the
                     # crossfade clocked through the ID, this boundary is consumed
