@@ -3,6 +3,8 @@ on:
   push:
     branches: [ main, dev ]
     tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, dev ]
 
 permissions:
   contents: read
@@ -35,7 +37,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || 'rolling' }}
             ${{ github.ref_name == 'main' && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
