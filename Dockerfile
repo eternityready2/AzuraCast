@@ -161,6 +161,8 @@ USER root
 
 # Install Kokoro TTS for human-like AI DJ voices (same as production final stage).
 # kokoro-v1.0.onnx + voices-v1.0.bin ship the FULL Kokoro v1.0 voice set (~53 speakers).
+# ARM64 (aarch64) note: onnxruntime ships native arm64 wheels via kokoro-onnx's dependencies,
+# so a standard pip install works on both amd64 and arm64.
 RUN pip install --break-system-packages kokoro-onnx soundfile \
     && mkdir -p /opt/kokoro \
     && curl -L -o /opt/kokoro/kokoro-v1.0.onnx \
@@ -239,6 +241,8 @@ USER root
 
 # Install Kokoro TTS for human-like AI DJ voices.
 # kokoro-v1.0.onnx + voices-v1.0.bin ship the FULL Kokoro v1.0 voice set (~53 speakers).
+# ARM64 (aarch64) note: onnxruntime ships native arm64 wheels via kokoro-onnx's dependencies,
+# so a standard pip install works on both amd64 and arm64.
 RUN pip install --break-system-packages kokoro-onnx soundfile \
     && mkdir -p /opt/kokoro \
     && curl -L -o /opt/kokoro/kokoro-v1.0.onnx \

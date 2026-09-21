@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Create Version File
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
@@ -20,17 +21,31 @@ jobs:
           else
             echo "$(git rev-parse --short HEAD)" > .version
           fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and Push
+
+      - name: Build and Push (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
+          target: final
           tags: |
-            ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || 'rolling' }}
-            ${{ github.ref_name == 'main' && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
+            ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || github.ref_name == 'dev' && 'rolling' || github.ref_name }}
+            ${{ startsWith(github.ref, 'refs/tags/') && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
+          cache-from: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max
+          cache-to: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max
