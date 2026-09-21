@@ -1,4 +1,3 @@
-name: Build Custom AzuraCast
 on:
   push:
     branches: [ main, dev ]
@@ -8,21 +7,13 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create Version File
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "${{ github.ref_name }}" > .version
-          else
-            echo "$(git rev-parse --short HEAD)" > .version
-          fi
-      - name: Log in to GHCR
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
