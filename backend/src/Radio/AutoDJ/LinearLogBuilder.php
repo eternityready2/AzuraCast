@@ -15,6 +15,7 @@ use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
 use App\Utilities\Time;
 use DateTimeImmutable;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Throwable;
 
@@ -39,6 +40,7 @@ final class LinearLogBuilder
         private readonly AiDjScheduleRepository $aiDjScheduleRepo,
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -63,6 +65,68 @@ final class LinearLogBuilder
 
     /** @return array<string, mixed> */
     public function build(Station $station, ?int $hoursOverride = null): array
+    {
+        $stationId = $station->id;
+        $maxAttempts = 2;
+
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                return $this->buildOnce($station, $hoursOverride);
+            } catch (Throwable $e) {
+                if ($attempt >= $maxAttempts || !self::isTransientTransactionError($e)) {
+                    throw $e;
+                }
+
+                // The preview runs inside one long transaction that writes to live queue
+                // rows. If MySQL aborts it (deadlock / lock wait timeout / lost connection),
+                // later savepoint statements fail with "SAVEPOINT DOCTRINE_n does not exist",
+                // which hides the real cause. Wait briefly and retry once from a clean state.
+                $this->logger->warning(
+                    'Linear Log build hit a transient database error; retrying once.',
+                    ['station_id' => $stationId, 'attempt' => $attempt, 'error' => $e->getMessage()]
+                );
+
+                $connection = $this->em->getConnection();
+                if ($connection->isTransactionActive()) {
+                    try {
+                        $connection->rollBack();
+                    } catch (Throwable) {
+                        // Transaction state is already gone; nothing to roll back.
+                    }
+                }
+
+                $this->em->clear();
+                $reloaded = $this->stationRepo->findByIdentifier((string)$stationId);
+                if (!$reloaded instanceof Station) {
+                    throw $e;
+                }
+                $station = $reloaded;
+
+                usleep(random_int(1_500_000, 4_000_000));
+            }
+        }
+    }
+
+    private static function isTransientTransactionError(Throwable $e): bool
+    {
+        for ($current = $e; null !== $current; $current = $current->getPrevious()) {
+            $message = $current->getMessage();
+            if (
+                str_contains($message, 'SAVEPOINT')
+                || str_contains($message, 'Deadlock')
+                || str_contains($message, 'Lock wait timeout')
+                || str_contains($message, 'server has gone away')
+                || str_contains($message, 'Lost connection')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return array<string, mixed> */
+    private function buildOnce(Station $station, ?int $hoursOverride = null): array
     {
         $stationId = $station->id;
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));

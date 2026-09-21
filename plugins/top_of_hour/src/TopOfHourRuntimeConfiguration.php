@@ -151,18 +151,18 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             def top_of_hour_underlying_gain() =
                 now = time()
                 target = top_of_hour_id_target_epoch()
-                fade = top_of_hour_id_fade_seconds()
+                id_fade_len = top_of_hour_id_fade_seconds()
                 release = top_of_hour_id_release_epoch()
 
                 if
                     top_of_hour_id_enabled()
                     and top_of_hour_id.is_ready()
                     and target > 0.0
-                    and fade > 0.0
-                    and now >= target - fade
+                    and id_fade_len > 0.0
+                    and now >= target - id_fade_len
                     and now < target
                 then
-                    remaining = (target - now) / fade
+                    remaining = (target - now) / id_fade_len
                     if remaining < 0.0 then
                         0.0
                     elsif remaining > 1.0 then

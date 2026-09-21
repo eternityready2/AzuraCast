@@ -11,17 +11,24 @@ use App\Entity\SongHistory;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Exception\Supervisor\AlreadyRunningException;
+use App\Exception\SupervisorException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Media\MediaProcessor;
 use App\Message\BuildLinearLogMessage;
+use App\Radio\AbstractLocalAdapter;
 use App\Radio\Adapters;
+use App\Radio\Backend\Liquidsoap\ConfigWriter as LiquidsoapConfigWriter;
+use App\Radio\Configuration;
+use App\Radio\Frontend\Icecast;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\GuzzleFactory;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\RequestOptions;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
+use Psr\SimpleCache\CacheInterface;
 use Symfony\Component\Messenger\MessageBus;
 use Throwable;
 
@@ -35,6 +42,8 @@ final class FeatureSuiteController
         private readonly MediaProcessor $mediaProcessor,
         private readonly LinearLogSnapshotStore $linearLogSnapshotStore,
         private readonly MessageBus $messageBus,
+        private readonly Configuration $configuration,
+        private readonly CacheInterface $cache,
     ) {
     }
 
@@ -73,6 +82,103 @@ final class FeatureSuiteController
         return $response->withJson($result);
     }
 
+    /**
+     * Detect on-disk configs that no longer match the database credentials and rewrite them.
+     *
+     * Symptom this fixes: Liquidsoap keeps running (so the normal running check passes) but every
+     * request is rejected with "Invalid API key" and Icecast answers 401, because liquidsoap.liq or
+     * icecast.xml was generated from older credentials than the database now holds.
+     */
+    private function repairCredentialDrift(Station $station): bool
+    {
+        // A pending manual restart means the person changed something on purpose; leave it alone.
+        if ($station->needs_restart || !$station->is_enabled) {
+            return false;
+        }
+
+        $apiKey = (string)$station->adapter_api_key;
+        $sourcePw = $station->frontend_config->source_pw;
+        if ('' === $apiKey) {
+            return false;
+        }
+
+        $drift = [];
+
+        $backend = $this->adapters->getBackendAdapter($station);
+        if (null !== $backend && $backend->hasCommand($station)) {
+            $path = $backend->getConfigurationPath($station);
+            $contents = is_file($path) ? @file_get_contents($path) : false;
+
+            if (is_string($contents) && '' !== $contents) {
+                if (!str_contains($contents, LiquidsoapConfigWriter::toRawString($apiKey))) {
+                    $drift[] = 'liquidsoap.liq API key';
+                }
+
+                if (
+                    1 === preg_match('/^[A-Za-z0-9]+$/', $sourcePw)
+                    && !str_contains($contents, LiquidsoapConfigWriter::toRawString($sourcePw))
+                ) {
+                    $drift[] = 'liquidsoap.liq source password';
+                }
+            }
+        }
+
+        $frontend = $this->adapters->getFrontendAdapter($station);
+        if ($frontend instanceof Icecast && $frontend->hasCommand($station)) {
+            $path = $frontend->getConfigurationPath($station);
+            $contents = is_file($path) ? @file_get_contents($path) : false;
+
+            if (
+                is_string($contents)
+                && '' !== $contents
+                && 1 === preg_match('/^[A-Za-z0-9]+$/', $sourcePw)
+                && !str_contains($contents, $sourcePw)
+            ) {
+                $drift[] = 'icecast.xml source password';
+            }
+        }
+
+        if ([] === $drift) {
+            return false;
+        }
+
+        // Never loop: at most one automatic rewrite per station every 15 minutes.
+        $cacheKey = 'aircheck_credential_repair_' . $station->id;
+        if (null !== $this->cache->get($cacheKey)) {
+            return false;
+        }
+        $this->cache->set($cacheKey, time(), 900);
+
+        $this->configuration->writeConfiguration(
+            station: $station,
+            forceRestart: true,
+            attemptReload: false
+        );
+
+        return true;
+    }
+
+    private function waitForRunning(object $adapter, Station $station, int $seconds): bool
+    {
+        if (!($adapter instanceof AbstractLocalAdapter)) {
+            return false;
+        }
+
+        for ($i = 0; $i < $seconds; $i++) {
+            sleep(1);
+
+            try {
+                if ($adapter->isRunning($station)) {
+                    return true;
+                }
+            } catch (Throwable) {
+                // Keep waiting; the final answer is whether it is running after the window.
+            }
+        }
+
+        return false;
+    }
+
     /** @return array<string, mixed> */
     public function runAirCheck(Station $station, bool $manual = false): array
     {
@@ -86,7 +192,19 @@ final class FeatureSuiteController
 
         $restarted = [];
         $failures = [];
-        foreach (['backend', 'frontend'] as $service) {
+
+        $repairedDrift = false;
+        try {
+            $repairedDrift = $this->repairCredentialDrift($station);
+        } catch (Throwable $e) {
+            $failures[] = 'config: ' . $e->getMessage();
+        }
+
+        if ($repairedDrift) {
+            $restarted = ['backend', 'frontend'];
+        }
+
+        foreach ($repairedDrift ? [] : ['backend', 'frontend'] as $service) {
             try {
                 $adapter = 'backend' === $service
                     ? $this->adapters->getBackendAdapter($station)
@@ -97,7 +215,30 @@ final class FeatureSuiteController
                 }
 
                 if (!$adapter->isRunning($station)) {
-                    $adapter->restart($station);
+                    // Supervisor reports "not running" while a process is STARTING or auto-restarting
+                    // (BACKOFF). Give it a moment before fighting it, otherwise our start() races
+                    // Supervisor's own restart and fails with "already running" or
+                    // AbnormalTerminationException even though the service comes back.
+                    if ($this->waitForRunning($adapter, $station, 4)) {
+                        continue;
+                    }
+
+                    try {
+                        $adapter->restart($station);
+                    } catch (AlreadyRunningException $e) {
+                        // Supervisor started it between our check and our start.
+                        if (!$this->waitForRunning($adapter, $station, 6)) {
+                            throw $e;
+                        }
+                    } catch (SupervisorException $e) {
+                        // Our start can lose the race against Supervisor's own restart
+                        // (port or lock still held), so only report failure if the
+                        // service is still down after it settles.
+                        if (!$this->waitForRunning($adapter, $station, 6)) {
+                            throw $e;
+                        }
+                    }
+
                     $restarted[] = $service;
                 }
             } catch (Throwable $e) {

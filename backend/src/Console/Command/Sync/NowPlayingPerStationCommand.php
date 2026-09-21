@@ -10,6 +10,7 @@ use App\Entity\Station;
 use App\Sync\NowPlaying\Task\BuildQueueTask;
 use App\Sync\NowPlaying\Task\NowPlayingTask;
 use App\Utilities\Types;
+use GuzzleHttp\Exception\ConnectException;
 use Monolog\LogRecord;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputArgument;
@@ -67,10 +68,18 @@ final class NowPlayingPerStationCommand extends AbstractSyncCommand
         try {
             $this->buildQueueTask->run($station);
         } catch (Throwable $e) {
-            $this->logger->error(
-                'Queue builder error: ' . $e->getMessage(),
-                ['exception' => $e]
-            );
+            if ($this->isBackendStillStarting($e)) {
+                // Liquidsoap's HTTP API is not listening yet (backend restart in progress).
+                // The next Now Playing run will build the queue normally.
+                $this->logger->warning(
+                    'Queue builder skipped: Liquidsoap backend is not accepting connections yet.'
+                );
+            } else {
+                $this->logger->error(
+                    'Queue builder error: ' . $e->getMessage(),
+                    ['exception' => $e]
+                );
+            }
         }
 
         try {
@@ -86,5 +95,16 @@ final class NowPlayingPerStationCommand extends AbstractSyncCommand
         $this->logger->popProcessor();
 
         return 0;
+    }
+
+    private function isBackendStillStarting(Throwable $e): bool
+    {
+        for ($current = $e; null !== $current; $current = $current->getPrevious()) {
+            if ($current instanceof ConnectException) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
