@@ -171,24 +171,19 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
         $start = CarbonImmutable::instance($event->getExpectedPlayTime());
 
-        // Check if this pick would start in the pre-fade window -- if so,
-        // reject it entirely rather than letting it play briefly and get
-        // hard-cut by the ID. This prevents the AutoDJ from scheduling songs
-        // that will sound terrible on air.
-        if ($this->isInPreFadeWindow($station, $start)) {
-            $this->logger->notice(
-                'Top-of-Hour swap: rejecting pick that would start in the pre-fade window.',
-                [
-                    'media_id' => $media->id,
-                    'start' => $start->toIso8601String(),
-                ]
-            );
-            // Detach the row so it's not persisted, and clear the event so
-            // no song is queued for this slot.
-            if ($this->em->contains($row)) {
-                $this->em->detach($row);
-            }
-            $event->setNextSongs();
+        // A pick landing inside the pre-fade window cannot be fixed by a
+        // duration-matched swap (there is no time left for one) and must NOT
+        // be dropped from the queue either: an empty queue at this exact
+        // moment breaks the existing one-ahead reserve/release mechanism
+        // that keeps a fresh AutoDJ pick from resolving silently behind the
+        // ID and surfacing already-in-progress once the ID releases (this
+        // shipped on air: "Queue is empty!" at the deadline, then a song 20s
+        // in the moment the ID ended). Capping the row's own play window to
+        // the remaining gap keeps a valid reserve in place -- the normal
+        // pre-fade/cue-out path (hour_boundary_enforce_cap, already used for
+        // every other boundary cutoff in this codebase) then fades it
+        // cleanly instead of hard-cutting it.
+        if ($this->capToPreFadeWindow($station, $row, $start)) {
             return;
         }
 
@@ -283,18 +278,14 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
         $start = CarbonImmutable::instance($event->getExpectedPlayAt());
 
-        // Check if this row starts in the pre-fade window -- if so, remove it
-        // entirely rather than letting it play briefly and get hard-cut.
-        if ($this->isInPreFadeWindow($station, $start)) {
-            $this->logger->notice(
-                'Top-of-Hour swap: removing queued row that starts in the pre-fade window.',
-                [
-                    'queue_id' => $row->id,
-                    'media_id' => $media->id,
-                    'start' => $start->toIso8601String(),
-                ]
-            );
-            $this->em->remove($row);
+        // See the matching comment in swap(): cap rather than remove. Removing
+        // this row left the queue empty at the exact deadline moment on a live
+        // test tonight, which broke the reserve/release mechanism that
+        // prevents a fresh pick from resolving silently behind the ID -- the
+        // very bug this class exists to prevent, just triggered a different
+        // way.
+        if ($this->capToPreFadeWindow($station, $row, $start)) {
+            $this->em->persist($row);
             return;
         }
 
@@ -1186,17 +1177,30 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     }
 
     /**
-     * Returns true if $start falls inside the pre-fade window before the next
-     * Station ID deadline. Starting a new song in this window is problematic:
-     * the pre-fade is designed to fade OUT an already-playing track, not fade
-     * IN a fresh one. A song starting here plays at full volume for only a
-     * few seconds before getting hard-cut by the ID -- audible as a jarring
-     * cut rather than the intended smooth transition.
+     * If $start falls inside the pre-fade window before the next Station ID
+     * deadline, caps $row's own play window to whatever of the gap remains
+     * and returns true. Starting a fresh song in this window is problematic
+     * either way a fix is attempted:
      *
-     * When this returns true, the caller should remove the queued row entirely
-     * rather than let it play.
+     *  - Left completely alone, it plays at full volume for only a few
+     *    seconds before getting hard-cut by the ID -- a jarring cut instead
+     *    of the intended smooth transition (the original bug this class was
+     *    built to fix).
+     *  - Removed from the queue outright, the queue can go empty at exactly
+     *    this moment. That breaks the separate one-ahead reserve/release
+     *    mechanism (see NextSongCommand) that normally keeps a fresh AutoDJ
+     *    pick from resolving silently behind the ID and surfacing already
+     *    in progress once the ID releases -- observed live: "Queue is
+     *    empty!" logged at the deadline, then a song ~20s in the instant the
+     *    ID ended.
+     *
+     * Capping avoids both: the row stays a valid reserve (so Liquidsoap's
+     * crossfade always has something to hold), but it is bounded to end
+     * exactly at the ID target, so the existing hour_boundary_enforce_cap
+     * cue-out/fade path -- already used for every other boundary cutoff in
+     * this codebase -- fades it cleanly instead of hard-cutting it.
      */
-    private function isInPreFadeWindow(Station $station, CarbonImmutable $start): bool
+    private function capToPreFadeWindow(Station $station, StationQueue $row, CarbonImmutable $start): bool
     {
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
         $target = $boundary
@@ -1211,7 +1215,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return false;
         }
 
-        // Don't remove rows for boundaries owned by a Clock Wheel.
+        // Don't cap rows for boundaries owned by a Clock Wheel.
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return false;
         }
@@ -1220,7 +1224,29 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
         // The pre-fade window is the $fadeSeconds immediately before the ID
         // target. Any song starting in this window will get hard-cut almost
-        // immediately after it starts.
-        return $gap <= $fadeSeconds;
+        // immediately after it starts unless capped here.
+        if ($gap > $fadeSeconds) {
+            return false;
+        }
+
+        $capSeconds = max(1, (int)round($gap));
+
+        $this->logger->notice(
+            'Top-of-Hour swap: capping row that starts in the pre-fade window instead of '
+            . 'dropping it, so a valid reserve stays queued for Liquidsoap.',
+            [
+                'queue_id' => $row->id,
+                'media_id' => $row->media?->id,
+                'start' => $start->toIso8601String(),
+                'target' => $target->toIso8601String(),
+                'gap' => round($gap, 2),
+                'cap_seconds' => $capSeconds,
+            ]
+        );
+
+        $row->hour_boundary_max_play_seconds = $capSeconds;
+        $row->hour_boundary_enforce_cap = true;
+
+        return true;
     }
 }

@@ -142,6 +142,20 @@ final class Queue
                 $this->dispatcher->dispatch(
                     new RevalidateQueuedSong($station, $queueRow, $expectedPlayTime)
                 );
+
+                // A plugin may have called EntityManager::remove() on this row
+                // during the event above (e.g. dropping a pick that can no
+                // longer land cleanly). Doctrine cancels a pending removal the
+                // moment the same entity is persist()'d again, which is
+                // exactly what the rest of this loop iteration unconditionally
+                // does below -- so without this check, any plugin-initiated
+                // removal here was silently undone on every single queue
+                // rebuild cycle, and the row would never actually leave the
+                // queue. Skip the rest of this row's processing entirely so
+                // the removal sticks.
+                if ($this->em->getUnitOfWork()->isScheduledForDelete($queueRow)) {
+                    continue;
+                }
             }
 
             // Only use the five-second safety floor for genuinely missing/bad
