@@ -47,6 +47,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly DuplicatePrevention $duplicatePrevention,
         private readonly BroadcastClockPlanner $broadcastClockPlanner,
+        private readonly TopOfHour\TopOfHourClock $topOfHourClock,
         private readonly CacheInterface $cache,
         private readonly StationPlaylistRepository $playlistRepo,
         private readonly StationPlaylistMediaRepository $spmRepo,
@@ -787,6 +788,17 @@ final class QueueBuilder implements EventSubscriberInterface
         );
         if (null === $maxDuration) {
             return $selectedTrack;
+        }
+
+        // An anchor just before the station-ID target belongs to the Top-of-Hour
+        // swap selector; capping here would force an unfillable few-second slot.
+        $station = $playlist->station;
+        if ($this->topOfHourClock->isEnabled($station) && $this->topOfHourClock->isSwapEnabled($station)) {
+            $anchorTs = $expectedPlayTime->getTimestamp() + (int)$maxDuration;
+            $idTargetTs = $this->topOfHourClock->getTargetStartFor($station, $expectedPlayTime)->getTimestamp();
+            if ($anchorTs >= $idTargetTs - 120) {
+                return $selectedTrack;
+            }
         }
 
         $media = $this->em->find(StationMedia::class, $selectedTrack->media_id);

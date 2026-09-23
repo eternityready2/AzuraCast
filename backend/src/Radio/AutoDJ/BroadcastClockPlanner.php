@@ -224,12 +224,20 @@ final class BroadcastClockPlanner
             );
 
             foreach ($occurrences as $occurrence) {
+                $occStart = CarbonImmutable::instance($occurrence->start)->setTimezone($tz);
+
                 if (!$rigidStart) {
-                    $boundaries[] = CarbonImmutable::instance($occurrence->start)->setTimezone($tz);
+                    $boundaries[] = $occStart;
                 }
 
-                if ($schedule->start_time !== $schedule->end_time && !$allowOverrun) {
-                    $boundaries[] = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
+                if ($schedule->start_time === $schedule->end_time || $allowOverrun) {
+                    continue;
+                }
+
+                // An end only matters while the window is actually running.
+                $occEnd = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
+                if ($now->between($occStart, $occEnd)) {
+                    $boundaries[] = $occEnd;
                 }
             }
 
@@ -261,7 +269,9 @@ final class BroadcastClockPlanner
             if ($schedule->start_time > $schedule->end_time) {
                 $end = $end->addDay();
             }
-            $boundaries[] = $end;
+            if ($now->between($start, $end)) {
+                $boundaries[] = $end;
+            }
         }
 
         return $boundaries;

@@ -382,18 +382,17 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             return;
         }
 
+        $stuckWhere = <<<'DQL'
+            sq.station = :station
+            AND sq.is_played = 1
+            AND sq.timestamp_played IS NULL
+            AND sq.autodj_custom_uri LIKE :aiDjPath
+        DQL;
+
         try {
-            /** @var StationQueue|null $pending */
-            $pending = $this->em->createQuery(
-                <<<'DQL'
-                    SELECT sq FROM App\Entity\StationQueue sq
-                    WHERE sq.station = :station
-                    AND sq.is_played = 1
-                    AND sq.timestamp_played IS NULL
-                    AND sq.autodj_custom_uri IS NOT NULL
-                    AND sq.autodj_custom_uri LIKE :aiDjPath
-                    ORDER BY sq.timestamp_cued DESC
-                DQL
+            /** @var StationQueue|null $newest */
+            $newest = $this->em->createQuery(
+                'SELECT sq FROM App\Entity\StationQueue sq WHERE ' . $stuckWhere . ' ORDER BY sq.timestamp_cued DESC'
             )->setParameter('station', $station)
                 ->setParameter('aiDjPath', '%/ai_dj/%')
                 ->setMaxResults(1)
@@ -406,33 +405,35 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
             return;
         }
 
-        if (null === $pending) {
-            // Liquidsoap reports something pending but no matching database row
-            // exists to time it against (e.g. state predates this deploy). Clear
-            // it: an unaccountable pending clip is never safe to leave in place.
+        if (null === $newest) {
             $this->purgePendingAiDjSpeech($station, $backend, 'pending speech has no matching queue row');
             return;
         }
 
-        $ageSeconds = time() - $pending->timestamp_cued->getTimestamp();
-        if ($ageSeconds <= self::STUCK_SPEECH_SECONDS) {
+        $now = new DateTimeImmutable('now', $station->getTimezoneObject());
+        $cutoff = $now->modify('-' . self::STUCK_SPEECH_SECONDS . ' seconds');
+        if ($newest->timestamp_cued > $cutoff) {
             return;
         }
 
-        $this->logger->warning('AI DJ: Clip stuck pending past expected air time; force-clearing.', [
-            'station_id' => $station->id,
-            'queue_row_id' => $pending->id,
-            'age_seconds' => $ageSeconds,
-            'title' => $pending->title,
-            'artist' => $pending->artist,
-        ]);
-
         $this->purgePendingAiDjSpeech($station, $backend, 'clip stuck pending past expected air time');
 
-        // The stale welcome/talk guard for this shift must also be cleared so the
-        // very next heartbeat is free to generate a fresh attempt rather than
-        // believing this shift was already (unsuccessfully) welcomed/handled.
-        $schedule = $this->scheduler->findActiveSchedule($station->id, new DateTimeImmutable('now', $station->getTimezoneObject()));
+        // Close out every stale row at once; one-per-tick left hundreds blocking for hours.
+        $cleared = $this->em->createQuery(
+            'UPDATE App\Entity\StationQueue sq SET sq.timestamp_played = :now WHERE '
+            . $stuckWhere . ' AND sq.timestamp_cued <= :cutoff'
+        )->setParameter('station', $station)
+            ->setParameter('aiDjPath', '%/ai_dj/%')
+            ->setParameter('now', $now)
+            ->setParameter('cutoff', $cutoff)
+            ->execute();
+
+        $this->logger->warning('AI DJ: Cleared stuck speech rows.', [
+            'station_id' => $station->id,
+            'count' => $cleared,
+        ]);
+
+        $schedule = $this->scheduler->findActiveSchedule($station->id, $now);
         if ($schedule instanceof AiDjSchedule) {
             $dj = $schedule->getAiDj();
             $this->cache->delete('ai_dj_welcomed_' . $station->id . '_' . $dj->getId());

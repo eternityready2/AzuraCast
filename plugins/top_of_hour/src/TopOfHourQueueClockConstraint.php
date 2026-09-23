@@ -52,13 +52,11 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
         $start = CarbonImmutable::instance($event->getExpectedPlayAt());
         $projectedEnd = CarbonImmutable::instance($event->getProjectedEndAt());
 
-        // Uses the shared TopOfHourClock::getTargetStartFor() rather than
-        // recomputing the target locally, so this can never drift out of
-        // sync with the same calculation the swap selector and the runtime
-        // ID-window guard use.
-        $candidateTarget = CarbonImmutable::instance(
-            $this->clock->getTargetStartFor($station, $start->toDateTimeImmutable())
-        );
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        $candidateTarget = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->addSeconds($this->clock->getIdStartSecond($station));
 
         if ($candidateTarget <= $start || $candidateTarget > $projectedEnd) {
             return;

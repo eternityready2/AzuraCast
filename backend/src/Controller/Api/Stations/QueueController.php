@@ -250,6 +250,15 @@ final class QueueController extends AbstractStationApiCrudController
                         continue;
                     }
 
+                    // With a Top-of-Hour ID the bulletin airs after the :59:59 ID, at
+                    // the hour boundary, so list it there rather than at :59:00.
+                    if ($station->backend_config->top_of_hour_id_enabled) {
+                        $newsTime = CarbonImmutable::instance($newsTime)
+                            ->addMinute()
+                            ->startOfMinute()
+                            ->toDateTimeImmutable();
+                    }
+
                     $rows[] = $this->viewAiNewsForecastRecord($station, $newsTime);
                 }
             }
