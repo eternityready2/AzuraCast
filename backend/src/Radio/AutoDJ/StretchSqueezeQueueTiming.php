@@ -26,6 +26,50 @@ final class StretchSqueezeQueueTiming implements EventSubscriberInterface
 
     private const float DEFAULT_MAX_PERCENT = 5.0;
 
+    /**
+     * Absolute ceiling for either direction, independent of what an operator
+     * configures. Matches the pre-existing single-knob ceiling this replaces
+     * -- splitting stretch and squeeze into two settings does not by itself
+     * raise how much either one is allowed to alter playback; an operator
+     * still has to deliberately turn each one up, and even then not past
+     * this hard cap.
+     */
+    private const float HARD_CEILING_PERCENT = 5.0;
+
+    public const string CONFIG_STRETCH_MAX_PERCENT = 'playout_stretch_max_percent';
+    public const string CONFIG_SQUEEZE_MAX_PERCENT = 'playout_squeeze_max_percent';
+
+    /** @deprecated Use CONFIG_STRETCH_MAX_PERCENT / CONFIG_SQUEEZE_MAX_PERCENT. Still read as the fallback for either one when it has no value of its own. */
+    public const string CONFIG_LEGACY_MAX_PERCENT = 'playout_stretch_squeeze_max_percent';
+
+    /**
+     * [stretchPercent, squeezePercent], each independently configured (falling
+     * back to the single legacy `playout_stretch_squeeze_max_percent` value
+     * when its own key is absent, so existing stations keep their current
+     * behavior until an operator deliberately splits the two), each clamped
+     * to HARD_CEILING_PERCENT regardless of what is configured.
+     *
+     * @param array<string, mixed> $rawConfig
+     * @return array{0: float, 1: float}
+     */
+    public static function getStretchSqueezePercents(array $rawConfig): array
+    {
+        $legacy = max(
+            0.5,
+            min(self::HARD_CEILING_PERCENT, (float)($rawConfig[self::CONFIG_LEGACY_MAX_PERCENT] ?? self::DEFAULT_MAX_PERCENT))
+        );
+
+        $stretch = array_key_exists(self::CONFIG_STRETCH_MAX_PERCENT, $rawConfig)
+            ? max(0.5, min(self::HARD_CEILING_PERCENT, (float)$rawConfig[self::CONFIG_STRETCH_MAX_PERCENT]))
+            : $legacy;
+
+        $squeeze = array_key_exists(self::CONFIG_SQUEEZE_MAX_PERCENT, $rawConfig)
+            ? max(0.5, min(self::HARD_CEILING_PERCENT, (float)$rawConfig[self::CONFIG_SQUEEZE_MAX_PERCENT]))
+            : $legacy;
+
+        return [$stretch, $squeeze];
+    }
+
     public static function getSubscribedEvents(): array
     {
         return [
@@ -100,12 +144,16 @@ final class StretchSqueezeQueueTiming implements EventSubscriberInterface
 
         $rawConfig = $station->backend_config->toArray(true) ?? [];
         $enabled = (bool)($rawConfig['playout_stretch_squeeze_enabled'] ?? self::DEFAULT_ENABLED);
-        $maxPercent = (float)(
-            $rawConfig['playout_stretch_squeeze_max_percent'] ?? self::DEFAULT_MAX_PERCENT
-        );
-        $maxPercent = max(0.5, min(5.0, $maxPercent));
-        $minimumRatio = 1.0 - ($maxPercent / 100);
-        $maximumRatio = 1.0 + ($maxPercent / 100);
+        [$stretchPercent, $squeezePercent] = self::getStretchSqueezePercents($rawConfig);
+
+        // Stretch (slowing audio down to fill MORE time -- ratio < 1, natural
+        // length shorter than the target) and squeeze (speeding it up to fill
+        // LESS time -- ratio > 1, natural length longer than the target) are
+        // separate operations with separate audibility characteristics, so
+        // each gets its own configured ceiling instead of one symmetric
+        // percentage covering both directions.
+        $minimumRatio = 1.0 - ($stretchPercent / 100);
+        $maximumRatio = 1.0 + ($squeezePercent / 100);
 
         if (null !== $targetSeconds) {
             $ratio = $calculatedLength / $targetSeconds;

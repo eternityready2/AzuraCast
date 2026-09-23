@@ -26,8 +26,15 @@ final readonly class StationPlayoutControls
     #[OA\Property]
     public bool $stretch_squeeze_enabled;
 
+    /** @deprecated Superseded by stretch_max_percent / squeeze_max_percent. */
     #[OA\Property]
     public float $stretch_squeeze_max_percent;
+
+    #[OA\Property]
+    public float $stretch_max_percent;
+
+    #[OA\Property]
+    public float $squeeze_max_percent;
 
     #[OA\Property]
     public bool $smart_duck_enabled;
@@ -45,6 +52,8 @@ final readonly class StationPlayoutControls
         $this->hard_clock_fade_seconds = $config->playout_hard_clock_fade_seconds;
         $this->stretch_squeeze_enabled = $config->playout_stretch_squeeze_enabled;
         $this->stretch_squeeze_max_percent = $config->playout_stretch_squeeze_max_percent;
+        $this->stretch_max_percent = $config->playout_stretch_max_percent;
+        $this->squeeze_max_percent = $config->playout_squeeze_max_percent;
         $this->smart_duck_enabled = $config->playout_smart_duck_enabled;
         $this->smart_duck_attenuation = $config->playout_smart_duck_attenuation;
         $this->smart_duck_delay = $config->playout_smart_duck_delay;

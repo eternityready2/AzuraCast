@@ -23,6 +23,7 @@ use App\Radio\Backend\Liquidsoap\ConfigWriter as LiquidsoapConfigWriter;
 use App\Radio\Configuration;
 use App\Radio\Frontend\Icecast;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
+use App\Service\AirCheckFrontendConnectivityProbe;
 use App\Service\GuzzleFactory;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\RequestOptions;
@@ -44,6 +45,7 @@ final class FeatureSuiteController
         private readonly MessageBus $messageBus,
         private readonly Configuration $configuration,
         private readonly CacheInterface $cache,
+        private readonly AirCheckFrontendConnectivityProbe $frontendConnectivityProbe,
     ) {
     }
 
@@ -214,33 +216,57 @@ final class FeatureSuiteController
                     continue;
                 }
 
-                if (!$adapter->isRunning($station)) {
-                    // Supervisor reports "not running" while a process is STARTING or auto-restarting
-                    // (BACKOFF). Give it a moment before fighting it, otherwise our start() races
-                    // Supervisor's own restart and fails with "already running" or
-                    // AbnormalTerminationException even though the service comes back.
-                    if ($this->waitForRunning($adapter, $station, 4)) {
-                        continue;
+                $isRunning = $adapter->isRunning($station);
+
+                if ($isRunning) {
+                    if (
+                        'frontend' === $service
+                        && !$this->frontendConnectivityProbe->isReachable($station, $adapter)
+                    ) {
+                        // Supervisor sees the process as RUNNING -- it never crashed --
+                        // but it is not actually accepting listener connections (e.g. a
+                        // full/stuck TCP accept queue on Icecast). There is nothing for
+                        // Supervisor to "come back" from here, so skip the
+                        // starting/BACKOFF grace period below and restart directly.
+                        try {
+                            $adapter->restart($station);
+                        } catch (AlreadyRunningException|SupervisorException $e) {
+                            if (!$this->waitForRunning($adapter, $station, 6)) {
+                                throw $e;
+                            }
+                        }
+
+                        $restarted[] = $service;
                     }
 
-                    try {
-                        $adapter->restart($station);
-                    } catch (AlreadyRunningException $e) {
-                        // Supervisor started it between our check and our start.
-                        if (!$this->waitForRunning($adapter, $station, 6)) {
-                            throw $e;
-                        }
-                    } catch (SupervisorException $e) {
-                        // Our start can lose the race against Supervisor's own restart
-                        // (port or lock still held), so only report failure if the
-                        // service is still down after it settles.
-                        if (!$this->waitForRunning($adapter, $station, 6)) {
-                            throw $e;
-                        }
-                    }
-
-                    $restarted[] = $service;
+                    continue;
                 }
+
+                // Supervisor reports "not running" while a process is STARTING or auto-restarting
+                // (BACKOFF). Give it a moment before fighting it, otherwise our start() races
+                // Supervisor's own restart and fails with "already running" or
+                // AbnormalTerminationException even though the service comes back.
+                if ($this->waitForRunning($adapter, $station, 4)) {
+                    continue;
+                }
+
+                try {
+                    $adapter->restart($station);
+                } catch (AlreadyRunningException $e) {
+                    // Supervisor started it between our check and our start.
+                    if (!$this->waitForRunning($adapter, $station, 6)) {
+                        throw $e;
+                    }
+                } catch (SupervisorException $e) {
+                    // Our start can lose the race against Supervisor's own restart
+                    // (port or lock still held), so only report failure if the
+                    // service is still down after it settles.
+                    if (!$this->waitForRunning($adapter, $station, 6)) {
+                        throw $e;
+                    }
+                }
+
+                $restarted[] = $service;
             } catch (Throwable $e) {
                 $failures[] = $service . ': ' . $e->getMessage();
             }

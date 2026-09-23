@@ -6,8 +6,10 @@ namespace App\Radio\AutoDJ\TopOfHour;
 
 use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelSlotTypes;
+use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
+use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
 use App\Utilities\ScheduleRecurrence;
 use Carbon\CarbonImmutable;
@@ -69,12 +71,24 @@ final class TopOfHourClock
 
     public function __construct(
         private readonly StationIdSelector $stationIdSelector,
+        private readonly StationQueueRepository $queueRepo,
     ) {
     }
 
     public function isEnabled(Station $station): bool
     {
         return (bool)$station->backend_config->top_of_hour_id_enabled;
+    }
+
+    /**
+     * See StationQueueRepository::releaseUnairedSentRow(). Called every time
+     * a nextsong request is refused for being inside the ID window, so the
+     * rescue happens the moment the station enters it -- well before the
+     * release transition asks for a fresh track.
+     */
+    public function releasePendingAutoDjReserve(Station $station): ?StationQueue
+    {
+        return $this->queueRepo->releaseUnairedSentRow($station);
     }
 
     public function getLookaheadMinutes(Station $station): int

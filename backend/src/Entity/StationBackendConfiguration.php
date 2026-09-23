@@ -218,11 +218,39 @@ final class StationBackendConfiguration extends AbstractArrayEntity
 
     protected const float DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT = 5.0;
 
+    /**
+     * @deprecated Superseded by the independent playout_stretch_max_percent /
+     * playout_squeeze_max_percent below. Still read as the shared fallback
+     * default for either one, so existing stations keep their current
+     * behavior unless an operator deliberately sets the two split values.
+     */
     #[OA\Property]
     public float $playout_stretch_squeeze_max_percent = self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT {
         set(float|int|string|null $value) {
             $floatVal = Types::float($value, self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT);
             $this->playout_stretch_squeeze_max_percent = max(0.5, min($floatVal, 5.0));
+        }
+    }
+
+    // Stretch (slowing audio down to fill MORE time) and squeeze (speeding it
+    // up to fill LESS) are separate operations with separate audibility
+    // characteristics -- a Maximum Stretch % and a Maximum Squeeze %, each
+    // independently configurable, matching how other broadcast automation
+    // systems expose pitch-preserving time correction as two limits rather
+    // than one symmetric percentage.
+    #[OA\Property]
+    public float $playout_stretch_max_percent = self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT {
+        set(float|int|string|null $value) {
+            $floatVal = Types::float($value, self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT);
+            $this->playout_stretch_max_percent = max(0.5, min($floatVal, 5.0));
+        }
+    }
+
+    #[OA\Property]
+    public float $playout_squeeze_max_percent = self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT {
+        set(float|int|string|null $value) {
+            $floatVal = Types::float($value, self::DEFAULT_STRETCH_SQUEEZE_MAX_PERCENT);
+            $this->playout_squeeze_max_percent = max(0.5, min($floatVal, 5.0));
         }
     }
 

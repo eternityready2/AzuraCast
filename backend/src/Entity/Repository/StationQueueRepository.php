@@ -435,6 +435,229 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             ->getOneOrNullResult();
     }
 
+    /**
+     * Give back an AutoDJ pick that was already resolved and marked "sent"
+     * but never actually confirmed on air (no feedback call yet), so it is
+     * offered again by getNextToSendToAutoDj() instead of being silently
+     * skipped from rotation forever.
+     *
+     * request.dynamic keeps exactly one request resolved ahead of whatever
+     * is actually on air so its crossfade has something ready the instant
+     * the current track ends. Annotations::postAnnotation() marks that
+     * request's StationQueue row "sent" the moment it is resolved -- not
+     * when it actually airs. When a broadcast-clock interruption (e.g. the
+     * Top-of-Hour Station ID) discards that reserved request so it cannot
+     * surface mid-song after the interruption, the row stays marked "sent"
+     * and is gone from rotation for good; the row after it opens the new
+     * hour instead of the song that was actually queued next.
+     *
+     * Returns the row it handed back, or null when it deliberately did
+     * nothing, so the caller can log the outcome -- this runs during the ID
+     * window where nothing else is observable, and a silent no-op here is
+     * indistinguishable from the method never being reached at all.
+     *
+     * Scoped to the last few minutes and to plain ordinary picks so this
+     * can never reach back and disturb an unrelated historical row.
+     *
+     * IMPORTANT: the row currently on air is *also* "sent, unplayed" right
+     * up until the next now-playing feedback call marks it played -- and it
+     * was cued EARLIER than the one-ahead reserve, because it was resolved
+     * back when it was itself the reserve, before the track before it even
+     * started. The one-ahead reserve this method actually needs to rescue
+     * was resolved only once the (interrupted) track started playing, so it
+     * is always the MORE RECENTLY cued of the two. Ordering by oldest first
+     * here used to grab the interrupted on-air row instead of the discarded
+     * reserve, which rewound the wrong row to the front of the queue: the
+     * already-heard track got re-offered as if it were next, silently
+     * bumping the song that was actually queued (and shown in Upcoming
+     * Queue) to start right after the ID. Ordering by most-recently-cued
+     * first targets the reserve, not whatever is airing.
+     */
+    public function releaseUnairedSentRow(Station $station): ?StationQueue
+    {
+        $candidates = $this->getUnplayedBaseQuery($station)
+            ->andWhere('sq.sent_to_autodj = 1')
+            ->andWhere('sq.top_of_hour_legal_id = 0')
+            ->andWhere('sq.clock_wheel_legal_id_substitute = 0')
+            ->andWhere('sq.request IS NULL')
+            ->andWhere('sq.timestamp_cued >= :cutoff')
+            ->setParameter('cutoff', Time::nowUtc()->subMinutes(5))
+            ->orderBy('sq.timestamp_cued', 'DESC')
+            ->getQuery()
+            ->setMaxResults(5)
+            ->getResult();
+
+        if ([] === $candidates) {
+            return null;
+        }
+
+        // A row that has ALREADY been on air must never be released. This is
+        // not hypothetical: the interrupted song is still "sent, unplayed"
+        // until now-playing feedback marks it played, and this method is
+        // called on every refused nextsong request for the whole ~39s ID
+        // window -- the first of which lands a fraction of a second after
+        // the ID takes air. Once the genuine reserve has been handed back by
+        // an earlier call in the same window, the interrupted song is the
+        // only remaining match, so a lagging feedback call would otherwise
+        // let a track that listeners just heard get rewound to the front of
+        // the queue and replayed the moment the ID ends.
+        //
+        // current_song alone cannot be the guard here, because during the ID
+        // window current_song IS the Station ID, not the music it
+        // interrupted. song_history is the authoritative record of what
+        // actually aired, so it is what gets consulted.
+        $airedSongIds = $this->getRecentlyAiredSongIds($station);
+        $currentSongId = $station->current_song?->song_id;
+
+        $row = null;
+        foreach ($candidates as $candidate) {
+            if (!$candidate instanceof StationQueue) {
+                continue;
+            }
+
+            $songId = $candidate->song_id;
+
+            if (null !== $currentSongId && $songId === $currentSongId) {
+                continue;
+            }
+
+            if (isset($airedSongIds[$songId])) {
+                continue;
+            }
+
+            $row = $candidate;
+            break;
+        }
+
+        // Nothing left that provably never aired. Leaving the queue untouched
+        // is the safe outcome: at worst one pick is skipped, which is far less
+        // audible than replaying a song that just played.
+        if (null === $row) {
+            return null;
+        }
+
+        $earliestUnsent = $this->getUnplayedBaseQuery($station)
+            ->andWhere('sq.sent_to_autodj = 0')
+            ->orderBy('sq.timestamp_cued', 'ASC')
+            ->getQuery()
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        // Must sort ahead of every still-unsent row so it is what
+        // getNextToSendToAutoDj() returns next, not whatever was already
+        // queued behind it. postAnnotation() re-stamped timestamp_cued to
+        // the resolve time when it marked this row "sent", so its original
+        // FIFO position is gone and has to be re-established here.
+        $row->timestamp_cued = (null !== $earliestUnsent)
+            ? CarbonImmutable::instance($earliestUnsent->timestamp_cued)->subSecond()
+            : Time::nowUtc();
+
+        $row->sent_to_autodj = false;
+        $this->em->persist($row);
+        $this->em->flush();
+
+        return $row;
+    }
+
+    /**
+     * Seconds of audio already handed to Liquidsoap but not yet on air.
+     *
+     * Liquidsoap does not resolve a request only when it is about to play it.
+     * The crossfade operator needs the *next* track available to build the
+     * transition out of the current one, so by the time a row is resolved
+     * there is normally another resolved row queued between it and the air.
+     * Measured on this station: a row's resolve time consistently equals the
+     * moment the row TWO positions ahead of it starts playing.
+     *
+     * That matters because a resolved row can no longer be changed -- it is
+     * inside Liquidsoap. So the last chance to swap a row is at resolve time
+     * (see Annotations::revalidateBeforeSend()), and a decision made there
+     * against "the current song ends, then this one plays" is wrong by a
+     * whole track. One observed case: a row resolved at 19:46:22 was
+     * projected to air at 19:48:53 and actually aired at 19:54:36 -- 5m43s
+     * out, which is the difference between "this is the last song before the
+     * Station ID, swap it" and "there is another song after this one". It
+     * produced a 96-second mid-song chop at the top of the hour.
+     *
+     * Rows staged into their own Liquidsoap lane (the Top-of-Hour legal ID
+     * and clock-wheel ID substitutes) are deliberately NOT counted: they do
+     * not occupy the AutoDJ transport, and the TOH ID in particular is
+     * pre-staged up to half an hour early, so counting it would push every
+     * projection out by its length for the rest of the hour.
+     */
+    public function getUnairedSentDuration(Station $station): float
+    {
+        $rows = $this->getUnplayedBaseQuery($station)
+            ->andWhere('sq.sent_to_autodj = 1')
+            ->andWhere('sq.top_of_hour_legal_id = 0')
+            ->andWhere('sq.clock_wheel_legal_id_substitute = 0')
+            ->andWhere('sq.timestamp_cued >= :cutoff')
+            ->setParameter('cutoff', Time::nowUtc()->subMinutes(30))
+            ->getQuery()
+            ->getResult();
+
+        if ([] === $rows) {
+            return 0.0;
+        }
+
+        // The row currently on air is also "sent, unplayed" until feedback
+        // marks it played, and the caller has already accounted for it via
+        // the current song's own end time -- counting it here would double it.
+        $airedSongIds = $this->getRecentlyAiredSongIds($station);
+        $currentSongId = $station->current_song?->song_id;
+
+        $seconds = 0.0;
+        foreach ($rows as $row) {
+            if (!$row instanceof StationQueue) {
+                continue;
+            }
+
+            $songId = $row->song_id;
+
+            if (null !== $currentSongId && $songId === $currentSongId) {
+                continue;
+            }
+
+            if (isset($airedSongIds[$songId])) {
+                continue;
+            }
+
+            $seconds += (float)($row->duration ?? 0.0);
+        }
+
+        return $seconds;
+    }
+
+    /**
+     * Song IDs this station has actually put to air recently, straight from
+     * SongHistory (i.e. what listeners heard), for use as a "this one is
+     * already spent" guard. Keyed by song_id for O(1) lookup.
+     *
+     * @return array<string, true>
+     */
+    private function getRecentlyAiredSongIds(Station $station, int $minutes = 10): array
+    {
+        $rows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT sh.song_id FROM App\Entity\SongHistory sh
+                WHERE sh.station = :station
+                AND sh.timestamp_start >= :threshold
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('threshold', Time::nowUtc()->subMinutes($minutes))
+            ->getArrayResult();
+
+        $ids = [];
+        foreach ($rows as $row) {
+            $songId = $row['song_id'] ?? null;
+            if (is_string($songId) && '' !== $songId) {
+                $ids[$songId] = true;
+            }
+        }
+
+        return $ids;
+    }
+
     public function findRecentlyCuedSong(
         Station $station,
         SongInterface $song

@@ -81,13 +81,13 @@
                     </form-group>
 
                     <template v-if="form.stretch_squeeze_enabled">
-                        <form-group id="stretch_squeeze_max_percent" class="mb-3">
+                        <form-group id="stretch_max_percent" class="mb-3">
                             <template #label>
-                                {{ $gettext('Maximum timing adjustment (%)') }}
+                                {{ $gettext('Maximum stretch (%)') }}
                             </template>
                             <input
-                                id="stretch_squeeze_max_percent"
-                                v-model.number="form.stretch_squeeze_max_percent"
+                                id="stretch_max_percent"
+                                v-model.number="form.stretch_max_percent"
                                 type="number"
                                 class="form-control"
                                 min="0.5"
@@ -95,7 +95,25 @@
                                 step="0.5"
                             >
                             <div class="form-text">
-                                {{ $gettext('The existing safe limit is 5%. Lower values reduce how much AutoDJ may speed up or slow down a track.') }}
+                                {{ $gettext('How much AutoDJ may slow a track down (extend its duration) to reach a timing target. Hard limit is 5%.') }}
+                            </div>
+                        </form-group>
+
+                        <form-group id="squeeze_max_percent" class="mb-3">
+                            <template #label>
+                                {{ $gettext('Maximum squeeze (%)') }}
+                            </template>
+                            <input
+                                id="squeeze_max_percent"
+                                v-model.number="form.squeeze_max_percent"
+                                type="number"
+                                class="form-control"
+                                min="0.5"
+                                max="5"
+                                step="0.5"
+                            >
+                            <div class="form-text">
+                                {{ $gettext('How much AutoDJ may speed a track up (shorten its duration) to reach a timing target. Hard limit is 5%. Configured separately from stretch because listeners can perceive the two directions differently.') }}
                             </div>
                         </form-group>
                     </template>
@@ -193,6 +211,8 @@ const form = ref<PlayoutControlsSettings>({
     hard_clock_fade_seconds: 3,
     stretch_squeeze_enabled: true,
     stretch_squeeze_max_percent: 5,
+    stretch_max_percent: 5,
+    squeeze_max_percent: 5,
     smart_duck_enabled: false,
     smart_duck_attenuation: 0.2,
     smart_duck_delay: 3,
@@ -208,6 +228,8 @@ const loadSettings = async () => {
             hard_clock_fade_seconds: data.hard_clock_fade_seconds ?? 3,
             stretch_squeeze_enabled: data.stretch_squeeze_enabled ?? true,
             stretch_squeeze_max_percent: data.stretch_squeeze_max_percent ?? 5,
+            stretch_max_percent: data.stretch_max_percent ?? 5,
+            squeeze_max_percent: data.squeeze_max_percent ?? 5,
             smart_duck_enabled: data.smart_duck_enabled ?? false,
             smart_duck_attenuation: data.smart_duck_attenuation ?? 0.2,
             smart_duck_delay: data.smart_duck_delay ?? 3,

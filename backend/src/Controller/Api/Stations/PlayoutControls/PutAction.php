@@ -72,6 +72,14 @@ final class PutAction implements SingleActionInterface
             $this->validateRange($body['stretch_squeeze_max_percent'], 0.5, 5);
             $config->playout_stretch_squeeze_max_percent = $body['stretch_squeeze_max_percent'];
         }
+        if (array_key_exists('stretch_max_percent', $body)) {
+            $this->validateRange($body['stretch_max_percent'], 0.5, 5);
+            $config->playout_stretch_max_percent = $body['stretch_max_percent'];
+        }
+        if (array_key_exists('squeeze_max_percent', $body)) {
+            $this->validateRange($body['squeeze_max_percent'], 0.5, 5);
+            $config->playout_squeeze_max_percent = $body['squeeze_max_percent'];
+        }
         if (array_key_exists('smart_duck_enabled', $body)) {
             $config->playout_smart_duck_enabled = $body['smart_duck_enabled'];
         }

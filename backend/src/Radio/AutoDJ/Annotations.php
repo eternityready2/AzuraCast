@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ;
 
 use App\Cache\AutoCueCache;
 use App\Container\EntityManagerAwareTrait;
+use App\Container\LoggerAwareTrait;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\CustomFieldRepository;
 use App\Entity\Repository\StationQueueRepository;
@@ -15,8 +16,10 @@ use App\Entity\StationMediaMetadata as Meta;
 use App\Entity\StationQueue;
 use App\Entity\StationRequest;
 use App\Event\Radio\AnnotateNextSong;
+use App\Event\Radio\RevalidateQueuedSong;
 use App\Utilities\Time;
 use App\Utilities\Types;
+use Carbon\CarbonImmutable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -24,6 +27,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 final class Annotations implements EventSubscriberInterface
 {
     use EntityManagerAwareTrait;
+    use LoggerAwareTrait;
 
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
@@ -63,10 +67,75 @@ final class Annotations implements EventSubscriberInterface
             throw new RuntimeException('Queue is empty!');
         }
 
+        if ($asAutoDj) {
+            // Last chance to catch drift before this row is irreversible.
+            // postAnnotation() below marks it "sent" the moment this method
+            // returns, and Liquidsoap resolves the actual audio file into its
+            // one-ahead crossfade reserve immediately after -- typically as
+            // soon as the CURRENT track starts, which can be minutes before
+            // this row is due to air. A plugin's periodic re-check (e.g. the
+            // Top-of-Hour swap selector, on every queue rebuild cycle) can
+            // therefore still be looking at a row that hasn't been sent yet
+            // when drift in the currently-playing track pushes this row's
+            // landing out of tolerance, and never gets another look at it
+            // once it has been. This uses the freshest timing available --
+            // the station's actual current playback state, not the queue's
+            // last-recalculated projection -- for one final, synchronous
+            // check right at the handoff point.
+            // This runs on the critical path for every single AutoDJ track
+            // handoff station-wide, not just Top-of-Hour stations, so a
+            // failure here must never be able to take down normal playback.
+            try {
+                $this->revalidateBeforeSend($station, $queueRow);
+            } catch (\Throwable $e) {
+                // Swallow and proceed with whatever queueRow already was --
+                // but LOG it. This used to swallow silently, which made a
+                // broken revalidation path indistinguishable from "nothing to
+                // revalidate": both looked like total silence in the logs.
+                $this->logger->warning(
+                    'Annotations: revalidateBeforeSend failed; proceeding with the '
+                    . 'already-selected row unrevalidated.',
+                    ['exception' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]
+                );
+            }
+        }
+
         $event = AnnotateNextSong::fromStationQueue($queueRow, $asAutoDj);
         $this->eventDispatcher->dispatch($event);
 
         return $event->buildAnnotations();
+    }
+
+    private function revalidateBeforeSend(Station $station, StationQueue $queueRow): void
+    {
+        $currentSong = $station->current_song;
+        $now = Time::nowUtc();
+
+        $expectedPlayAt = $now;
+        if (null !== $currentSong && null !== $currentSong->timestamp_start) {
+            $expectedPlayAt = CarbonImmutable::instance($currentSong->timestamp_start)
+                ->addSeconds((float)($currentSong->duration ?? 1.0));
+
+            if ($expectedPlayAt->lessThan($now)) {
+                $expectedPlayAt = $now;
+            }
+        }
+
+        // ...and then everything already resolved into Liquidsoap ahead of
+        // this row, because all of it airs before this row does. Without
+        // this the projection reads "right after the current song ends",
+        // when in practice the crossfade has normally already pulled another
+        // whole track in between. See
+        // StationQueueRepository::getUnairedSentDuration() for the
+        // measurements and for the top-of-hour mis-timing that omitting it
+        // caused.
+        $expectedPlayAt = $expectedPlayAt->addSeconds(
+            $this->queueRepo->getUnairedSentDuration($station)
+        );
+
+        $this->eventDispatcher->dispatch(
+            new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable())
+        );
     }
 
     public function annotateSongPath(AnnotateNextSong $event): void

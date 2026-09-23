@@ -255,16 +255,46 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
                 if not azuracast.live_enabled() then
                     # Drain the AutoDJ transport so nothing can start underneath
-                    # the ID. request.dynamic keeps one resolved request in
-                    # reserve, so two skips are needed: the first ends the
-                    # interrupted song, the second consumes the reserve. The
-                    # nextsong API refuses to hand out any more for the duration
-                    # of the ID window (see NextSongCommand), so the transport
-                    # then stays genuinely dry until release instead of burning
-                    # a fresh track silently under the ID.
+                    # the ID, and so nothing resolved BEFORE the ID can surface
+                    # after it. The first skip ends the interrupted song; each
+                    # later one consumes another request that was already
+                    # resolved and buffered ahead of it.
+                    #
+                    # This used to be exactly two skips, on the assumption that
+                    # request.dynamic holds exactly one request in reserve. It
+                    # holds more than that in practice. Observed on air: at the
+                    # 20:00 boundary two tracks were resolved-but-unaired when
+                    # the ID took over; two skips consumed only the interrupted
+                    # song and one of them, and the survivor ("Phil Wickham -
+                    # The Jesus Way", resolved 19:54:31) surfaced when the lane
+                    # released and played for 6.0 seconds before the freshly
+                    # prefetched track replaced it -- audible on air as a song
+                    # starting after the ID and then being cut and swapped for
+                    # a different one.
+                    #
+                    # Extra skips are safe precisely because the nextsong API
+                    # refuses every request for the whole ID window (see
+                    # NextSongCommand): a skip can only ever drain the buffer,
+                    # never pull a fresh track in to burn, and once the
+                    # transport is dry each further skip is a no-op. Each row
+                    # drained this way is handed back to the queue by
+                    # StationQueueRepository::releaseUnairedSentRow() so nothing
+                    # is lost from rotation.
                     source.skip(azuracast.autodj_transport())
                     thread.run(
                         delay=0.5,
+                        { source.skip(azuracast.autodj_transport()) }
+                    )
+                    thread.run(
+                        delay=1.5,
+                        { source.skip(azuracast.autodj_transport()) }
+                    )
+                    thread.run(
+                        delay=3.0,
+                        { source.skip(azuracast.autodj_transport()) }
+                    )
+                    thread.run(
+                        delay=6.0,
                         { source.skip(azuracast.autodj_transport()) }
                     )
                     log("Top-of-Hour ID: drained the AutoDJ transport for the ID window.")
@@ -341,15 +371,49 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # the real request.dynamic leaf. Because the underlay kept the
                     # crossfade clocked through the ID, this boundary is consumed
                     # immediately and the new hour opens on a fresh request.
-                    azuracast.discard_autodj_current_cleanly()
-                    log("Top-of-Hour ID: armed clean cross boundary and discarded interrupted AutoDJ request.")
+                    #
+                    # ONLY when this lane is actually releasing at :00, though.
+                    # The discard exists to destroy the song the ID interrupted,
+                    # which is only still in the transport at the boundary
+                    # itself. When top-of-hour AI News is enabled the lane keeps
+                    # the air well past :00 (top_of_hour_id_should_play() stays
+                    # true while top_of_hour_news.is_ready()), and meanwhile the
+                    # nextsong window has already closed at :00 -- so by the time
+                    # the news ends the transport has legitimately resolved FRESH
+                    # tracks for the new hour. Discarding then destroys one of
+                    # those instead, which is audible as a song starting after
+                    # the news and being cut seconds later. Measured on air:
+                    # 21:02:37 Joel Jackson started and was cut 2.9s into a
+                    # 224s track, replaced by We The Kingdom.
+                    #
+                    # So: at the boundary, discard (the interrupted song is what
+                    # is held). Well past it, leave the transport alone -- what
+                    # it holds is the new hour's music, and the enter-time drain
+                    # already destroyed the interrupted song.
+                    seconds_past_boundary = time() - top_of_hour_id_boundary_epoch()
+                    releasing_at_boundary =
+                        top_of_hour_id_boundary_epoch() <= 0.0
+                        or seconds_past_boundary < 5.0
+
+                    if releasing_at_boundary then
+                        azuracast.discard_autodj_current_cleanly()
+                        log("Top-of-Hour ID: armed clean cross boundary and discarded interrupted AutoDJ request.")
+                    else
+                        log(
+                            "Top-of-Hour ID: lane released #{seconds_past_boundary}s after :00 "
+                            ^ "(news ran long); keeping the already-resolved fresh request "
+                            ^ "instead of discarding it."
+                        )
+                    end
 
                     # Fetch the request that opens the new hour NOW, so :00 does
                     # not wait out request.dynamic's 10s retry delay after the
                     # nextsong window closes. This moved here from the enter
                     # transition, where it was what caused a fresh track to be
                     # resolved and started under the ID.
-                    azuracast.prefetch_autodj_next()
+                    if releasing_at_boundary then
+                        azuracast.prefetch_autodj_next()
+                    end
 
                 end
 
@@ -450,6 +514,26 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 description="Set whether a rigid programme owns the following :00.",
                 "hard",
                 top_of_hour_set_hard_boundary
+            )
+
+            # Live authority check for NextSongCommand. The PHP-computed refusal
+            # window (target..boundary) assumes the ID+news block always finishes
+            # by :00, but an AI news bulletin genuinely can run past it -- see
+            # top_of_hour_id_should_play() above, which keeps the lane active past
+            # `boundary` for exactly that case. When PHP sees wall-clock has passed
+            # `boundary` it cannot tell, on its own, whether the lane already
+            # released or is still genuinely holding, so it asks here instead of
+            # guessing a fixed pad (too short races the release; too long strands
+            # the underlay dry with every legitimate post-release request refused).
+            def top_of_hour_get_active(_) =
+                if top_of_hour_id_should_play() then "true" else "false" end
+            end
+            server.register(
+                namespace="top_of_hour_id_control",
+                usage="active",
+                description="Whether the Top-of-Hour ID/news lane currently owns the air.",
+                "active",
+                top_of_hour_get_active
             )
 
             def top_of_hour_clear_queue(_) =

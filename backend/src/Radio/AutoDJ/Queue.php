@@ -13,6 +13,7 @@ use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Event\Radio\ResolveQueueClockConstraint;
+use App\Event\Radio\RevalidateQueuedSong;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -131,6 +132,16 @@ final class Queue
                 // timestamps: the last song before a programme/news boundary can
                 // still be given a graceful cue-out before it is handed to Liquidsoap.
                 $this->applyBroadcastClockCapToQueuedRow($station, $queueRow, $expectedPlayTime);
+
+                // Give a plugin a chance to replace an already-queued pick in
+                // place now that its projected play time is fresh. A choice
+                // made when this row was first built (e.g. a duration match
+                // against a Top-of-Hour deadline) can go stale if the actual
+                // air clock has drifted since; this re-runs on every queue
+                // rebuild cycle, not just once at build time.
+                $this->dispatcher->dispatch(
+                    new RevalidateQueuedSong($station, $queueRow, $expectedPlayTime)
+                );
             }
 
             // Only use the five-second safety floor for genuinely missing/bad
