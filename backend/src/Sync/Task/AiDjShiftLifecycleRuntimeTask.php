@@ -82,7 +82,7 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
      * otherwise leave a station silent, and the Upcoming Queue page pinned to
      * the same stale row, until the next scheduled shift boundary purges it.
      */
-    private const int STUCK_SPEECH_SECONDS = 150;
+    private const int STUCK_SPEECH_SECONDS = 900;
 
     public function __construct(
         private readonly AiDjShiftLifecycleListener $lifecycleListener,

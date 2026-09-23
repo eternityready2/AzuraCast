@@ -142,32 +142,29 @@ final class NextSongCommand extends AbstractCommand
 
         $now = CarbonImmutable::now($station->getTimezoneObject());
 
-        $boundary = CarbonImmutable::instance(
-            $this->topOfHourClock->getNextBoundary($station, $now->toDateTimeImmutable())
-        );
-
         // Uses the shared TopOfHourClock::getTargetStartFor() rather than
         // recomputing the target locally, so this can never drift out of
         // sync with the same calculation the swap selector and queue
-        // constraint use.
+        // constraint use. Target always precedes the next boundary, so
+        // target..boundary is simply "now >= target".
         $target = CarbonImmutable::instance(
             $this->topOfHourClock->getTargetStartFor($station, $now->toDateTimeImmutable())
         );
 
-        if ($now < $target) {
-            return false;
-        }
-
-        if ($now < $boundary) {
+        if ($now >= $target) {
             return true;
         }
 
-        // Past the plain hour boundary. This is the grey zone: normally the
-        // window is over, but only Liquidsoap's own state can say for sure.
-        if ($now->diffInSeconds($boundary) > self::MAX_OVERRUN_GRACE_SECONDS) {
-            // Absolute safety cap -- never refuse forever on a lost/wedged
-            // signal, even though a real overrun this long would itself be
-            // a station-configuration problem worth surfacing separately.
+        // Just past the boundary the ID (and any AI News) can still own the air.
+        // getNextBoundary() from now already points at the NEXT hour here, so
+        // measure from the boundary that just passed; otherwise this grey zone
+        // is unreachable and songs start muted under the ID/news.
+        $lastBoundary = CarbonImmutable::instance(
+            $this->topOfHourClock->getNextBoundary($station, $now->subHour()->toDateTimeImmutable())
+        );
+
+        if (abs($now->diffInSeconds($lastBoundary)) > self::MAX_OVERRUN_GRACE_SECONDS) {
+            // Absolute safety cap -- never refuse forever on a lost/wedged signal.
             return false;
         }
 

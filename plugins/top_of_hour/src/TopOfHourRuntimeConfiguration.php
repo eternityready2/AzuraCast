@@ -386,23 +386,36 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # 21:02:37 Joel Jackson started and was cut 2.9s into a
                     # 224s track, replaced by We The Kingdom.
                     #
-                    # So: at the boundary, discard (the interrupted song is what
-                    # is held). Well past it, leave the transport alone -- what
-                    # it holds is the new hour's music, and the enter-time drain
-                    # already destroyed the interrupted song.
+                    # But "fresh" is only true if that track has not been
+                    # playing yet. The underlay keeps the transport clocked at
+                    # zero gain, so a track that started under the ID/news has
+                    # been playing silently the whole time; keeping it fades the
+                    # song up minutes in (2026-09-23 14:03: Chris Tomlin faded up
+                    # ~3 min in after a long news bulletin). So discard at the
+                    # boundary, or whenever the held track is already past its
+                    # first few seconds; keep it only if it genuinely just began.
                     seconds_past_boundary = time() - top_of_hour_id_boundary_epoch()
                     releasing_at_boundary =
                         top_of_hour_id_boundary_epoch() <= 0.0
                         or seconds_past_boundary < 5.0
+                    held_track_elapsed =
+                        if azuracast.autodj_transport_ready() then
+                            source.methods(azuracast.autodj_transport()).elapsed()
+                        else
+                            0.0
+                        end
+                    discard_held_track = releasing_at_boundary or held_track_elapsed > 5.0
 
-                    if releasing_at_boundary then
+                    if discard_held_track then
                         azuracast.discard_autodj_current_cleanly()
-                        log("Top-of-Hour ID: armed clean cross boundary and discarded interrupted AutoDJ request.")
+                        log(
+                            "Top-of-Hour ID: armed clean cross boundary and discarded the held "
+                            ^ "AutoDJ request (#{held_track_elapsed}s already elapsed under the lane)."
+                        )
                     else
                         log(
-                            "Top-of-Hour ID: lane released #{seconds_past_boundary}s after :00 "
-                            ^ "(news ran long); keeping the already-resolved fresh request "
-                            ^ "instead of discarding it."
+                            "Top-of-Hour ID: lane released #{seconds_past_boundary}s after :00; "
+                            ^ "held request only #{held_track_elapsed}s in, keeping it."
                         )
                     end
 
@@ -411,7 +424,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # nextsong window closes. This moved here from the enter
                     # transition, where it was what caused a fresh track to be
                     # resolved and started under the ID.
-                    if releasing_at_boundary then
+                    # The nextsong API refuses while this lane owns the air, so the
+                    # transport is normally dry here; fetch now or the new hour
+                    # would wait out request.dynamic's 10s retry delay in silence.
+                    if discard_held_track or not azuracast.autodj_fresh_ready() then
                         azuracast.prefetch_autodj_next()
                     end
 

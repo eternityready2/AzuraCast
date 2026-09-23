@@ -19,6 +19,7 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Utilities\Time;
 use Exception;
@@ -43,6 +44,7 @@ final class NowPlayingApiGenerator
         private readonly Router $router,
         private readonly NowPlayingCache $nowPlayingCache,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
+        private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
     ) {
     }
 
@@ -201,6 +203,25 @@ final class NowPlayingApiGenerator
         }
 
         $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+
+        // AI News is a Liquidsoap-owned bulletin, not a queue row; show it when it
+        // airs before the next queued item (e.g. right after the :59:59 ID).
+        $now = Time::nowUtc();
+        $newsTimes = $this->aiNewsScheduleForecast->getAiringTimes(
+            $station,
+            $now,
+            $nextVisibleSong?->timestamp_played ?? $now->modify('+1 hour'),
+        );
+        $newsIsOnAir = 'News Hour' === $np->now_playing?->song?->title;
+        if ([] !== $newsTimes && !$newsIsOnAir) {
+            $np->playing_next = ($this->stationQueueApiGenerator)(
+                $this->aiNewsScheduleForecast->toQueueRow($station, $newsTimes[0]->toDateTimeImmutable()),
+                $baseUri,
+                true
+            );
+            return;
+        }
+
         if (null === $nextVisibleSong) {
             $np->playing_next = $npOld?->playing_next;
             return;

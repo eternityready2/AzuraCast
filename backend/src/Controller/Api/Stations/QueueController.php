@@ -139,17 +139,17 @@ final class QueueController extends AbstractStationApiCrudController
         $now = Time::nowUtc();
 
         // This endpoint remains a read-only view of what the existing playout
-        // systems say is upcoming. Runtime-owned projections are deliberately
-        // limited to the remainder of the current station-local clock hour so a
-        // long Strict block never turns this page into a multi-hour programme log.
-        $hourEnd = $this->getCurrentHourEnd($station, $now);
+        // systems say is upcoming, limited to a rolling hour ahead so a long Strict
+        // block never turns this page into a multi-hour programme log, while the
+        // page never shrinks to a song or two late in a clock hour.
+        $hourEnd = CarbonImmutable::instance($now)->addHour();
         // Extend the window-resolver horizon by the AutoDJ lookahead so that
         // strict windows starting in the NEXT clock hour appear in the queue
         // page before they start (Bug 1: Hymns & Favorites invisible before midnight).
         $lookaheadMinutes = $station->backend_config->autodj_queue_lookahead_minutes;
         $lookaheadEnd = $hourEnd->addMinutes($lookaheadMinutes);
         $rigidWindows = $this->rigidScheduleWindowResolver->getWindows($station, $now, $lookaheadEnd);
-        $aiNewsTimes = $this->aiNewsScheduleForecast->getForecast($station, $now, $hourEnd);
+        $aiNewsTimes = $this->aiNewsScheduleForecast->getAiringTimes($station, $now, $hourEnd);
         $pendingAiDjRow = $this->getPendingAiDjRuntimeRow($station);
 
         $qb = $this->queueRepo->getUnplayedBaseQuery($station);
@@ -250,15 +250,6 @@ final class QueueController extends AbstractStationApiCrudController
                         continue;
                     }
 
-                    // With a Top-of-Hour ID the bulletin airs after the :59:59 ID, at
-                    // the hour boundary, so list it there rather than at :59:00.
-                    if ($station->backend_config->top_of_hour_id_enabled) {
-                        $newsTime = CarbonImmutable::instance($newsTime)
-                            ->addMinute()
-                            ->startOfMinute()
-                            ->toDateTimeImmutable();
-                    }
-
                     $rows[] = $this->viewAiNewsForecastRecord($station, $newsTime);
                 }
             }
@@ -270,15 +261,6 @@ final class QueueController extends AbstractStationApiCrudController
         );
 
         return Paginator::fromArray($rows, $request)->write($response);
-    }
-
-    private function getCurrentHourEnd(Station $station, DateTimeImmutable $now): CarbonImmutable
-    {
-        return CarbonImmutable::instance($now)
-            ->setTimezone($station->getTimezoneObject())
-            ->startOfHour()
-            ->addHour()
-            ->utc();
     }
 
     private function startsAtOrAfter(StationQueue $row, DateTimeImmutable $boundary): bool
@@ -296,7 +278,7 @@ final class QueueController extends AbstractStationApiCrudController
      * this point is exactly what pins a stale row to the top of the queue
      * page indefinitely.
      */
-    private const int PENDING_AI_DJ_STALE_SECONDS = 150;
+    private const int PENDING_AI_DJ_STALE_SECONDS = 900;
 
     private function getPendingAiDjRuntimeRow(Station $station): ?StationQueue
     {

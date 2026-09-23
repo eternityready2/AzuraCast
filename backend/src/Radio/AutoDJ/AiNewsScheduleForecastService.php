@@ -78,6 +78,33 @@ final class AiNewsScheduleForecastService
         return $items;
     }
 
+    /**
+     * When bulletins actually reach air between $now and $rangeEnd. Scheduled at
+     * :59, but with a Top-of-Hour ID they air after the :59:59 ID, at the hour
+     * boundary, so they stay "upcoming" through the final minute and the ID itself
+     * (up to 60s), hence the 120s look-back.
+     *
+     * @return list<CarbonImmutable>
+     */
+    public function getAiringTimes(
+        Station $station,
+        DateTimeImmutable $now,
+        DateTimeImmutable $rangeEnd,
+    ): array {
+        $afterTopOfHourId = (bool)$station->backend_config->top_of_hour_id_enabled;
+        $rangeStart = $afterTopOfHourId ? $now->modify('-120 seconds') : $now;
+
+        $times = $this->getForecast($station, $rangeStart, $rangeEnd);
+        if (!$afterTopOfHourId) {
+            return $times;
+        }
+
+        return array_map(
+            static fn(CarbonImmutable $time): CarbonImmutable => $time->addMinute()->startOfMinute(),
+            $times,
+        );
+    }
+
     public function toQueueRow(Station $station, DateTimeImmutable $playedAt): StationQueue
     {
         $song = Song::createFromArray([

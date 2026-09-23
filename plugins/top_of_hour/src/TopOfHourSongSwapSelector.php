@@ -188,7 +188,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             if ($this->em->contains($row)) {
                 $this->em->detach($row);
             }
-            $event->setNextSongs();
+            $event->setNextSongs(null);
             return;
         }
 
