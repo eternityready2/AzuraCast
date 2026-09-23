@@ -289,6 +289,22 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
+        // Once a row is sent_to_autodj, Liquidsoap has already committed to
+        // this exact request -- swapping its underlying media out from under
+        // it here would be a different, likely worse, failure mode than the
+        // one this class exists to prevent. Queue.php still re-dispatches
+        // this event for sent-but-not-yet-played rows so the cap check just
+        // above can catch a row that drifted into the pre-fade window AFTER
+        // being sent (the Living Water bug: it became the reserve while
+        // safely far from the boundary, then an earlier row's cap pulled its
+        // projected start back to one second before the ID, and nothing
+        // re-checked it because revalidation previously stopped at "sent").
+        // The cap check above already covers that danger-zone case; nothing
+        // further should touch an already-sent row.
+        if ($row->sent_to_autodj) {
+            return;
+        }
+
         $replacement = $this->evaluateFinalSlot($station, $playlist, $media, $start);
         if (null === $replacement) {
             return;
@@ -349,10 +365,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
 
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
-        $target = $boundary
-            ->subMinute()
-            ->startOfMinute()
-            ->addSeconds($this->clock->getIdStartSecond($station));
+        // Uses the shared TopOfHourClock::getTargetStartFor() rather than
+        // recomputing the target locally, so this can never drift out of
+        // sync with the same calculation the runtime ID-window guard and
+        // queue constraint use.
+        $target = CarbonImmutable::instance($this->clock->getTargetStartFor($station, $start->toDateTimeImmutable()));
 
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             $this->logger->notice(
@@ -1203,10 +1220,9 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     private function capToPreFadeWindow(Station $station, StationQueue $row, CarbonImmutable $start): bool
     {
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
-        $target = $boundary
-            ->subMinute()
-            ->startOfMinute()
-            ->addSeconds($this->clock->getIdStartSecond($station));
+        // Uses the shared TopOfHourClock::getTargetStartFor() -- see the
+        // matching comment in evaluateFinalSlot() above.
+        $target = CarbonImmutable::instance($this->clock->getTargetStartFor($station, $start->toDateTimeImmutable()));
 
         $gap = $this->secondsBetween($start, $target);
         if ($gap <= 0.0) {

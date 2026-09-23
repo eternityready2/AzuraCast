@@ -130,7 +130,17 @@
                             <form-group id="top_of_hour_id_start_second" class="mb-3">
                                 <template #label>{{ $gettext('ID start time') }}</template>
                                 <div class="input-group">
-                                    <span class="input-group-text">:59:</span>
+                                    <span class="input-group-text">:</span>
+                                    <input
+                                        id="top_of_hour_id_start_minute"
+                                        v-model.number="form.top_of_hour_id_start_minute"
+                                        type="number"
+                                        class="form-control"
+                                        min="0"
+                                        max="59"
+                                        :aria-label="$gettext('Minute')"
+                                    >
+                                    <span class="input-group-text">:</span>
                                     <input
                                         id="top_of_hour_id_start_second"
                                         v-model.number="form.top_of_hour_id_start_second"
@@ -138,12 +148,14 @@
                                         class="form-control"
                                         min="0"
                                         max="59"
+                                        :aria-label="$gettext('Second')"
                                     >
                                 </div>
                                 <template #description>
-                                    {{ $gettext('Choose the exact second in minute :59 when the ID starts. Current setting: %{time}.', {time: configuredStartLabel}) }}
+                                    {{ $gettext('Choose the minute and second within the hour when the ID starts. Current setting: %{time}.', {time: configuredStartLabel}) }}
+                                    {{ $gettext('The default of :59:00 lands the ID in the final minute before :00; moving it earlier gives more room before the next hour.') }}
                                     <template v-if="nextPlan">
-                                        {{ $gettext(' For the selected ID, :59:%{second} is the latest whole-second start that should finish before :00.', {second: padSecond(nextPlan.recommended_start_second)}) }}
+                                        {{ $gettext(' For the selected ID, :59:%{second} would be the latest whole-second start that should finish before :00 at the default minute.', {second: padSecond(nextPlan.recommended_start_second)}) }}
                                     </template>
                                 </template>
                             </form-group>
@@ -224,7 +236,7 @@
                                         type="number"
                                         class="form-control"
                                         min="1"
-                                        max="30"
+                                        max="60"
                                     >
                                     <span class="input-group-text">{{ $gettext('minutes') }}</span>
                                 </div>
@@ -366,6 +378,7 @@ const form = ref<TopOfHourForm>({
     top_of_hour_compliance_tolerance_seconds: 10,
     top_of_hour_id_max_seconds: 60,
     top_of_hour_id_start_second: 0,
+    top_of_hour_id_start_minute: 59,
     top_of_hour_id_fade_seconds: 5,
     top_of_hour_swap_enabled: true,
     top_of_hour_swap_tolerance_seconds: 5,
@@ -406,6 +419,7 @@ const loadSettings = async () => {
             top_of_hour_compliance_tolerance_seconds: data.top_of_hour_compliance_tolerance_seconds ?? 10,
             top_of_hour_id_max_seconds: data.top_of_hour_id_max_seconds ?? 60,
             top_of_hour_id_start_second: data.top_of_hour_id_start_second ?? 0,
+            top_of_hour_id_start_minute: data.top_of_hour_id_start_minute ?? 59,
             top_of_hour_id_fade_seconds: data.top_of_hour_id_fade_seconds ?? 5,
             top_of_hour_swap_enabled: data.top_of_hour_swap_enabled ?? true,
             top_of_hour_swap_tolerance_seconds: data.top_of_hour_swap_tolerance_seconds ?? 5,

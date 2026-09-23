@@ -54,6 +54,7 @@ final class GetAction implements SingleActionInterface
         $backendConfig = $station->backend_config;
         $tolerance = $this->clock->getComplianceToleranceSeconds($station);
         $startSecond = $this->clock->getIdStartSecond($station);
+        $startMinute = $this->clock->getIdStartMinute($station);
         $fadeSeconds = $this->clock->getIdFadeSeconds($station);
         $since = new DateTimeImmutable('-7 days', $station->getTimezoneObject());
 
@@ -133,11 +134,12 @@ final class GetAction implements SingleActionInterface
             'top_of_hour_compliance_tolerance_seconds' => $tolerance,
             'top_of_hour_id_max_seconds' => $this->clock->getIdMaxSeconds($station),
             'top_of_hour_id_start_second' => $startSecond,
+            'top_of_hour_id_start_minute' => $startMinute,
             'top_of_hour_id_fade_seconds' => $fadeSeconds,
             'top_of_hour_swap_enabled' => $this->clock->isSwapEnabled($station),
             'top_of_hour_swap_tolerance_seconds' => $this->clock->getSwapToleranceSeconds($station),
             'top_of_hour_swap_min_gap_seconds' => $this->clock->getSwapMinGapSeconds($station),
-            'configured_start_label' => sprintf(':59:%02d', $startSecond),
+            'configured_start_label' => sprintf(':%02d:%02d', $startMinute, $startSecond),
             'id_media_count' => $idMediaCount,
             'compliance' => $this->eventRepo->getStationTopOfHourLegalIdComplianceSummary(
                 $station,

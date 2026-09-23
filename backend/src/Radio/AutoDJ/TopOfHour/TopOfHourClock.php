@@ -32,7 +32,7 @@ final class TopOfHourClock
 {
     public const int DEFAULT_LOOKAHEAD_MINUTES = 10;
     public const int MIN_LOOKAHEAD_MINUTES = 1;
-    public const int MAX_LOOKAHEAD_MINUTES = 30;
+    public const int MAX_LOOKAHEAD_MINUTES = 60;
 
     public const int DEFAULT_COMPLIANCE_TOLERANCE_SECONDS = 10;
     public const int MIN_COMPLIANCE_TOLERANCE_SECONDS = 1;
@@ -45,6 +45,15 @@ final class TopOfHourClock
     public const int DEFAULT_ID_START_SECOND = 0;
     public const int MIN_ID_START_SECOND = 0;
     public const int MAX_ID_START_SECOND = 59;
+
+    // Minute of the hour the ID targets, paired with CONFIG_ID_START_SECOND
+    // above. Default of 59 preserves every existing station's current
+    // behavior (the ID landing in the final minute before :00) without
+    // requiring a migration; an operator who wants the ID somewhere else in
+    // the hour can move this off 59 explicitly.
+    public const int DEFAULT_ID_START_MINUTE = 59;
+    public const int MIN_ID_START_MINUTE = 0;
+    public const int MAX_ID_START_MINUTE = 59;
 
     public const float DEFAULT_ID_FADE_SECONDS = 5.0;
     public const float MIN_ID_FADE_SECONDS = 1.0;
@@ -64,6 +73,7 @@ final class TopOfHourClock
     public const int MAX_SWAP_MIN_GAP_SECONDS = 600;
 
     public const string CONFIG_ID_START_SECOND = 'top_of_hour_id_start_second';
+    public const string CONFIG_ID_START_MINUTE = 'top_of_hour_id_start_minute';
     public const string CONFIG_ID_FADE_SECONDS = 'top_of_hour_id_fade_seconds';
     public const string CONFIG_SWAP_ENABLED = 'top_of_hour_swap_enabled';
     public const string CONFIG_SWAP_TOLERANCE_SECONDS = 'top_of_hour_swap_tolerance_seconds';
@@ -130,6 +140,23 @@ final class TopOfHourClock
             self::MIN_ID_START_SECOND,
             self::MAX_ID_START_SECOND,
             self::DEFAULT_ID_START_SECOND,
+        );
+    }
+
+    /**
+     * The minute of the hour the ID targets. Paired with getIdStartSecond()
+     * to form a full minute:second offset from the start of the hour -- see
+     * getTargetStartFor().
+     */
+    public function getIdStartMinute(Station $station): int
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (int)($raw[self::CONFIG_ID_START_MINUTE] ?? self::DEFAULT_ID_START_MINUTE),
+            self::MIN_ID_START_MINUTE,
+            self::MAX_ID_START_MINUTE,
+            self::DEFAULT_ID_START_MINUTE,
         );
     }
 
@@ -207,9 +234,17 @@ final class TopOfHourClock
         Station $station,
         DateTimeImmutable $from,
     ): DateTimeImmutable {
+        // Computed from the START of the hour that ends at the next boundary
+        // (not by subtracting a fixed minute from the boundary), so an
+        // operator-configured minute anywhere in the hour works the same way
+        // a minute-59 target always has. minute=59,second=X reproduces the
+        // original "subMinute()->addSeconds()" behavior exactly, so every
+        // existing station's configuration (which only ever set seconds)
+        // keeps working unchanged under the new default of minute=59.
         return CarbonImmutable::instance($this->getNextBoundary($station, $from))
-            ->subMinute()
-            ->startOfMinute()
+            ->subHour()
+            ->startOfHour()
+            ->addMinutes($this->getIdStartMinute($station))
             ->addSeconds($this->getIdStartSecond($station))
             ->toDateTimeImmutable();
     }

@@ -156,6 +156,24 @@ final class Queue
                 if ($this->em->getUnitOfWork()->isScheduledForDelete($queueRow)) {
                     continue;
                 }
+            } elseif (!$queueRow->is_played) {
+                // A row that is already the reserved one-ahead request
+                // (sent_to_autodj = true) but has not actually started
+                // playing yet can still drift: this loop unconditionally
+                // recalculates every row's timestamp_played below, so an
+                // earlier row getting shortened by a plugin (e.g. a
+                // Top-of-Hour duration cap) pulls every row after it earlier
+                // too -- including one that was already handed to Liquidsoap
+                // as "next," with nothing re-checking it once sent. Live
+                // symptom: a song already marked sent drifted to start one
+                // second before the Station ID deadline and nothing caught
+                // it. Re-dispatching here lets a plugin apply a SAFE, cap-only
+                // correction (never a full media swap or removal -- Liquidsoap
+                // has already committed to this specific row/request) if the
+                // row's newly recalculated position has become dangerous.
+                $this->dispatcher->dispatch(
+                    new RevalidateQueuedSong($station, $queueRow, $expectedPlayTime)
+                );
             }
 
             // Only use the five-second safety floor for genuinely missing/bad

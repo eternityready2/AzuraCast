@@ -81,6 +81,9 @@ final class PutAction implements SingleActionInterface
         if (array_key_exists(TopOfHourClock::CONFIG_ID_START_SECOND, $body)) {
             $extra[TopOfHourClock::CONFIG_ID_START_SECOND] = (int)$body[TopOfHourClock::CONFIG_ID_START_SECOND];
         }
+        if (array_key_exists(TopOfHourClock::CONFIG_ID_START_MINUTE, $body)) {
+            $extra[TopOfHourClock::CONFIG_ID_START_MINUTE] = (int)$body[TopOfHourClock::CONFIG_ID_START_MINUTE];
+        }
         if (array_key_exists(TopOfHourClock::CONFIG_ID_FADE_SECONDS, $body)) {
             $extra[TopOfHourClock::CONFIG_ID_FADE_SECONDS] = (float)$body[TopOfHourClock::CONFIG_ID_FADE_SECONDS];
         }
@@ -142,6 +145,11 @@ final class PutAction implements SingleActionInterface
             (int)($raw[TopOfHourClock::CONFIG_ID_START_SECOND] ?? TopOfHourClock::DEFAULT_ID_START_SECOND),
             TopOfHourClock::MIN_ID_START_SECOND,
             TopOfHourClock::MAX_ID_START_SECOND,
+        );
+        $this->validateRange(
+            (int)($raw[TopOfHourClock::CONFIG_ID_START_MINUTE] ?? TopOfHourClock::DEFAULT_ID_START_MINUTE),
+            TopOfHourClock::MIN_ID_START_MINUTE,
+            TopOfHourClock::MAX_ID_START_MINUTE,
         );
         $this->validateRange(
             (float)($raw[TopOfHourClock::CONFIG_ID_FADE_SECONDS] ?? TopOfHourClock::DEFAULT_ID_FADE_SECONDS),

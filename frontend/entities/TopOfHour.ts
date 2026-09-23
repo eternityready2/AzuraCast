@@ -36,6 +36,7 @@ export interface TopOfHourSettings {
     top_of_hour_compliance_tolerance_seconds: number;
     top_of_hour_id_max_seconds: number;
     top_of_hour_id_start_second: number;
+    top_of_hour_id_start_minute: number;
     top_of_hour_id_fade_seconds: number;
     top_of_hour_swap_enabled: boolean;
     top_of_hour_swap_tolerance_seconds: number;
@@ -54,6 +55,7 @@ export interface TopOfHourForm {
     top_of_hour_compliance_tolerance_seconds: number;
     top_of_hour_id_max_seconds: number;
     top_of_hour_id_start_second: number;
+    top_of_hour_id_start_minute: number;
     top_of_hour_id_fade_seconds: number;
     top_of_hour_swap_enabled: boolean;
     top_of_hour_swap_tolerance_seconds: number;

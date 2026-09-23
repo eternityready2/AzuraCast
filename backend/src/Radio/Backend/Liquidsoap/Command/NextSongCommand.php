@@ -146,10 +146,13 @@ final class NextSongCommand extends AbstractCommand
             $this->topOfHourClock->getNextBoundary($station, $now->toDateTimeImmutable())
         );
 
-        $target = $boundary
-            ->subMinute()
-            ->startOfMinute()
-            ->addSeconds($this->topOfHourClock->getIdStartSecond($station));
+        // Uses the shared TopOfHourClock::getTargetStartFor() rather than
+        // recomputing the target locally, so this can never drift out of
+        // sync with the same calculation the swap selector and queue
+        // constraint use.
+        $target = CarbonImmutable::instance(
+            $this->topOfHourClock->getTargetStartFor($station, $now->toDateTimeImmutable())
+        );
 
         if ($now < $target) {
             return false;
