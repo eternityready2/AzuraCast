@@ -258,6 +258,30 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
+        $start = CarbonImmutable::instance($event->getExpectedPlayAt());
+
+        // Checked BEFORE the full isOrdinaryMusicRow() gate, and deliberately
+        // using the narrower isEligibleForPreFadeRecap() instead: that gate
+        // excludes any row already carrying hour_boundary_enforce_cap, which
+        // is exactly the flag capToPreFadeWindow() itself sets. Gating this
+        // re-check behind the full method meant a row this class capped on
+        // one cycle became invisible to every later cycle, so a cap made
+        // while the gap was, say, 6s never tightened further as upstream
+        // drift shrank the real gap to 4s -- shipped live as roughly a 2s
+        // overshoot into the ID. Re-running this every cycle regardless of
+        // prior cap state, and letting capToPreFadeWindow() overwrite its own
+        // previous value with a fresher one, is what actually keeps the cap
+        // honest as timing keeps moving right up to air.
+        if (
+            $this->isEligibleForPreFadeRecap($row)
+            && $row->playlist instanceof StationPlaylist
+            && $row->media instanceof StationMedia
+            && $this->capToPreFadeWindow($station, $row, $start)
+        ) {
+            $this->em->persist($row);
+            return;
+        }
+
         if (!$this->isOrdinaryMusicRow($row)) {
             $this->logger->notice(
                 'Top-of-Hour swap: revalidate bailed -- not an ordinary music row.',
@@ -273,19 +297,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 'Top-of-Hour swap: revalidate bailed -- missing playlist or media.',
                 ['queue_id' => $row->id]
             );
-            return;
-        }
-
-        $start = CarbonImmutable::instance($event->getExpectedPlayAt());
-
-        // See the matching comment in swap(): cap rather than remove. Removing
-        // this row left the queue empty at the exact deadline moment on a live
-        // test tonight, which broke the reserve/release mechanism that
-        // prevents a fresh pick from resolving silently behind the ID -- the
-        // very bug this class exists to prevent, just triggered a different
-        // way.
-        if ($this->capToPreFadeWindow($station, $row, $start)) {
-            $this->em->persist($row);
             return;
         }
 
@@ -848,6 +859,43 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return false;
         }
         if ($row->clock_wheel_enforce_cap || $row->hour_boundary_enforce_cap) {
+            return false;
+        }
+        if (null !== $row->autodj_custom_uri) {
+            return false;
+        }
+        if (null === $row->media) {
+            return false;
+        }
+
+        return !StationMediaTypes::isStationId($row->media->type);
+    }
+
+    /**
+     * A narrower gate than isOrdinaryMusicRow(), used only before the
+     * pre-fade re-cap check in revalidate(). Deliberately does NOT exclude a
+     * row for already carrying hour_boundary_enforce_cap: that flag is
+     * exactly what capToPreFadeWindow() itself sets, and isOrdinaryMusicRow()
+     * treats it as "some OTHER mechanism already owns this row's timing,
+     * leave it alone" -- which meant a row this class capped on one cycle
+     * became permanently invisible to every later cycle, even as further
+     * upstream drift made that earlier cap stale. Live symptom: a row capped
+     * to 6s when the gap was ~6s kept that 6s cap after the gap shrank to
+     * ~4s, overshooting the ID by ~2s, because nothing was allowed to
+     * re-check it. Still excludes every genuinely different kind of content
+     * (legal IDs, Clock Wheel rows, requests, custom URIs, station IDs) the
+     * same as isOrdinaryMusicRow(), since those are never safe for this
+     * class to touch regardless of cap state.
+     */
+    private function isEligibleForPreFadeRecap(StationQueue $row): bool
+    {
+        if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
+            return false;
+        }
+        if (null !== $row->clock_wheel || null !== $row->request) {
+            return false;
+        }
+        if ($row->clock_wheel_enforce_cap) {
             return false;
         }
         if (null !== $row->autodj_custom_uri) {
