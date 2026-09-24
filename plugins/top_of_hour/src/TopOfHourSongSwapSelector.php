@@ -160,15 +160,17 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
         $row = $nextSongs[0];
 
+        // A pick due inside the early-ID window never starts before the ID:
+        // Liquidsoap starts the ID early and holds this item until the ID/news
+        // releases. Keep it so it is loaded before the ID and opens the new hour
+        // immediately. Dropping it left the queue empty through the ID (1am
+        // 2026-09-24: every retry was dropped, and the new hour opened after
+        // 5s of silence while a song was fetched and analysed).
         if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayTime()))) {
             $this->logger->notice(
-                'Top-of-Hour: dropping pick that would start right before the ID and be cut by it.',
+                'Top-of-Hour: pick is due inside the early-ID window; it is held and opens the new hour.',
                 ['media_id' => $row->media?->id, 'start' => $event->getExpectedPlayTime()->format(DATE_ATOM)]
             );
-            if ($this->em->contains($row)) {
-                $this->em->detach($row);
-            }
-            $event->setNextSongs(null);
             return;
         }
 
@@ -283,12 +285,8 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
+        // Held through the ID and opens the new hour; see swap().
         if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
-            $this->logger->notice(
-                'Top-of-Hour: removing queued row that would start right before the ID and be cut by it.',
-                ['queue_id' => $row->id, 'media_id' => $row->media?->id]
-            );
-            $this->em->remove($row);
             return;
         }
 
@@ -346,6 +344,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $row->setSong($replacementMedia);
         $row->media = $replacementMedia;
         $row->playlist = $spm->playlist;
+        // The replacement was chosen to land on the ID, so the overrun cap on
+        // the old song no longer applies.
+        $row->hour_boundary_enforce_cap = false;
+        $row->duration = $replacementMedia->getCalculatedLength();
         // Always re-applied (not only when a stretch is chosen this cycle):
         // this row is mutated in place across repeated revalidation cycles,
         // so a stretch target set on an earlier cycle must be cleared if this
@@ -921,7 +923,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if (null !== $row->clock_wheel || null !== $row->request) {
             return false;
         }
-        if ($row->clock_wheel_enforce_cap || $row->hour_boundary_enforce_cap) {
+        // A Clock Wheel cap is a deliberate programming choice. An hour-boundary
+        // cap is only the queue's fallback for a song that overruns the ID, which
+        // is exactly the row the swap exists to fix: excluding it meant the
+        // midnight 2026-09-24 overrun was capped and faded instead of swapped.
+        if ($row->clock_wheel_enforce_cap) {
             return false;
         }
         if (null !== $row->autodj_custom_uri) {

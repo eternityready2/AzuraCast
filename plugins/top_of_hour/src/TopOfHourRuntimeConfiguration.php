@@ -371,6 +371,13 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     azuracast.autodj_hold := true
                     if not started_early and azuracast.autodj_fresh_ready() then
                         azuracast.discard_autodj_current_cleanly()
+                    elsif not azuracast.autodj_fresh_ready() then
+                        # Nothing is loaded (the last song ended on its own). A
+                        # held request.dynamic is not pulled, so it never asks for
+                        # the next item by itself; load it now so the new hour
+                        # opens at release instead of after a fetch + AutoCue
+                        # (1am 2026-09-24: 5s of silence after the ID).
+                        azuracast.prefetch_autodj_next()
                     end
                     log("Top-of-Hour ID: AutoDJ held; the next item waits unplayed until the ID/news ends.")
                 end

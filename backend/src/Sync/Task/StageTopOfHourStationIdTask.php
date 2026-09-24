@@ -45,7 +45,25 @@ final class StageTopOfHourStationIdTask extends AbstractTask
 
     public function run(bool $force = false): void
     {
-        foreach ($this->iterateStations() as $station) {
+        // Same as QueueInterruptingTracks: the batch iterator wraps the loop in
+        // an outer transaction, so this task's flushes ran as savepoints that
+        // could go missing ("SAVEPOINT DOCTRINE_2 does not exist", 00:05
+        // 2026-09-24). Read IDs first and load each station on its own.
+        /** @var array<int, array{id: int|string}> $stationRows */
+        $stationRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT s.id AS id FROM App\Entity\Station s
+            DQL
+        )->getScalarResult();
+
+        foreach ($stationRows as $stationRow) {
+            $this->em->clear();
+
+            $station = $this->em->find(Station::class, (int)$stationRow['id']);
+            if (!$station instanceof Station) {
+                continue;
+            }
+
             try {
                 $this->stageForStation($station);
             } catch (Throwable $e) {
@@ -56,8 +74,27 @@ final class StageTopOfHourStationIdTask extends AbstractTask
                         'exception' => $e->getMessage(),
                     ]
                 );
+
+                // A failed flush can leave the DBAL nesting level out of sync
+                // with MySQL ("SAVEPOINT DOCTRINE_n does not exist"), which then
+                // crashed every later task in this sync run. Reset it.
+                $this->resetConnectionState();
             }
         }
+    }
+
+    private function resetConnectionState(): void
+    {
+        $connection = $this->em->getConnection();
+        while ($connection->isTransactionActive()) {
+            try {
+                $connection->rollBack();
+            } catch (Throwable) {
+                $connection->close();
+                break;
+            }
+        }
+        $this->em->clear();
     }
 
     private function stageForStation(Station $station): void
