@@ -87,7 +87,7 @@ jobs:
           grep -q '"forecast"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q '\.remaining_files()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
           grep -q 'playlist.files(mime_type="audio/x-mpegurl"' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
-          ! grep -q '\|\| \$playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -qF '|| $playlist->backendInterruptOtherSongs()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
 
           # The 24-hour Linear Log remains the full planner. Upcoming Queue is only
           # a reporting surface: runtime-owned Strict/AI News projections are capped
@@ -95,7 +95,7 @@ jobs:
           # authoritative and AI DJ custom-URI rows survive Strict underlay filtering.
           grep -q 'function getActiveUpcoming' backend/src/Radio/AutoDJ/RigidScheduleForecastService.php
           grep -q 'getActiveUpcoming' backend/src/Entity/ApiGenerator/NowPlayingApiGenerator.php
-          grep -q 'getCurrentHourEnd' backend/src/Controller/Api/Stations/QueueController.php
+          grep -q 'hourEnd = CarbonImmutable::instance($now)->addHour()' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'startsAtOrAfter' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'AiNewsScheduleForecastService' backend/src/Controller/Api/Stations/QueueController.php
           grep -q 'autodj_custom_uri' backend/src/Controller/Api/Stations/QueueController.php
