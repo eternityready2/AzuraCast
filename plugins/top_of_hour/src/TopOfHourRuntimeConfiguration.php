@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Plugin\TopOfHour;
 
+use App\Entity\Station;
+use App\Entity\StationMedia;
 use App\Event\Radio\WriteLiquidsoapConfiguration;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\Backend\Liquidsoap\ConfigWriter;
 use App\Radio\Enums\LiquidsoapQueues;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -26,8 +29,12 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 {
     public const float EARLY_ID_WINDOW_SECONDS = 30.0;
 
+    /** Largest pitch-preserving tempo change used to land the ID on its target. */
+    public const float FIT_MAX_TEMPO_ADJUST = 0.03;
+
     public function __construct(
         private readonly TopOfHourClock $clock,
+        private readonly EntityManagerInterface $em,
     ) {
     }
 
@@ -43,6 +50,47 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
         return ConfigWriter::toFloat(self::EARLY_ID_WINDOW_SECONDS, 1);
     }
 
+    /**
+     * Short promos/jingles (5-30s) that are in an enabled playlist, written as a
+     * Liquidsoap list of (length, request URI) for the Top-of-Hour fit.
+     */
+    private function getFitPromoList(Station $station): string
+    {
+        /** @var StationMedia[] $media */
+        $media = $this->em->createQuery(
+            <<<'DQL'
+                SELECT sm FROM App\Entity\StationMedia sm
+                WHERE sm.storage_location = :storageLocation
+                AND sm.type IN (:types)
+                AND sm.length >= 5 AND sm.length <= 30
+                AND EXISTS (
+                    SELECT spm.id FROM App\Entity\StationPlaylistMedia spm
+                    JOIN spm.playlist sp
+                    WHERE spm.media = sm AND sp.station = :station AND sp.is_enabled = true
+                )
+                ORDER BY sm.length ASC
+            DQL
+        )->setParameter('storageLocation', $station->media_storage_location)
+            ->setParameter('types', ['promo', 'jingle'])
+            ->setParameter('station', $station)
+            ->setMaxResults(50)
+            ->getResult();
+
+        $items = [];
+        foreach ($media as $row) {
+            $annotations = ConfigWriter::annotateArray([
+                'title' => $row->title ?? '',
+                'artist' => $row->artist ?? '',
+                'duration' => $row->length,
+                'natural_length' => $row->length,
+            ]);
+            $items[] = '(' . ConfigWriter::toFloat($row->length, 2) . ', '
+                . ConfigWriter::toRawString('annotate:' . $annotations . ':media:' . $row->path) . ')';
+        }
+
+        return implode(', ', $items);
+    }
+
     public function writeRuntime(WriteLiquidsoapConfiguration $event): void
     {
         $station = $event->getStation();
@@ -51,6 +99,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
         $fadeSeconds = ConfigWriter::toFloat($this->clock->getIdFadeSeconds($station), 1);
 
         $newsEnabled = ($config->ai_news_enabled && $config->ai_news_top_of_hour);
+        $fitPromos = $this->getFitPromoList($station);
+        $fitMaxAdjust = ConfigWriter::toFloat(self::FIT_MAX_TEMPO_ADJUST, 3);
 
         $newsStaging = $newsEnabled
             ? <<<'LIQ'
@@ -147,6 +197,86 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 end
             end
             source.methods(radio).on_track(synchronous=true, top_of_hour_id_guard_on_track)
+
+            # Land the ID on its target (:59:59) instead of starting it early when
+            # the last song before it ends short. Decided when that song starts,
+            # the only moment the real remaining time is known: a pitch-preserving
+            # tempo change within +/-3%, plus at most ONE short promo when the gap
+            # is larger than that. Promos are never stacked. If nothing fits, the
+            # ID starts early as before.
+            top_of_hour_fit_tempo = ref(1.0)
+            top_of_hour_fit_promos = [{$fitPromos}]
+
+            def top_of_hour_fit_on_track(m) =
+                top_of_hour_fit_tempo := 1.0
+                target = top_of_hour_id_target_epoch()
+                cue_in = float_of_string(default=0.0, m["liq_cue_in"])
+                cue_out = float_of_string(default=0.0, m["liq_cue_out"])
+                cross_end = float_of_string(default=0.0, m["liq_cross_end_duration"])
+                natural = float_of_string(default=0.0, m["natural_length"])
+                full = if cue_out > cue_in then cue_out - cue_in else natural end
+
+                # Ordinary AutoDJ songs only (a queue row with a real length).
+                if
+                    top_of_hour_id_enabled()
+                    and not top_of_hour_id_active()
+                    and not azuracast.live_enabled()
+                    and top_of_hour_id.is_ready()
+                    and target > 0.0
+                    and m["sq_id"] != ""
+                    and m["jingle_mode"] != "true"
+                    and full > 60.0
+                then
+                    # The next item starts when this one begins its fade-out.
+                    len = full - cross_end
+                    avail = target - time()
+                    gap = avail - len
+                    max_adj = len * {$fitMaxAdjust}
+                    item = m["artist"] ^ " - " ^ m["title"]
+
+                    # Only the final song before the ID: nothing else fits after it.
+                    if gap < 45.0 and gap > 0.0 - max_adj then
+                        if gap <= max_adj then
+                            if abs(gap) > 0.5 then
+                                top_of_hour_fit_tempo := len / avail
+                                log("Top-of-Hour fit: '#{item}' tempo #{top_of_hour_fit_tempo()} to land the ID on target (gap #{gap}s).")
+                            end
+                        elsif list.length(requests.queue()) > 0 then
+                            log("Top-of-Hour fit: #{gap}s gap after '#{item}', but the requests queue is busy; ID may start early.")
+                        else
+                            best_len = ref(0.0)
+                            best_uri = ref("")
+                            list.iter(
+                                fun (promo) -> begin
+                                    let (promo_len, promo_uri) = promo
+                                    rest = gap - promo_len
+                                    if
+                                        rest >= 0.0 - max_adj
+                                        and rest <= max_adj
+                                        and (best_len() <= 0.0 or abs(rest) < abs(gap - best_len()))
+                                    then
+                                        best_len := promo_len
+                                        best_uri := promo_uri
+                                    end
+                                end,
+                                top_of_hour_fit_promos
+                            )
+                            if best_len() > 0.0 then
+                                requests.push(request.create(best_uri()))
+                                song_avail = avail - best_len()
+                                if abs(song_avail - len) > 0.5 then
+                                    top_of_hour_fit_tempo := len / song_avail
+                                end
+                                log("Top-of-Hour fit: #{gap}s gap after '#{item}'; one #{best_len()}s promo queued, song tempo #{top_of_hour_fit_tempo()}.")
+                            else
+                                log("Top-of-Hour fit: #{gap}s gap after '#{item}' and no single promo fits; ID may start early.")
+                            end
+                        end
+                    end
+                end
+            end
+            source.methods(radio).on_track(synchronous=true, top_of_hour_fit_on_track)
+            radio = soundtouch(id="top_of_hour_fit", tempo={top_of_hour_fit_tempo()}, radio)
 
             # Self-contained hook for dropping an interrupted STRICT-lane item
             # at release. Defaults to a no-op so this NEVER crashes, regardless
