@@ -26,6 +26,8 @@ final class AnnotateNextSong extends Event
         'song_id',
         'media_id',
         'playlist_id',
+        // Lets Liquidsoap limit stretch/squeeze and the Top-of-Hour fit to music.
+        'media_type',
         'jingle_mode',
         'request_id',
         'sq_id',
