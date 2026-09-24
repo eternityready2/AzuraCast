@@ -128,7 +128,6 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
         private readonly LinearLogStore $linearLogStore,
-        private readonly Doctrine\ORM\EntityManagerInterface $em,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
