@@ -61,18 +61,22 @@ final class LinearLogBuilder
             return;
         }
 
-        $this->build($station, $message->hours, $message->rebuild);
+        $this->build($station, $message->hours, $message->rebuild, $message->throughTomorrow);
     }
 
     /** @return array<string, mixed> */
-    public function build(Station $station, ?int $hoursOverride = null, bool $rebuild = false): array
-    {
+    public function build(
+        Station $station,
+        ?int $hoursOverride = null,
+        bool $rebuild = false,
+        bool $throughTomorrow = false,
+    ): array {
         $stationId = $station->id;
         $maxAttempts = 2;
 
         for ($attempt = 1; ; $attempt++) {
             try {
-                return $this->buildOnce($station, $hoursOverride, $rebuild);
+                return $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow);
             } catch (Throwable $e) {
                 if ($attempt >= $maxAttempts || !self::isTransientTransactionError($e)) {
                     throw $e;
@@ -127,11 +131,24 @@ final class LinearLogBuilder
     }
 
     /** @return array<string, mixed> */
-    private function buildOnce(Station $station, ?int $hoursOverride = null, bool $rebuild = false): array
-    {
+    private function buildOnce(
+        Station $station,
+        ?int $hoursOverride = null,
+        bool $rebuild = false,
+        bool $throughTomorrow = false,
+    ): array {
         $stationId = $station->id;
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
         $requestedLookaheadMinutes = $hours * 60;
+        if ($throughTomorrow) {
+            // FM-style daily log: always reach the end of tomorrow (at most 48h),
+            // so the log never runs short before the next daily build.
+            $endOfTomorrow = \Carbon\CarbonImmutable::now($station->getTimezoneObject())->addDay()->endOfDay();
+            $requestedLookaheadMinutes = min(
+                48 * 60,
+                max($requestedLookaheadMinutes, (int)ceil(($endOfTomorrow->getTimestamp() - time()) / 60))
+            );
+        }
         $lookaheadMinutes = $requestedLookaheadMinutes + self::SAFETY_RUNWAY_MINUTES;
         $maxTracks = max(1000, $lookaheadMinutes * 2);
         $buildStartedAt = time();

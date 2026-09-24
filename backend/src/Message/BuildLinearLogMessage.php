@@ -16,6 +16,9 @@ final class BuildLinearLogMessage extends AbstractUniqueMessage
         bool $force = false,
         // Saved linear log: re-plan the unlocked hours instead of only extending.
         public readonly bool $rebuild = false,
+        // Daily FM-style build: plan through the end of tomorrow (max 48h), so
+        // tomorrow's log is ready before today's ends.
+        public readonly bool $throughTomorrow = false,
     ) {
         $this->force = $force;
     }

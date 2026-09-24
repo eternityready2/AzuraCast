@@ -62,9 +62,9 @@ export function useLinearLog() {
         }
     }
 
-    function schedulePoll(): void {
+    function schedulePoll(delayMs = 2000): void {
         clearPoll();
-        pollTimer = window.setTimeout(() => void loadSnapshot(false), 2000);
+        pollTimer = window.setTimeout(() => void loadSnapshot(false), delayMs);
     }
 
     async function loadSnapshot(showLoader = true): Promise<void> {
@@ -94,6 +94,9 @@ export function useLinearLog() {
 
             if (data.enabled && (data.status === "queued" || data.status === "building")) {
                 schedulePoll();
+            } else if (data.enabled) {
+                // Times are re-computed live from what is playing; keep them current.
+                schedulePoll(30000);
             } else {
                 clearPoll();
             }
@@ -133,27 +136,6 @@ export function useLinearLog() {
             await axios.put(settingsUrl.value, {
                 linear_log_enabled: enabled,
                 linear_log_hours: hoursAhead.value,
-            });
-            await loadSnapshot(false);
-            if (enabled) {
-                await requestBuild();
-            }
-        } catch (error: unknown) {
-            buildError.value = errorMessage(error, $gettext("Unable to save the Playout Log setting."));
-        } finally {
-            isSavingSettings.value = false;
-        }
-    }
-
-    // "Log controls playout": AutoDJ plays the saved log in order.
-    async function setPlayoutEnabled(enabled: boolean): Promise<void> {
-        isSavingSettings.value = true;
-        buildError.value = "";
-        try {
-            await axios.put(settingsUrl.value, {
-                linear_log_enabled: featureEnabled.value,
-                linear_log_hours: hoursAhead.value,
-                linear_log_playout_enabled: enabled,
             });
             await loadSnapshot(false);
             if (enabled) {
@@ -213,7 +195,6 @@ export function useLinearLog() {
         requestBuild,
         isSavingSettings,
         setEnabled,
-        setPlayoutEnabled,
         isEditing,
         editEntry,
         searchMedia,

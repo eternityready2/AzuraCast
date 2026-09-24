@@ -384,6 +384,110 @@ final class LinearLogStore
         ];
     }
 
+    /**
+     * Snapshot entries re-timed from live playback, the way FM automation keeps
+     * the log's times current without rebuilding it: queued lines take the live
+     * queue's time (and its song, if the Top-of-Hour swap changed it), later
+     * lines in the same hour move by the same drift, and lines in later hours
+     * keep their saved time (each hour is anchored to its ID). Statuses come
+     * from the saved log. Only now .. now + $hours is returned.
+     *
+     * @param list<array<string, mixed>> $entries
+     * @return list<array<string, mixed>>
+     */
+    public function liveEntries(Station $station, array $entries, int $hours): array
+    {
+        $conn = $this->em->getConnection();
+        $now = time();
+        $tz = $station->getTimezoneObject();
+
+        $queued = [];
+        foreach (
+            $conn->fetchAllAssociative(
+                'SELECT log_entry_id, UNIX_TIMESTAMP(timestamp_played) AS t, text, title, artist, duration
+                FROM station_queue
+                WHERE station_id = ? AND is_played = 0 AND log_entry_id IS NOT NULL',
+                [$station->id]
+            ) as $row
+        ) {
+            $queued[(int)$row['log_entry_id']] = $row;
+        }
+
+        $ids = [];
+        foreach ($entries as $entry) {
+            if (!empty($entry['log_entry_id'])) {
+                $ids[] = (int)$entry['log_entry_id'];
+            }
+        }
+        $saved = [];
+        if ([] !== $ids) {
+            foreach (
+                $conn->fetchAllAssociative(
+                    'SELECT id, status, aired_at, note, is_locked FROM station_log_entries WHERE id IN (?)',
+                    [$ids],
+                    [\Doctrine\DBAL\ArrayParameterType::INTEGER]
+                ) as $row
+            ) {
+                $saved[(int)$row['id']] = $row;
+            }
+        }
+
+        usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
+
+        $shift = 0;
+        $shiftUntil = 0;
+        foreach ($entries as &$entry) {
+            $id = (int)($entry['log_entry_id'] ?? 0);
+            if ($id > 0 && isset($saved[$id])) {
+                $entry['log_status'] = $saved[$id]['status'];
+                $entry['log_note'] = $saved[$id]['note'];
+                $entry['is_locked'] = (bool)$saved[$id]['is_locked'];
+                if (null !== $saved[$id]['aired_at']) {
+                    $entry['aired_at'] = (int)$saved[$id]['aired_at'];
+                    $entry['played_at'] = (int)$saved[$id]['aired_at'];
+                    continue;
+                }
+            }
+
+            if ($id > 0 && isset($queued[$id])) {
+                $live = $queued[$id];
+                $liveAt = (int)$live['t'];
+                $shift = $liveAt - (int)($entry['played_at'] ?? $liveAt);
+                $shiftUntil = CarbonImmutable::createFromTimestamp($liveAt, $tz)->startOfHour()->addHour()->getTimestamp();
+                $entry['played_at'] = $liveAt;
+                $entry['is_live_queue'] = true;
+                if (($live['text'] ?? null) !== ($entry['text'] ?? null)) {
+                    $entry['text'] = $live['text'];
+                    $entry['title'] = $live['title'];
+                    $entry['artist'] = $live['artist'];
+                    if (null !== $live['duration']) {
+                        $entry['duration'] = max(1.0, (float)$live['duration']);
+                    }
+                }
+                continue;
+            }
+
+            if (0 !== $shift && StationLogEntry::STATUS_PLANNED === ($entry['log_status'] ?? null)
+                && (int)($entry['played_at'] ?? 0) < $shiftUntil
+            ) {
+                $entry['played_at'] = (int)$entry['played_at'] + $shift;
+            }
+        }
+        unset($entry);
+
+        usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
+
+        // The current hour's history plus the configured hours ahead.
+        $from = CarbonImmutable::createFromTimestamp($now, $tz)->startOfHour()->getTimestamp();
+        $until = $now + $hours * 3600;
+
+        return array_values(array_filter(
+            $entries,
+            static fn(array $e): bool => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
+                && (int)($e['played_at'] ?? 0) <= $until
+        ));
+    }
+
     private static function cut(mixed $value): ?string
     {
         if (null === $value || '' === $value) {

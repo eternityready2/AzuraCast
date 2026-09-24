@@ -172,9 +172,8 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set(bool|null $value) => Types::bool($value);
     }
 
-    // When on, AutoDJ plays the saved linear log in order instead of picking at
-    // random. Listener requests, AI DJ, AI News, DMCA checks and the station ID
-    // stay live; their changes are written back into the log.
+    // No longer used: an enabled linear log always drives playout (one switch).
+    // Kept so existing station settings still load.
     #[OA\Property]
     public bool $linear_log_playout_enabled = false {
         set(bool|null $value) => Types::bool($value);

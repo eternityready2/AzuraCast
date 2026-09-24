@@ -56,8 +56,8 @@ final class LinearLogPlayout implements EventSubscriberInterface
 
     public static function isPlayoutEnabled(Station $station): bool
     {
-        $config = $station->backend_config;
-        return $config->linear_log_enabled && $config->linear_log_playout_enabled;
+        // One switch, as on FM automation: an enabled log is what plays.
+        return $station->backend_config->linear_log_enabled;
     }
 
     /**

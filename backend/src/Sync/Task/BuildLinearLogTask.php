@@ -22,7 +22,9 @@ final class BuildLinearLogTask extends AbstractTask
 
     public static function getSchedulePattern(): string
     {
-        return '7 */12 * * *';
+        // Once a day, like FM traffic/music logs: built early morning through
+        // the end of the next day. Live timing is re-computed on the page.
+        return '7 3 * * *';
     }
 
     public function run(bool $force = false): void
@@ -50,7 +52,7 @@ final class BuildLinearLogTask extends AbstractTask
 
             try {
                 $this->snapshotStore->markQueued($station, $hours);
-                $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, $force));
+                $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, $force, false, true));
             } catch (Throwable $e) {
                 $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
                 $this->logger->error(

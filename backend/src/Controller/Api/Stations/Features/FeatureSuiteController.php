@@ -22,6 +22,7 @@ use App\Radio\Adapters;
 use App\Radio\Backend\Liquidsoap\ConfigWriter as LiquidsoapConfigWriter;
 use App\Radio\Configuration;
 use App\Radio\Frontend\Icecast;
+use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\AirCheckFrontendConnectivityProbe;
 use App\Service\GuzzleFactory;
@@ -42,6 +43,7 @@ final class FeatureSuiteController
         private readonly GuzzleFactory $guzzleFactory,
         private readonly MediaProcessor $mediaProcessor,
         private readonly LinearLogSnapshotStore $linearLogSnapshotStore,
+        private readonly LinearLogStore $linearLogStore,
         private readonly MessageBus $messageBus,
         private readonly Configuration $configuration,
         private readonly CacheInterface $cache,
@@ -371,11 +373,27 @@ final class FeatureSuiteController
     public function linearLogStatusAction(ServerRequest $request, Response $response): ResponseInterface
     {
         $station = $request->getStation();
+        $snapshot = $this->linearLogSnapshotStore->get($station);
+
+        // Live times, like an FM automation log: re-timed from what is actually
+        // playing on every load instead of waiting for the next rebuild.
+        if ($station->backend_config->linear_log_enabled && !empty($snapshot['entries'])) {
+            try {
+                $snapshot['entries'] = $this->linearLogStore->liveEntries(
+                    $station,
+                    $snapshot['entries'],
+                    $station->backend_config->linear_log_hours,
+                );
+            } catch (Throwable $e) {
+                // Fall back to the snapshot's own times.
+            }
+        }
 
         return $response->withJson([
-            ...$this->linearLogSnapshotStore->get($station),
+            ...$snapshot,
             'enabled' => $station->backend_config->linear_log_enabled,
-            'playout_enabled' => $station->backend_config->linear_log_playout_enabled,
+            // An enabled log always drives playout (no separate switch).
+            'playout_enabled' => $station->backend_config->linear_log_enabled,
             'configured_hours' => $station->backend_config->linear_log_hours,
             'ai_dj_projection' => 'shifts_only',
         ]);
