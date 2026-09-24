@@ -148,6 +148,9 @@ let azuracast.autodj_transport_ready = ref(false)
 # again. The Top-of-Hour lane shortens it while it holds the air so music
 # resumes within ~1s of the ID/news releasing instead of up to 10s later.
 let azuracast.autodj_retry_delay = ref(10.)
+# While true, AutoDJ items are not pulled at all: a held item waits, unplayed,
+# instead of running silently under a broadcast-clock lane (e.g. the TOH ID).
+let azuracast.autodj_hold = ref(false)
 
 # One-shot marker consumed by the cross operator after a broadcast-clock cut.
 # Normal track transitions never set this flag and keep their configured fade.
@@ -566,7 +569,11 @@ def azuracast.enable_autodj(s) =
         id = "dynamic_startup",
         track_sensitive = false,
         [
-            dynamic,
+            source.available(dynamic, {not azuracast.autodj_hold()}),
+            source.available(
+                blank(id = "autodj_hold_blank"),
+                {azuracast.autodj_hold()}
+            ),
             source.available(
                 blank(id = "autodj_startup_blank", duration = 120.),
                 predicate.activates({azuracast.autodj_is_loading()})
