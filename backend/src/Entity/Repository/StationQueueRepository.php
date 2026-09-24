@@ -80,12 +80,29 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             ->setParameter('id', $row->id)
             ->execute();
 
+        // A Top-of-Hour ID airs from its own lane, not the AutoDJ transport, so it
+        // must not sweep the rows queued to open the new hour (e.g. a scheduled show).
+        if ($row->top_of_hour_legal_id) {
+            $this->em->createQuery(
+                <<<'DQL'
+                UPDATE App\Entity\StationQueue sq
+                SET sq.is_played=1, sq.sent_to_autodj=1
+                WHERE sq.station = :station
+                AND sq.id = :id
+            DQL
+            )->setParameter('station', $station)
+                ->setParameter('id', $row->id)
+                ->execute();
+
+            return;
+        }
+
         $this->em->createQuery(
             <<<'DQL'
             UPDATE App\Entity\StationQueue sq
             SET sq.is_played=1, sq.sent_to_autodj=1
-            WHERE sq.station = :station 
-            AND sq.is_played = 0 
+            WHERE sq.station = :station
+            AND sq.is_played = 0
             AND (sq.id = :id OR sq.timestamp_cued < :cued)
         DQL
         )->setParameter('station', $station)
@@ -422,6 +439,18 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             DQL
         )->setParameter('station', $station)
             ->execute();
+    }
+
+    /** @return list<StationQueue> */
+    public function getNextToSendToAutoDjRows(Station $station, int $limit): array
+    {
+        return $this->getBaseQuery($station)
+            ->andWhere('sq.sent_to_autodj = 0')
+            ->andWhere('sq.top_of_hour_legal_id = 0')
+            ->orderBy('sq.timestamp_cued', 'ASC')
+            ->getQuery()
+            ->setMaxResults($limit)
+            ->getResult();
     }
 
     public function getNextToSendToAutoDj(Station $station): ?StationQueue

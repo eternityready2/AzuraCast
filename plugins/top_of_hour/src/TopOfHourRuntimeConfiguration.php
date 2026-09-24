@@ -24,6 +24,8 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  */
 final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 {
+    public const float EARLY_ID_WINDOW_SECONDS = 30.0;
+
     public function __construct(
         private readonly TopOfHourClock $clock,
     ) {
@@ -34,6 +36,11 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
         return [
             WriteLiquidsoapConfiguration::class => ['writeRuntime', 14],
         ];
+    }
+
+    private function earlyWindowSeconds(): string
+    {
+        return ConfigWriter::toFloat(self::EARLY_ID_WINDOW_SECONDS, 1);
     }
 
     public function writeRuntime(WriteLiquidsoapConfiguration $event): void
@@ -88,6 +95,52 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             top_of_hour_id_active = ref(false)
             top_of_hour_id_hard_boundary = ref(false)
 
+            # Nothing may START in the final seconds before the ID only to be cut
+            # by it. If the underlay begins an item that cannot finish before the
+            # target, or runs dry, inside this window, the ID takes the air now.
+            top_of_hour_id_early_window_seconds = ref({$this->earlyWindowSeconds()})
+            top_of_hour_id_early = ref(false)
+
+            def top_of_hour_id_in_early_window() =
+                target = top_of_hour_id_target_epoch()
+                remaining = target - time()
+                top_of_hour_id_enabled()
+                and not top_of_hour_id_active()
+                and not azuracast.live_enabled()
+                and target > 0.0
+                and remaining > 0.0
+                and remaining <= top_of_hour_id_early_window_seconds()
+                and top_of_hour_id.is_ready()
+            end
+
+            def top_of_hour_id_guard_on_track(m) =
+                if top_of_hour_id_in_early_window() then
+                    remaining = top_of_hour_id_target_epoch() - time()
+                    natural = float_of_string(default=0.0, m["natural_length"])
+                    is_jingle = m["jingle_mode"] == "true"
+                    # `duration` may be a wall-clock cap, not the real length, so only
+                    # a short-form item may fall back to it; music without a known
+                    # real length never starts inside the window.
+                    length =
+                        if natural > 0.0 then
+                            natural
+                        elsif is_jingle then
+                            float_of_string(default=0.0, m["duration"])
+                        else
+                            0.0
+                        end
+                    if length <= 0.0 or length > remaining + 1.0 then
+                        top_of_hour_id_early := true
+                        item = m["artist"] ^ " - " ^ m["title"]
+                        log(
+                            "Top-of-Hour ID: '#{item}' (#{length}s) started "
+                            ^ "#{remaining}s before the ID and cannot finish; starting the ID now."
+                        )
+                    end
+                end
+            end
+            source.methods(radio).on_track(synchronous=true, top_of_hour_id_guard_on_track)
+
             # Self-contained hook for dropping an interrupted STRICT-lane item
             # at release. Defaults to a no-op so this NEVER crashes, regardless
             # of whether this station has any rigid schedule configured at all
@@ -116,6 +169,28 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 log("Top-of-Hour ID: Station ID is on air; cleared duplicate staged tail.")
             end
             source.methods(top_of_hour_id).on_track(synchronous=false, top_of_hour_id_on_track)
+
+            # Resolve a request without playing it so AutoCue is computed and cached
+            # ahead of time; the item that opens the hour then starts instantly.
+            def top_of_hour_autocue_warm(uri) =
+                def warm() =
+                    r = request.create(uri)
+                    if request.resolve(timeout=60., r) then
+                        log("Top-of-Hour ID: pre-analysed the next item for an instant hour start.")
+                    else
+                        log("Top-of-Hour ID: could not pre-analyse the next item.")
+                    end
+                    request.destroy(r)
+                end
+                thread.run(fast=false, warm)
+                "OK"
+            end
+            server.register(
+                description="Pre-compute AutoCue for a request URI without playing it.",
+                usage="autocue_warm <uri>",
+                "autocue_warm",
+                top_of_hour_autocue_warm
+            )
 
             # Top-hour AI News lane queue (plugin owned). Filled at ID takeover,
             # played by the lane straight after the ID.
@@ -230,6 +305,17 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     (boundary > 0.0 and now < boundary)
                     or (not top_of_hour_id_hard_boundary() and top_of_hour_id.is_ready())
                     or top_of_hour_news.is_ready()
+                elsif
+                    top_of_hour_id_in_early_window()
+                    and (
+                        top_of_hour_id_early()
+                        or (
+                            azuracast.autodj_transport_ready()
+                            and not source.methods(azuracast.autodj_transport()).is_ready()
+                        )
+                    )
+                then
+                    boundary > target
                 else
                     target > 0.0
                     and boundary > target
@@ -244,6 +330,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 # also sets this when metadata arrives, but must not be the timing
                 # primitive for a frame-accurate hold.
                 top_of_hour_id_active := true
+                top_of_hour_id_early := false
                 top_of_hour_id_release_epoch := 0.0
 
                 # Do NOT discard the AutoDJ here. The muted underlay keeps whatever
@@ -299,6 +386,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     )
                     log("Top-of-Hour ID: drained the AutoDJ transport for the ID window.")
                 end
+
+                # nextsong is refused while this lane owns the air; retry fast so
+                # the new hour starts within ~1s of release, not up to 10s later.
+                azuracast.autodj_retry_delay := 1.
 
                 log("Top-of-Hour ID: took wall-clock authority; underlay clocked at zero gain.")
                 new
@@ -404,7 +495,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                         else
                             0.0
                         end
-                    discard_held_track = releasing_at_boundary or held_track_elapsed > 5.0
+                    discard_held_track = releasing_at_boundary or held_track_elapsed > 1.0
 
                     if discard_held_track then
                         azuracast.discard_autodj_current_cleanly()
@@ -434,6 +525,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 end
 
                 top_of_hour_id_active := false
+                top_of_hour_id_early := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0
                 top_of_hour_id_boundary_epoch := 0.0
@@ -443,6 +535,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 else
                     log("Top-of-Hour ID: open-hour lane released at the :00 boundary to a clean fresh AutoDJ start.")
                 end
+
+                azuracast.autodj_retry_delay := 10.
 
                 new
             end
@@ -558,6 +652,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 top_of_hour_news.skip()
                 top_of_hour_news.set_queue([])
                 top_of_hour_id_active := false
+                top_of_hour_id_early := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0
                 top_of_hour_id_boundary_epoch := 0.0

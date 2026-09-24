@@ -22,6 +22,7 @@ final class AnnotateNextSong extends Event
         'title',
         'artist',
         'duration',
+        'natural_length',
         'song_id',
         'media_id',
         'playlist_id',

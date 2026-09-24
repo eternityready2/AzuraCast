@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace App\Radio\Backend\Liquidsoap\Command;
 
+use App\Cache\AutoCueCache;
+use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Event\Radio\AnnotateNextSong;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\Annotations;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\Backend\Liquidsoap;
 use Carbon\CarbonImmutable;
+use Psr\EventDispatcher\EventDispatcherInterface;
+use Psr\SimpleCache\CacheInterface;
 use RuntimeException;
 use Throwable;
 
@@ -74,10 +79,16 @@ final class NextSongCommand extends AbstractCommand
      */
     private const int MAX_OVERRUN_GRACE_SECONDS = 300;
 
+    private const int PRE_ID_REFUSAL_SECONDS = 10;
+
     public function __construct(
         private readonly Annotations $annotations,
         private readonly TopOfHourClock $topOfHourClock,
         private readonly Adapters $adapters,
+        private readonly StationQueueRepository $queueRepo,
+        private readonly AutoCueCache $autoCueCache,
+        private readonly EventDispatcherInterface $dispatcher,
+        private readonly CacheInterface $cache,
     ) {
     }
 
@@ -87,6 +98,8 @@ final class NextSongCommand extends AbstractCommand
         array $payload = []
     ): array {
         if ($this->isInsideTopOfHourIdWindow($station)) {
+            $this->warmNextHourOpeners($station);
+
             // The Liquidsoap runtime discards whatever it already had resolved
             // one-ahead so that request cannot surface mid-song once the ID
             // releases (see TopOfHourRuntimeConfiguration::top_of_hour_id_enter).
@@ -151,7 +164,10 @@ final class NextSongCommand extends AbstractCommand
             $this->topOfHourClock->getTargetStartFor($station, $now->toDateTimeImmutable())
         );
 
-        if ($now >= $target) {
+        // Also refuse just before the ID: a track loaded now could only air a few
+        // seconds before being cut, and one that is still loaded when the ID takes
+        // over plays muted underneath it (2026-09-23 2:59:58 -> silent under ID).
+        if ($now >= $target->subSeconds(self::PRE_ID_REFUSAL_SECONDS)) {
             return true;
         }
 
@@ -199,6 +215,48 @@ final class NextSongCommand extends AbstractCommand
             );
 
             return false;
+        }
+    }
+
+    /**
+     * While the ID holds the air, pre-compute AutoCue for the items queued to
+     * open the hour, so the first one starts the instant the lane releases
+     * instead of after several seconds of on-the-fly analysis.
+     */
+    private function warmNextHourOpeners(Station $station): void
+    {
+        try {
+            $backend = $this->adapters->getBackendAdapter($station);
+            if (!$backend instanceof Liquidsoap) {
+                return;
+            }
+
+            foreach ($this->queueRepo->getNextToSendToAutoDjRows($station, 2) as $row) {
+                $media = $row->media;
+                if (null === $media) {
+                    continue;
+                }
+                if (null !== $this->autoCueCache->getForCacheKey($this->autoCueCache->getCacheKey($media))) {
+                    continue;
+                }
+
+                $flag = 'toh_autocue_warm_' . $row->id;
+                if ($this->cache->has($flag)) {
+                    continue;
+                }
+                $this->cache->set($flag, true, 300);
+
+                $event = AnnotateNextSong::fromStationQueue($row, false);
+                $this->dispatcher->dispatch($event);
+
+                $backend->command($station, 'autocue_warm ' . $event->buildAnnotations());
+                $this->logger->info(
+                    'Top-of-Hour ID: pre-analysing the next item so the hour opens without delay.',
+                    ['queue_id' => $row->id, 'song' => $row->text]
+                );
+            }
+        } catch (Throwable $e) {
+            $this->logger->warning('Top-of-Hour ID: AutoCue warm-up failed.', ['exception' => $e->getMessage()]);
         }
     }
 }

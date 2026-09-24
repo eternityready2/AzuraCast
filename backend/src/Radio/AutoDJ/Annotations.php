@@ -98,6 +98,14 @@ final class Annotations implements EventSubscriberInterface
                     ['exception' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]
                 );
             }
+
+            // A plugin dropped this slot at the last check (nothing fits before
+            // the Top-of-Hour ID). Refuse rather than send it, or send the next
+            // hour's first song early, either of which the ID would cut.
+            if (!$this->em->contains($queueRow)) {
+                $this->em->flush();
+                throw new RuntimeException('Final slot before the Top-of-Hour ID was dropped; nothing fits.');
+            }
         }
 
         $event = AnnotateNextSong::fromStationQueue($queueRow, $asAutoDj);
@@ -172,6 +180,8 @@ final class Annotations implements EventSubscriberInterface
             'title' => $media->title,
             'artist' => $media->artist,
             'duration' => $duration,
+            // Uncapped length; later subscribers may shrink `duration` to a wall-clock cap.
+            'natural_length' => $duration,
             'song_id' => $media->song_id,
             'media_id' => $media->id,
             'sq_id' => $event->getQueue()?->id,

@@ -144,6 +144,10 @@ let azuracast.autodj_queue_ready = ref(false)
 # through temporary switch/crossfade wrappers. The placeholder is never aired.
 let azuracast.autodj_transport = ref(blank(id="autodj_transport_placeholder", duration=0.))
 let azuracast.autodj_transport_ready = ref(false)
+# Seconds request.dynamic waits after a refused/empty nextsong before asking
+# again. The Top-of-Hour lane shortens it while it holds the air so music
+# resumes within ~1s of the ID/news releasing instead of up to 10s later.
+let azuracast.autodj_retry_delay = ref(10.)
 
 # One-shot marker consumed by the cross operator after a broadcast-clock cut.
 # Normal track transitions never set this flag and keep their configured fade.
@@ -547,7 +551,7 @@ def azuracast.enable_autodj(s) =
     dynamic = request.dynamic(
         id="next_song", 
         timeout=settings.azuracast.request_timeout(), 
-        retry_delay=10., 
+        retry_delay={azuracast.autodj_retry_delay()}, 
         azuracast.autodj_next_song
     )
 

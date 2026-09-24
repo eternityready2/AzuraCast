@@ -202,33 +202,51 @@ final class NowPlayingApiGenerator
             return;
         }
 
-        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+        // Playing Next is whichever airs first: the next ordinary song, the staged
+        // Top-of-Hour Station ID (excluded from getNextVisible() because it runs
+        // in its own lane), or the AI News bulletin (a Liquidsoap-owned item with
+        // no queue row, airing right after the ID).
+        $candidates = [];
 
-        // AI News is a Liquidsoap-owned bulletin, not a queue row; show it when it
-        // airs before the next queued item (e.g. right after the :59:59 ID).
-        $now = Time::nowUtc();
-        $newsTimes = $this->aiNewsScheduleForecast->getAiringTimes(
-            $station,
-            $now,
-            $nextVisibleSong?->timestamp_played ?? $now->modify('+1 hour'),
-        );
-        $newsIsOnAir = 'News Hour' === $np->now_playing?->song?->title;
-        if ([] !== $newsTimes && !$newsIsOnAir) {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $this->aiNewsScheduleForecast->toQueueRow($station, $newsTimes[0]->toDateTimeImmutable()),
-                $baseUri,
-                true
-            );
-            return;
+        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+        if (null !== $nextVisibleSong) {
+            $candidates[] = $nextVisibleSong;
         }
 
-        if (null === $nextVisibleSong) {
+        $nextStationId = $this->queueRepo->getUnplayedBaseQuery($station)
+            ->andWhere('sq.top_of_hour_legal_id = 1')
+            ->getQuery()
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+        if ($nextStationId instanceof StationQueue) {
+            $candidates[] = $nextStationId;
+        }
+
+        $now = Time::nowUtc();
+        $newsIsOnAir = 'News Hour' === $np->now_playing?->song?->title;
+        $newsTimes = $newsIsOnAir
+            ? []
+            : $this->aiNewsScheduleForecast->getAiringTimes($station, $now, $now->modify('+1 hour'));
+        if ([] !== $newsTimes) {
+            $candidates[] = $this->aiNewsScheduleForecast->toQueueRow(
+                $station,
+                $newsTimes[0]->toDateTimeImmutable()
+            );
+        }
+
+        if ([] === $candidates) {
             $np->playing_next = $npOld?->playing_next;
             return;
         }
 
+        usort(
+            $candidates,
+            static fn(StationQueue $a, StationQueue $b): int => ($a->timestamp_played?->getTimestamp() ?? PHP_INT_MAX)
+                <=> ($b->timestamp_played?->getTimestamp() ?? PHP_INT_MAX),
+        );
+
         $np->playing_next = ($this->stationQueueApiGenerator)(
-            $nextVisibleSong,
+            $candidates[0],
             $baseUri,
             true
         );
