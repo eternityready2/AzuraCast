@@ -21,6 +21,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *   1. No more than N plays of the same song in any rolling 3-hour window.
  *   2. No more than N consecutive plays of the same song.
  *   3. No more than N songs from the same album in any rolling 3-hour window.
+ *   3b. No more than 2 consecutive songs from the same album (statutory, fixed).
  *   4a. No more than N songs by the same artist in any rolling 3-hour window.
  *   4b. No more than N consecutive songs by the same artist.
  *
@@ -43,6 +44,9 @@ final class DmcaComplianceListener implements EventSubscriberInterface
     public const int DEFAULT_MAX_ALBUM_PLAYS              = 3;
     public const int DEFAULT_MAX_ARTIST_PLAYS             = 4;
     public const int DEFAULT_MAX_CONSECUTIVE_ARTIST_PLAYS = 3;
+
+    // Statutory (17 U.S.C. 114(j)(13)): no more than 2 consecutive tracks from one album.
+    public const int MAX_CONSECUTIVE_ALBUM_PLAYS = 2;
 
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
@@ -186,6 +190,25 @@ final class DmcaComplianceListener implements EventSubscriberInterface
                 $this->logger->info('DMCA Compliance: Rejected — album play limit reached.', [
                     'title' => $entry->title, 'album' => $album,
                     'album_plays' => $albumPlays, 'limit' => $maxAlbumPlays,
+                ]);
+                return false;
+            }
+
+            // Rule 3b: Max consecutive songs from same album.
+            $consecutiveAlbum = 0;
+            foreach ($history as $row) {
+                $rowAlbum = $row['album'] ?? null;
+                if (!empty($rowAlbum) && strtolower($rowAlbum) === strtolower($album)) {
+                    $consecutiveAlbum++;
+                } else {
+                    break;
+                }
+            }
+
+            if ($consecutiveAlbum >= self::MAX_CONSECUTIVE_ALBUM_PLAYS) {
+                $this->logger->info('DMCA Compliance: Rejected — consecutive album play limit reached.', [
+                    'title' => $entry->title, 'album' => $album,
+                    'consecutive' => $consecutiveAlbum, 'limit' => self::MAX_CONSECUTIVE_ALBUM_PLAYS,
                 ]);
                 return false;
             }

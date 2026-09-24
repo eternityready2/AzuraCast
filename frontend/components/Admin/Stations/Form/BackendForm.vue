@@ -311,25 +311,6 @@
                         :description="$gettext('Optional. Keeps the queue built out at least this many minutes ahead in wall-clock time, regardless of the song-count queue length above, so clock wheels, schedules, and top-of-hour IDs are resolved well in advance instead of only a few tracks out. 0 disables this and uses the song-count queue length only.')"
                     />
 
-                    <form-group-checkbox
-                        id="edit_form_backend_linear_log_enabled"
-                        class="col-md-6"
-                        :field="r$.backend_config.linear_log_enabled"
-                        :label="$gettext('Enable 24-Hour Playout Log')"
-                        :description="$gettext('Maintains an isolated AutoDJ playout snapshot in advance. It is rebuilt automatically every 12 hours; opening or refreshing the report only reads the last snapshot and never triggers a rebuild.')"
-                    />
-
-                    <form-group-field
-                        v-if="r$.backend_config.linear_log_enabled.$model"
-                        id="edit_form_backend_linear_log_hours"
-                        class="col-md-6"
-                        :field="r$.backend_config.linear_log_hours"
-                        input-type="number"
-                        :input-attrs="{ min: '1', max: '48' }"
-                        :label="$gettext('Playout Log Hours In Advance')"
-                        :description="$gettext('How many hours ahead the automatic linear log should be kept built out to.')"
-                    />
-
                     <form-group-multi-check
                         id="edit_form_backend_charset"
                         class="col-md-6"
@@ -365,7 +346,6 @@
                 </div>
             </form-fieldset>
 
-            <dmca-compliance-form v-model="form.backend_config" />
         </template>
     </tab>
 </template>
@@ -384,7 +364,6 @@ import {AudioProcessingMethods, BackendAdapters, CrossfadeModes, MasterMePresets
 import {storeToRefs} from "pinia";
 import {useAdminStationsForm} from "~/components/Admin/Stations/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import DmcaComplianceForm from "~/components/Admin/Stations/Form/DmcaComplianceForm.vue";
 
 const props = defineProps<{
     isStereoToolInstalled: boolean

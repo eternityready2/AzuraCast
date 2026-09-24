@@ -35,7 +35,8 @@ final class Queue
         private readonly StationQueueRepository $queueRepo,
         private readonly Scheduler $scheduler,
         private readonly BroadcastClockPlanner $broadcastClockPlanner,
-        private readonly QueueLogCache $queueLogCache
+        private readonly QueueLogCache $queueLogCache,
+        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
     ) {
     }
 
@@ -288,13 +289,29 @@ final class Queue
 
             if (empty($nextSongs)) {
                 if ($isPreview) {
+                    // Never step past the next :00; a short tail before it is owned
+                    // by the Top-of-Hour ID lane on air, so it is not dead air.
                     $gapSeconds = 300;
-                    $previewGaps[] = [
-                        'started_at' => $expectedPlayTime->getTimestamp(),
-                        'duration' => $gapSeconds,
-                        'reason' => 'No eligible AutoDJ item was available for this projected slot.',
-                    ];
-                    $consecutivePreviewGapSeconds += $gapSeconds;
+                    $secondsToTop = $this->hourBoundaryPlanner->secondsUntilNextTopOfHour(
+                        $expectedPlayTime,
+                        $station->getTimezoneObject(),
+                    );
+                    if ($secondsToTop > 0 && $secondsToTop < $gapSeconds) {
+                        $gapSeconds = $secondsToTop;
+                    }
+
+                    $coveredByTopOfHour = $gapSeconds === $secondsToTop
+                        && $secondsToTop <= 60
+                        && $this->hourBoundaryPlanner->isTopOfHourProtectionEnabled($station);
+
+                    if (!$coveredByTopOfHour) {
+                        $previewGaps[] = [
+                            'started_at' => $expectedPlayTime->getTimestamp(),
+                            'duration' => $gapSeconds,
+                            'reason' => 'No eligible AutoDJ item was available for this projected slot.',
+                        ];
+                        $consecutivePreviewGapSeconds += $gapSeconds;
+                    }
 
                     $this->logger->warning(
                         'Linear Log preview found no eligible item; advancing the projection cursor.',

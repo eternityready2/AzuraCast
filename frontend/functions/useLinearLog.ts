@@ -30,6 +30,7 @@ export function useLinearLog() {
 
     const statusUrl = getStationApiUrl("/reports/linear-log");
     const buildUrl = getStationApiUrl("/reports/linear-log/build");
+    const settingsUrl = getStationApiUrl("/reports/linear-log/settings");
 
     const initialLoading = ref(true);
     const buildError = ref("");
@@ -118,6 +119,27 @@ export function useLinearLog() {
         }
     }
 
+    const isSavingSettings = ref(false);
+
+    async function setEnabled(enabled: boolean): Promise<void> {
+        isSavingSettings.value = true;
+        buildError.value = "";
+        try {
+            await axios.put(settingsUrl.value, {
+                linear_log_enabled: enabled,
+                linear_log_hours: hoursAhead.value,
+            });
+            await loadSnapshot(false);
+            if (enabled) {
+                await requestBuild();
+            }
+        } catch (error: unknown) {
+            buildError.value = errorMessage(error, $gettext("Unable to save the Playout Log setting."));
+        } finally {
+            isSavingSettings.value = false;
+        }
+    }
+
     onMounted(() => void loadSnapshot());
     onUnmounted(clearPoll);
 
@@ -138,5 +160,7 @@ export function useLinearLog() {
         isBuilding,
         loadSnapshot,
         requestBuild,
+        isSavingSettings,
+        setEnabled,
     };
 }

@@ -12,65 +12,17 @@
 
             <info-card>
                 <p class="mb-0">
-                    {{ $gettext('Advanced hard-clock, stretch/squeeze and audio-ducking controls, kept separate from the Top of Hour ID page.') }}
+                    {{ $gettext('Advanced stretch/squeeze and audio-ducking controls. Top-of-hour timing is handled on the Top of Hour ID page.') }}
                 </p>
             </info-card>
 
             <loading :loading="isLoading" lazy>
                 <div class="card-body">
                     <h3 class="h6">
-                        {{ $gettext('Hard Clock Trigger') }}
-                    </h3>
-                    <p class="text-secondary small">
-                        {{ $gettext('System-clock safety trigger used by the existing playout engine. Changes here preserve the pre-rebuild Top of Hour behavior.') }}
-                    </p>
-
-                    <form-group id="hard_clock_enabled" class="mb-3">
-                        <template #label>
-                            {{ $gettext('Enable hard clock trigger') }}
-                        </template>
-                        <form-checkbox id="hard_clock_enabled" v-model="form.hard_clock_enabled" />
-                    </form-group>
-
-                    <template v-if="form.hard_clock_enabled">
-                        <form-group id="hard_clock_trigger_seconds" class="mb-3">
-                            <template #label>
-                                {{ $gettext('Trigger window (seconds)') }}
-                            </template>
-                            <input
-                                id="hard_clock_trigger_seconds"
-                                v-model.number="form.hard_clock_trigger_seconds"
-                                type="number"
-                                class="form-control"
-                                min="1"
-                                max="30"
-                                step="0.5"
-                            >
-                        </form-group>
-
-                        <form-group id="hard_clock_fade_seconds" class="mb-3">
-                            <template #label>
-                                {{ $gettext('Fade duration (seconds)') }}
-                            </template>
-                            <input
-                                id="hard_clock_fade_seconds"
-                                v-model.number="form.hard_clock_fade_seconds"
-                                type="number"
-                                class="form-control"
-                                min="0"
-                                max="10"
-                                step="0.5"
-                            >
-                        </form-group>
-                    </template>
-
-                    <hr class="my-4">
-
-                    <h3 class="h6">
                         {{ $gettext('Stretch / Squeeze') }}
                     </h3>
                     <p class="text-secondary small">
-                        {{ $gettext('Uses pitch-preserving time adjustment when AutoDJ backtimes music into a protected boundary. This is station-wide and applies to standard rotation playlists, Smart Blocks and Clock Wheels when their selected track has stretch/squeeze timing metadata.') }}
+                        {{ $gettext('Speeds up or slows down a track slightly when AutoDJ backtimes music into a protected boundary. This also raises or lowers pitch (like a turntable), so keep it at 2-3% to stay unnoticeable. This is station-wide and applies to standard rotation playlists, Smart Blocks and Clock Wheels when their selected track has stretch/squeeze timing metadata.') }}
                     </p>
 
                     <form-group id="stretch_squeeze_enabled" class="mb-3">
@@ -167,7 +119,7 @@
                     </template>
 
                     <div class="alert alert-info mb-0">
-                        {{ $gettext('Ducking and Liquidsoap hard-clock configuration changes take effect after broadcasting is restarted. Stretch / Squeeze does not require a broadcasting restart; new settings apply to newly planned AutoDJ items while items already in the queue keep their existing timing plan.') }}
+                        {{ $gettext('Ducking configuration changes take effect after broadcasting is restarted. Stretch / Squeeze does not require a broadcasting restart; new settings apply to newly planned AutoDJ items while items already in the queue keep their existing timing plan.') }}
                     </div>
                 </div>
             </loading>
@@ -206,9 +158,6 @@ const isLoading = ref(true);
 const isSaving = ref(false);
 
 const form = ref<PlayoutControlsSettings>({
-    hard_clock_enabled: false,
-    hard_clock_trigger_seconds: 3,
-    hard_clock_fade_seconds: 3,
     stretch_squeeze_enabled: true,
     stretch_squeeze_max_percent: 5,
     stretch_max_percent: 5,
@@ -223,9 +172,6 @@ const loadSettings = async () => {
     try {
         const {data} = await axios.get<PlayoutControlsSettings>(apiUrl.value);
         form.value = {
-            hard_clock_enabled: data.hard_clock_enabled ?? false,
-            hard_clock_trigger_seconds: data.hard_clock_trigger_seconds ?? 3,
-            hard_clock_fade_seconds: data.hard_clock_fade_seconds ?? 3,
             stretch_squeeze_enabled: data.stretch_squeeze_enabled ?? true,
             stretch_squeeze_max_percent: data.stretch_squeeze_max_percent ?? 5,
             stretch_max_percent: data.stretch_max_percent ?? 5,

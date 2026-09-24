@@ -19,6 +19,8 @@ import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
 import IconIcGraphicEq from "~icons/ic/baseline-graphic-eq";
 import IconIcCategory from "~icons/ic/baseline-category";
+import IconIcList from "~icons/ic/baseline-list";
+import IconIcShield from "~icons/ic/baseline-shield";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
 
 export function useStationsMenu() {
@@ -276,15 +278,6 @@ export function useStationsMenu() {
             visible: () => userAllowedForStation(StationPermissions.Reports),
             items: [
                 {
-                    key: 'reports_linear_log',
-                    label: $gettext('24-Hour Playout Log'),
-                    url: {
-                        name: 'stations:reports:linear-log',
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                        && station.value.features.autoDjQueue
-                },
-                {
                     key: 'reports_overview',
                     label: $gettext('Station Statistics'),
                     url: {
@@ -343,14 +336,6 @@ export function useStationsMenu() {
                     }
                 },
                 {
-                    key: 'reports_dmca_compliance',
-                    label: $gettext('DMCA Compliance'),
-                    url: {
-                        name: 'stations:dmca_compliance'
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                },
-                {
                     key: 'reports_sponsor_plays',
                     label: $gettext('Sponsor Play Report'),
                     url: {
@@ -383,6 +368,25 @@ export function useStationsMenu() {
                     visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                 },
             ]
+        },
+        {
+            key: 'linear_log',
+            label: $gettext('24-Hour Playout Log'),
+            icon: () => IconIcList,
+            url: {
+                name: 'stations:reports:linear-log',
+            },
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                && station.value.features.autoDjQueue
+        },
+        {
+            key: 'dmca_compliance',
+            label: $gettext('DMCA Compliance'),
+            icon: () => IconIcShield,
+            url: {
+                name: 'stations:dmca_compliance'
+            },
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
         {
             key: 'top_of_hour',

@@ -9,7 +9,9 @@ use App\Entity\AiDj;
 use App\Entity\AiDjContent;
 use App\Entity\Repository\AiDjContentRepository;
 use App\Entity\Station;
+use App\Radio\AutoDJ\AiDjTalkRules;
 use Doctrine\Common\Collections\Collection;
+use Psr\SimpleCache\CacheInterface;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -91,10 +93,57 @@ final class AiDjGenerator
         ['name' => 'Yunyang (Chinese Male)', 'id' => 'kokoro:zm_yunyang', 'gender' => 'male', 'style' => 'chinese'],
     ];
 
+    /**
+     * A real host names herself and the station now and then, not every break
+     * (interval set on the AI DJ page, see AiDjTalkRules). Breaks inside that
+     * window use lines without {{dj_name}} / {{station_name}}.
+     */
+    private const int IDENT_CACHE_TTL_SECONDS = 3 * 3600;
+
+    private const array IDENT_TOKENS = ['{{dj_name}}', '{{station_name}}', '{{show_name}}'];
+
     public function __construct(
         private readonly AiDjCleanup $cleanup,
         private readonly AiDjContentRepository $contentRepo,
+        private readonly CacheInterface $cache,
     ) {
+    }
+
+    /**
+     * True (and recorded) when this break should say the DJ's name and the
+     * station; false while a recent break already did.
+     */
+    public function claimIdentification(Station $station, AiDj $dj): bool
+    {
+        $interval = AiDjTalkRules::identIntervalSeconds($station);
+        $key = $this->identKey($station, $dj);
+        $last = (int)($this->cache->get($key) ?? 0);
+        if ($interval > 0 && $last > 0 && (time() - $last) < $interval) {
+            return false;
+        }
+
+        $this->markIdentified($station, $dj);
+        return true;
+    }
+
+    public function markIdentified(Station $station, AiDj $dj): void
+    {
+        $this->cache->set($this->identKey($station, $dj), time(), self::IDENT_CACHE_TTL_SECONDS);
+    }
+
+    private function identKey(Station $station, AiDj $dj): string
+    {
+        return 'ai_dj_last_ident_' . $station->id . '_' . $dj->getId();
+    }
+
+    private static function isIdentFree(string $template): bool
+    {
+        foreach (self::IDENT_TOKENS as $token) {
+            if (str_contains($template, $token)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -301,9 +350,10 @@ final class AiDjGenerator
             return null;
         }
 
-        $template = $this->selectRandomTemplate($dj->getContents())
-            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_SONG_INTRO_TEMPLATE)
-            ?? $this->getDefaultSongIntro();
+        $identFree = !$this->claimIdentification($station, $dj);
+        $template = $this->selectRandomTemplate($dj->getContents(), $identFree)
+            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_SONG_INTRO_TEMPLATE, $identFree)
+            ?? $this->getDefaultSongIntro($identFree);
 
         $this->logger->info('AI DJ: Song intro metadata', [
             'artist' => $artist,
@@ -345,7 +395,15 @@ final class AiDjGenerator
             return null;
         }
 
-        $text = $this->buildPostSongText($dj, $prevArtist, $prevTitle, $nextArtist, $nextTitle, $station);
+        $text = $this->buildPostSongText(
+            $dj,
+            $prevArtist,
+            $prevTitle,
+            $nextArtist,
+            $nextTitle,
+            $station,
+            $this->claimIdentification($station, $dj),
+        );
 
         $outputPath = $this->buildClipOutputPath($station, 'post_song');
 
@@ -363,19 +421,21 @@ final class AiDjGenerator
         ?string $prevTitle,
         ?string $nextArtist,
         ?string $nextTitle,
-        Station $station
+        Station $station,
+        bool $identify = true,
     ): string {
         $hasNext = ($nextArtist !== null && $nextArtist !== '');
+        $identFree = !$identify;
 
-        $template = $this->selectRandomPostSongTemplate($dj->getContents(), $hasNext)
-            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE)
-            ?? $this->getDefaultPostSong($hasNext);
+        $template = $this->selectRandomPostSongTemplate($dj->getContents(), $hasNext, $identFree)
+            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE, $identFree)
+            ?? $this->getDefaultPostSong($hasNext, $identFree);
 
         // Safety net: never let a post-song template mention a "next" song when we
         // don't actually know it. That produced "coming up next, the next song"
         // with no name, followed by an awkward pause. Use a prev-only line instead.
         if (!$hasNext && str_contains($template, '{{next_')) {
-            $template = $this->getDefaultPostSong(false);
+            $template = $this->getDefaultPostSong(false, $identFree);
         }
 
         return $this->replaceTemplateVariables(
@@ -437,6 +497,7 @@ final class AiDjGenerator
 
         $template = $dj->getShiftIntroTemplate()
             ?? 'Hey, this is {{dj_name}} on {{station_name}}. Welcome to the show!';
+        $this->markIdentified($station, $dj);
 
         $text = $this->replaceTemplateVariables(
             $template,
@@ -466,9 +527,44 @@ final class AiDjGenerator
             return null;
         }
 
-        $text = $this->buildLinerText($dj, $content, $station);
+        $text = $this->buildLinerText($dj, $content, $station, $this->claimIdentification($station, $dj));
 
         $outputPath = $this->buildClipOutputPath($station, 'liner');
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+    }
+
+    /**
+     * A brief 5-10 second between-songs line, so not every break is a full segment.
+     */
+    public function generateShortLiner(AiDj $dj, Station $station): ?string
+    {
+        if ($this->isOverDiskQuota($station, logWarning: false)) {
+            return null;
+        }
+
+        $lines = $this->claimIdentification($station, $dj)
+            ? [
+                "It's {{dj_name}} here on {{station_name}}. More great music ahead.",
+                "{{dj_name}} with you on {{station_name}}. Stay right here.",
+                "You're listening to {{station_name}}, I'm {{dj_name}}. Let's keep it going.",
+            ]
+            : [
+                "Stay with us, more great music is on the way.",
+                "So glad you're here. Let's keep the music going.",
+                "More uplifting music coming right up.",
+                "Here's another one for you.",
+            ];
+
+        $text = $this->replaceTemplateVariables(
+            $lines[array_rand($lines)],
+            [
+                'dj_name' => $this->getSpokenName($dj->getName()),
+                'station_name' => $station->name,
+            ]
+        );
+
+        $outputPath = $this->buildClipOutputPath($station, 'short_liner');
 
         return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
     }
@@ -542,22 +638,39 @@ final class AiDjGenerator
     /**
      * Select a random template from station-wide content by type.
      */
-    private function selectStationTemplate(int $stationId, string $type): ?string
+    private function selectStationTemplate(int $stationId, string $type, bool $identFree = false): ?string
     {
-        $templates = $this->contentRepo->findEnabledByType($stationId, $type);
+        $templates = array_map(
+            static fn(AiDjContent $c): string => $c->content,
+            $this->contentRepo->findEnabledByType($stationId, $type),
+        );
+        if ($identFree) {
+            $templates = array_values(array_filter($templates, self::isIdentFree(...)));
+        }
 
         if (empty($templates)) {
             return null;
         }
 
-        return $templates[array_rand($templates)]->content;
+        return $templates[array_rand($templates)];
     }
 
     /**
      * Get a longer default song intro template for natural-sounding speech.
      */
-    private function getDefaultSongIntro(): string
+    private function getDefaultSongIntro(bool $identFree = false): string
     {
+        if ($identFree) {
+            $defaults = [
+                "Here's one for you. {{song}} by {{artist}}. I think you're going to love this.",
+                "Coming up, {{artist}} with {{song}}. Let this one speak to your heart.",
+                "Next up, it's {{song}} by {{artist}}. Turn it up and enjoy.",
+                "I've got something special for you right now. {{artist}}, {{song}}.",
+            ];
+
+            return $defaults[array_rand($defaults)];
+        }
+
         $defaults = [
             "Hey there, you're listening to {{station_name}} with {{dj_name}}. Coming up next, we've got {{artist}} with {{song}}. I know you're going to love this one, so sit back and let it speak to your heart.",
             "Welcome back to {{station_name}}, I'm {{dj_name}} and I'm so glad you're here with us today. Up next, we have {{artist}} performing {{song}}. This is one of those songs that really lifts your spirit. Here it is.",
@@ -572,8 +685,22 @@ final class AiDjGenerator
     /**
      * Get a longer default post-song template for natural-sounding speech.
      */
-    private function getDefaultPostSong(bool $hasNextSong): string
+    private function getDefaultPostSong(bool $hasNextSong, bool $identFree = false): string
     {
+        if ($identFree) {
+            $defaults = [
+                "That was {{prev_song}} by {{prev_artist}}. What a beautiful song. More great music is on the way.",
+                "{{prev_artist}} with {{prev_song}}. I hope that one blessed you today. Stay with us.",
+                "Beautiful music from {{prev_artist}} right there, {{prev_song}}. I'm so glad you're here.",
+                "You just heard {{prev_song}} from {{prev_artist}}. We've got plenty more coming your way.",
+            ];
+            if ($hasNextSong) {
+                $defaults[] = "That was {{prev_song}} by {{prev_artist}}. Coming up next, {{next_artist}} with {{next_song}}.";
+            }
+
+            return $defaults[array_rand($defaults)];
+        }
+
         $defaults = [
             "That was {{prev_artist}} with {{prev_song}}, right here on {{station_name}}. I'm {{dj_name}}, and I hope that song touched your heart today. We've got more great music lined up for you, so don't go anywhere.",
             "You just heard {{prev_song}} by {{prev_artist}} on {{station_name}} with {{dj_name}}. What a beautiful song. If that blessed you today, we've got plenty more where that came from. Stay with us.",
@@ -592,12 +719,15 @@ final class AiDjGenerator
     /**
      * Select a random song_intro_template from the DJ's content collection.
      */
-    private function selectRandomTemplate(Collection $contents): ?string
+    private function selectRandomTemplate(Collection $contents, bool $identFree = false): ?string
     {
         $templates = $contents
             ->filter(fn(AiDjContent $c) => $c->is_enabled && $c->type === AiDjContent::TYPE_SONG_INTRO_TEMPLATE)
             ->map(fn(AiDjContent $c) => $c->content)
             ->toArray();
+        if ($identFree) {
+            $templates = array_filter($templates, self::isIdentFree(...));
+        }
 
         if ([] === $templates) {
             return null;
@@ -609,12 +739,18 @@ final class AiDjGenerator
     /**
      * Select a random post_song_template from the DJ's content collection.
      */
-    private function selectRandomPostSongTemplate(Collection $contents, bool $allowNext = true): ?string
-    {
+    private function selectRandomPostSongTemplate(
+        Collection $contents,
+        bool $allowNext = true,
+        bool $identFree = false,
+    ): ?string {
         $templates = $contents
             ->filter(fn(AiDjContent $c) => $c->is_enabled && $c->type === AiDjContent::TYPE_POST_SONG_TEMPLATE)
             ->map(fn(AiDjContent $c) => $c->content)
             ->toArray();
+        if ($identFree) {
+            $templates = array_filter($templates, self::isIdentFree(...));
+        }
 
         // When the next song is unknown, drop templates that reference it so the
         // DJ never says a hollow "coming up next, the next song".

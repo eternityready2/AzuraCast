@@ -406,6 +406,99 @@
             <ai-dj-schedule-modal ref="scheduleModalRef" />
         </section>
 
+        <form
+            class="card"
+            role="region"
+            aria-labelledby="hdr_ai_dj_talk_rules"
+            @submit.prevent="saveTalkRules"
+        >
+            <div class="card-header text-bg-primary">
+                <h2
+                    id="hdr_ai_dj_talk_rules"
+                    class="card-title my-0 d-flex align-items-center gap-2"
+                >
+                    <icon-ic-baseline-tune />
+                    {{ $gettext('Talk Rules') }}
+                </h2>
+            </div>
+
+            <loading
+                :loading="talkRulesLoading"
+                lazy
+            >
+                <div class="card-body">
+                    <p class="text-muted">
+                        {{ $gettext('Station-wide rules for when AI DJ breaks may air. These apply to every DJ personality and take effect on the next queued break.') }}
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label
+                                class="form-label fw-semibold"
+                                for="ai_dj_ident_interval_minutes"
+                            >{{ $gettext('Station/DJ Name Interval (minutes)') }}</label>
+                            <input
+                                id="ai_dj_ident_interval_minutes"
+                                v-model.number="talkRules.ai_dj_ident_interval_minutes"
+                                type="number"
+                                class="form-control"
+                                min="0"
+                                max="120"
+                                required
+                            >
+                            <div class="form-text">
+                                {{ $gettext('Minimum time between breaks where the DJ says her name and the station name. 0 = every break. (0–120)') }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label
+                                class="form-label fw-semibold"
+                                for="ai_dj_quiet_before_hour_minutes"
+                            >{{ $gettext('Quiet Before Top of Hour (minutes)') }}</label>
+                            <input
+                                id="ai_dj_quiet_before_hour_minutes"
+                                v-model.number="talkRules.ai_dj_quiet_before_hour_minutes"
+                                type="number"
+                                class="form-control"
+                                min="0"
+                                max="30"
+                                required
+                            >
+                            <div class="form-text">
+                                {{ $gettext('No DJ break airs in this many minutes before :00, so talk never runs into the Station ID. (0–30)') }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label
+                                class="form-label fw-semibold"
+                                for="ai_dj_quiet_after_hour_minutes"
+                            >{{ $gettext('Quiet After Top of Hour (minutes)') }}</label>
+                            <input
+                                id="ai_dj_quiet_after_hour_minutes"
+                                v-model.number="talkRules.ai_dj_quiet_after_hour_minutes"
+                                type="number"
+                                class="form-control"
+                                min="0"
+                                max="15"
+                                required
+                            >
+                            <div class="form-text">
+                                {{ $gettext('No DJ break is queued in the first minutes after :00, leaving room for the ID and news. (0–15)') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer text-end">
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :disabled="talkRulesLoading || talkRulesSaving"
+                    >
+                        {{ $gettext('Save Talk Rules') }}
+                    </button>
+                </div>
+            </loading>
+        </form>
+
         <section
             class="card"
             role="region"
@@ -705,7 +798,46 @@ const runTest = async (dj: AiDj): Promise<void> => {
 const LIVE_STATUS_POLL_INTERVAL_MS = 30_000;
 let liveRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
+interface TalkRules {
+    ai_dj_ident_interval_minutes: number;
+    ai_dj_quiet_before_hour_minutes: number;
+    ai_dj_quiet_after_hour_minutes: number;
+}
+
+const talkRulesUrl = getStationApiUrl('/ai-dj-talk-rules');
+const talkRulesLoading = ref(true);
+const talkRulesSaving = ref(false);
+const talkRules = ref<TalkRules>({
+    ai_dj_ident_interval_minutes: 20,
+    ai_dj_quiet_before_hour_minutes: 15,
+    ai_dj_quiet_after_hour_minutes: 3,
+});
+
+const loadTalkRules = async () => {
+    talkRulesLoading.value = true;
+    try {
+        const {data} = await axios.get<TalkRules>(talkRulesUrl.value);
+        talkRules.value = data;
+    } finally {
+        talkRulesLoading.value = false;
+    }
+};
+
+const saveTalkRules = async () => {
+    talkRulesSaving.value = true;
+    try {
+        await axios.put(talkRulesUrl.value, talkRules.value);
+        notifySuccess($gettext('Talk rules saved.'));
+        await loadTalkRules();
+    } catch {
+        notifyError();
+    } finally {
+        talkRulesSaving.value = false;
+    }
+};
+
 onMounted(async () => {
+    void loadTalkRules();
     await loadDjs();
 
     liveRefreshTimer = setInterval(async () => {

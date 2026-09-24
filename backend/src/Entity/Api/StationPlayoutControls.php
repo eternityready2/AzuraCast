@@ -15,15 +15,6 @@ use OpenApi\Attributes as OA;
 final readonly class StationPlayoutControls
 {
     #[OA\Property]
-    public bool $hard_clock_enabled;
-
-    #[OA\Property]
-    public float $hard_clock_trigger_seconds;
-
-    #[OA\Property]
-    public float $hard_clock_fade_seconds;
-
-    #[OA\Property]
     public bool $stretch_squeeze_enabled;
 
     /** @deprecated Superseded by stretch_max_percent / squeeze_max_percent. */
@@ -47,9 +38,6 @@ final readonly class StationPlayoutControls
 
     public function __construct(StationBackendConfiguration $config)
     {
-        $this->hard_clock_enabled = $config->playout_hard_clock_enabled;
-        $this->hard_clock_trigger_seconds = $config->playout_hard_clock_trigger_seconds;
-        $this->hard_clock_fade_seconds = $config->playout_hard_clock_fade_seconds;
         $this->stretch_squeeze_enabled = $config->playout_stretch_squeeze_enabled;
         $this->stretch_squeeze_max_percent = $config->playout_stretch_squeeze_max_percent;
         $this->stretch_max_percent = $config->playout_stretch_max_percent;

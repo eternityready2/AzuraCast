@@ -1,6 +1,9 @@
 <template>
     <div class="linear-log-page">
-        <section class="linear-log-card">
+        <section
+            class="linear-log-card"
+            :class="{'is-disabled': !initialLoading && !featureEnabled}"
+        >
             <header class="linear-log-header">
                 <div>
                     <h1>{{ pageTitle }}</h1>
@@ -8,6 +11,28 @@
                 </div>
 
                 <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="form-check form-switch mb-0 me-2">
+                        <input
+                            id="linear_log_enabled"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="featureEnabled"
+                            :disabled="initialLoading || isSavingSettings || isBuilding"
+                            @change="setEnabled(($event.target as HTMLInputElement).checked)"
+                        >
+                        <label class="form-check-label fw-semibold" for="linear_log_enabled">
+                            {{ $gettext('Enable 24-Hour Playout Log') }}
+                        </label>
+                    </div>
+                    <span
+                        v-if="!initialLoading"
+                        class="badge state-badge"
+                        :class="featureEnabled ? 'text-bg-success' : 'text-bg-danger'"
+                    >
+                        {{ featureEnabled ? $gettext('ON') : $gettext('OFF') }}
+                    </span>
+
                     <label class="visually-hidden" for="linear_log_hours">{{ $gettext('Hours') }}</label>
                     <select
                         id="linear_log_hours"
@@ -40,10 +65,25 @@
 
             <div
                 v-if="!initialLoading && !featureEnabled"
-                class="alert alert-secondary rounded-0 border-start-0 border-end-0 mb-0"
+                class="alert alert-danger disabled-banner rounded-0 border-start-0 border-end-0 mb-0"
+                role="status"
             >
-                <strong>{{ $gettext('24-Hour Playout Log is disabled for this station.') }}</strong>
-                {{ $gettext('Enable it in Station Profile → AutoDJ to create and maintain advance playout snapshots.') }}
+                <div>
+                    <div class="fw-bold fs-5">
+                        {{ $gettext('24-Hour Playout Log is OFF') }}
+                    </div>
+                    <div>
+                        {{ $gettext('No new snapshots are being built. Anything shown below is the last snapshot from before it was turned off and is not being updated.') }}
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    class="btn btn-danger fw-semibold"
+                    :disabled="isSavingSettings"
+                    @click="setEnabled(true)"
+                >
+                    {{ $gettext('Turn On') }}
+                </button>
             </div>
 
             <div v-if="buildError" class="alert alert-danger rounded-0 border-start-0 border-end-0 mb-0">
@@ -68,7 +108,7 @@
                     {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
                 </div>
                 <div class="small mt-1">
-                    {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced five minutes and kept calculating instead of silently truncating the day.') }}
+                    {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced up to five minutes (never past the top of the hour) and kept calculating instead of silently truncating the day.') }}
                 </div>
             </div>
 
@@ -203,6 +243,8 @@ const {
     nowTs,
     isBuilding,
     requestBuild,
+    isSavingSettings,
+    setEnabled,
 } = useLinearLog();
 
 const pageTitle = computed(() => `${snapshotHours.value || hoursAhead.value}-${$gettext("Hour Playout Log")}`);
@@ -347,6 +389,10 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 <style scoped>
 .linear-log-page{max-width:1400px;margin:0 auto;color:var(--bs-body-color)}
 .linear-log-card{overflow:hidden;border:1px solid var(--bs-border-color);border-radius:.8rem;background:var(--bs-body-bg);box-shadow:0 .3rem 1rem rgba(0,0,0,.07)}
+.linear-log-card.is-disabled .linear-log-header{background:linear-gradient(90deg,#5c636a 0%,#6c757d 100%)}
+.linear-log-card.is-disabled .disabled-banner ~ *{opacity:.45;filter:grayscale(1)}
+.disabled-banner{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;border-left:6px solid var(--bs-danger)!important}
+.state-badge{font-size:.8rem;letter-spacing:.05em;padding:.4em .7em}
 .linear-log-header{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.15rem;color:#fff;background:linear-gradient(90deg,#0a6fc2 0%,#2196f3 100%)}
 .linear-log-header h1{margin:0;color:#fff;font-size:1.35rem;font-weight:750}
 .linear-log-header p{margin:.15rem 0 0;color:rgba(255,255,255,.9);font-size:.83rem}

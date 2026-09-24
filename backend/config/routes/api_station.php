@@ -1029,6 +1029,34 @@ return static function (RouteCollectorProxy $group) {
                         Controller\Api\Stations\Features\FeatureSuiteController::class . ':buildLinearLogAction'
                     )->add(new Middleware\Permissions(StationPermissions::Reports, true));
 
+                    // Per-feature settings edited on each feature's own page.
+                    $group->get(
+                        '/reports/linear-log/settings',
+                        Controller\Api\Stations\Reports\LinearLogSettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/reports/linear-log/settings',
+                        Controller\Api\Stations\Reports\LinearLogSettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
+                        '/dmca-compliance/settings',
+                        Controller\Api\Stations\DmcaCompliance\SettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/dmca-compliance/settings',
+                        Controller\Api\Stations\DmcaCompliance\SettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
+                        '/ai-dj-talk-rules',
+                        Controller\Api\Stations\AiDj\TalkRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/ai-dj-talk-rules',
+                        Controller\Api\Stations\AiDj\TalkRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Reports
                     $group->get('/history', Controller\Api\Stations\HistoryAction::class)
                         ->setName('api:stations:history')

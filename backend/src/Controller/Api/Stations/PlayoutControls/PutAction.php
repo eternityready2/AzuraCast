@@ -54,17 +54,6 @@ final class PutAction implements SingleActionInterface
         $originalConfig = clone $config;
         $originalNeedsRestart = $station->needs_restart;
 
-        if (array_key_exists('hard_clock_enabled', $body)) {
-            $config->playout_hard_clock_enabled = $body['hard_clock_enabled'];
-        }
-        if (array_key_exists('hard_clock_trigger_seconds', $body)) {
-            $this->validateRange($body['hard_clock_trigger_seconds'], 1, 30);
-            $config->playout_hard_clock_trigger_seconds = $body['hard_clock_trigger_seconds'];
-        }
-        if (array_key_exists('hard_clock_fade_seconds', $body)) {
-            $this->validateRange($body['hard_clock_fade_seconds'], 0, 10);
-            $config->playout_hard_clock_fade_seconds = $body['hard_clock_fade_seconds'];
-        }
         if (array_key_exists('stretch_squeeze_enabled', $body)) {
             $config->playout_stretch_squeeze_enabled = $body['stretch_squeeze_enabled'];
         }
@@ -112,10 +101,7 @@ final class PutAction implements SingleActionInterface
         StationBackendConfiguration $original,
         StationBackendConfiguration $updated,
     ): bool {
-        return $original->playout_hard_clock_enabled !== $updated->playout_hard_clock_enabled
-            || $original->playout_hard_clock_trigger_seconds !== $updated->playout_hard_clock_trigger_seconds
-            || $original->playout_hard_clock_fade_seconds !== $updated->playout_hard_clock_fade_seconds
-            || $original->playout_smart_duck_enabled !== $updated->playout_smart_duck_enabled
+        return $original->playout_smart_duck_enabled !== $updated->playout_smart_duck_enabled
             || $original->playout_smart_duck_attenuation !== $updated->playout_smart_duck_attenuation
             || $original->playout_smart_duck_delay !== $updated->playout_smart_duck_delay;
     }

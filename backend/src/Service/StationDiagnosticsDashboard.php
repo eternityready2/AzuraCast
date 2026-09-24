@@ -721,16 +721,15 @@ final readonly class StationDiagnosticsDashboard
     private function buildPlayoutControlsFeature(Station $station): array
     {
         $config = $station->backend_config;
-        $hardClock = $this->configBool($config, 'hard_clock_enabled');
         $stretch = $this->configBool($config, 'stretch_squeeze_enabled');
         $duck = $this->configBool($config, 'smart_duck_enabled');
-        $enabledCount = (int)$hardClock + (int)$stretch + (int)$duck;
+        $enabledCount = (int)$stretch + (int)$duck;
         return $this->feature(
             'playout-controls', __('Playout Controls'), 'playout', $enabledCount > 0 ? 'healthy' : 'inactive',
             $enabledCount > 0 ? __('Advanced playout controls configured') : __('Advanced playout controls are inactive'),
-            __('Covers hard-clock trigger, station-wide Stretch / Squeeze and Smart Ducking configuration plus related runtime failures.'),
-            sprintf('%d/3 enabled', $enabledCount), 'state+logs', $enabledCount,
-            [['label' => __('Hard clock'), 'value' => $hardClock ? __('Enabled') : __('Disabled')], ['label' => __('Stretch / Squeeze'), 'value' => $stretch ? __('Enabled') : __('Disabled')], ['label' => __('Smart Ducking'), 'value' => $duck ? __('Enabled') : __('Disabled')]]
+            __('Covers station-wide Stretch / Squeeze and Smart Ducking configuration plus related runtime failures.'),
+            sprintf('%d/2 enabled', $enabledCount), 'state+logs', $enabledCount,
+            [['label' => __('Stretch / Squeeze'), 'value' => $stretch ? __('Enabled') : __('Disabled')], ['label' => __('Smart Ducking'), 'value' => $duck ? __('Enabled') : __('Disabled')]]
         );
     }
 

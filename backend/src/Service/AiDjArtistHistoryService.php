@@ -40,8 +40,12 @@ final class AiDjArtistHistoryService
     /**
      * Get a spoken artist-history segment, or null if unavailable.
      */
-    public function getArtistHistory(string $artist, string $djName, string $stationName): ?string
-    {
+    public function getArtistHistory(
+        string $artist,
+        string $djName,
+        string $stationName,
+        bool $identify = true,
+    ): ?string {
         $artist = trim($artist);
         if ($artist === '' || $artist === 'this artist' || $artist === 'that artist') {
             return null;
@@ -51,7 +55,7 @@ final class AiDjArtistHistoryService
         // facts if Wikipedia has nothing usable.
         $wikiSummary = $this->fetchWikipediaSummary($artist);
         if ($wikiSummary !== null) {
-            return $this->buildWikipediaScript($wikiSummary, $djName, $stationName);
+            return $this->buildWikipediaScript($wikiSummary, $djName, $stationName, $identify);
         }
 
         $info = $this->fetchArtistInfo($artist);
@@ -59,7 +63,7 @@ final class AiDjArtistHistoryService
             return null;
         }
 
-        return $this->buildArtistScript($info, $djName, $stationName);
+        return $this->buildArtistScript($info, $djName, $stationName, $identify);
     }
 
     /**
@@ -114,8 +118,18 @@ final class AiDjArtistHistoryService
         return trim(implode(' ', array_slice($parts, 0, $count)));
     }
 
-    private function buildWikipediaScript(string $summary, string $djName, string $stationName): string
+    private function buildWikipediaScript(string $summary, string $djName, string $stationName, bool $identify): string
     {
+        if (!$identify) {
+            $templates = [
+                "Here's a little something about that artist. %s. Let's keep the music going.",
+                "A quick bit of history on the artist you just heard. %s. Stay with us.",
+                "Let me tell you a bit about them. %s. More great music coming up.",
+            ];
+
+            return sprintf($templates[array_rand($templates)], $summary);
+        }
+
         $templates = [
             "Here's a little something about that artist. %s. This is %s on %s, let's keep the music going.",
             "You know, I love sharing these. %s. That's your music moment with %s, here on %s. Stay with us.",
@@ -205,7 +219,7 @@ final class AiDjArtistHistoryService
     /**
      * @param array<string, mixed> $info
      */
-    private function buildArtistScript(array $info, string $djName, string $stationName): string
+    private function buildArtistScript(array $info, string $djName, string $stationName, bool $identify): string
     {
         $name = $info['name'];
         $parts = [];
@@ -253,6 +267,12 @@ final class AiDjArtistHistoryService
         if (!empty($info['tags'])) {
             $tagStr = implode(' and ', array_slice($info['tags'], 0, 2));
             $parts[] = sprintf('known for their %s sound', $tagStr);
+        }
+
+        if (!$identify) {
+            return empty($parts)
+                ? sprintf('You just heard %s, one of those artists who really know how to touch your soul. Stay with us.', $name)
+                : sprintf("Here's a fun fact about the artist you just heard. %s. More music coming your way.", ucfirst(implode(', ', $parts)) . '.');
         }
 
         if (empty($parts)) {
