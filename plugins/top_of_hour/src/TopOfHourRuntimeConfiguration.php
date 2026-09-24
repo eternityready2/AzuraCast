@@ -100,6 +100,11 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # target, or runs dry, inside this window, the ID takes the air now.
             top_of_hour_id_early_window_seconds = ref({$this->earlyWindowSeconds()})
             top_of_hour_id_early = ref(false)
+            # Title handling after the ID: the song that ended/was cut must not have
+            # its title replayed; a held item that already began keeps its own.
+            top_of_hour_last_sq = ref("")
+            top_of_hour_stale_sq = ref("")
+            top_of_hour_held_started = ref(false)
 
             def top_of_hour_id_in_early_window() =
                 target = top_of_hour_id_target_epoch()
@@ -131,6 +136,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                         end
                     if length <= 0.0 or length > remaining + 1.0 then
                         top_of_hour_id_early := true
+                        top_of_hour_held_started := true
                         azuracast.autodj_hold := true
                         item = m["artist"] ^ " - " ^ m["title"]
                         log(
@@ -270,6 +276,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 override=null,
                 {top_of_hour_underlying_gain()},
                 radio
+            )
+            source.methods(radio_before_top_of_hour).on_metadata(
+                synchronous=true,
+                fun (m) -> top_of_hour_last_sq := m["sq_id"]
             )
 
             # Keep the processed underlay alive at zero gain while the ID owns the
@@ -415,6 +425,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
                 # Release the hold: the item that waited (the one shown as Playing
                 # Next) now starts from its beginning with its own metadata.
+                if not top_of_hour_held_started() then
+                    top_of_hour_stale_sq := top_of_hour_last_sq()
+                end
+                top_of_hour_held_started := false
                 azuracast.autodj_hold := false
                 if not azuracast.live_enabled() and not azuracast.autodj_fresh_ready() then
                     azuracast.prefetch_autodj_next()
@@ -447,6 +461,24 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     ({top_of_hour_id_should_play()}, top_of_hour_clocked_lane),
                     ({true}, radio_before_top_of_hour)
                 ]
+            )
+
+            def top_of_hour_drop_stale_title(m) =
+                stale = top_of_hour_stale_sq()
+                if stale != "" and m["sq_id"] == stale then
+                    top_of_hour_stale_sq := ""
+                    log("Top-of-Hour ID: suppressed the replayed title of the song that ended before the ID.")
+                    []
+                else
+                    m
+                end
+            end
+            radio = metadata.map(
+                id="top_of_hour_stale_title",
+                update=false,
+                strip=true,
+                top_of_hour_drop_stale_title,
+                radio
             )
 
             # Runtime controls use absolute epochs to avoid timezone/DST ambiguity.
@@ -531,6 +563,17 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # released or is still genuinely holding, so it asks here instead of
             # guessing a fixed pad (too short races the release; too long strands
             # the underlay dry with every legitimate post-release request refused).
+            def top_of_hour_get_held(_) =
+                if azuracast.autodj_hold() then "true" else "false" end
+            end
+            server.register(
+                namespace="top_of_hour_id_control",
+                usage="held",
+                description="Whether AutoDJ is held (not pulled) under the Top-of-Hour lane.",
+                "held",
+                top_of_hour_get_held
+            )
+
             def top_of_hour_get_active(_) =
                 if top_of_hour_id_should_play() then "true" else "false" end
             end

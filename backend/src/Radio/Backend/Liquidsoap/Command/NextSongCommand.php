@@ -97,7 +97,9 @@ final class NextSongCommand extends AbstractCommand
         bool $asAutoDj = false,
         array $payload = []
     ): array {
-        if ($this->isInsideTopOfHourIdWindow($station)) {
+        // While Liquidsoap holds AutoDJ under the ID, a fetched item is loaded but
+        // cannot play, so let it load now and open the hour with no dead air.
+        if ($this->isInsideTopOfHourIdWindow($station) && !$this->isAutoDjHeldByLiquidsoap($station)) {
             $this->warmNextHourOpeners($station);
 
             // The Liquidsoap runtime discards whatever it already had resolved
@@ -196,6 +198,20 @@ final class NextSongCommand extends AbstractCommand
      * pre-existing fixed-:00-cutoff behavior, so a broken signal degrades to
      * the previous bug rather than to indefinite dead air.
      */
+    private function isAutoDjHeldByLiquidsoap(Station $station): bool
+    {
+        try {
+            $backend = $this->adapters->getBackendAdapter($station);
+            if (!$backend instanceof Liquidsoap) {
+                return false;
+            }
+
+            return 'true' === trim($backend->command($station, 'top_of_hour_id_control.held')[0] ?? '');
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
     private function isStillHeldByLiquidsoap(Station $station): bool
     {
         try {
