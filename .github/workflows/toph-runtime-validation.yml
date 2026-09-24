@@ -133,7 +133,7 @@ jobs:
 
           # HARD TOH keeps the same authoritative lane selected through :00.
           grep -q 'top_of_hour_hard_hold = blank' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
-          grep -q '\[top_of_hour_id, top_of_hour_hard_hold\]' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          grep -q '\[top_of_hour_id, top_of_hour_news, top_of_hour_hard_hold\]' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           grep -q 'boundary > 0.0 and now < boundary' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
           ! grep -q 'top_of_hour_hard_release_epoch' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
 

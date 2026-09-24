@@ -404,7 +404,29 @@ def azuracast.autocue(
             thread.run(fast=false, f)
         end
 
-        autocue_result
+        # A computed AutoCue ignores AzuraCast's own cue-out, which carries the
+        # Top-of-Hour / Clock Wheel play cap. Clamp to it (the cache above keeps
+        # the natural values) so a capped song fades out before the ID instead
+        # of running its natural length into the ID's cut.
+        cap = float_of_string(default=0.0, list.assoc(default="", "autocue_cue_out", request_metadata))
+        if cap > 0.0 and null.defined(autocue_result) then
+            r = null.get(autocue_result)
+            if cap < r.cue_out then
+                cue_out = max(r.cue_in + 1.0, cap)
+                fade_out = min(r.fade_out, cue_out - r.cue_in)
+                start_next = min(r?.start_next ?? (cue_out - fade_out), cue_out - fade_out)
+                log(
+                    level=3,
+                    label=label,
+                    "Applied AzuraCast cue-out cap: #{r.cue_out}s -> #{cue_out}s."
+                )
+                null({...r, cue_out = cue_out, fade_out = fade_out, start_next = start_next})
+            else
+                autocue_result
+            end
+        else
+            autocue_result
+        end
     else
         null
     end

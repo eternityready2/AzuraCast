@@ -24,7 +24,7 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
@@ -33,17 +33,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Every published image is multi-arch so ARM64 hosts (e.g. Oracle Ampere
-      # A1) never receive an amd64-only image. Keep this in main AND dev.
+      # Only v* release tags build arm64 (emulated arm64 takes ~1 hour) and only
+      # they publish :stable, so ARM64 hosts (e.g. Oracle Ampere A1) pulling
+      # :stable always get a multi-arch image. main (:latest) and dev
+      # (:rolling) are amd64-only for fast builds.
       - name: Build and Push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           target: final
           tags: |
             ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || github.ref_name == 'dev' && 'rolling' || github.ref_name }}
-            ${{ (github.ref_name == 'main' || startsWith(github.ref, 'refs/tags/')) && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
           cache-from: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache
           cache-to: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max
