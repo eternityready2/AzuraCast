@@ -16,6 +16,7 @@ use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Event\Radio\RevalidateQueuedSong;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\StretchSqueezeQueueTiming;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
@@ -120,6 +121,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         private readonly TopOfHourClock $clock,
         private readonly StationQueueRepository $queueRepo,
         private readonly Scheduler $scheduler,
+        private readonly AiNewsScheduleForecastService $aiNewsForecast,
     ) {
     }
 
@@ -320,6 +322,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // the new hour instead (the hand-off honours the hold).
         if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
             $event->holdBack();
+            $event->opensAfter(
+                $this->estimateTopOfHourRelease($station, CarbonImmutable::instance($event->getExpectedPlayAt()))
+                    ->toDateTimeImmutable()
+            );
             $this->logger->notice(
                 'Top-of-Hour: holding a pick that would start just before the ID; it opens the new hour.',
                 ['queue_id' => $row->id, 'media_id' => $row->media?->id, 'start' => $event->getExpectedPlayAt()->format(DATE_ATOM)]
@@ -1331,6 +1337,45 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             ['queue_id' => $row->id, 'media_id' => $row->media?->id, 'start' => $start->toIso8601String(), 'gap' => round($gap, 1)]
         );
         return true;
+    }
+
+    /**
+     * When the ID lane will hand the air back: the ID start plus the ID's
+     * length plus, when top-hour AI News airs, the recent bulletins' average
+     * length. Never before :00 (the lane owns the air until then).
+     */
+    private function estimateTopOfHourRelease(Station $station, CarbonImmutable $start): CarbonImmutable
+    {
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $conn = $this->em->getConnection();
+
+        $idSeconds = (float)($conn->fetchOne(
+            'SELECT duration FROM station_queue
+            WHERE station_id = ? AND top_of_hour_legal_id = 1 AND is_played = 0
+            ORDER BY id DESC LIMIT 1',
+            [$station->id]
+        ) ?: 38.0);
+        $release = $target->addSeconds((int)ceil($idSeconds));
+
+        $newsAtBoundary = $this->aiNewsForecast->getAiringTimes(
+            $station,
+            $target->subMinute()->toDateTimeImmutable(),
+            $boundary->addMinutes(3)->toDateTimeImmutable(),
+        );
+        if ([] !== $newsAtBoundary) {
+            $newsSeconds = (float)($conn->fetchOne(
+                'SELECT AVG(d) FROM (
+                    SELECT duration AS d FROM song_history
+                    WHERE station_id = ? AND text = ? AND duration > 30
+                    ORDER BY id DESC LIMIT 5
+                ) recent',
+                [$station->id, 'Eternity Ready - News Hour']
+            ) ?: 150.0);
+            $release = $release->addSeconds((int)ceil($newsSeconds));
+        }
+
+        return $release->max($boundary);
     }
 
     /**

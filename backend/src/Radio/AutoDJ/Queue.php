@@ -146,12 +146,18 @@ final class Queue
                 // against a Top-of-Hour deadline) can go stale if the actual
                 // air clock has drifted since; this re-runs on every queue
                 // rebuild cycle, not just once at build time.
-                $this->dispatcher->dispatch(
-                    new RevalidateQueuedSong($station, $queueRow, $expectedPlayTime)
-                );
+                $revalidate = new RevalidateQueuedSong($station, $queueRow, $expectedPlayTime);
+                $this->dispatcher->dispatch($revalidate);
 
                 if (!$this->em->contains($queueRow)) {
                     continue;
+                }
+
+                // Held until something else owns the air (the Top-of-Hour ID and
+                // news): project it, and everything after it, from then.
+                $opensAfter = $revalidate->getOpensAfter();
+                if (null !== $opensAfter && $opensAfter > $expectedPlayTime) {
+                    $expectedPlayTime = CarbonImmutable::instance($opensAfter);
                 }
             }
 

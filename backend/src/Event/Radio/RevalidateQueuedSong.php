@@ -26,6 +26,9 @@ final class RevalidateQueuedSong extends Event
     /** Set by a plugin when this row must not be handed to the backend yet. */
     private bool $holdBack = false;
 
+    /** When a held row will actually start (e.g. after the Top-of-Hour ID and news). */
+    private ?DateTimeImmutable $opensAfter = null;
+
     public function __construct(
         private readonly Station $station,
         private readonly StationQueue $queueRow,
@@ -61,5 +64,20 @@ final class RevalidateQueuedSong extends Event
     public function isHeldBack(): bool
     {
         return $this->holdBack;
+    }
+
+    /**
+     * The row waits for something that owns the air first (the Top-of-Hour ID
+     * and news): project it from $time so the queue, Playing Next and the
+     * Linear Log show it where it will really air.
+     */
+    public function opensAfter(DateTimeImmutable $time): void
+    {
+        $this->opensAfter = $time;
+    }
+
+    public function getOpensAfter(): ?DateTimeImmutable
+    {
+        return $this->opensAfter;
     }
 }
