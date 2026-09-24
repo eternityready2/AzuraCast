@@ -68,7 +68,11 @@ class StationLogEntry
     #[ORM\Column(length: 255, nullable: true)]
     public ?string $artist = null;
 
-    /** Queue-row settings needed to play this line exactly as planned (clock wheel caps etc.). */
+    /**
+     * Queue-row settings needed to play this line exactly as planned (clock wheel caps etc.).
+     *
+     * @var array<string, mixed>|null
+     */
     #[ORM\Column(type: 'json', nullable: true)]
     public ?array $payload = null;
 

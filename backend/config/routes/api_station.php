@@ -1029,6 +1029,16 @@ return static function (RouteCollectorProxy $group) {
                         Controller\Api\Stations\Features\FeatureSuiteController::class . ':buildLinearLogAction'
                     )->add(new Middleware\Permissions(StationPermissions::Reports, true));
 
+                    // Hand edits on the saved linear log.
+                    $group->get(
+                        '/reports/linear-log/media',
+                        Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':mediaAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->post(
+                        '/reports/linear-log/entries/{entry_id}/{edit}',
+                        Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':editAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Per-feature settings edited on each feature's own page.
                     $group->get(
                         '/reports/linear-log/settings',

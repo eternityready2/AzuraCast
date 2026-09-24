@@ -693,6 +693,14 @@ final class Queue
             return true;
         }
 
+        // A saved Linear Log line was chosen by the same pickers for this
+        // slot; the log is the authority. Re-checking it here would drop it,
+        // and every line after it, whenever re-timing nudges it across a
+        // programme boundary. Rebuilds are what re-plan the log.
+        if (null !== $queueRow->log_entry_id) {
+            return true;
+        }
+
         if (
             null !== $queueRow->request
             && $this->broadcastClockPlanner->areRequestsBlockedBySchedule(

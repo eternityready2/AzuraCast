@@ -3,6 +3,7 @@ import type {
     LinearLogAiDjShift,
     LinearLogGap,
     LinearLogItem,
+    LinearLogMediaOption,
     LinearLogResponse,
     LinearLogStatus,
 } from "~/entities/LinearLog";
@@ -31,6 +32,8 @@ export function useLinearLog() {
     const statusUrl = getStationApiUrl("/reports/linear-log");
     const buildUrl = getStationApiUrl("/reports/linear-log/build");
     const settingsUrl = getStationApiUrl("/reports/linear-log/settings");
+    const mediaUrl = getStationApiUrl("/reports/linear-log/media");
+    const entriesUrl = getStationApiUrl("/reports/linear-log/entries");
 
     const initialLoading = ref(true);
     const buildError = ref("");
@@ -163,6 +166,30 @@ export function useLinearLog() {
         }
     }
 
+    // Hand edits on a planned log line (lock, unlock, up, down, remove, replace).
+    const isEditing = ref(false);
+
+    async function editEntry(entryId: number, edit: string, body: Record<string, unknown> = {}): Promise<boolean> {
+        isEditing.value = true;
+        buildError.value = "";
+        try {
+            await axios.post(`${entriesUrl.value}/${entryId}/${edit}`, body);
+            status.value = "queued";
+            schedulePoll();
+            return true;
+        } catch (error: unknown) {
+            buildError.value = errorMessage(error, $gettext("Unable to change the log line."));
+            return false;
+        } finally {
+            isEditing.value = false;
+        }
+    }
+
+    async function searchMedia(query: string): Promise<LinearLogMediaOption[]> {
+        const {data} = await axios.get<LinearLogMediaOption[]>(mediaUrl.value, {params: {q: query}});
+        return data;
+    }
+
     onMounted(() => void loadSnapshot());
     onUnmounted(clearPoll);
 
@@ -187,5 +214,8 @@ export function useLinearLog() {
         isSavingSettings,
         setEnabled,
         setPlayoutEnabled,
+        isEditing,
+        editEntry,
+        searchMedia,
     };
 }

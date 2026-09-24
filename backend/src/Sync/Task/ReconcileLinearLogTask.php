@@ -165,7 +165,7 @@ final class ReconcileLinearLogTask extends AbstractTask
             $entry->queue_id = $row->id;
             $entry->media = $row->media;
             $entry->playlist = $row->playlist;
-            $entry->duration = (float)($row->duration ?? $row->media?->length ?? 0.0);
+            $entry->duration = (float)($row->duration ?? $row->media->length ?? 0.0);
             $entry->title = $row->title;
             $entry->artist = $row->artist;
             $entry->text = $row->text;

@@ -79,6 +79,46 @@
                             {{ statusLabel(item) }}
                         </td>
 
+                        <td v-if="visibleColumns.includes('edit')" class="edit-cell">
+                            <div v-if="isEditable(item)" class="btn-group btn-group-sm" role="group">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="$gettext('Move up')"
+                                    :disabled="busy"
+                                    @click="emit('edit', item, 'up')"
+                                >&uarr;</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="$gettext('Move down')"
+                                    :disabled="busy"
+                                    @click="emit('edit', item, 'down')"
+                                >&darr;</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="item.is_locked ? $gettext('Unlock') : $gettext('Lock')"
+                                    :disabled="busy"
+                                    @click="emit('edit', item, item.is_locked ? 'unlock' : 'lock')"
+                                >{{ item.is_locked ? $gettext('Unlock') : $gettext('Lock') }}</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary"
+                                    :title="$gettext('Replace')"
+                                    :disabled="busy"
+                                    @click="emit('replace', item)"
+                                >{{ $gettext('Replace') }}</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-danger"
+                                    :title="$gettext('Remove')"
+                                    :disabled="busy"
+                                    @click="emit('edit', item, 'remove')"
+                                >&times;</button>
+                            </div>
+                        </td>
+
                         <td v-if="visibleColumns.includes('duration')" class="duration-cell pe-3">
                             {{ formatDuration(item.duration) }}
                         </td>
@@ -97,7 +137,18 @@ const props = defineProps<{
     groups: LinearLogHourGroup[];
     visibleColumns: string[];
     nowTs: number;
+    busy?: boolean;
 }>();
+
+const emit = defineEmits<{
+    (e: "edit", item: LinearLogItem, edit: string): void;
+    (e: "replace", item: LinearLogItem): void;
+}>();
+
+// Only saved lines that have not been handed to AutoDJ yet can change.
+function isEditable(item: LinearLogItem): boolean {
+    return !!item.log_entry_id && item.log_status === "planned";
+}
 
 const {$gettext} = useTranslate();
 
@@ -252,6 +303,7 @@ function formatStretch(ratio: number): string {
 .swapped-marker{background:var(--bs-warning);color:#000}
 .dropped-marker{background:var(--bs-dark)}
 .log-note{color:var(--bs-secondary-color)}
+.edit-cell{width:1%;white-space:nowrap}
 .status-cell{width:95px;font-size:.76rem}
 .queue-row.log-done td{opacity:.72}
 .queue-row.log-dropped td{opacity:.55;text-decoration:line-through}

@@ -76,3 +76,12 @@ export interface LinearLogHourGroup {
     totalDurationFormatted: string;
     hasId: boolean;
 }
+
+export interface LinearLogMediaOption {
+    id: number;
+    title: string | null;
+    artist: string | null;
+    text: string | null;
+    length: number;
+    type: string;
+}

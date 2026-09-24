@@ -50,7 +50,8 @@ final class LinearLogStore
      * Put every planned line into the (rolled-back) simulation queue, in log
      * order, after the live queue rows.
      */
-    public function seedQueue(Station $station): int
+    /** @return list<int> the seeded log line ids */
+    public function seedQueue(Station $station): array
     {
         /** @var StationLogEntry[] $planned */
         $planned = $this->em->createQuery(
@@ -63,12 +64,28 @@ final class LinearLogStore
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->getResult();
 
+        // The queue runs in timestamp_cued order, and live rows are cued in
+        // the future. Cue the planned lines after the last live row so they
+        // follow it instead of jumping ahead of it.
+        $lastCued = $this->em->createQuery(
+            <<<'DQL'
+                SELECT MAX(sq.timestamp_cued) FROM App\Entity\StationQueue sq
+                WHERE sq.station = :station AND sq.is_played = 0
+            DQL
+        )->setParameter('station', $station)
+            ->getSingleScalarResult();
+
         $cued = CarbonImmutable::now('UTC');
+        if (null !== $lastCued) {
+            $cued = CarbonImmutable::parse((string)$lastCued, 'UTC')->max($cued)->addSecond();
+        }
         $count = 0;
+        $ids = [];
         foreach ($planned as $entry) {
             if (null === $entry->media) {
                 continue;
             }
+            $ids[] = $entry->id;
 
             $row = $this->toQueueRow($station, $entry, null);
             $row->timestamp_cued = $cued->addMilliseconds(++$count);
@@ -77,7 +94,32 @@ final class LinearLogStore
 
         $this->em->flush();
 
-        return $count;
+        return $ids;
+    }
+
+    /**
+     * Delete planned lines the planner could no longer fit. Locked lines stay.
+     *
+     * @param list<int> $ids
+     */
+    public function removeUnplannable(Station $station, array $ids): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+
+        return (int)$this->em->createQuery(
+            <<<'DQL'
+                DELETE FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.id IN (:ids)
+                AND e.status = :planned
+                AND e.is_locked = 0
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('ids', $ids)
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->execute();
     }
 
     /**
@@ -139,7 +181,7 @@ final class LinearLogStore
                 || null !== $row->autodj_custom_uri
                 || null === $row->media,
             'planned_at' => $plannedAt,
-            'duration' => max(1.0, (float)($row->duration ?? $row->media?->length ?? 0.0)),
+            'duration' => max(1.0, (float)($row->duration ?? $row->media->length ?? 0.0)),
             'media_id' => $row->media?->id,
             'playlist_id' => $row->playlist?->id,
             'title' => $row->title,
@@ -263,7 +305,7 @@ final class LinearLogStore
             static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
         );
 
-        return array_values($entries);
+        return $entries;
     }
 
     /** @param array<string, mixed> $data */
@@ -319,7 +361,7 @@ final class LinearLogStore
             'playlist_chain' => $payload['playlist_chain'] ?? null,
             'clock_wheel' => $payload['clock_wheel'] ?? null,
             'clock_wheel_id' => $payload['clock_wheel_id'] ?? null,
-            'media_type' => $entry->media?->type ?? ($payload['media_type'] ?? 'music'),
+            'media_type' => $entry->media->type ?? ($payload['media_type'] ?? 'music'),
             'source_type' => match (true) {
                 $isRequest => 'request',
                 !empty($payload['clock_wheel_id']) => 'clock_wheel',

@@ -171,6 +171,8 @@ final class LinearLogBuilder
             );
         }
         $logRows = [];
+        $seededIds = [];
+        $survivingIds = [];
 
         $this->snapshotStore->markBuilding($station, $hours);
         $this->previewContext->begin();
@@ -184,7 +186,7 @@ final class LinearLogBuilder
             $connection->beginTransaction();
 
             if ($playout) {
-                $this->logStore->seedQueue($station);
+                $seededIds = $this->logStore->seedQueue($station);
             }
 
             $gaps = $this->queue->buildQueue(
@@ -200,6 +202,12 @@ final class LinearLogBuilder
                 static fn(StationQueue $a, StationQueue $b): int =>
                     ($a->timestamp_played?->getTimestamp() ?? 0) <=> ($b->timestamp_played?->getTimestamp() ?? 0)
             );
+
+            foreach ($rows as $row) {
+                if (null !== $row->log_entry_id) {
+                    $survivingIds[$row->log_entry_id] = true;
+                }
+            }
 
             $sequence = 0;
             foreach ($rows as $row) {
@@ -320,6 +328,15 @@ final class LinearLogBuilder
         $station = $managedStation;
 
         if ($playout) {
+            // Planned lines the simulation removed (e.g. re-timing moved a song
+            // out of its playlist's time slot) no longer play; drop them.
+            $this->logStore->removeUnplannable(
+                $station,
+                array_values(array_filter(
+                    $seededIds,
+                    static fn(int $id): bool => !isset($survivingIds[$id]),
+                )),
+            );
             $entries = $this->logStore->applyPlan($station, $logRows, $entries);
         }
 

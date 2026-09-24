@@ -231,7 +231,59 @@
                 :groups="hourGroups"
                 :visible-columns="visibleColumns"
                 :now-ts="nowTs"
+                :busy="isEditing || isBuilding"
+                @edit="onEdit"
+                @replace="openReplace"
             />
+
+            <div
+                v-if="replaceItem"
+                class="replace-backdrop"
+                role="dialog"
+                aria-modal="true"
+                @click.self="closeReplace"
+            >
+                <div class="replace-dialog card shadow">
+                    <div class="card-header d-flex align-items-center">
+                        <strong>{{ $gettext('Replace log line') }}</strong>
+                        <button type="button" class="btn-close ms-auto" :aria-label="$gettext('Close')" @click="closeReplace" />
+                    </div>
+                    <div class="card-body">
+                        <div class="small text-body-secondary mb-2">
+                            {{ formatTime(replaceItem.played_at) }} &middot; {{ displayTitle(replaceItem) }}
+                        </div>
+                        <input
+                            v-model="replaceQuery"
+                            type="search"
+                            class="form-control form-control-sm mb-2"
+                            :placeholder="$gettext('Search the library by title or artist')"
+                            @input="onReplaceSearch"
+                        >
+                        <div class="list-group replace-results">
+                            <button
+                                v-for="option in replaceOptions"
+                                :key="option.id"
+                                type="button"
+                                class="list-group-item list-group-item-action d-flex gap-2"
+                                :disabled="isEditing"
+                                @click="applyReplace(option.id)"
+                            >
+                                <span class="flex-grow-1 text-start">
+                                    <strong>{{ option.title || option.text }}</strong>
+                                    <span v-if="option.artist" class="d-block small text-body-secondary">{{ option.artist }}</span>
+                                </span>
+                                <span class="small font-monospace">{{ formatLength(option.length) }}</span>
+                            </button>
+                            <div v-if="replaceQuery.length >= 2 && !replaceOptions.length" class="small text-body-secondary p-2">
+                                {{ $gettext('No matches.') }}
+                            </div>
+                        </div>
+                        <div class="small text-body-secondary mt-2">
+                            {{ $gettext('The replacement is locked so a rebuild keeps it.') }}
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <footer class="linear-log-footer">
                 {{ $gettext('Strict scheduled programs use the authoritative strict-playlist forecast, so their projected songs match the same source used by Playing Next and Upcoming Song Queue. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
@@ -244,7 +296,7 @@
 import {computed, ref} from "vue";
 import LinearLogAiDjShifts from "~/components/Stations/Reports/LinearLogAiDjShifts.vue";
 import LinearLogSchedule from "~/components/Stations/Reports/LinearLogSchedule.vue";
-import type {LinearLogHourGroup, LinearLogItem} from "~/entities/LinearLog";
+import type {LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
 import {useTranslate} from "~/vendor/gettext";
 
@@ -269,7 +321,52 @@ const {
     setEnabled,
     playoutEnabled,
     setPlayoutEnabled,
+    isEditing,
+    editEntry,
+    searchMedia,
 } = useLinearLog();
+
+async function onEdit(item: LinearLogItem, edit: string): Promise<void> {
+    if (!item.log_entry_id) return;
+    if (edit === "remove" && !window.confirm($gettext("Remove this line from the log?"))) return;
+    await editEntry(item.log_entry_id, edit);
+}
+
+const replaceItem = ref<LinearLogItem | null>(null);
+const replaceQuery = ref("");
+const replaceOptions = ref<LinearLogMediaOption[]>([]);
+let replaceTimer: number | null = null;
+
+function openReplace(item: LinearLogItem): void {
+    replaceItem.value = item;
+    replaceQuery.value = "";
+    replaceOptions.value = [];
+}
+
+function closeReplace(): void {
+    replaceItem.value = null;
+}
+
+function onReplaceSearch(): void {
+    if (replaceTimer !== null) window.clearTimeout(replaceTimer);
+    replaceTimer = window.setTimeout(async () => {
+        const query = replaceQuery.value.trim();
+        replaceOptions.value = query.length >= 2 ? await searchMedia(query) : [];
+    }, 250);
+}
+
+async function applyReplace(mediaId: number): Promise<void> {
+    const item = replaceItem.value;
+    if (!item?.log_entry_id) return;
+    if (await editEntry(item.log_entry_id, "replace", {media_id: mediaId})) {
+        closeReplace();
+    }
+}
+
+function formatLength(seconds: number): string {
+    const total = Math.round(seconds ?? 0);
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
 
 const pageTitle = computed(() => `${snapshotHours.value || hoursAhead.value}-${$gettext("Hour Playout Log")}`);
 const searchQuery = ref("");
@@ -282,6 +379,7 @@ const columnOptions = [
     {key: "rules", label: $gettext("Rules")},
     {key: "aired", label: $gettext("Aired at")},
     {key: "status", label: $gettext("Status")},
+    {key: "edit", label: $gettext("Edit")},
     {key: "duration", label: $gettext("Duration")},
 ];
 const visibleColumns = ref(["time", "title", "source", "type", "rules", "duration"]);
@@ -413,6 +511,9 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 </script>
 
 <style scoped>
+.replace-backdrop{position:fixed;inset:0;z-index:1080;display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;background:rgba(0,0,0,.45)}
+.replace-dialog{width:100%;max-width:520px}
+.replace-results{max-height:50vh;overflow-y:auto}
 .linear-log-page{max-width:1400px;margin:0 auto;color:var(--bs-body-color)}
 .linear-log-card{overflow:hidden;border:1px solid var(--bs-border-color);border-radius:.8rem;background:var(--bs-body-bg);box-shadow:0 .3rem 1rem rgba(0,0,0,.07)}
 .linear-log-card.is-disabled .linear-log-header{background:linear-gradient(90deg,#5c636a 0%,#6c757d 100%)}
