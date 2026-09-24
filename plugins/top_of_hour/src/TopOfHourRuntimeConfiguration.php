@@ -54,13 +54,13 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
         $newsStaging = $newsEnabled
             ? <<<'LIQ'
-                if not top_of_hour_id_hard_boundary() then
-                    if is_within_active_hours() then
-                        top_of_hour_news.push(request.create(news_bulletin_request))
-                        log("Top-of-Hour ID: staged top-hour AI News to lead the new hour.")
-                    else
-                        log("Top-of-Hour ID: AI News skipped - outside active hours window.")
-                    end
+                # Also on a HARD hour: a scheduled programme waits for the news
+                # to finish (the strict lane is gated on the TOH lane).
+                if is_within_active_hours() then
+                    top_of_hour_news.push(request.create(news_bulletin_request))
+                    log("Top-of-Hour ID: staged top-hour AI News to lead the new hour.")
+                else
+                    log("Top-of-Hour ID: AI News skipped - outside active hours window.")
                 end
                 LIQ
             : '# Top-hour AI News is disabled; nothing is staged after the ID.';
@@ -170,6 +170,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
             def top_of_hour_id_on_track(_) =
                 top_of_hour_id_active := true
+                rigid_schedule_toh_lane_owns_air := true
                 # request.queue removes the active request from its waiting queue;
                 # purge any remaining staged tail so one deadline cannot double-ID.
                 top_of_hour_id.set_queue([])
@@ -351,6 +352,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 # primitive for a frame-accurate hold.
                 started_early = top_of_hour_id_early()
                 top_of_hour_id_active := true
+                rigid_schedule_toh_lane_owns_air := true
                 top_of_hour_id_early := false
                 top_of_hour_id_release_epoch := 0.0
 
@@ -435,6 +437,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 end
 
                 top_of_hour_id_active := false
+
+                rigid_schedule_toh_lane_owns_air := false
                 top_of_hour_id_early := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0
@@ -591,6 +595,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 top_of_hour_news.skip()
                 top_of_hour_news.set_queue([])
                 top_of_hour_id_active := false
+                rigid_schedule_toh_lane_owns_air := false
                 top_of_hour_id_early := false
                 top_of_hour_id_hard_boundary := false
                 top_of_hour_id_target_epoch := 0.0

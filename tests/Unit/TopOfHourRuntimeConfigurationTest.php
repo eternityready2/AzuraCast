@@ -31,7 +31,7 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         self::assertStringContainsString('top_of_hour_id_active := true', $config);
         self::assertStringContainsString('azuracast.discard_autodj_current_cleanly()', $config);
         self::assertStringContainsString(
-            'armed clean cross boundary and discarded interrupted AutoDJ request.',
+            'Top-of-Hour ID: AutoDJ held; the next item waits unplayed until the ID/news ends.',
             $config,
         );
 
@@ -63,7 +63,7 @@ final class TopOfHourRuntimeConfigurationTest extends Unit
         // becomes the selected branch during the gap.
         self::assertStringContainsString('top_of_hour_hard_hold = blank(id="top_of_hour_hard_hold")', $config);
         self::assertStringContainsString('top_of_hour_lane = fallback(', $config);
-        self::assertStringContainsString('[top_of_hour_id, top_of_hour_hard_hold]', $config);
+        self::assertStringContainsString('[top_of_hour_id, top_of_hour_news, top_of_hour_hard_hold]', $config);
         self::assertStringContainsString('boundary > 0.0 and now < boundary', $config);
         self::assertStringContainsString(
             'HARD lane released exactly at the :00 boundary to rigid authority.',

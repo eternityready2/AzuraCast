@@ -92,6 +92,10 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
             foreach ($rigidSchedules as $scheduleItem) {
                 $playTime = $this->getScheduledPlaylistPlayTime($event, $scheduleItem);
+                // A scheduled programme waits while the Top-of-Hour ID/news owns
+                // the air; otherwise it runs silently under them and listeners
+                // join it minutes in. It starts from its top when they finish.
+                $playTime = '(' . $playTime . ') and not rigid_schedule_toh_lane_owns_air()';
                 $rigidBranches[] = $playlist->backendPlaySingleTrack()
                     ? '(predicate.at_most(1, {' . $playTime . '}), ' . $playlistVarName . ')'
                     : '({ ' . $playTime . ' }, ' . $playlistVarName . ')';
@@ -104,6 +108,8 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
             <<<'LIQ'
             # Strict schedule state (Top-of-Hour plugin).
             rigid_schedule_active = ref(false)
+            # Set by the Top-of-Hour lane while its ID/news owns the air.
+            rigid_schedule_toh_lane_owns_air = ref(false)
             LIQ
         );
 

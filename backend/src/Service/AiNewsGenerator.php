@@ -230,14 +230,19 @@ final class AiNewsGenerator
      */
     private function isWithinActiveSchedule(?string $activeHours, array $activeDays, Station $station): bool
     {
+        // Generation runs at :50 for the bulletin Liquidsoap stages at :59, and
+        // Liquidsoap checks the window at :59. Check it at that same moment, or
+        // the first bulletin of a window like "11:59-17:59" is never generated
+        // (11:50 is outside) and a bulletin is made for the hour that ends it.
         $now = new DateTimeImmutable('now', $station->getTimezoneObject());
+        $stagedAt = $now->setTime((int)$now->format('G'), 59);
         $activeDays = $this->normalizeActiveDays($activeDays);
 
-        if ([] !== $activeDays && !in_array((int) $now->format('N'), $activeDays, true)) {
+        if ([] !== $activeDays && !in_array((int) $stagedAt->format('N'), $activeDays, true)) {
             return false;
         }
 
-        return $this->isWithinActiveHours($activeHours, $now);
+        return $this->isWithinActiveHours($activeHours, $stagedAt);
     }
 
     /**

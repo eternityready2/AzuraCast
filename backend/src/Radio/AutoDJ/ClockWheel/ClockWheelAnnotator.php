@@ -22,6 +22,9 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
 {
     private const float RATIO_ALIGNMENT_TOLERANCE = 0.000075;
 
+    /** Matches Queue's floor and the Top-of-Hour early-ID window. */
+    private const int MIN_HOUR_BOUNDARY_CAP_SECONDS = 30;
+
     public function __construct(
         private readonly ClockWheelEventRepository $eventRepo,
         private readonly ClockWheelEventLogger $eventLogger,
@@ -123,6 +126,23 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
             }
 
             $maxSeconds = $queue->hour_boundary_max_play_seconds;
+
+            // A seconds-long boundary cap never airs as intended: nothing starts
+            // that close to the ID, so the row is held and would air after it as
+            // a fragment. Play it whole instead.
+            if (null !== $maxSeconds && $maxSeconds < self::MIN_HOUR_BOUNDARY_CAP_SECONDS) {
+                $queue->hour_boundary_enforce_cap = false;
+                $queue->hour_boundary_max_play_seconds = null;
+
+                $media = $event->getMedia();
+                if ($media instanceof StationMedia && $media->length > 0) {
+                    $queue->duration = $media->length;
+                    $event->addAnnotations([
+                        'duration' => $media->length,
+                    ]);
+                }
+                return;
+            }
         } else {
             $maxSeconds = $queue->clock_wheel_max_play_seconds;
         }

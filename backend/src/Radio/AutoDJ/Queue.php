@@ -30,6 +30,12 @@ final class Queue
     use LoggerAwareTrait;
     use EntityManagerAwareTrait;
 
+    /**
+     * Shortest clock-boundary cap worth airing. Matches the Top-of-Hour early-ID
+     * window: a row this close to the boundary is held until after it instead.
+     */
+    private const int MIN_BOUNDARY_CAP_SECONDS = 30;
+
     public function __construct(
         private readonly EventDispatcherInterface $dispatcher,
         private readonly StationQueueRepository $queueRepo,
@@ -534,6 +540,37 @@ final class Queue
             1,
             $interruptAt->getTimestamp() - $expectedPlayTime->getTimestamp(),
         );
+
+        // Nothing may start this close to a clock boundary: the boundary content
+        // starts early and this row is held until it releases. Capping it to the
+        // few seconds left would travel with the row and cut it to a fragment
+        // when it airs after the boundary (00:09 on 2026-09-24: a 1s cap made at
+        // 23:59:59). Project it after the boundary at its natural length instead.
+        // The on-air song (no queue row) really is interrupted, so it is excluded.
+        if (
+            null !== $queueRow
+            && $capSeconds < self::MIN_BOUNDARY_CAP_SECONDS
+            && !$this->isMandatoryBoundaryContent($queueRow)
+        ) {
+            if ($queueRow->hour_boundary_enforce_cap) {
+                $naturalDuration = $queueRow->media?->getCalculatedLength() ?? 0.0;
+                if ($naturalDuration > 0.0) {
+                    $effectiveDuration = $naturalDuration;
+                }
+                $queueRow->duration = $effectiveDuration;
+            }
+            $queueRow->hour_boundary_enforce_cap = false;
+            $queueRow->hour_boundary_max_play_seconds = null;
+
+            return [
+                $effectiveDuration,
+                $this->addDurationToTime(
+                    $station,
+                    CarbonImmutable::instance($resumeAt),
+                    $effectiveDuration,
+                ),
+            ];
+        }
 
         if (null !== $queueRow && !$this->isMandatoryBoundaryContent($queueRow)) {
             $queueRow->hour_boundary_enforce_cap = true;
