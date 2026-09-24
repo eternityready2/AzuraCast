@@ -11,6 +11,7 @@ use App\Entity\Api\Status;
 use App\Entity\ApiGenerator\StationQueueApiGenerator;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Http\Response;
 use App\Http\ServerRequest;
@@ -18,6 +19,8 @@ use App\OpenApi;
 use App\Paginator;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
+use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\RigidScheduleForecastItem;
 use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
@@ -124,6 +127,8 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
+        private readonly LinearLogStore $linearLogStore,
+        private readonly Doctrine\ORM\EntityManagerInterface $em,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
@@ -190,9 +195,13 @@ final class QueueController extends AbstractStationApiCrudController
             ->addOrderBy('sq.top_of_hour_legal_id', 'ASC')
             ->addOrderBy('sq.id', 'ASC');
 
+        // When the saved linear log controls playout, the rest of the hour comes
+        // from the log, so this page shows exactly what the log has planned.
+        $logPlayout = LinearLogPlayout::isPlayoutEnabled($station);
+
         // With no runtime-owned content to add or reconcile, preserve the native
         // upstream queue endpoint behavior exactly.
-        if ([] === $rigidWindows && [] === $aiNewsTimes && null === $pendingAiDjRow) {
+        if ([] === $rigidWindows && [] === $aiNewsTimes && null === $pendingAiDjRow && !$logPlayout) {
             return $this->listPaginatedFromQuery(
                 $request,
                 $response,
@@ -242,6 +251,22 @@ final class QueueController extends AbstractStationApiCrudController
                 }
 
                 $rows[] = $this->viewRigidForecastRecord($station, $forecastItem);
+            }
+
+            if ($logPlayout) {
+                foreach ($this->getPlannedLogLines($station, $hourEnd) as $entry) {
+                    if (null !== $filterPlaylistId && $entry->playlist?->id !== $filterPlaylistId) {
+                        continue;
+                    }
+                    if (
+                        null !== $searchPhrase
+                        && !str_contains(mb_strtolower((string)$entry->text), mb_strtolower($searchPhrase))
+                    ) {
+                        continue;
+                    }
+
+                    $rows[] = $this->viewLogLineRecord($station, $entry);
+                }
             }
 
             if (null === $filterPlaylistId) {
@@ -443,6 +468,52 @@ final class QueueController extends AbstractStationApiCrudController
     }
 
     /** @return array<string, mixed> */
+    /** @return list<StationLogEntry> */
+    private function getPlannedLogLines(Station $station, DateTimeImmutable $hourEnd): array
+    {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.status = :planned
+                AND e.planned_at < :hourEnd
+                AND e.media IS NOT NULL
+                ORDER BY e.sequence ASC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setParameter('hourEnd', $hourEnd->getTimestamp())
+            ->getResult();
+    }
+
+    /** @return array<string, mixed> */
+    private function viewLogLineRecord(Station $station, StationLogEntry $entry): array
+    {
+        // Read-only view of a planned log line; it becomes a real queue row
+        // only when playout takes it.
+        $record = $this->linearLogStore->toQueueRow($station, $entry, null);
+        $playedAt = CarbonImmutable::createFromTimestamp($entry->planned_at);
+        $record->timestamp_cued = $playedAt;
+        $record->timestamp_played = $playedAt;
+        $record->duration = $entry->duration;
+        $record->is_visible = true;
+
+        $row = $this->queueApiGenerator->__invoke($record);
+
+        $apiResponse = new StationQueueDetailed();
+        $apiResponse->sent_to_autodj = false;
+        $apiResponse->is_played = false;
+        $apiResponse->autodj_custom_uri = null;
+        $apiResponse->media_type = $entry->media?->type ?? 'music';
+        $apiResponse->log = [];
+        $apiResponse->links = [];
+
+        return [
+            ...get_object_vars($row),
+            ...get_object_vars($apiResponse),
+        ];
+    }
+
     private function viewRigidForecastRecord(
         Station $station,
         RigidScheduleForecastItem $item,

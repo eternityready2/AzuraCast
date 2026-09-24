@@ -24,8 +24,14 @@
 
                         <td v-if="visibleColumns.includes('title')" class="py-2">
                             <div class="d-flex align-items-start gap-2">
-                                <span v-if="isNextUp(item)" class="next-marker">{{ $gettext('NEXT') }}</span>
+                                <span v-if="isOnAir(item)" class="onair-marker">{{ $gettext('ON AIR') }}</span>
+                                <span v-else-if="isNextUp(item)" class="next-marker">{{ $gettext('NEXT') }}</span>
                                 <span v-else-if="item.is_live_queue" class="live-marker">{{ $gettext('LIVE QUEUE') }}</span>
+                                <span
+                                    v-else-if="logMarker(item)"
+                                    :class="logMarker(item)?.cls"
+                                    :title="item.log_note ?? ''"
+                                >{{ logMarker(item)?.label }}</span>
                                 <div>
                                     <div v-if="item.autodj_custom_uri" class="small text-body-secondary">
                                         {{ item.autodj_custom_uri }}
@@ -34,6 +40,7 @@
                                         <strong class="track-title">{{ displayTitle(item) }}</strong>
                                         <div v-if="item.artist" class="small track-artist">{{ item.artist }}</div>
                                         <div v-if="item.album" class="small text-body-secondary">{{ item.album }}</div>
+                                        <div v-if="item.log_note" class="small log-note">{{ item.log_note }}</div>
                                     </template>
                                 </div>
                             </div>
@@ -60,7 +67,16 @@
                                 {{ formatStretch(item.clock_wheel_stretch_ratio) }}
                             </span>
                             <span v-if="item.hour_boundary_enforce_cap" class="badge text-bg-warning me-1">BOUNDARY</span>
-                            <span v-if="item.is_request" class="badge text-bg-primary">REQUEST</span>
+                            <span v-if="item.is_request" class="badge text-bg-primary me-1">REQUEST</span>
+                            <span v-if="item.is_locked" class="badge text-bg-dark">LOCKED</span>
+                        </td>
+
+                        <td v-if="visibleColumns.includes('aired')" class="queue-time">
+                            {{ item.aired_at ? formatTime(item.aired_at) : '-' }}
+                        </td>
+
+                        <td v-if="visibleColumns.includes('status')" class="status-cell">
+                            {{ statusLabel(item) }}
                         </td>
 
                         <td v-if="visibleColumns.includes('duration')" class="duration-cell pe-3">
@@ -87,6 +103,39 @@ const {$gettext} = useTranslate();
 
 function isNextUp(item: LinearLogItem): boolean {
     return (item.played_at ?? 0) >= props.nowTs && item.is_live_queue;
+}
+
+function isOnAir(item: LinearLogItem): boolean {
+    if (!item.aired_at) return false;
+    return item.aired_at <= props.nowTs && props.nowTs < item.aired_at + (item.duration ?? 0);
+}
+
+function logMarker(item: LinearLogItem): {label: string, cls: string} | null {
+    switch (item.log_status) {
+        case "aired":
+            return {label: $gettext("AIRED"), cls: "aired-marker"};
+        case "swapped":
+            return {label: $gettext("SWAPPED"), cls: "swapped-marker"};
+        case "replaced":
+            return {label: $gettext("REPLACED"), cls: "swapped-marker"};
+        case "dropped":
+            return {label: $gettext("DROPPED"), cls: "dropped-marker"};
+        default:
+            return null;
+    }
+}
+
+function statusLabel(item: LinearLogItem): string {
+    if (isOnAir(item)) return $gettext("On air");
+    const labels: Record<string, string> = {
+        planned: $gettext("Planned"),
+        queued: $gettext("Queued"),
+        aired: $gettext("Aired"),
+        swapped: $gettext("Swapped"),
+        replaced: $gettext("Replaced"),
+        dropped: $gettext("Dropped"),
+    };
+    return item.log_status ? (labels[item.log_status] ?? "-") : "-";
 }
 
 function displayTitle(item: LinearLogItem): string {
@@ -151,6 +200,8 @@ function rowClasses(item: LinearLogItem): Record<string, boolean> {
         "legal-id": item.top_of_hour_legal_id,
         "live-queue": item.is_live_queue,
         "scheduled-programme": item.source_type === "scheduled_programme",
+        "log-done": ["aired", "swapped", "replaced"].includes(item.log_status ?? "") && !isOnAir(item),
+        "log-dropped": item.log_status === "dropped",
     };
 }
 
@@ -194,7 +245,16 @@ function formatStretch(ratio: number): string {
 .track-title{color:var(--bs-body-color)}
 .track-artist{color:var(--bs-secondary-color)!important}
 .next-marker,.live-marker{display:inline-block;padding:.16rem .32rem;border-radius:.28rem;color:#fff;font-size:.58rem;font-weight:750;letter-spacing:.035em;white-space:nowrap}
+.next-marker,.onair-marker,.aired-marker,.swapped-marker,.dropped-marker{display:inline-block;padding:.16rem .32rem;border-radius:.28rem;color:#fff;font-size:.58rem;font-weight:750;letter-spacing:.035em;white-space:nowrap}
 .next-marker{background:var(--bs-success)}
+.onair-marker{background:var(--bs-danger)}
+.aired-marker{background:var(--bs-secondary)}
+.swapped-marker{background:var(--bs-warning);color:#000}
+.dropped-marker{background:var(--bs-dark)}
+.log-note{color:var(--bs-secondary-color)}
+.status-cell{width:95px;font-size:.76rem}
+.queue-row.log-done td{opacity:.72}
+.queue-row.log-dropped td{opacity:.55;text-decoration:line-through}
 .live-marker{background:var(--bs-secondary)}
 @media(max-width:767px){.rules-cell{min-width:160px}}
 </style>

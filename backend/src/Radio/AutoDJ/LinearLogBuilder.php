@@ -40,6 +40,7 @@ final class LinearLogBuilder
         private readonly AiDjScheduleRepository $aiDjScheduleRepo,
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
+        private readonly LinearLog\LinearLogStore $logStore,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -60,18 +61,18 @@ final class LinearLogBuilder
             return;
         }
 
-        $this->build($station, $message->hours);
+        $this->build($station, $message->hours, $message->rebuild);
     }
 
     /** @return array<string, mixed> */
-    public function build(Station $station, ?int $hoursOverride = null): array
+    public function build(Station $station, ?int $hoursOverride = null, bool $rebuild = false): array
     {
         $stationId = $station->id;
         $maxAttempts = 2;
 
         for ($attempt = 1; ; $attempt++) {
             try {
-                return $this->buildOnce($station, $hoursOverride);
+                return $this->buildOnce($station, $hoursOverride, $rebuild);
             } catch (Throwable $e) {
                 if ($attempt >= $maxAttempts || !self::isTransientTransactionError($e)) {
                     throw $e;
@@ -126,7 +127,7 @@ final class LinearLogBuilder
     }
 
     /** @return array<string, mixed> */
-    private function buildOnce(Station $station, ?int $hoursOverride = null): array
+    private function buildOnce(Station $station, ?int $hoursOverride = null, bool $rebuild = false): array
     {
         $stationId = $station->id;
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
@@ -160,6 +161,17 @@ final class LinearLogBuilder
             $liveQueueIds[$queueRow->id] = true;
         }
 
+        // Saved linear log (log controls playout): keep the planned lines and
+        // only extend them; a rebuild request re-plans hours past the lock.
+        $playout = LinearLog\LinearLogPlayout::isPlayoutEnabled($station);
+        if ($playout && $rebuild) {
+            $this->logStore->clearUnlockedPlan(
+                $station,
+                $projectionStartTs + LinearLog\LinearLogStore::LOCK_SECONDS
+            );
+        }
+        $logRows = [];
+
         $this->snapshotStore->markBuilding($station, $hours);
         $this->previewContext->begin();
 
@@ -170,6 +182,10 @@ final class LinearLogBuilder
 
         try {
             $connection->beginTransaction();
+
+            if ($playout) {
+                $this->logStore->seedQueue($station);
+            }
 
             $gaps = $this->queue->buildQueue(
                 $station,
@@ -202,6 +218,16 @@ final class LinearLogBuilder
                     isset($liveQueueIds[$row->id]),
                 );
                 $entry = $this->applyRigidWindowsToQueueEntry($entry, $rigidWindows);
+
+                if ($playout) {
+                    $logRows[] = $this->logStore->describeRow(
+                        $row,
+                        $playedAt,
+                        isset($liveQueueIds[$row->id]),
+                        null === $entry ? null : count($entries),
+                    );
+                }
+
                 if (null === $entry) {
                     continue;
                 }
@@ -292,6 +318,10 @@ final class LinearLogBuilder
             throw new RuntimeException($error);
         }
         $station = $managedStation;
+
+        if ($playout) {
+            $entries = $this->logStore->applyPlan($station, $logRows, $entries);
+        }
 
         $aiDjShifts = $this->buildAiDjShifts($station, $projectionStartTs, $projectionEndTs);
 
@@ -532,6 +562,7 @@ final class LinearLogBuilder
         return [
             'id' => 'projection-' . $sequence,
             'queue_id' => $row->id,
+            'log_entry_id' => $row->log_entry_id,
             'song_id' => $row->song_id,
             'played_at' => $row->timestamp_played?->getTimestamp(),
             'cued_at' => $row->timestamp_cued->getTimestamp(),

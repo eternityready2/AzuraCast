@@ -30,6 +30,12 @@ export interface LinearLogItem {
     hour_boundary_enforce_cap: boolean;
     hour_boundary_max_play_seconds: number | null;
     top_of_hour_pre_id_fade: boolean;
+    // Saved linear log (only when the log controls playout).
+    log_entry_id?: number | null;
+    log_status?: "planned" | "queued" | "aired" | "swapped" | "replaced" | "dropped" | null;
+    log_note?: string | null;
+    aired_at?: number | null;
+    is_locked?: boolean;
 }
 
 export interface LinearLogGap {
@@ -50,6 +56,7 @@ export interface LinearLogAiDjShift {
 export interface LinearLogResponse {
     status: LinearLogStatus;
     enabled: boolean;
+    playout_enabled?: boolean;
     hours: number;
     configured_hours: number;
     built_at: number | null;

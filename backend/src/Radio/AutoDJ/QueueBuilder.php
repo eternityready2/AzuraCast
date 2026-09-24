@@ -59,6 +59,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
         private readonly UserUrlFilter $userUrlFilter,
         private readonly Client $httpClient,
+        private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
     ) {
     }
 
@@ -75,6 +76,11 @@ final class QueueBuilder implements EventSubscriberInterface
     public function calculateNextSong(BuildQueue $event): void
     {
         if (!empty($event->getNextSongs())) {
+            return;
+        }
+
+        // The saved linear log chooses this slot (LinearLogPlayout).
+        if ($this->linearLogPlayout->ownsSelection($event)) {
             return;
         }
 

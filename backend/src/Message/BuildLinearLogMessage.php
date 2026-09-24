@@ -14,6 +14,8 @@ final class BuildLinearLogMessage extends AbstractUniqueMessage
         public readonly int $stationId,
         public readonly int $hours,
         bool $force = false,
+        // Saved linear log: re-plan the unlocked hours instead of only extending.
+        public readonly bool $rebuild = false,
     ) {
         $this->force = $force;
     }

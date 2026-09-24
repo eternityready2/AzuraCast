@@ -36,6 +36,7 @@ export function useLinearLog() {
     const buildError = ref("");
     const status = ref<LinearLogStatus>("idle");
     const featureEnabled = ref(true);
+    const playoutEnabled = ref(false);
     const hoursAhead = ref(24);
     const snapshotHours = ref(24);
     const builtAt = ref<number | null>(null);
@@ -72,6 +73,7 @@ export function useLinearLog() {
             const {data} = await axios.get<LinearLogResponse>(statusUrl.value);
             status.value = data.status;
             featureEnabled.value = data.enabled;
+            playoutEnabled.value = data.playout_enabled ?? false;
             snapshotHours.value = data.hours || data.configured_hours || 24;
             builtAt.value = data.built_at;
             coverageStart.value = data.coverage_start;
@@ -140,6 +142,27 @@ export function useLinearLog() {
         }
     }
 
+    // "Log controls playout": AutoDJ plays the saved log in order.
+    async function setPlayoutEnabled(enabled: boolean): Promise<void> {
+        isSavingSettings.value = true;
+        buildError.value = "";
+        try {
+            await axios.put(settingsUrl.value, {
+                linear_log_enabled: featureEnabled.value,
+                linear_log_hours: hoursAhead.value,
+                linear_log_playout_enabled: enabled,
+            });
+            await loadSnapshot(false);
+            if (enabled) {
+                await requestBuild();
+            }
+        } catch (error: unknown) {
+            buildError.value = errorMessage(error, $gettext("Unable to save the Playout Log setting."));
+        } finally {
+            isSavingSettings.value = false;
+        }
+    }
+
     onMounted(() => void loadSnapshot());
     onUnmounted(clearPoll);
 
@@ -148,6 +171,7 @@ export function useLinearLog() {
         buildError,
         status,
         featureEnabled,
+        playoutEnabled,
         hoursAhead,
         snapshotHours,
         builtAt,
@@ -162,5 +186,6 @@ export function useLinearLog() {
         requestBuild,
         isSavingSettings,
         setEnabled,
+        setPlayoutEnabled,
     };
 }

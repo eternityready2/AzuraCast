@@ -87,6 +87,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 App\Sync\Task\AiDjCleanupTask::class,
                 App\Sync\Task\AiDjShiftLifecycleRuntimeTask::class,
                 App\Sync\Task\BuildLinearLogTask::class,
+                App\Sync\Task\ReconcileLinearLogTask::class,
                 App\Sync\Task\AirCheckTask::class,
                 App\Sync\Task\StationDiagnosticsRuntimeReconcileTask::class,
             ]);
@@ -153,6 +154,9 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Console\ErrorHandler::class,
             App\Nginx\ConfigWriter::class,
             App\Radio\AutoDJ\ClockWheelScheduler::class,
+            // Saved linear log playout: listed before QueueBuilder so it takes
+            // the priority-0 slot first when the log controls playout.
+            App\Radio\AutoDJ\LinearLog\LinearLogPlayout::class,
             App\Radio\AutoDJ\QueueBuilder::class,
             App\Radio\AutoDJ\BroadcastClockQueueTimingSubscriber::class,
             App\Radio\AutoDJ\StretchSqueezeQueueTiming::class,

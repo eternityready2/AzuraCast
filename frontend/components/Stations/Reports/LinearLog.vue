@@ -33,6 +33,28 @@
                         {{ featureEnabled ? $gettext('ON') : $gettext('OFF') }}
                     </span>
 
+                    <div class="form-check form-switch mb-0 me-2">
+                        <input
+                            id="linear_log_playout_enabled"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="playoutEnabled"
+                            :disabled="initialLoading || isSavingSettings || isBuilding || !featureEnabled"
+                            @change="setPlayoutEnabled(($event.target as HTMLInputElement).checked)"
+                        >
+                        <label class="form-check-label fw-semibold" for="linear_log_playout_enabled">
+                            {{ $gettext('Log Controls Playout') }}
+                        </label>
+                    </div>
+                    <span
+                        v-if="!initialLoading && featureEnabled"
+                        class="badge state-badge"
+                        :class="playoutEnabled ? 'text-bg-success' : 'text-bg-secondary'"
+                    >
+                        {{ playoutEnabled ? $gettext('PLAYING LOG') : $gettext('FORECAST') }}
+                    </span>
+
                     <label class="visually-hidden" for="linear_log_hours">{{ $gettext('Hours') }}</label>
                     <select
                         id="linear_log_hours"
@@ -245,6 +267,8 @@ const {
     requestBuild,
     isSavingSettings,
     setEnabled,
+    playoutEnabled,
+    setPlayoutEnabled,
 } = useLinearLog();
 
 const pageTitle = computed(() => `${snapshotHours.value || hoursAhead.value}-${$gettext("Hour Playout Log")}`);
@@ -256,6 +280,8 @@ const columnOptions = [
     {key: "source", label: $gettext("Playlist / Source")},
     {key: "type", label: $gettext("Type")},
     {key: "rules", label: $gettext("Rules")},
+    {key: "aired", label: $gettext("Aired at")},
+    {key: "status", label: $gettext("Status")},
     {key: "duration", label: $gettext("Duration")},
 ];
 const visibleColumns = ref(["time", "title", "source", "type", "rules", "duration"]);

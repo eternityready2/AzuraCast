@@ -140,6 +140,10 @@ final class StationQueue implements
         set (DateTimeImmutable|string|null $value) => Time::toNullableUtcCarbonImmutable($value);
     }
 
+    /** The saved linear-log line this row plays, when the log controls playout. */
+    #[ORM\Column(nullable: true)]
+    public ?int $log_entry_id = null;
+
     /** Whether AnnotateNextSong should apply a cue_out cap for hour-boundary protection. */
     #[ORM\Column]
     public bool $hour_boundary_enforce_cap = false;

@@ -375,6 +375,7 @@ final class FeatureSuiteController
         return $response->withJson([
             ...$this->linearLogSnapshotStore->get($station),
             'enabled' => $station->backend_config->linear_log_enabled,
+            'playout_enabled' => $station->backend_config->linear_log_playout_enabled,
             'configured_hours' => $station->backend_config->linear_log_hours,
             'ai_dj_projection' => 'shifts_only',
         ]);
@@ -398,7 +399,7 @@ final class FeatureSuiteController
         $this->linearLogSnapshotStore->markQueued($station, $hours);
 
         try {
-            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours));
+            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, false, true));
         } catch (Throwable $e) {
             $this->linearLogSnapshotStore->markFailed($station, $hours, $e->getMessage());
             throw $e;
