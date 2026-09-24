@@ -762,13 +762,19 @@ LIQ;
             # Log current metadata for debugging.
             source.methods(radio).on_metadata(synchronous=false, azuracast.log_meta)
 
-            # Clock Wheel stretch/squeeze: pitch-preserving time-stretch, ratio computed
-            # in PHP (safe +/-5%), passed through the 'liq_stretch_ratio' request annotation.
+            # Stretch/squeeze (music only): pitch-preserving tempo from PHP's
+            # 'liq_stretch_ratio' (natural length / target, so > 1 plays faster and
+            # shorter). The old stretch() operator changed pitch and read > 1 as
+            # slower, and its on_track hook never fired, so nothing was applied.
             clock_wheel_stretch_ratio = ref(1.0)
-            source.methods(radio).on_track(synchronous=false, fun (m) -> begin
-              clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
+            source.methods(radio).on_metadata(synchronous=true, fun (m) -> begin
+              if m["media_type"] == "music" then
+                clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
+              elsif m["title"] != "" or m["sq_id"] != "" then
+                clock_wheel_stretch_ratio := 1.0
+              end
             end)
-            radio = stretch(ratio={clock_wheel_stretch_ratio()}, radio)
+            radio = soundtouch(id="stretch_squeeze", tempo={clock_wheel_stretch_ratio()}, radio)
 
             # Apply crossfade.
             radio = azuracast.apply_crossfade(radio)

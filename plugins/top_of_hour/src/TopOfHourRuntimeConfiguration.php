@@ -207,6 +207,16 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             top_of_hour_fit_tempo = ref(1.0)
             top_of_hour_fit_promos = [{$fitPromos}]
 
+            # The final song's OVERALL tempo (upstream stretch/squeeze included),
+            # held within +/-{$fitMaxAdjust} so adjustments never stack past it.
+            def top_of_hour_fit_set(desired) =
+                lo = 1.0 - {$fitMaxAdjust}
+                hi = 1.0 + {$fitMaxAdjust}
+                overall = if desired < lo then lo elsif desired > hi then hi else desired end
+                upstream = clock_wheel_stretch_ratio()
+                top_of_hour_fit_tempo := if upstream > 0.0 then overall / upstream else overall end
+            end
+
             def top_of_hour_fit_on_track(m) =
                 top_of_hour_fit_tempo := 1.0
                 target = top_of_hour_id_target_epoch()
@@ -214,17 +224,39 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 cue_out = float_of_string(default=0.0, m["liq_cue_out"])
                 cross_end = float_of_string(default=0.0, m["liq_cross_end_duration"])
                 natural = float_of_string(default=0.0, m["natural_length"])
-                full = if cue_out > cue_in then cue_out - cue_in else natural end
+                listed = float_of_string(default=0.0, m["duration"])
+                full =
+                    if cue_out > cue_in then
+                        cue_out - cue_in
+                    elsif natural > 0.0 then
+                        natural
+                    else
+                        listed
+                    end
+
+                # Trace every entry check while an ID target is set, so a fit
+                # that does not happen says why.
+                fit_remaining = target - time()
+                if target > 0.0 and fit_remaining > 0.0 then
+                    fit_item = m["artist"] ^ " - " ^ m["title"]
+                    fit_sq = m["sq_id"] ^ "/" ^ m["media_id"]
+                    fit_jingle = m["jingle_mode"]
+                    fit_enabled = top_of_hour_id_enabled()
+                    fit_active = top_of_hour_id_active()
+                    fit_live = azuracast.live_enabled()
+                    fit_ready = top_of_hour_id.is_ready()
+                    log("Top-of-Hour fit check: '#{fit_item}' remaining=#{fit_remaining} full=#{full} cross_end=#{cross_end} enabled=#{fit_enabled} active=#{fit_active} live=#{fit_live} id_ready=#{fit_ready} sq_id='#{fit_sq}' jingle='#{fit_jingle}'")
+                end
 
                 # Ordinary AutoDJ songs only (a queue row with a real length).
                 if
                     top_of_hour_id_enabled()
                     and not top_of_hour_id_active()
                     and not azuracast.live_enabled()
-                    and top_of_hour_id.is_ready()
                     and target > 0.0
-                    and m["sq_id"] != ""
+                    and (m["sq_id"] != "" or m["media_id"] != "")
                     and m["jingle_mode"] != "true"
+                    and m["media_type"] == "music"
                     and full > 60.0
                 then
                     # The next item starts when this one begins its fade-out.
@@ -235,14 +267,17 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     item = m["artist"] ^ " - " ^ m["title"]
 
                     # Only the final song before the ID: nothing else fits after it.
+                    # The item after it is held back until the ID (PHP hand-off),
+                    # so whatever gap is left here would be silence: always fill it
+                    # as closely as the tempo limit and one promo allow.
                     if gap < 45.0 and gap > 0.0 - max_adj then
                         if gap <= max_adj then
                             if abs(gap) > 0.5 then
-                                top_of_hour_fit_tempo := len / avail
+                                top_of_hour_fit_set(len / avail)
                                 log("Top-of-Hour fit: '#{item}' tempo #{top_of_hour_fit_tempo()} to land the ID on target (gap #{gap}s).")
                             end
                         elsif list.length(requests.queue()) > 0 then
-                            log("Top-of-Hour fit: #{gap}s gap after '#{item}', but the requests queue is busy; ID may start early.")
+                            log("Top-of-Hour fit: #{gap}s gap after '#{item}'; the requests queue already has an item to play in it.")
                         else
                             best_len = ref(0.0)
                             best_uri = ref("")
@@ -261,21 +296,51 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                                 end,
                                 top_of_hour_fit_promos
                             )
+                            exact = best_len() > 0.0
+                            if not exact then
+                                # No exact fit: the longest promo that still fits,
+                                # with the song slowed as far as allowed.
+                                list.iter(
+                                    fun (promo) -> begin
+                                        let (promo_len, promo_uri) = promo
+                                        if promo_len <= gap + max_adj and promo_len > best_len() then
+                                            best_len := promo_len
+                                            best_uri := promo_uri
+                                        end
+                                    end,
+                                    top_of_hour_fit_promos
+                                )
+                            end
                             if best_len() > 0.0 then
                                 requests.push(request.create(best_uri()))
                                 song_avail = avail - best_len()
-                                if abs(song_avail - len) > 0.5 then
-                                    top_of_hour_fit_tempo := len / song_avail
-                                end
-                                log("Top-of-Hour fit: #{gap}s gap after '#{item}'; one #{best_len()}s promo queued, song tempo #{top_of_hour_fit_tempo()}.")
+                                top_of_hour_fit_set(len / song_avail)
+                                log("Top-of-Hour fit: #{gap}s gap after '#{item}'; one #{best_len()}s promo queued (exact=#{exact}), song tempo #{top_of_hour_fit_tempo()}.")
                             else
-                                log("Top-of-Hour fit: #{gap}s gap after '#{item}' and no single promo fits; ID may start early.")
+                                top_of_hour_fit_set(1.0 - {$fitMaxAdjust})
+                                log("Top-of-Hour fit: #{gap}s gap after '#{item}' and no promo fits; song slowed to #{top_of_hour_fit_tempo()}.")
                             end
                         end
+                    elsif gap <= 0.0 - max_adj and gap > -60.0 then
+                        # Runs over the ID: speed up as far as allowed so the ID
+                        # takes as little of the song's outro as possible.
+                        top_of_hour_fit_set(1.0 + {$fitMaxAdjust})
+                        log("Top-of-Hour fit: '#{item}' runs #{0.0 - gap}s past the ID; tempo #{top_of_hour_fit_tempo()} to shorten the overrun.")
                     end
                 end
             end
-            source.methods(radio).on_track(synchronous=true, top_of_hour_fit_on_track)
+            # on_track never fires on this source (not once in any hour of
+            # 2026-09-24), so the fit never ran. Metadata does arrive here at
+            # each track start; act once per track.
+            top_of_hour_fit_seen = ref("")
+            def top_of_hour_fit_on_metadata(m) =
+                key = m["sq_id"] ^ "|" ^ m["media_id"] ^ "|" ^ m["title"]
+                if key != "||" and key != top_of_hour_fit_seen() then
+                    top_of_hour_fit_seen := key
+                    top_of_hour_fit_on_track(m)
+                end
+            end
+            source.methods(radio).on_metadata(synchronous=true, top_of_hour_fit_on_metadata)
             radio = soundtouch(id="top_of_hour_fit", tempo={top_of_hour_fit_tempo()}, radio)
 
             # Self-contained hook for dropping an interrupted STRICT-lane item
@@ -498,8 +563,20 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # until the ID/news releases. Only the song the ID interrupts is
                     # ended; if the ID was started early because a new item just
                     # began, that item is simply held at its start instead.
+                    # The song on air now is the one the ID ends. Remember it here,
+                    # before the next song's metadata can arrive, so only ITS
+                    # replayed title is suppressed at release (2pm 2026-09-24: it
+                    # was captured at release, after the new song's metadata, so
+                    # the new title was hidden and the old one was reported).
+                    if not started_early then
+                        top_of_hour_stale_sq := top_of_hour_last_sq()
+                    end
                     azuracast.autodj_hold := true
                     if not started_early and azuracast.autodj_fresh_ready() then
+                        # A clean-cut marker left armed by an earlier hour turns the
+                        # discard into a no-op and the cut song carries on after the
+                        # ID (2:59am 2026-09-24). This cut starts fresh.
+                        azuracast.autodj_clean_cut_pending := false
                         azuracast.discard_autodj_current_cleanly()
                     elsif not azuracast.autodj_fresh_ready() then
                         # Nothing is loaded (the last song ended on its own). A
@@ -564,9 +641,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
                 # Release the hold: the item that waited (the one shown as Playing
                 # Next) now starts from its beginning with its own metadata.
-                if not top_of_hour_held_started() then
-                    top_of_hour_stale_sq := top_of_hour_last_sq()
-                end
+                # The song to keep off the air/title was recorded at ID start.
                 top_of_hour_held_started := false
                 azuracast.autodj_hold := false
                 if not azuracast.live_enabled() and not azuracast.autodj_fresh_ready() then
@@ -606,8 +681,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
             def top_of_hour_drop_stale_title(m) =
                 stale = top_of_hour_stale_sq()
+                # Stays armed until the next ID: the old title can be replayed
+                # more than once at release (crossfade and switch), and a queue
+                # row id never legitimately airs twice.
                 if stale != "" and m["sq_id"] == stale then
-                    top_of_hour_stale_sq := ""
                     log("Top-of-Hour ID: suppressed the replayed title of the song that ended before the ID.")
                     []
                 else

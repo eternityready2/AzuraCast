@@ -85,8 +85,9 @@ final class Annotations implements EventSubscriberInterface
             // This runs on the critical path for every single AutoDJ track
             // handoff station-wide, not just Top-of-Hour stations, so a
             // failure here must never be able to take down normal playback.
+            $heldBack = false;
             try {
-                $this->revalidateBeforeSend($station, $queueRow);
+                $heldBack = $this->revalidateBeforeSend($station, $queueRow);
             } catch (\Throwable $e) {
                 // Swallow and proceed with whatever queueRow already was --
                 // but LOG it. This used to swallow silently, which made a
@@ -96,6 +97,17 @@ final class Annotations implements EventSubscriberInterface
                     'Annotations: revalidateBeforeSend failed; proceeding with the '
                     . 'already-selected row unrevalidated.',
                     ['exception' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()]
+                );
+            }
+
+            // A plugin held this row back: sent now, it would start just
+            // before the Top-of-Hour ID and be cut. It stays queued (unsent)
+            // and opens the new hour; the gap before the ID is Liquidsoap's
+            // to fill (tempo / one promo), never a song the ID cuts.
+            if ($heldBack && $this->em->contains($queueRow)) {
+                $this->em->flush();
+                throw new RuntimeException(
+                    'Held for the new hour: this item would start just before the Top-of-Hour ID and be cut.'
                 );
             }
 
@@ -114,15 +126,24 @@ final class Annotations implements EventSubscriberInterface
         return $event->buildAnnotations();
     }
 
-    private function revalidateBeforeSend(Station $station, StationQueue $queueRow): void
+    /** @return bool true when a plugin held the row back from being sent now */
+    private function revalidateBeforeSend(Station $station, StationQueue $queueRow): bool
     {
         $currentSong = $station->current_song;
         $now = Time::nowUtc();
 
+        $overlap = max($station->backend_config->getCrossfadeDuration(), 3.0) + 1.0;
+
         $expectedPlayAt = $now;
         if (null !== $currentSong && null !== $currentSong->timestamp_start) {
+            // The next item starts when the current one begins its fade-out,
+            // not at its last sample; the same overlap applies to each sent
+            // item below. Without it the final song of the hour is judged
+            // seconds late per song and lands early, freeing the air for a
+            // new song the ID then cuts.
+            $currentDuration = (float)($currentSong->duration ?? 1.0);
             $expectedPlayAt = CarbonImmutable::instance($currentSong->timestamp_start)
-                ->addSeconds((float)($currentSong->duration ?? 1.0));
+                ->addSeconds(max(1.0, $currentDuration - $overlap));
 
             if ($expectedPlayAt->lessThan($now)) {
                 $expectedPlayAt = $now;
@@ -138,12 +159,13 @@ final class Annotations implements EventSubscriberInterface
         // measurements and for the top-of-hour mis-timing that omitting it
         // caused.
         $expectedPlayAt = $expectedPlayAt->addSeconds(
-            $this->queueRepo->getUnairedSentDuration($station)
+            $this->queueRepo->getUnairedSentDuration($station, $overlap)
         );
 
-        $this->eventDispatcher->dispatch(
-            new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable())
-        );
+        $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable());
+        $this->eventDispatcher->dispatch($event);
+
+        return $event->isHeldBack();
     }
 
     public function annotateSongPath(AnnotateNextSong $event): void
@@ -182,6 +204,8 @@ final class Annotations implements EventSubscriberInterface
             'duration' => $duration,
             // Uncapped length; later subscribers may shrink `duration` to a wall-clock cap.
             'natural_length' => $duration,
+            // Lets Liquidsoap limit stretch/squeeze and the Top-of-Hour fit to music.
+            'media_type' => $media->type,
             'song_id' => $media->song_id,
             'media_id' => $media->id,
             'sq_id' => $event->getQueue()?->id,

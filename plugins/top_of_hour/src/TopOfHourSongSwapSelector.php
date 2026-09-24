@@ -61,6 +61,26 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     // keys use the defaults below, so the feature works with no configuration.
     public const string CONFIG_SWAP_ENABLED = 'top_of_hour_swap_enabled';
     public const string CONFIG_SWAP_TOLERANCE = 'top_of_hour_swap_tolerance_seconds';
+
+    /**
+     * A song due to start within this many seconds of the ID is never sent:
+     * it would only be cut. It waits and opens the new hour, and Liquidsoap's
+     * fit (tempo +/-3% and at most one promo, up to 45s) fills the gap.
+     */
+    private const float HOLD_WINDOW_SECONDS = 45.0;
+
+    /**
+     * From the ID start until this many seconds past :00 the ID/news owns the
+     * air and projected times slide with the wall clock; decisions made then
+     * would only be re-made seconds later. Nothing is swapped in this window.
+     */
+    private const int SETTLE_SECONDS_AFTER_HOUR = 360;
+
+    /** Last stretch before the ID in which songs go to Liquidsoap one at a time. */
+    private const float FINAL_APPROACH_SECONDS = 720.0;
+
+    /** Never hold while the song on air ends within this many seconds. */
+    private const int HOLD_SAFETY_SECONDS = 25;
     public const string CONFIG_SWAP_MIN_GAP = 'top_of_hour_swap_min_gap_seconds';
 
     private const bool DEFAULT_SWAP_ENABLED = true;
@@ -153,6 +173,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
+        if ($this->isSettlingAroundTopOfHour($station)) {
+            return;
+        }
+
         $nextSongs = $event->getNextSongs();
         if (1 !== count($nextSongs)) {
             return;
@@ -228,6 +252,9 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // actually found, not necessarily the original pick's playlist.
         $newRow = StationQueue::fromMedia($station, $replacementMedia);
         $newRow->playlist = $spm->playlist;
+        // Keep the saved linear log's link, so the log shows the line as
+        // SWAPPED instead of dropped with an unlinked song in its place.
+        $newRow->log_entry_id = $row->log_entry_id;
         $this->applyStretchTarget($newRow, $context);
 
         $spm->played($start->getTimestamp());
@@ -285,9 +312,29 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
-        // Held through the ID and opens the new hour; see swap().
-        if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
+        if ($this->isSettlingAroundTopOfHour($station)) {
             return;
+        }
+
+        // Would start just before the ID and be cut: not sent now; it opens
+        // the new hour instead (the hand-off honours the hold).
+        if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
+            $event->holdBack();
+            $this->logger->notice(
+                'Top-of-Hour: holding a pick that would start just before the ID; it opens the new hour.',
+                ['queue_id' => $row->id, 'media_id' => $row->media?->id, 'start' => $event->getExpectedPlayAt()->format(DATE_ATOM)]
+            );
+            return;
+        }
+
+        // In the last minutes before the ID, hand songs to Liquidsoap one at a
+        // time: it otherwise takes them two ahead, so the final song was
+        // locked in ~12 minutes early and anything that aired in between (an
+        // AI DJ clip, a trimmed intro) pushed it into the ID (3pm 2026-09-24).
+        // Held here, it is re-checked when the song before it starts, with
+        // the real time known. The hold is only honoured at the hand-off.
+        if ($this->shouldSendOneAtATime($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
+            $event->holdBack();
         }
 
         if (!$this->isOrdinaryMusicRow($row)) {
@@ -407,7 +454,17 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        $gap = $this->secondsBetween($start, $target);
+        // Liquidsoap starts the next item when a song begins its fade-out, a
+        // few seconds before its last sample. A song whose full length equals
+        // the gap therefore frees the air early and a new song starts only to
+        // be cut by the ID. Aim for the fade-out to begin at the ID instead:
+        // the ID covers the final seconds of the song's own outro.
+        // A slot starting at or after the ID is the new hour's opener, not a
+        // final slot; test that before adding the fade overlap, or the opener
+        // looks like a few seconds left to fill and gets swapped for a promo
+        // (3pm 2026-09-24).
+        $rawGap = $this->secondsBetween($start, $target);
+        $gap = $rawGap > 0.0 ? $rawGap + $this->getFadeOverlapSeconds($station) : $rawGap;
         if ($gap <= 0.0) {
             $this->logger->notice(
                 'Top-of-Hour swap: evaluateFinalSlot bailed -- start is already past the ID target.',
@@ -1235,6 +1292,70 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         return in_array((string)$value, ['1', 'true', 'yes', 'on'], true);
     }
 
+    /**
+     * Within FINAL_APPROACH_SECONDS of the ID, a row is not sent while another
+     * sent item is still waiting to air ahead of it. Never held when the song
+     * on air ends within HOLD_SAFETY_SECONDS, so AutoDJ cannot run dry.
+     */
+    private function shouldSendOneAtATime(Station $station, StationQueue $row, CarbonImmutable $start): bool
+    {
+        if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute || null !== $row->request) {
+            return false;
+        }
+
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
+            return false;
+        }
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $gap = $this->secondsBetween($start, $target);
+        if ($gap <= 0.0 || $gap > self::FINAL_APPROACH_SECONDS) {
+            return false;
+        }
+
+        $current = $station->current_song;
+        if (null !== $current && null !== $current->timestamp_start) {
+            $currentEnd = CarbonImmutable::instance($current->timestamp_start)
+                ->addSeconds((float)($current->duration ?? 0.0));
+            if ($currentEnd->getTimestamp() - time() < self::HOLD_SAFETY_SECONDS) {
+                return false;
+            }
+        }
+
+        if ($this->queueRepo->getUnairedSentDuration($station) <= 0.0) {
+            return false;
+        }
+
+        $this->logger->notice(
+            'Top-of-Hour: final approach; holding this pick until the song ahead of it starts.',
+            ['queue_id' => $row->id, 'media_id' => $row->media?->id, 'start' => $start->toIso8601String(), 'gap' => round($gap, 1)]
+        );
+        return true;
+    }
+
+    /**
+     * True from the ID's start (:59:ss) until a few minutes past :00, while
+     * the ID and news own the air.
+     */
+    private function isSettlingAroundTopOfHour(Station $station): bool
+    {
+        $now = CarbonImmutable::now($station->getTimezoneObject());
+        $secondsIntoHour = $now->minute * 60 + $now->second;
+        $idStart = 59 * 60 + $this->clock->getIdStartSecond($station);
+
+        return $secondsIntoHour >= $idStart || $secondsIntoHour < self::SETTLE_SECONDS_AFTER_HOUR;
+    }
+
+    /**
+     * Seconds of a song's tail that overlap the next item: the station
+     * crossfade as the queue projects it, plus the extra of AutoCue's
+     * detected fade-out (about 4s on this station's music).
+     */
+    private function getFadeOverlapSeconds(Station $station): float
+    {
+        return max($station->backend_config->getCrossfadeDuration(), 3.0) + 1.0;
+    }
+
     private function getToleranceSeconds(Station $station): float
     {
         $raw = $station->backend_config->toArray(true) ?? [];
@@ -1340,7 +1461,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             ->addSeconds($this->clock->getIdStartSecond($station));
 
         $gap = $this->secondsBetween($start, $target);
-        if ($gap <= 0.0 || $gap > TopOfHourRuntimeConfiguration::EARLY_ID_WINDOW_SECONDS) {
+        if ($gap <= 0.0 || $gap > self::HOLD_WINDOW_SECONDS) {
             return false;
         }
 

@@ -142,6 +142,16 @@ final class StretchSqueezeQueueTiming implements EventSubscriberInterface
             return;
         }
 
+        // Music only, as on FM automation: shows, podcasts, talk, promos and
+        // jingles always play at natural speed (a target is only a ceiling).
+        if ('music' !== $media->type) {
+            $queueRow->clock_wheel_stretch_ratio = null;
+            $queueRow->duration = null !== $targetSeconds && $calculatedLength > $targetSeconds
+                ? $targetSeconds
+                : $calculatedLength;
+            return;
+        }
+
         $rawConfig = $station->backend_config->toArray(true) ?? [];
         $enabled = (bool)($rawConfig['playout_stretch_squeeze_enabled'] ?? self::DEFAULT_ENABLED);
         [$stretchPercent, $squeezePercent] = self::getStretchSqueezePercents($rawConfig);

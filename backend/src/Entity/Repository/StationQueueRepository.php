@@ -614,7 +614,11 @@ final class StationQueueRepository extends AbstractStationBasedRepository
      * pre-staged up to half an hour early, so counting it would push every
      * projection out by its length for the rest of the hour.
      */
-    public function getUnairedSentDuration(Station $station): float
+    /**
+     * @param float $overlapPerItem seconds each item's tail overlaps the next
+     *   one (crossfade / fade-out), subtracted to get its real on-air share.
+     */
+    public function getUnairedSentDuration(Station $station, float $overlapPerItem = 0.0): float
     {
         $rows = $this->getUnplayedBaseQuery($station)
             ->andWhere('sq.sent_to_autodj = 1')
@@ -651,7 +655,8 @@ final class StationQueueRepository extends AbstractStationBasedRepository
                 continue;
             }
 
-            $seconds += (float)($row->duration ?? 0.0);
+            $duration = (float)($row->duration ?? 0.0);
+            $seconds += $duration > $overlapPerItem ? $duration - $overlapPerItem : $duration;
         }
 
         return $seconds;

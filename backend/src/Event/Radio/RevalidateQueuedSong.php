@@ -23,6 +23,9 @@ use Symfony\Contracts\EventDispatcher\Event;
  */
 final class RevalidateQueuedSong extends Event
 {
+    /** Set by a plugin when this row must not be handed to the backend yet. */
+    private bool $holdBack = false;
+
     public function __construct(
         private readonly Station $station,
         private readonly StationQueue $queueRow,
@@ -43,5 +46,20 @@ final class RevalidateQueuedSong extends Event
     public function getExpectedPlayAt(): DateTimeImmutable
     {
         return $this->expectedPlayAt;
+    }
+
+    /**
+     * Keep the row queued but unsent: at the hand-off it would start now and
+     * be cut (e.g. by the Top-of-Hour ID), so it waits and opens the next
+     * segment instead. Only the hand-off check honours this.
+     */
+    public function holdBack(): void
+    {
+        $this->holdBack = true;
+    }
+
+    public function isHeldBack(): bool
+    {
+        return $this->holdBack;
     }
 }
