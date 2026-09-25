@@ -171,13 +171,12 @@ final class QueueBuilder implements EventSubscriberInterface
             $typesToPlayByPriority[] = $type . '_unscheduled';
         }
 
-        // Track which base playlist types have an actively-scheduled playlist
-        // eligible for this play time. When any scheduled playlist is active
-        // for a type, the unscheduled fallback for that same type is skipped:
-        // a scheduled playlist (e.g. "Hymns & Favorites", midnight–6 AM) must
-        // never be diluted by an always-on playlist (e.g. "General Mix") just
-        // because the scheduled one momentarily ran out of non-duplicate songs.
-        $typesWithActiveScheduledPlaylist = [];
+        // FM-automation rule: when ANY scheduled playlist is active and due now,
+        // ALL unscheduled playlists are blocked. Scheduled playlists own the air
+        // exclusively during their time slot — no rotational or always-on playlist
+        // may leak music in, regardless of playlist type. This mirrors how Zetta,
+        // WideOrbit and other FM systems treat scheduled programme blocks.
+        $anyScheduledPlaylistActive = false;
 
         foreach ($typesToPlayByPriority as $currentPlaylistType) {
             if (empty($activePlaylistsByType[$currentPlaylistType])) {
@@ -185,13 +184,9 @@ final class QueueBuilder implements EventSubscriberInterface
             }
 
             $isUnscheduled = str_ends_with($currentPlaylistType, '_unscheduled');
-            $baseType = $isUnscheduled
-                ? substr($currentPlaylistType, 0, -strlen('_unscheduled'))
-                : substr($currentPlaylistType, 0, -strlen('_scheduled'));
 
-            // If a scheduled playlist for this type is active, never fall
-            // through to its unscheduled counterpart for this queue slot.
-            if ($isUnscheduled && isset($typesWithActiveScheduledPlaylist[$baseType])) {
+            // If any scheduled playlist is active, block all unscheduled playlists.
+            if ($isUnscheduled && $anyScheduledPlaylistActive) {
                 continue;
             }
 
@@ -214,10 +209,10 @@ final class QueueBuilder implements EventSubscriberInterface
                 continue;
             }
 
-            // Record that this base type has an active scheduled playlist so
-            // the unscheduled variant is skipped below.
+            // Record that a scheduled playlist is active so all unscheduled
+            // playlists are blocked for the remainder of this queue slot.
             if (!$isUnscheduled) {
-                $typesWithActiveScheduledPlaylist[$baseType] = true;
+                $anyScheduledPlaylistActive = true;
             }
 
             $this->logger->info(
