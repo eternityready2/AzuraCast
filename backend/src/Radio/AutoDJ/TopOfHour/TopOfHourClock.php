@@ -351,8 +351,8 @@ final class TopOfHourClock
     ): bool {
         // FM-automation rule: ANY scheduled playlist starting at the boundary
         // makes it a hard TOH. No song may play between the ID and the scheduled
-        // program, regardless of whether it has strict_start or other flags.
-        // This prevents filler songs from delaying the scheduled show.
+        // program. The strict_start flag only controls whether the program
+        // interrupts mid-song at :00; the hard boundary prevents post-ID filler.
         foreach ($station->playlists as $playlist) {
             if (!$playlist->is_enabled) {
                 continue;
