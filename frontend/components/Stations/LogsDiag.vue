@@ -2,44 +2,65 @@
     <section
         class="card"
         role="region"
-        aria-labelledby="hdr_logs_diag"
+        aria-label="Logs & Diagnostics"
     >
-        <div class="card-header text-bg-primary">
-            <h2
-                id="hdr_logs_diag"
-                class="card-title"
+        <div class="card-body pb-0">
+            <nav
+                class="nav nav-tabs logs-diag-tabs"
+                role="tablist"
             >
-                {{ $gettext('Logs & Diag') }}
-            </h2>
+                <div
+                    class="nav-item"
+                    role="presentation"
+                >
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: activeTab === 'aircheck'}"
+                        role="tab"
+                        :aria-selected="activeTab === 'aircheck'"
+                        @click="activeTab = 'aircheck'"
+                    >
+                        {{ $gettext('AirCheck') }}
+                    </button>
+                </div>
+                <div
+                    class="nav-item"
+                    role="presentation"
+                >
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: activeTab === 'diagnostics'}"
+                        role="tab"
+                        :aria-selected="activeTab === 'diagnostics'"
+                        @click="activeTab = 'diagnostics'"
+                    >
+                        {{ $gettext('Diagnostics') }}
+                    </button>
+                </div>
+                <div
+                    class="nav-item"
+                    role="presentation"
+                >
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: activeTab === 'logs'}"
+                        role="tab"
+                        :aria-selected="activeTab === 'logs'"
+                        @click="activeTab = 'logs'"
+                    >
+                        {{ $gettext('Logs') }}
+                    </button>
+                </div>
+            </nav>
         </div>
 
         <div class="card-body">
-            <tabs
-                v-model="activeTab"
-                nav-tabs-class="logs-diag-tabs"
-                destroy-on-hide
-            >
-                <tab
-                    id="aircheck"
-                    :label="$gettext('AirCheck')"
-                >
-                    <air-check-panel />
-                </tab>
-
-                <tab
-                    id="diagnostics"
-                    :label="$gettext('Diagnostics')"
-                >
-                    <diagnostics-dashboard />
-                </tab>
-
-                <tab
-                    id="logs"
-                    :label="$gettext('Logs')"
-                >
-                    <logs-panel />
-                </tab>
-            </tabs>
+            <air-check-panel v-if="activeTab === 'aircheck'" />
+            <diagnostics-dashboard v-show="activeTab === 'diagnostics'" />
+            <logs-panel v-if="activeTab === 'logs'" />
         </div>
     </section>
 </template>
@@ -47,8 +68,6 @@
 <script setup lang="ts">
 import {ref} from "vue";
 import {useTranslate} from "~/vendor/gettext";
-import Tabs from "~/components/Common/Tabs.vue";
-import Tab from "~/components/Common/Tab.vue";
 import AirCheckPanel from "~/components/Stations/AirCheck.vue";
 import DiagnosticsDashboard from "~/components/Stations/Logs/DiagnosticsDashboard.vue";
 import LogsPanel from "~/components/Stations/LogsDiag/LogsPanel.vue";
@@ -64,8 +83,8 @@ const activeTab = ref(props.initialTab ?? 'aircheck');
 
 <style lang="scss">
 .logs-diag-tabs.nav-tabs .nav-link {
-    padding: 0.85rem 1.35rem;
-    font-size: 1rem;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
     font-weight: 600;
 }
 

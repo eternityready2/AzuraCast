@@ -406,8 +406,8 @@ onMounted(() => void load());
 </script>
 
 <style scoped>
-.aircheck-page{max-width:1180px;margin:0 auto;color:var(--bs-body-color)}
-.aircheck-hero{display:flex;align-items:center;gap:1rem;padding:1.2rem 1.3rem;border-radius:1rem;color:#fff;background:linear-gradient(90deg,#0a6fc2 0%,#2196f3 100%);box-shadow:0 .55rem 1.4rem rgba(16,24,40,.2)}
+.aircheck-page{color:var(--bs-body-color)}
+.aircheck-hero{display:flex;align-items:center;gap:1rem;padding:1rem 1.3rem;border-radius:1rem;color:#fff;background:var(--bs-primary);box-shadow:0 .25rem .9rem rgba(0,0,0,.14)}
 .aircheck-hero h1{margin:0;color:#fff;font-size:1.55rem;font-weight:750}.aircheck-hero p{margin:.25rem 0 0;color:rgba(255,255,255,.88);font-size:.9rem}
 .hero-icon{width:2.85rem;height:2.85rem;display:grid;place-items:center;flex:0 0 auto;border-radius:.75rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.22)}
 .hero-icon :deep(svg),.status-icon :deep(svg),.feature-icon :deep(svg){width:1.3rem;height:1.3rem}

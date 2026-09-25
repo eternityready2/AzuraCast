@@ -27,7 +27,7 @@
             <div class="diagnostics-actions">
                 <button
                     type="button"
-                    class="btn btn-sm btn-secondary"
+                    class="btn btn-sm btn-outline-light"
                     :disabled="isFetching"
                     @click="refetch()"
                 >
@@ -36,21 +36,21 @@
                 </button>
                 <button
                     type="button"
-                    class="btn btn-sm btn-primary"
+                    class="btn btn-sm btn-light"
                     @click="viewDetailedDiagnostics"
                 >
                     <icon-ic-visibility />
                     <span>{{ $gettext('Detailed Diagnostics') }}</span>
                 </button>
                 <a
-                    class="btn btn-sm btn-outline-light diagnostics-download"
+                    class="btn btn-sm btn-outline-light"
                     :href="diagnosticsDownloadUrl"
                 >
                     <icon-ic-download />
                     <span>{{ $gettext('Developer Report') }}</span>
                 </a>
                 <a
-                    class="btn btn-sm btn-outline-light diagnostics-download"
+                    class="btn btn-sm btn-outline-light"
                     :href="diagnosticsCsvUrl"
                 >
                     <icon-ic-download />
@@ -840,26 +840,21 @@ function dateInputValue(offsetDays: number): string {
 .diagnostics-console {
     --diag-status: var(--bs-success);
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--bs-border-color) 68%, transparent);
-    border-radius: 1.35rem;
-    background:
-        radial-gradient(circle at 8% -10%, rgba(var(--bs-primary-rgb), 0.22), transparent 34%),
-        radial-gradient(circle at 98% 8%, rgba(var(--bs-info-rgb), 0.11), transparent 28%),
-        linear-gradient(145deg, color-mix(in srgb, var(--bs-secondary-bg) 94%, var(--bs-primary) 6%), var(--bs-secondary-bg));
+    border: 0;
+    border-radius: 1rem;
     box-shadow:
-        0 1.25rem 3.25rem rgba(0, 0, 0, 0.17),
-        inset 0 1px 0 rgba(255, 255, 255, 0.045);
+        0 0.6rem 1.8rem rgba(0, 0, 0, 0.09),
+        inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
 .diagnostics-hero {
     display: flex;
-    min-height: 6.35rem;
     align-items: center;
     justify-content: space-between;
     gap: 1.5rem;
-    padding: 1.15rem 1.25rem 1.05rem;
-    background:
-        linear-gradient(105deg, rgba(var(--bs-primary-rgb), 0.3), rgba(var(--bs-primary-rgb), 0.075) 52%, transparent 82%);
+    padding: 1rem 1.25rem;
+    background-color: var(--bs-primary);
+    color: #fff;
 }
 
 .diagnostics-heading {
@@ -879,24 +874,20 @@ function dateInputValue(offsetDays: number): string {
     gap: 0.24rem;
     padding: 0.72rem;
     border-radius: 0.9rem;
-    background: color-mix(in srgb, var(--bs-primary) 22%, var(--bs-body-bg));
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.09),
-        0 0.65rem 1.5rem rgba(var(--bs-primary-rgb), 0.18);
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .diagnostics-mark span {
     width: 0.3rem;
     border-radius: 999px;
-    background: var(--bs-primary);
-    box-shadow: 0 0 0.75rem rgba(var(--bs-primary-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.9);
 }
 
 .diagnostics-mark span:nth-child(1) { height: 52%; }
 .diagnostics-mark span:nth-child(2) { height: 100%; }
 .diagnostics-mark span:nth-child(3) { height: 72%; }
 
-.diagnostics-eyebrow,
 .panel-kicker,
 .feature-category,
 .filter-label {
@@ -907,17 +898,26 @@ function dateInputValue(offsetDays: number): string {
     text-transform: uppercase;
 }
 
+.diagnostics-eyebrow {
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 0.67rem;
+    font-weight: 800;
+    letter-spacing: 0.105em;
+    text-transform: uppercase;
+}
+
 .diagnostics-heading h2 {
     margin: 0.12rem 0 0.2rem;
-    font-size: clamp(1.25rem, 2vw, 1.7rem);
+    color: #fff;
+    font-size: clamp(1.1rem, 2vw, 1.45rem);
     font-weight: 760;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.015em;
 }
 
 .diagnostics-heading p {
     max-width: 56rem;
     margin: 0;
-    color: var(--bs-secondary-color);
+    color: rgba(255, 255, 255, 0.82);
     font-size: 0.83rem;
 }
 
@@ -936,18 +936,13 @@ function dateInputValue(offsetDays: number): string {
     box-shadow: 0 0.25rem 0.65rem rgba(0, 0, 0, 0.12);
 }
 
-.diagnostics-download {
-    border-color: color-mix(in srgb, var(--bs-body-color) 22%, transparent);
-    color: var(--bs-body-color);
-}
 
 .diagnostics-filter-bar {
     display: flex;
     align-items: end;
     gap: 0.8rem;
     padding: 0.78rem 0.9rem;
-    border-top: 1px solid color-mix(in srgb, var(--bs-border-color) 45%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 55%, transparent);
+    border-bottom: 1px solid var(--bs-border-color);
     background: color-mix(in srgb, var(--bs-body-bg) 91%, var(--bs-primary) 9%);
 }
 
@@ -1034,10 +1029,8 @@ function dateInputValue(offsetDays: number): string {
 .diagnostics-panel,
 .feature-health-card,
 .service-matrix {
-    background: color-mix(in srgb, var(--bs-body-bg) 93%, var(--bs-primary) 7%);
-    box-shadow:
-        0 0.38rem 1rem rgba(0, 0, 0, 0.085),
-        inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    background: var(--bs-card-bg);
+    box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.06);
 }
 
 .health-score-card {
@@ -1280,7 +1273,7 @@ function dateInputValue(offsetDays: number): string {
 }
 
 @media (max-width: 1199.98px) {
-    .diagnostics-hero { align-items: flex-start; }
+    .diagnostics-hero { align-items: flex-start; flex-wrap: wrap; }
     .diagnostics-filter-bar { flex-wrap: wrap; }
     .filter-summary { width: 100%; margin-left: 0; justify-items: start; text-align: left; }
     .diagnostics-command-row { grid-template-columns: 1fr; }
