@@ -150,6 +150,13 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # target, or runs dry, inside this window, the ID takes the air now.
             top_of_hour_id_early_window_seconds = ref({$this->earlyWindowSeconds()})
             top_of_hour_id_early = ref(false)
+            # Set by the fit on the final song: the air is covered (the song's own
+            # ending, or one fill promo) until this epoch, so an idle AutoDJ
+            # transport before it is expected, not a reason to start the ID early.
+            top_of_hour_air_covered_until = ref(0.0)
+            # The final song (or its fill) ends on the target by itself, so the
+            # emergency pre-fade is not applied to it.
+            top_of_hour_clean_landing = ref(false)
             # Title handling after the ID: the song that ended/was cut must not have
             # its title replayed; a held item that already began keeps its own.
             top_of_hour_last_sq = ref("")
@@ -259,8 +266,12 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     and m["media_type"] == "music"
                     and full > 60.0
                 then
-                    # The next item starts when this one begins its fade-out.
-                    len = full - cross_end
+                    # The song finishes (last sample, after its own fade-out) on the
+                    # target, so it is never faded or cut by the ID. Transitions
+                    # here play the outgoing tail in full before the next item
+                    # (each track airs cue_out - cue_in, measured 2026-09-24), so a
+                    # fill promo also starts at the song's last sample.
+                    len = full
                     avail = target - time()
                     gap = avail - len
                     max_adj = len * {$fitMaxAdjust}
@@ -274,8 +285,12 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                         if gap <= max_adj then
                             if abs(gap) > 0.5 then
                                 top_of_hour_fit_set(len / avail)
-                                log("Top-of-Hour fit: '#{item}' tempo #{top_of_hour_fit_tempo()} to land the ID on target (gap #{gap}s).")
+                                log("Top-of-Hour fit: '#{item}' tempo #{top_of_hour_fit_tempo()} so it ends on the ID target (gap #{gap}s).")
+                            else
+                                log("Top-of-Hour fit: '#{item}' already ends on the ID target (gap #{gap}s).")
                             end
+                            top_of_hour_air_covered_until := target
+                            top_of_hour_clean_landing := true
                         elsif list.length(requests.queue()) > 0 then
                             log("Top-of-Hour fit: #{gap}s gap after '#{item}'; the requests queue already has an item to play in it.")
                         else
@@ -315,16 +330,22 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                                 requests.push(request.create(best_uri()))
                                 song_avail = avail - best_len()
                                 top_of_hour_fit_set(len / song_avail)
+                                top_of_hour_air_covered_until := target
+                                top_of_hour_clean_landing := exact
                                 log("Top-of-Hour fit: #{gap}s gap after '#{item}'; one #{best_len()}s promo queued (exact=#{exact}), song tempo #{top_of_hour_fit_tempo()}.")
                             else
                                 top_of_hour_fit_set(1.0 - {$fitMaxAdjust})
+                                top_of_hour_air_covered_until := time() + len / (1.0 - {$fitMaxAdjust})
                                 log("Top-of-Hour fit: #{gap}s gap after '#{item}' and no promo fits; song slowed to #{top_of_hour_fit_tempo()}.")
                             end
                         end
                     elsif gap <= 0.0 - max_adj and gap > -60.0 then
                         # Runs over the ID: speed up as far as allowed so the ID
-                        # takes as little of the song's outro as possible.
+                        # takes as little of the song's outro as possible. This is
+                        # the emergency case the pre-fade exists for.
                         top_of_hour_fit_set(1.0 + {$fitMaxAdjust})
+                        top_of_hour_air_covered_until := target
+                        top_of_hour_clean_landing := false
                         log("Top-of-Hour fit: '#{item}' runs #{0.0 - gap}s past the ID; tempo #{top_of_hour_fit_tempo()} to shorten the overrun.")
                     end
                 end
@@ -446,6 +467,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     and top_of_hour_id.is_ready()
                     and target > 0.0
                     and id_fade_len > 0.0
+                    and not top_of_hour_clean_landing()
                     and now >= target - id_fade_len
                     and now < target
                 then
@@ -525,9 +547,19 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     top_of_hour_id_in_early_window()
                     and (
                         top_of_hour_id_early()
+                        # The air has actually gone quiet: start the ID rather than
+                        # let the station fallback file play.
+                        or not source.is_ready(radio_before_top_of_hour)
+                        # AutoDJ has nothing next and nothing is covering the air.
+                        # During the final approach the transport is idle by
+                        # design (the next item is held for the new hour) while
+                        # the song's own ending or a fill promo plays; starting the
+                        # ID then cut them (8pm 2026-09-24: ID 21s early, promo
+                        # muted underneath).
                         or (
                             azuracast.autodj_transport_ready()
                             and not source.methods(azuracast.autodj_transport()).is_ready()
+                            and now >= top_of_hour_air_covered_until() - 0.25
                         )
                     )
                 then
@@ -550,6 +582,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 rigid_schedule_toh_lane_owns_air := true
                 top_of_hour_id_early := false
                 top_of_hour_id_release_epoch := 0.0
+                top_of_hour_air_covered_until := 0.0
+                top_of_hour_clean_landing := false
 
                 # Do NOT discard the AutoDJ here. The muted underlay keeps whatever
                 # is on air clocked (and inaudible) through the ID; discarding now
@@ -649,6 +683,8 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 end
 
                 top_of_hour_id_active := false
+                top_of_hour_air_covered_until := 0.0
+                top_of_hour_clean_landing := false
 
                 rigid_schedule_toh_lane_owns_air := false
                 top_of_hour_id_early := false

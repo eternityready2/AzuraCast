@@ -34,6 +34,7 @@ final class Annotations implements EventSubscriberInterface
         private readonly CustomFieldRepository $customFieldRepo,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly AutoCueCache $autoCueCache,
+        private readonly AiredLength $airedLength,
     ) {
     }
 
@@ -57,9 +58,17 @@ final class Annotations implements EventSubscriberInterface
     /**
      * Pulls the next song from the AutoDJ, dispatches the AnnotateNextSong event and returns the built result.
      */
+    /**
+     * @param bool $autoDjHeldByTopOfHour Liquidsoap's Top-of-Hour lane is holding
+     *   AutoDJ: whatever is sent now only loads, and starts from its beginning
+     *   when the ID/news releases. A "held for the new hour" decision is exactly
+     *   that, so it is not refused here; refusing left nothing loaded and the
+     *   hour opened after a fetch instead of straight after the ID.
+     */
     public function annotateNextSong(
         Station $station,
         bool $asAutoDj = false,
+        bool $autoDjHeldByTopOfHour = false,
     ): string {
         $queueRow = $this->queueRepo->getNextToSendToAutoDj($station);
 
@@ -104,7 +113,7 @@ final class Annotations implements EventSubscriberInterface
             // before the Top-of-Hour ID and be cut. It stays queued (unsent)
             // and opens the new hour; the gap before the ID is Liquidsoap's
             // to fill (tempo / one promo), never a song the ID cuts.
-            if ($heldBack && $this->em->contains($queueRow)) {
+            if ($heldBack && !$autoDjHeldByTopOfHour && $this->em->contains($queueRow)) {
                 $this->em->flush();
                 throw new RuntimeException(
                     'Held for the new hour: this item would start just before the Top-of-Hour ID and be cut.'
@@ -132,18 +141,14 @@ final class Annotations implements EventSubscriberInterface
         $currentSong = $station->current_song;
         $now = Time::nowUtc();
 
-        $overlap = max($station->backend_config->getCrossfadeDuration(), 3.0) + 1.0;
-
+        // Each track holds the air for its AutoCue cue_out - cue_in (measured
+        // against song history to ~0.1s); the file length was off by up to 17s
+        // per track, which is how the 8pm 2026-09-24 final song landed 18s short.
         $expectedPlayAt = $now;
         if (null !== $currentSong && null !== $currentSong->timestamp_start) {
-            // The next item starts when the current one begins its fade-out,
-            // not at its last sample; the same overlap applies to each sent
-            // item below. Without it the final song of the hour is judged
-            // seconds late per song and lands early, freeing the air for a
-            // new song the ID then cuts.
-            $currentDuration = (float)($currentSong->duration ?? 1.0);
+            $currentLength = $this->airedLength->lengthOf($currentSong->media, $currentSong->duration);
             $expectedPlayAt = CarbonImmutable::instance($currentSong->timestamp_start)
-                ->addSeconds(max(1.0, $currentDuration - $overlap));
+                ->addSeconds(max(1.0, $currentLength));
 
             if ($expectedPlayAt->lessThan($now)) {
                 $expectedPlayAt = $now;
@@ -151,16 +156,17 @@ final class Annotations implements EventSubscriberInterface
         }
 
         // ...and then everything already resolved into Liquidsoap ahead of
-        // this row, because all of it airs before this row does. Without
-        // this the projection reads "right after the current song ends",
-        // when in practice the crossfade has normally already pulled another
-        // whole track in between. See
-        // StationQueueRepository::getUnairedSentDuration() for the
-        // measurements and for the top-of-hour mis-timing that omitting it
-        // caused.
-        $expectedPlayAt = $expectedPlayAt->addSeconds(
-            $this->queueRepo->getUnairedSentDuration($station, $overlap)
-        );
+        // this row, because all of it airs before this row does. Now-playing
+        // feedback lags a track change by several seconds, so the track that
+        // has just started is still in this list and is counted here.
+        foreach ($this->queueRepo->getUnairedSentRows($station) as $aheadRow) {
+            if ($aheadRow->id === $queueRow->id) {
+                continue;
+            }
+            $expectedPlayAt = $expectedPlayAt->addSeconds(
+                $this->airedLength->lengthOf($aheadRow->media, $aheadRow->duration)
+            );
+        }
 
         $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable());
         $this->eventDispatcher->dispatch($event);

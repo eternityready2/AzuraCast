@@ -780,6 +780,27 @@ def azuracast.live_aware_crossfade_impl(old, new) =
 end
 
 def azuracast.apply_crossfade(s) =
+    # While the Top-of-Hour lane holds AutoDJ, the underlay plays a silent hold
+    # track, and metadata replayed onto it carries the last song's
+    # liq_cross_end_duration. cross cannot see a hold track's end coming, so it
+    # buffered that many seconds of silence and the new hour opened ~6s late
+    # (6pm-8pm 2026-09-24). Nothing seen during the hold gets a crossfade.
+    s = metadata.map(
+        id="autodj_hold_cross_reset",
+        update=true,
+        fun (_) ->
+            if azuracast.autodj_hold() then
+                [
+                    ("liq_cross_end_duration", "0."),
+                    ("liq_cross_start_duration", "0."),
+                    ("liq_cross_max_start_duration", "0.")
+                ]
+            else
+                []
+            end,
+        s
+    )
+
     cross(
         duration=settings.azuracast.default_cross(),
         azuracast.live_aware_crossfade_impl,

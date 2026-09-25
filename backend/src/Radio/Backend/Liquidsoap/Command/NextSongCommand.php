@@ -34,13 +34,12 @@ use Throwable;
  * TopOfHourRuntimeConfiguration::top_of_hour_id_enter), and this endpoint
  * declines to refill it for the rest of the window.
  *
- * That reserved request's StationQueue row was already marked "sent" the
- * moment it was originally resolved, though -- so discarding it in Liquidsoap
- * would otherwise lose it from rotation for good, and the new hour would open
- * on the row queued AFTER it instead of the one that was actually queued next.
- * releasePendingAutoDjReserve() below gives it back the moment the window
- * opens, so at release the lane's prefetch_autodj_next() call resolves that
- * exact same row fresh from 0:00 -- nothing is silently skipped.
+ * The lane now holds AutoDJ instead of draining it: an item already loaded
+ * stays loaded and starts from its beginning at release, so its row is never
+ * handed back to the queue (doing so aired it twice).
+ *
+ * Once the lane holds AutoDJ, requests are answered again: the new hour's
+ * first song loads under the hold and starts the moment the ID/news ends.
  *
  * Liquidsoap's request.dynamic treats any non-200 from this endpoint as "no
  * request available" (see azuracast.api_call: it returns null on a non-200, and
@@ -99,38 +98,17 @@ final class NextSongCommand extends AbstractCommand
     ): array {
         // While Liquidsoap holds AutoDJ under the ID, a fetched item is loaded but
         // cannot play, so let it load now and open the hour with no dead air.
-        if ($this->isInsideTopOfHourIdWindow($station) && !$this->isAutoDjHeldByLiquidsoap($station)) {
+        $insideIdWindow = $this->isInsideTopOfHourIdWindow($station);
+        $heldByTopOfHour = $insideIdWindow && $this->isAutoDjHeldByLiquidsoap($station);
+
+        if ($insideIdWindow && !$heldByTopOfHour) {
             $this->warmNextHourOpeners($station);
 
-            // The Liquidsoap runtime discards whatever it already had resolved
-            // one-ahead so that request cannot surface mid-song once the ID
-            // releases (see TopOfHourRuntimeConfiguration::top_of_hour_id_enter).
-            // That request's StationQueue row was already marked "sent" the
-            // moment it was resolved, though, so without this it would be lost
-            // from rotation for good. Give it back every time a request is
-            // refused in this window; idempotent once nothing is left to give
-            // back.
-            $released = $this->topOfHourClock->releasePendingAutoDjReserve($station);
-
-            // The ID window is a ~39s stretch in which nothing else about the
-            // AutoDJ queue is observable, so the outcome is logged either way.
-            // Otherwise a deliberate no-op here and this endpoint never being
-            // reached at all look identical after the fact, which makes any
-            // report of "the wrong song opened the hour" undiagnosable.
-            if (null !== $released) {
-                $this->logger->notice(
-                    'Top-of-Hour ID: handed the unaired AutoDJ reserve back to the queue.',
-                    [
-                        'queue_id' => $released->id,
-                        'song' => $released->text,
-                        'duration' => $released->duration,
-                    ]
-                );
-            } else {
-                $this->logger->info(
-                    'Top-of-Hour ID: no unaired AutoDJ reserve to hand back this time.'
-                );
-            }
+            // Nothing is handed back to the queue here. The ID lane holds
+            // AutoDJ rather than discarding what it has loaded, so an item
+            // already in Liquidsoap plays from its start after the ID; handing
+            // its row back as well aired it twice (7pm 2026-09-24: "I Exalt
+            // Thee" played back to back).
 
             // Non-200 -> Liquidsoap reads this as "no request available".
             throw new RuntimeException(
@@ -140,7 +118,7 @@ final class NextSongCommand extends AbstractCommand
         }
 
         return [
-            'uri' => $this->annotations->annotateNextSong($station, $asAutoDj),
+            'uri' => $this->annotations->annotateNextSong($station, $asAutoDj, $heldByTopOfHour),
         ];
     }
 

@@ -17,6 +17,7 @@ use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Event\Radio\RevalidateQueuedSong;
 use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\AiredLength;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\StretchSqueezeQueueTiming;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
@@ -80,8 +81,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     /** Last stretch before the ID in which songs go to Liquidsoap one at a time. */
     private const float FINAL_APPROACH_SECONDS = 720.0;
 
-    /** Never hold while the song on air ends within this many seconds. */
-    private const int HOLD_SAFETY_SECONDS = 25;
     public const string CONFIG_SWAP_MIN_GAP = 'top_of_hour_swap_min_gap_seconds';
 
     private const bool DEFAULT_SWAP_ENABLED = true;
@@ -114,6 +113,33 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     /** Rotate between this many equally-good matches so the hour doesn't rut. */
     private const int CANDIDATE_POOL_SIZE = 5;
 
+    /**
+     * Where the final song is when the ID starts. false: its last sample ends
+     * on :59:59, so it finishes on its own (the station's rule: no fading or
+     * cutting a song unless there is no alternative). true: its fade-out
+     * begins on :59:59 and the ID covers the outro.
+     */
+    private const bool LAND_FADE_START_ON_ID = false;
+
+    /** A final song landing this close needs no swap; Liquidsoap's tempo fit trims the rest. */
+    private const float LANDED_TOLERANCE_SECONDS = 2.0;
+
+    /** Largest error Liquidsoap's fit can absorb by tempo (3%, see TopOfHourRuntimeConfiguration). */
+    private const float FIT_TEMPO_FRACTION = 0.03;
+
+    /** Score penalty for a candidate whose aired length is only estimated (no AutoCue yet). */
+    private const float UNKNOWN_LENGTH_PENALTY = 8.0;
+
+    /** Score penalty for a song outside the playlists scheduled right now. */
+    private const float OFF_SCHEDULE_PENALTY = 1.5;
+
+    /**
+     * Final approach: a row is held while the track ahead of it has not
+     * started. "Started" is judged from projected timing, because now-playing
+     * feedback lags a track change by several seconds.
+     */
+    private const float HOLD_SLACK_SECONDS = 20.0;
+
     /** @var array<string, float> sorted playlist id list => shortest track length, per request. */
     private array $shortestTrackCache = [];
 
@@ -122,6 +148,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         private readonly StationQueueRepository $queueRepo,
         private readonly Scheduler $scheduler,
         private readonly AiNewsScheduleForecastService $aiNewsForecast,
+        private readonly AiredLength $airedLength,
     ) {
     }
 
@@ -275,8 +302,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             'Top-of-Hour swap: SWAPPED the final song of the hour for a duration-matched track.',
             $context + [
                 'replacement_media_id' => $replacementMedia->id,
-                'replacement_length' => round($replacementMedia->getCalculatedLength(), 2),
-                'landing_error' => round($context['seconds_to_fill'] - $replacementMedia->getCalculatedLength(), 2),
+                'replacement_aired_length' => round($this->landingLength($replacementMedia), 2),
             ]
         );
     }
@@ -333,6 +359,27 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
+        // Due to start under the ID/news lane (just after :59:59, before the
+        // lane releases): it opens the new hour. It must not be loaded where
+        // the final song's fade could start it a second before the ID and leave
+        // it playing muted underneath (7pm 2026-09-24: "Making Room" started at
+        // 6:59:58 and never aired). It loads once the lane holds AutoDJ.
+        $idWindow = $this->getTopOfHourLaneWindowContaining($station, CarbonImmutable::instance($event->getExpectedPlayAt()));
+        if (null !== $idWindow && $this->isHoldableOpener($row)) {
+            $event->holdBack();
+            $event->opensAfter($idWindow['release']->toDateTimeImmutable());
+            $this->logger->notice(
+                'Top-of-Hour: holding the new hour\'s first item until the ID lane holds AutoDJ.',
+                [
+                    'queue_id' => $row->id,
+                    'media_id' => $row->media?->id,
+                    'start' => $event->getExpectedPlayAt()->format(DATE_ATOM),
+                    'release' => $idWindow['release']->toIso8601String(),
+                ]
+            );
+            return;
+        }
+
         // In the last minutes before the ID, hand songs to Liquidsoap one at a
         // time: it otherwise takes them two ahead, so the final song was
         // locked in ~12 minutes early and anything that aired in between (an
@@ -341,6 +388,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // the real time known. The hold is only honoured at the hand-off.
         if ($this->shouldSendOneAtATime($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
             $event->holdBack();
+            // Decided at the hand-off, where the start time is exact. The
+            // periodic queue projection runs on file lengths and drifted 14s by
+            // 8:47pm 2026-09-24, flipping the pick back and forth every cycle.
+            return;
         }
 
         if (!$this->isOrdinaryMusicRow($row)) {
@@ -413,8 +464,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             $context + [
                 'queue_id' => $row->id,
                 'replacement_media_id' => $replacementMedia->id,
-                'replacement_length' => round($replacementMedia->getCalculatedLength(), 2),
-                'landing_error' => round($context['seconds_to_fill'] - $replacementMedia->getCalculatedLength(), 2),
+                'replacement_aired_length' => round($this->landingLength($replacementMedia), 2),
             ]
         );
     }
@@ -437,8 +487,8 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         StationMedia $media,
         CarbonImmutable $start,
     ): array|false|null {
-        $naturalLength = $media->getCalculatedLength();
-        if ($naturalLength <= 0.0) {
+        $originalLanding = $this->landingLength($media);
+        if ($originalLanding <= 0.0) {
             $this->logger->notice(
                 'Top-of-Hour swap: evaluateFinalSlot bailed -- media has no calculated length.',
                 ['media_id' => $media->id]
@@ -460,17 +510,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        // Liquidsoap starts the next item when a song begins its fade-out, a
-        // few seconds before its last sample. A song whose full length equals
-        // the gap therefore frees the air early and a new song starts only to
-        // be cut by the ID. Aim for the fade-out to begin at the ID instead:
-        // the ID covers the final seconds of the song's own outro.
-        // A slot starting at or after the ID is the new hour's opener, not a
-        // final slot; test that before adding the fade overlap, or the opener
-        // looks like a few seconds left to fill and gets swapped for a promo
-        // (3pm 2026-09-24).
-        $rawGap = $this->secondsBetween($start, $target);
-        $gap = $rawGap > 0.0 ? $rawGap + $this->getFadeOverlapSeconds($station) : $rawGap;
+        // Seconds from this slot's start to the ID. The final song must fill
+        // exactly that: measured by its aired length (AutoCue cue points), not
+        // its file length, which ran 5s long on average and 17s at worst.
+        $gap = $this->secondsBetween($start, $target);
         if ($gap <= 0.0) {
             $this->logger->notice(
                 'Top-of-Hour swap: evaluateFinalSlot bailed -- start is already past the ID target.',
@@ -483,11 +526,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        // Diagnostic trace, unconditional (debug level, so it never pollutes
-        // normal operational logs but is there to grep for): confirms this
-        // method is actually being reached for a given pick and shows the
-        // raw numbers behind whatever it decides next, whether or not this
-        // turns out to be the final slot.
         $this->logger->notice(
             'Top-of-Hour swap: evaluateFinalSlot reached.',
             [
@@ -496,18 +534,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 'start' => $start->toIso8601String(),
                 'target' => $target->toIso8601String(),
                 'gap' => round($gap, 2),
-                'natural_length' => round($naturalLength, 2),
-                'remainder' => round($gap - $naturalLength, 2),
+                'aired_length' => round($originalLanding, 2),
+                'remainder' => round($gap - $originalLanding, 2),
             ]
         );
 
-        // Duration matches are not limited to the original pick's own playlist:
-        // a station's music playlists are all "the same kind of thing" once you
-        // are down to the last handful of seconds before the ID, and confining
-        // the search to one playlist means a station only ever lands cleanly
-        // when THAT specific playlist happens to own a track of the right
-        // length. Every other currently-eligible music playlist is a fair
-        // source too.
         $playlists = $this->getEligiblePlaylists($station, $start, $playlist);
 
         $tolerance = $this->getToleranceSeconds($station);
@@ -516,7 +547,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // Is this actually the last music slot of the hour? It is, if the chosen
         // track either crosses the deadline or leaves behind a remainder too
         // short for another whole song to occupy.
-        $remainder = $gap - $naturalLength;
+        $remainder = $gap - $originalLanding;
         if ($remainder > $minGap) {
             $this->logger->notice(
                 'Top-of-Hour swap: evaluateFinalSlot bailed -- not yet the final slot '
@@ -530,8 +561,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        // From here on this IS the final slot, so every exit gets logged. If the
-        // feature ever looks inert, these lines say exactly why.
         $context = [
             'playlist' => $playlist->name,
             'playlist_id' => $playlist->id,
@@ -539,40 +568,21 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             'id_deadline_at' => $target->toIso8601String(),
             'seconds_to_fill' => round($gap, 2),
             'original_media_id' => $media->id,
-            'original_length' => round($naturalLength, 2),
+            'original_aired_length' => round($originalLanding, 2),
             'original_overshoot' => round(-$remainder, 2),
             'tolerance' => $tolerance,
             'min_fillable_gap' => round($minGap, 2),
         ];
 
         if ($gap < $minGap) {
-            // Not enough room for a properly duration-matched replacement --
-            // but that is not the same as nothing being wrong. A track whose
-            // OWN natural length badly overshoots this tiny remaining gap
-            // (observed live tonight: a 503s track landing with ~1s of gap
-            // left, an 8+ minute overshoot) cannot be fixed by the pre-fade
-            // either: that fade is sized for a track landing a few seconds
-            // late, not minutes late, so "let the pre-fade handle it" was
-            // itself the bug in this branch, not just an unlogged one.
-            // Swapping to whatever the shortest available eligible track is
-            // will not land cleanly, but it shrinks an unrecoverable
-            // multi-minute overshoot down to (at worst) that track's own
-            // length past the deadline -- strictly better, even though not
-            // perfect. This is a needed floor under the whole feature: it
-            // should never make a bad landing worse than doing nothing, but
-            // it also should never leave an enormous overshoot standing
-            // when a smaller one was available for the taking.
-            $overshoot = $naturalLength - $gap;
+            // Too little of the hour left for a whole song. Take the longest
+            // item (music first, then promos/sweepers) that still ends before
+            // the ID; if nothing fits, drop the slot so nothing is cut.
+            $overshoot = $originalLanding - $gap;
             if ($overshoot <= $tolerance) {
                 return null;
             }
 
-            // Best fit, never "shortest even if it still overshoots": an item
-            // that cannot finish before the ID is a guaranteed fade-cut
-            // (2026-09-23 4pm: a 21s radio spot swapped into a 6s gap). Take the
-            // longest item from regular music or the promo/sweeper pool that
-            // ends within tolerance of the ID; if none fits, drop the slot so
-            // the previous item ends and the ID follows a brief pause.
             $fitLimit = $gap + $tolerance;
             $best = $this->findBestFitMedia($station, $playlists, $media->id, $start, $fitLimit);
             $shortForm = $this->findBestFitMedia(
@@ -584,38 +594,40 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             );
             if (
                 null !== $shortForm
-                && (null === $best || $shortForm[1]->getCalculatedLength() > $best[1]->getCalculatedLength())
+                && (null === $best || $this->landingLength($shortForm[1]) > $this->landingLength($best[1]))
             ) {
                 $best = $shortForm;
             }
 
             if (null !== $best) {
                 [$spm, $replacementMedia, $isRepeat] = $best;
-                $bestLength = $replacementMedia->getCalculatedLength();
+                $bestLength = $this->landingLength($replacementMedia);
 
                 $this->logger->notice(
                     'Top-of-Hour swap: too little of the hour left for a whole song; '
                     . 'using the best-fitting item that ends cleanly before the ID.',
                     $context + [
-                        'min_gap' => $minGap,
                         'replacement_media_id' => $replacementMedia->id,
-                        'replacement_length' => round($bestLength, 2),
+                        'replacement_aired_length' => round($bestLength, 2),
                         'landing_error' => round($gap - $bestLength, 2),
                         'is_repeat_pick' => $isRepeat,
                     ]
                 );
 
-                return [$spm, $replacementMedia, $context + ['is_repeat_pick' => $isRepeat]];
+                return [$spm, $replacementMedia, $context + [
+                    'is_repeat_pick' => $isRepeat,
+                    'landing_error' => round($gap - $bestLength, 2),
+                ]];
             }
 
             $this->logger->notice(
                 'Top-of-Hour swap: nothing fits the remaining gap; dropping this slot so nothing is cut by the ID.',
-                $context + ['min_gap' => $minGap, 'fit_limit' => round($fitLimit, 2)]
+                $context + ['fit_limit' => round($fitLimit, 2)]
             );
             return false;
         }
 
-        if (abs($remainder) <= $tolerance) {
+        if (abs($remainder) <= min($tolerance, self::LANDED_TOLERANCE_SECONDS)) {
             $this->logger->notice(
                 'Top-of-Hour swap: the selected track already lands on the deadline; no swap needed.',
                 $context
@@ -623,76 +635,237 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        $replacement = $this->findDurationMatchedMedia(
+        // Search every music file in the library (not only the playlist the
+        // pick came from) for the one whose aired length lands closest to the
+        // ID. Whatever small error is left, Liquidsoap's fit removes with a
+        // pitch-preserving tempo change of at most 3%.
+        $maxError = max(min($tolerance, self::LANDED_TOLERANCE_SECONDS), $gap * self::FIT_TEMPO_FRACTION);
+        $match = $this->findLibraryMatch($station, $playlists, $gap, $maxError, $media->id, $start);
+
+        if (null !== $match && abs($match['error']) < abs($remainder) - 0.5) {
+            $this->logger->notice(
+                'Top-of-Hour swap: found a song in the library that ends on the ID.',
+                $context + [
+                    'replacement_media_id' => $match['media']->id,
+                    'replacement_aired_length' => round($match['length'], 2),
+                    'landing_error' => round($match['error'], 2),
+                    'length_known' => $match['known'],
+                    'is_repeat_pick' => $match['is_repeat'],
+                ]
+            );
+
+            return [$match['spm'], $match['media'], $context + [
+                'is_repeat_pick' => $match['is_repeat'],
+                'landing_error' => round($match['error'], 2),
+            ]];
+        }
+
+        if (abs($remainder) <= $maxError) {
+            // Nothing in the library beats it and Liquidsoap's tempo fit can
+            // absorb what is left, so keep it.
+            $this->logger->notice(
+                'Top-of-Hour swap: keeping the selected track; the tempo fit absorbs the remaining error.',
+                $context
+            );
+            return null;
+        }
+
+        $stretchReplacement = $this->findStretchMatchedMedia(
             $station,
             $playlists,
             $gap,
-            $tolerance,
             $media->id,
             $start,
         );
 
-        if (null === $replacement) {
-            // No track is close enough on its own. Before giving up to the
-            // pre-fade, check whether the station's existing pitch-preserving
-            // stretch/squeeze feature (Playout > Stretch/Squeeze, already used
-            // for Clock Wheel and scheduled-playlist boundaries) can speed up
-            // or slow down some eligible track just enough to land exactly on
-            // the deadline. This is the case the exact-duration search above
-            // can never solve by construction: a catalog rarely has a track
-            // sitting within a few seconds of any arbitrary remaining gap, but
-            // a +/-5% time adjustment turns a much wider band of "roughly the
-            // right length" tracks into an exact landing, with no audible cut
-            // and (unlike a plain duration-tolerance match) no dead air either.
-            $stretchReplacement = $this->findStretchMatchedMedia(
-                $station,
-                $playlists,
-                $gap,
-                $media->id,
-                $start,
+        if (null === $stretchReplacement) {
+            $this->logger->warning(
+                'Top-of-Hour swap: NO song in the library lands on the ID, even with stretch/squeeze; '
+                . 'Liquidsoap fit and pre-fade will handle it.',
+                $context
             );
+            return null;
+        }
 
-            if (null === $stretchReplacement) {
-                $this->logger->warning(
-                    'Top-of-Hour swap: NO duration-matched or stretch-matched track in any '
-                    . 'eligible playlist (including as a repeat); falling back to the pre-fade soft cut.',
-                    $context + ['playlists_searched' => array_map(static fn (StationPlaylist $p): string => $p->name, $playlists)]
-                );
-                return null;
+        [$spm, $replacementMedia, $ratio, $isRepeat] = $stretchReplacement;
+
+        $stretchContext = $context + [
+            'is_repeat_pick' => $isRepeat,
+            'stretch_target_seconds' => round($gap, 2),
+            'stretch_ratio' => round($ratio, 4),
+        ];
+
+        $this->logger->notice(
+            'Top-of-Hour swap: no library song within the tempo range; using pitch-preserving '
+            . 'stretch/squeeze to land a nearby track on the deadline instead.',
+            $stretchContext + ['replacement_media_id' => $replacementMedia->id]
+        );
+
+        return [$spm, $replacementMedia, $stretchContext];
+    }
+
+    /**
+     * The length the final song must fill before the ID: its aired length
+     * (AutoCue cue_out - cue_in), less its fade-out when the ID is meant to
+     * cover the outro.
+     */
+    private function landingLength(StationMedia $media): float
+    {
+        $aired = $this->airedLength->forMedia($media);
+
+        return self::LAND_FADE_START_ON_ID
+            ? max(0.0, $aired['length'] - $aired['fade_out'])
+            : $aired['length'];
+    }
+
+    /**
+     * Every music file in the station library that belongs to an enabled
+     * playlist, scored by how closely its aired length fills $neededSeconds.
+     * Songs whose length AutoCue has measured, songs in the playlists scheduled
+     * now, and songs not played recently are preferred, in that order of weight.
+     *
+     * @param list<StationPlaylist> $eligiblePlaylists
+     * @return array{spm: StationPlaylistMedia, media: StationMedia, length: float, error: float, known: bool, is_repeat: bool}|null
+     */
+    private function findLibraryMatch(
+        Station $station,
+        array $eligiblePlaylists,
+        float $neededSeconds,
+        float $maxError,
+        ?int $excludeMediaId,
+        CarbonImmutable $expectedPlayTime,
+    ): ?array {
+        if ($neededSeconds <= 0.0) {
+            return null;
+        }
+
+        $eligibleIds = [];
+        foreach ($eligiblePlaylists as $eligible) {
+            $eligibleIds[$eligible->id] = true;
+        }
+
+        // Aired length is at most the file length and, measured on this
+        // library, never more than ~20s under it.
+        $rows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm
+                JOIN spm.media m
+                JOIN spm.playlist p
+                WHERE p.station = :station
+                AND p.is_enabled = true
+                AND p.is_jingle = false
+                AND p.type = :standard
+                AND m.type = :music
+                AND m.length >= :minLength
+                AND m.length <= :maxLength
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('standard', PlaylistTypes::Standard->value)
+            ->setParameter('music', 'music')
+            ->setParameter('minLength', $neededSeconds - $maxError)
+            ->setParameter('maxLength', $neededSeconds + $maxError + self::SQL_PREFILTER_SLACK_SECONDS)
+            ->getResult();
+
+        // One entry per song: prefer its membership in a playlist scheduled now,
+        // then the least recently played membership.
+        $byMedia = [];
+        foreach ($rows as $spm) {
+            if (!$spm instanceof StationPlaylistMedia) {
+                continue;
+            }
+            $candidateMedia = $spm->media;
+            if ($candidateMedia->id === $excludeMediaId) {
+                continue;
             }
 
-            [$spm, $replacementMedia, $ratio, $isRepeat] = $stretchReplacement;
+            $onSchedule = isset($eligibleIds[$spm->playlist->id]);
+            $existing = $byMedia[$candidateMedia->id] ?? null;
+            if (
+                null === $existing
+                || ($onSchedule && !$existing['on_schedule'])
+                || ($onSchedule === $existing['on_schedule'] && $spm->last_played < $existing['spm']->last_played)
+            ) {
+                $byMedia[$candidateMedia->id] = ['spm' => $spm, 'on_schedule' => $onSchedule];
+            }
+        }
 
-            $stretchContext = $context + [
-                'is_repeat_pick' => $isRepeat,
-                'stretch_target_seconds' => round($gap, 2),
-                'stretch_ratio' => round($ratio, 4),
+        if ([] === $byMedia) {
+            return null;
+        }
+
+        $recentSongIds = $this->getRecentlySelectedSongIds($station, $expectedPlayTime);
+
+        $fresh = [];
+        $repeats = [];
+        foreach ($byMedia as $entry) {
+            $spm = $entry['spm'];
+            $candidateMedia = $spm->media;
+            $aired = $this->airedLength->forMedia($candidateMedia);
+            $length = self::LAND_FADE_START_ON_ID
+                ? max(0.0, $aired['length'] - $aired['fade_out'])
+                : $aired['length'];
+            if ($length <= 0.0) {
+                continue;
+            }
+
+            // Positive: ends before the ID (slowed slightly to fill). Negative:
+            // runs past it (sped up slightly). Both are fixed by the tempo fit;
+            // finishing early is preferred because it can never be cut.
+            $error = $neededSeconds - $length;
+            if (abs($error) > $maxError) {
+                continue;
+            }
+
+            $score = abs($error)
+                + ($error < 0.0 ? abs($error) * 0.25 : 0.0)
+                + ($aired['known'] ? 0.0 : self::UNKNOWN_LENGTH_PENALTY)
+                + ($entry['on_schedule'] ? 0.0 : self::OFF_SCHEDULE_PENALTY);
+
+            $candidate = [
+                'score' => $score,
+                'spm' => $spm,
+                'media' => $candidateMedia,
+                'length' => $length,
+                'error' => $error,
+                'known' => $aired['known'],
+                'last_played' => $spm->last_played,
             ];
 
-            $this->logger->notice(
-                'Top-of-Hour swap: no exact duration match; using pitch-preserving '
-                . 'stretch/squeeze to land a nearby track exactly on the deadline instead.',
-                $stretchContext + ['replacement_media_id' => $replacementMedia->id]
-            );
-
-            return [$spm, $replacementMedia, $stretchContext];
+            if (isset($recentSongIds[$candidateMedia->song_id])) {
+                $repeats[] = $candidate;
+            } else {
+                $fresh[] = $candidate;
+            }
         }
 
-        [$spm, $replacementMedia, $isRepeat] = $replacement;
-
-        if ($isRepeat) {
-            // Logged distinctly (not just via the flag below) because this is
-            // the one path where the feature deliberately trades a station
-            // policy (no repeats within the dedup window) for a bigger win
-            // (no audible cut into the ID) -- worth being able to grep for.
-            $this->logger->notice(
-                'Top-of-Hour swap: only a recently-played track matched the needed duration; '
-                . 'using it anyway rather than falling back to the pre-fade soft cut.',
-                $context + ['replacement_media_id' => $replacementMedia->id]
-            );
+        $isRepeat = [] === $fresh;
+        $candidates = $isRepeat ? $repeats : $fresh;
+        if ([] === $candidates) {
+            return null;
         }
 
-        return [$spm, $replacementMedia, $context + ['is_repeat_pick' => $isRepeat]];
+        usort(
+            $candidates,
+            static fn (array $a, array $b): int => ($a['score'] <=> $b['score'])
+                ?: ($a['last_played'] <=> $b['last_played'])
+        );
+
+        // Rotate among near-equal matches so the same song does not close every hour.
+        $bestScore = $candidates[0]['score'];
+        $pool = array_values(array_filter(
+            array_slice($candidates, 0, self::CANDIDATE_POOL_SIZE),
+            static fn (array $c): bool => $c['score'] <= $bestScore + 0.5
+        ));
+        $chosen = [] === $pool ? $candidates[0] : $pool[random_int(0, count($pool) - 1)];
+
+        return [
+            'spm' => $chosen['spm'],
+            'media' => $chosen['media'],
+            'length' => $chosen['length'],
+            'error' => $chosen['error'],
+            'known' => $chosen['known'],
+            'is_repeat' => $isRepeat,
+        ];
     }
 
     /**
@@ -739,8 +912,8 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // Any candidate whose natural length falls in this band can be
         // stretched or squeezed onto $neededSeconds without exceeding the
         // station's safety limit. Widened further for the SQL prefilter the
-        // same way findDurationMatchedMedia() is, since m.length (raw) can
-        // run longer than getCalculatedLength() (after cue trimming).
+        // same way findLibraryMatch() is, since m.length (raw) can
+        // run longer than the length that actually airs.
         $minLength = $neededSeconds * $minRatio;
         $maxLength = ($neededSeconds * $maxRatio) + self::SQL_PREFILTER_SLACK_SECONDS;
 
@@ -837,7 +1010,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
      * @return array{StationPlaylistMedia, StationMedia, bool}|null The
      *         trailing bool is true when the pick only exists because the
      *         repeat-prevention window was overridden, same meaning as in
-     *         findDurationMatchedMedia().
+     *         findLibraryMatch().
      */
     /**
      * The longest eligible item that still fits in $maxLength seconds, i.e. the
@@ -871,29 +1044,38 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 ORDER BY m.length DESC, spm.last_played ASC, spm.id ASC
             DQL
         )->setParameter('playlists', $playlists)
-            ->setParameter('maxLength', $maxLength)
+            ->setParameter('maxLength', $maxLength + self::SQL_PREFILTER_SLACK_SECONDS)
             ->setParameter('idTypes', StationMediaTypes::stationIdTypeValues())
-            ->setMaxResults(50)
+            ->setMaxResults(100)
             ->getResult();
 
-        $anyPlayable = null;
+        // Judged by aired length: the longest item that still ends before the ID.
+        $bestFresh = null;
+        $bestAny = null;
         foreach ($rows as $spm) {
             if (!$spm instanceof StationPlaylistMedia) {
                 continue;
             }
             $candidateMedia = $spm->media;
-            $length = $candidateMedia->getCalculatedLength();
-            if ($candidateMedia->id === $excludeMediaId || $length <= 0.0 || $length > $maxLength) {
+            if ($candidateMedia->id === $excludeMediaId) {
+                continue;
+            }
+            $length = $this->landingLength($candidateMedia);
+            if ($length <= 0.0 || $length > $maxLength) {
                 continue;
             }
 
-            $anyPlayable ??= [$spm, $candidateMedia, true];
-            if (!isset($recentSongIds[$candidateMedia->song_id])) {
-                return [$spm, $candidateMedia, false];
+            if (null === $bestAny || $length > $bestAny[3]) {
+                $bestAny = [$spm, $candidateMedia, true, $length];
+            }
+            if (!isset($recentSongIds[$candidateMedia->song_id]) && (null === $bestFresh || $length > $bestFresh[3])) {
+                $bestFresh = [$spm, $candidateMedia, false, $length];
             }
         }
 
-        return $anyPlayable;
+        $best = $bestFresh ?? $bestAny;
+
+        return null === $best ? null : [$best[0], $best[1], $best[2]];
     }
 
     private function findShortestAvailableMedia(
@@ -1001,117 +1183,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
 
         return !StationMediaTypes::isStationId($row->media->type);
-    }
-
-    /**
-     * @param list<StationPlaylist> $playlists
-     * @return array{StationPlaylistMedia, StationMedia, bool}|null
-     *         The trailing bool is true when the pick only exists because the
-     *         repeat-prevention window was overridden (see below) -- purely
-     *         informational, for the caller's log line.
-     */
-    private function findDurationMatchedMedia(
-        Station $station,
-        array $playlists,
-        float $neededSeconds,
-        float $toleranceSeconds,
-        ?int $excludeMediaId,
-        CarbonImmutable $expectedPlayTime,
-    ): ?array {
-        if ([] === $playlists) {
-            return null;
-        }
-
-        $recentSongIds = $this->getRecentlySelectedSongIds($station, $expectedPlayTime);
-
-        $rows = $this->em->createQuery(
-            <<<'DQL'
-                SELECT spm, m FROM App\Entity\StationPlaylistMedia spm
-                JOIN spm.media m
-                WHERE spm.playlist IN (:playlists)
-                AND m.length >= :minLength
-                AND m.length <= :maxLength
-                AND m.type NOT IN (:idTypes)
-                ORDER BY spm.last_played ASC, spm.id ASC
-            DQL
-        )->setParameter('playlists', $playlists)
-            ->setParameter('minLength', $neededSeconds - $toleranceSeconds)
-            ->setParameter('maxLength', $neededSeconds + $toleranceSeconds + self::SQL_PREFILTER_SLACK_SECONDS)
-            ->setParameter('idTypes', StationMediaTypes::stationIdTypeValues())
-            ->getResult();
-
-        // Two buckets: candidates that respect the station's normal repeat-
-        // prevention window, and candidates that would only repeat it. A
-        // narrow duration window (needed length +/- tolerance) often has
-        // only one or two tracks in the whole catalog to begin with, so
-        // requiring BOTH "right length" and "not played in the last N
-        // minutes" at once regularly comes up empty even when a perfectly
-        // good duration match exists -- exactly the case logged as "NO
-        // duration-matched track" while a matching track sat unused because
-        // it had aired within the (station-configured, often 1-2 hour)
-        // dedup window. For this one final-of-the-hour slot, landing
-        // cleanly on the ID beats avoiding a repeat: an early repeat is a
-        // minor, easy-to-miss imperfection; a fade/cut into the ID is the
-        // exact audible defect this whole feature exists to prevent. So the
-        // repeat window is honored when possible and only overridden as a
-        // last resort, never silently -- see the 'is_repeat' flag below.
-        $fresh = [];
-        $repeats = [];
-
-        foreach ($rows as $spm) {
-            if (!$spm instanceof StationPlaylistMedia) {
-                continue;
-            }
-
-            $candidateMedia = $spm->media;
-            if ($candidateMedia->id === $excludeMediaId) {
-                continue;
-            }
-
-            $length = $candidateMedia->getCalculatedLength();
-            if ($length <= 0.0) {
-                continue;
-            }
-
-            $error = $neededSeconds - $length;
-            if (abs($error) > $toleranceSeconds) {
-                continue;
-            }
-
-            $entry = [
-                // Landing a hair early is inaudible (the underlay is already
-                // faded to silence); landing late means the ID clips the song's
-                // tail. So overshoot is penalised twice as heavily.
-                'score' => $error >= 0.0 ? $error : (abs($error) * 2.0),
-                'spm' => $spm,
-                'media' => $candidateMedia,
-                'last_played' => $spm->last_played,
-            ];
-
-            if (isset($recentSongIds[$candidateMedia->song_id])) {
-                $repeats[] = $entry;
-            } else {
-                $fresh[] = $entry;
-            }
-        }
-
-        $isRepeat = [] === $fresh;
-        $candidates = $isRepeat ? $repeats : $fresh;
-
-        if ([] === $candidates) {
-            return null;
-        }
-
-        usort(
-            $candidates,
-            static fn (array $a, array $b): int => ($a['score'] <=> $b['score'])
-                ?: ($a['last_played'] <=> $b['last_played'])
-        );
-
-        $pool = array_slice($candidates, 0, self::CANDIDATE_POOL_SIZE);
-        $chosen = $pool[random_int(0, count($pool) - 1)];
-
-        return [$chosen['spm'], $chosen['media'], $isRepeat];
     }
 
     /**
@@ -1299,9 +1370,17 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     }
 
     /**
-     * Within FINAL_APPROACH_SECONDS of the ID, a row is not sent while another
-     * sent item is still waiting to air ahead of it. Never held when the song
-     * on air ends within HOLD_SAFETY_SECONDS, so AutoDJ cannot run dry.
+     * Within FINAL_APPROACH_SECONDS of the ID, a row is not sent while the
+     * track loaded ahead of it in Liquidsoap has not started yet, so the final
+     * song is chosen with the real start time known.
+     *
+     * "Started" is judged by projected timing, not current_song: Liquidsoap asks
+     * for the next song the moment a track starts, but its now-playing feedback
+     * arrives ~6s later, so current_song is still the track that just ended.
+     * The old test ("the song on air ends within 25s") therefore always passed
+     * at hand-off and the final song went out two ahead (8pm 2026-09-24: sent at
+     * 7:47:16, aired 7:55:23, landed 18s short). A short track ahead is never
+     * held behind, so AutoDJ cannot run dry.
      */
     private function shouldSendOneAtATime(Station $station, StationQueue $row, CarbonImmutable $start): bool
     {
@@ -1319,24 +1398,77 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return false;
         }
 
-        $current = $station->current_song;
-        if (null !== $current && null !== $current->timestamp_start) {
-            $currentEnd = CarbonImmutable::instance($current->timestamp_start)
-                ->addSeconds((float)($current->duration ?? 0.0));
-            if ($currentEnd->getTimestamp() - time() < self::HOLD_SAFETY_SECONDS) {
-                return false;
+        $ahead = null;
+        foreach ($this->queueRepo->getUnairedSentRows($station) as $sentRow) {
+            if ($sentRow->id !== $row->id) {
+                $ahead = $sentRow;
             }
         }
+        if (null === $ahead) {
+            return false;
+        }
 
-        if ($this->queueRepo->getUnairedSentDuration($station) <= 0.0) {
+        $aheadLength = $this->airedLength->lengthOf($ahead->media, $ahead->duration);
+        $secondsUntilDue = $this->secondsBetween(CarbonImmutable::now(), $start);
+        if ($secondsUntilDue <= $aheadLength + self::HOLD_SLACK_SECONDS) {
             return false;
         }
 
         $this->logger->notice(
             'Top-of-Hour: final approach; holding this pick until the song ahead of it starts.',
-            ['queue_id' => $row->id, 'media_id' => $row->media?->id, 'start' => $start->toIso8601String(), 'gap' => round($gap, 1)]
+            [
+                'queue_id' => $row->id,
+                'media_id' => $row->media?->id,
+                'start' => $start->toIso8601String(),
+                'gap' => round($gap, 1),
+                'ahead_queue_id' => $ahead->id,
+                'ahead_aired_length' => round($aheadLength, 1),
+                'seconds_until_due' => round($secondsUntilDue, 1),
+            ]
         );
         return true;
+    }
+
+    /**
+     * The Top-of-Hour lane window $start falls in, if any: from the ID target
+     * (:59:ss) until the lane is expected to release (ID length, plus top-hour
+     * news when it airs), which can run past :00.
+     *
+     * @return array{target: CarbonImmutable, release: CarbonImmutable}|null
+     */
+    private function getTopOfHourLaneWindowContaining(Station $station, CarbonImmutable $start): ?array
+    {
+        $boundary = CarbonImmutable::instance(
+            $this->clock->getNextBoundary($station, $start->subMinutes(10)->toDateTimeImmutable())
+        );
+        if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
+            return null;
+        }
+
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        if ($start->lessThan($target->subSecond())) {
+            return null;
+        }
+
+        $release = $this->estimateTopOfHourRelease($station, $target->subSecond());
+        if ($start->greaterThanOrEqualTo($release)) {
+            return null;
+        }
+
+        return ['target' => $target, 'release' => $release];
+    }
+
+    private function isHoldableOpener(StationQueue $row): bool
+    {
+        if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
+            return false;
+        }
+        if (null !== $row->clock_wheel || null !== $row->request) {
+            return false;
+        }
+        $media = $row->media;
+
+        return $media instanceof StationMedia && !StationMediaTypes::isStationId($media->type);
     }
 
     /**
@@ -1389,16 +1521,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $idStart = 59 * 60 + $this->clock->getIdStartSecond($station);
 
         return $secondsIntoHour >= $idStart || $secondsIntoHour < self::SETTLE_SECONDS_AFTER_HOUR;
-    }
-
-    /**
-     * Seconds of a song's tail that overlap the next item: the station
-     * crossfade as the queue projects it, plus the extra of AutoCue's
-     * detected fade-out (about 4s on this station's music).
-     */
-    private function getFadeOverlapSeconds(Station $station): float
-    {
-        return max($station->backend_config->getCrossfadeDuration(), 3.0) + 1.0;
     }
 
     private function getToleranceSeconds(Station $station): float
@@ -1510,6 +1632,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return false;
         }
 
-        return $media->getCalculatedLength() > $gap + 1.0;
+        return $this->landingLength($media) > $gap + 1.0;
     }
 }

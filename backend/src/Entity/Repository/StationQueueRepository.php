@@ -620,6 +620,24 @@ final class StationQueueRepository extends AbstractStationBasedRepository
      */
     public function getUnairedSentDuration(Station $station, float $overlapPerItem = 0.0): float
     {
+        $seconds = 0.0;
+        foreach ($this->getUnairedSentRows($station) as $row) {
+            $duration = (float)($row->duration ?? 0.0);
+            $seconds += $duration > $overlapPerItem ? $duration - $overlapPerItem : $duration;
+        }
+
+        return $seconds;
+    }
+
+    /**
+     * Rows already handed to Liquidsoap that have not aired yet, oldest first.
+     * Includes a track that has just started but whose now-playing feedback
+     * has not arrived (it lags the track change by several seconds).
+     *
+     * @return list<StationQueue>
+     */
+    public function getUnairedSentRows(Station $station): array
+    {
         $rows = $this->getUnplayedBaseQuery($station)
             ->andWhere('sq.sent_to_autodj = 1')
             ->andWhere('sq.top_of_hour_legal_id = 0')
@@ -630,7 +648,7 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             ->getResult();
 
         if ([] === $rows) {
-            return 0.0;
+            return [];
         }
 
         // The row currently on air is also "sent, unplayed" until feedback
@@ -639,7 +657,7 @@ final class StationQueueRepository extends AbstractStationBasedRepository
         $airedSongIds = $this->getRecentlyAiredSongIds($station);
         $currentSongId = $station->current_song?->song_id;
 
-        $seconds = 0.0;
+        $unaired = [];
         foreach ($rows as $row) {
             if (!$row instanceof StationQueue) {
                 continue;
@@ -655,11 +673,16 @@ final class StationQueueRepository extends AbstractStationBasedRepository
                 continue;
             }
 
-            $duration = (float)($row->duration ?? 0.0);
-            $seconds += $duration > $overlapPerItem ? $duration - $overlapPerItem : $duration;
+            $unaired[] = $row;
         }
 
-        return $seconds;
+        usort(
+            $unaired,
+            static fn (StationQueue $a, StationQueue $b): int => ($a->timestamp_cued <=> $b->timestamp_cued)
+                ?: ($a->id <=> $b->id)
+        );
+
+        return $unaired;
     }
 
     /**
