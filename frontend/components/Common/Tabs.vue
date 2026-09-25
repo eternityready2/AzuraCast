@@ -67,6 +67,10 @@ onMounted(() => {
         return;
     }
 
-    selectTab(state.tabs[0].computedId);
+    const initialTab = state.tabs.find(
+        (tab) => tab.computedId === activeId.value
+    );
+
+    selectTab(initialTab?.computedId ?? state.tabs[0].computedId);
 });
 </script>

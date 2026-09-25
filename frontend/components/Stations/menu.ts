@@ -502,20 +502,11 @@ export function useStationsMenu() {
             ]
         },
         {
-            key: 'aircheck',
-            label: $gettext('AirCheck'),
-            icon: () => IconIcGraphicEq,
-            url: {
-                name: 'stations:aircheck'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-        },
-        {
-            key: 'logs',
-            label: $gettext('Logs'),
+            key: 'logs_diag',
+            label: $gettext('Logs & Diag'),
             icon: () => IconIcAssignment,
             url: {
-                name: 'stations:logs'
+                name: 'stations:logs_diag'
             },
             visible: () => userAllowedForStation(StationPermissions.Logs)
         }

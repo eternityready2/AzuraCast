@@ -113,6 +113,28 @@ class LogsAction implements SingleActionInterface
 
         $logType = $logTypes[$log];
 
+        $queryParams = $request->getQueryParams();
+        if (!empty($queryParams['download'])) {
+            $filePath = $logType->path;
+            if (!is_file($filePath) || !is_readable($filePath)) {
+                throw new Exception('Log file is not available for download.');
+            }
+
+            $fileName = basename($filePath);
+            $contents = file_get_contents($filePath);
+            $filteredContents = str_replace(
+                $station->getFilteredPasswords(),
+                '(PASSWORD)',
+                $contents ?: ''
+            );
+
+            $response->getBody()->write($filteredContents);
+
+            return $response
+                ->withHeader('Content-Type', 'text/plain; charset=utf-8')
+                ->withHeader('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+        }
+
         return $this->streamLogToResponse(
             $request,
             $response,
