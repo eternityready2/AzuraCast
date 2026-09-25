@@ -349,20 +349,16 @@ final class TopOfHourClock
         Station $station,
         CarbonImmutable $boundary,
     ): bool {
+        // FM-automation rule: ANY scheduled playlist starting at the boundary
+        // makes it a hard TOH. No song may play between the ID and the scheduled
+        // program, regardless of whether it has strict_start or other flags.
+        // This prevents filler songs from delaying the scheduled show.
         foreach ($station->playlists as $playlist) {
             if (!$playlist->is_enabled) {
                 continue;
             }
 
             foreach ($playlist->schedule_items as $schedule) {
-                if (
-                    !$schedule->strict_start
-                    && !$schedule->is_emergency
-                    && !$playlist->backendInterruptOtherSongs()
-                ) {
-                    continue;
-                }
-
                 if ($this->scheduleStartsAt($schedule, $boundary)) {
                     return true;
                 }
