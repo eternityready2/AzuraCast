@@ -161,6 +161,14 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # its title replayed; a held item that already began keeps its own.
             top_of_hour_last_sq = ref("")
             top_of_hour_stale_sq = ref("")
+            # The stale marker is only valid for the handful of seconds around
+            # the release in which the old title can be replayed (crossfade and
+            # switch). Leaving it armed until the next ID meant a single armed
+            # marker could still swallow a metadata packet minutes later, and a
+            # swallowed packet sends no feedback at all -- now-playing then sat
+            # on the previous title until some later track happened to refresh
+            # it. Bound the window so suppression can never outlive the release.
+            top_of_hour_stale_until = ref(0.)
             top_of_hour_held_started = ref(false)
 
             def top_of_hour_id_in_early_window() =
@@ -698,6 +706,11 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     log("Top-of-Hour ID: open-hour lane released; held AutoDJ item resumes from its start.")
                 end
 
+                # The replayed title arrives with the release (crossfade, then
+                # switch). Open the suppression window here rather than at the
+                # ID start, so it covers those replays and nothing later.
+                top_of_hour_stale_until := time() + 20.
+
                 azuracast.autodj_retry_delay := 10.
 
                 new
@@ -717,10 +730,16 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
             def top_of_hour_drop_stale_title(m) =
                 stale = top_of_hour_stale_sq()
-                # Stays armed until the next ID: the old title can be replayed
-                # more than once at release (crossfade and switch), and a queue
-                # row id never legitimately airs twice.
-                if stale != "" and m["sq_id"] == stale then
+                # Armed only for the short window that opens at release: the old
+                # title can be replayed more than once there (crossfade and
+                # switch). Past that window the marker is dropped -- a dropped
+                # metadata packet also drops its now-playing feedback, so an
+                # indefinitely-armed marker could strand the overview on a stale
+                # title until some later track happened to refresh it.
+                if stale != "" and time() >= top_of_hour_stale_until() then
+                    top_of_hour_stale_sq := ""
+                    m
+                elsif stale != "" and m["sq_id"] == stale then
                     log("Top-of-Hour ID: suppressed the replayed title of the song that ended before the ID.")
                     []
                 else

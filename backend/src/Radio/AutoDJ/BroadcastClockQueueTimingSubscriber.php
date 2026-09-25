@@ -7,6 +7,7 @@ namespace App\Radio\AutoDJ;
 use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Station;
 use App\Entity\StationMedia;
+use App\Entity\Repository\StationQueueRepository;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
 use App\Event\Radio\BuildQueue;
@@ -23,6 +24,7 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
 {
     public function __construct(
         private readonly BroadcastClockPlanner $clockPlanner,
+        private readonly StationQueueRepository $queueRepo,
     ) {
     }
 
@@ -155,6 +157,19 @@ final class BroadcastClockQueueTimingSubscriber implements EventSubscriberInterf
         $crossfade = max(0.0, $station->backend_config->getCrossfadeDuration());
         if ($duration >= $crossfade && $crossfade > 0) {
             $end = $end->subMilliseconds((int)round($crossfade * 1000));
+        }
+
+        // The current song is not necessarily the only thing between now and
+        // the row being annotated: Liquidsoap is handed rows one ahead, so
+        // several can be "sent but not yet aired" at once. Counting only the
+        // current song makes every one of them believe it starts next, so each
+        // independently caps itself to land on the same boundary. They then
+        // play back-to-back and every cap after the first is wrong -- which put
+        // a song on air seconds before the Top-of-Hour ID. Push the estimate
+        // past everything already handed over but still unaired.
+        $pending = $this->queueRepo->getUnairedSentDuration($station, $crossfade);
+        if ($pending > 0.0) {
+            $end = $end->addMilliseconds((int)round($pending * 1000));
         }
 
         return $end->greaterThan($now)

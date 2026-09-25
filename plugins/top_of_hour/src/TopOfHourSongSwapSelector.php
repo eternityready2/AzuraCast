@@ -131,7 +131,6 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     private const float UNKNOWN_LENGTH_PENALTY = 8.0;
 
     /** Score penalty for a song outside the playlists scheduled right now. */
-    private const float OFF_SCHEDULE_PENALTY = 1.5;
 
     /**
      * Final approach: a row is held while the track ahead of it has not
@@ -744,6 +743,15 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             $eligibleIds[$eligible->id] = true;
         }
 
+        // The substitute must come from a playlist that is actually scheduled
+        // for the slot it will fill. A better-fitting song from a playlist that
+        // is not on the air yet puts the wrong format to air -- e.g. pulling a
+        // midnight-only playlist into the 23:00 hour. Duration fit never
+        // outranks the schedule, so this is a filter and not a score penalty.
+        if ([] === $eligibleIds) {
+            return null;
+        }
+
         // Aired length is at most the file length and, measured on this
         // library, never more than ~20s under it.
         $rows = $this->em->createQuery(
@@ -755,19 +763,21 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 AND p.is_enabled = true
                 AND p.is_jingle = false
                 AND p.type = :standard
+                AND p.id IN (:eligibleIds)
                 AND m.type = :music
                 AND m.length >= :minLength
                 AND m.length <= :maxLength
             DQL
         )->setParameter('station', $station)
             ->setParameter('standard', PlaylistTypes::Standard->value)
+            ->setParameter('eligibleIds', array_keys($eligibleIds))
             ->setParameter('music', 'music')
             ->setParameter('minLength', $neededSeconds - $maxError)
             ->setParameter('maxLength', $neededSeconds + $maxError + self::SQL_PREFILTER_SLACK_SECONDS)
             ->getResult();
 
-        // One entry per song: prefer its membership in a playlist scheduled now,
-        // then the least recently played membership.
+        // One entry per song, keeping the least recently played membership.
+        // Every row here is already on schedule.
         $byMedia = [];
         foreach ($rows as $spm) {
             if (!$spm instanceof StationPlaylistMedia) {
@@ -778,14 +788,9 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 continue;
             }
 
-            $onSchedule = isset($eligibleIds[$spm->playlist->id]);
             $existing = $byMedia[$candidateMedia->id] ?? null;
-            if (
-                null === $existing
-                || ($onSchedule && !$existing['on_schedule'])
-                || ($onSchedule === $existing['on_schedule'] && $spm->last_played < $existing['spm']->last_played)
-            ) {
-                $byMedia[$candidateMedia->id] = ['spm' => $spm, 'on_schedule' => $onSchedule];
+            if (null === $existing || $spm->last_played < $existing['spm']->last_played) {
+                $byMedia[$candidateMedia->id] = ['spm' => $spm];
             }
         }
 
@@ -818,8 +823,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
             $score = abs($error)
                 + ($error < 0.0 ? abs($error) * 0.25 : 0.0)
-                + ($aired['known'] ? 0.0 : self::UNKNOWN_LENGTH_PENALTY)
-                + ($entry['on_schedule'] ? 0.0 : self::OFF_SCHEDULE_PENALTY);
+                + ($aired['known'] ? 0.0 : self::UNKNOWN_LENGTH_PENALTY);
 
             $candidate = [
                 'score' => $score,
