@@ -614,18 +614,20 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                         top_of_hour_stale_sq := top_of_hour_last_sq()
                     end
                     azuracast.autodj_hold := true
-                    if not started_early and azuracast.autodj_fresh_ready() then
+                    # Discard the currently playing song so it cannot resume after
+                    # the ID. This must happen whenever the ID didn't start early
+                    # (i.e. the song was mid-play, not just beginning).
+                    if not started_early then
                         # A clean-cut marker left armed by an earlier hour turns the
                         # discard into a no-op and the cut song carries on after the
                         # ID (2:59am 2026-09-24). This cut starts fresh.
                         azuracast.autodj_clean_cut_pending := false
                         azuracast.discard_autodj_current_cleanly()
-                    elsif not azuracast.autodj_fresh_ready() then
-                        # Nothing is loaded (the last song ended on its own). A
-                        # held request.dynamic is not pulled, so it never asks for
-                        # the next item by itself; load it now so the new hour
-                        # opens at release instead of after a fetch + AutoCue
-                        # (1am 2026-09-24: 5s of silence after the ID).
+                    end
+                    # If no next song is ready yet, prefetch it now so the new hour
+                    # opens at release instead of after a fetch + AutoCue delay
+                    # (1am 2026-09-24: 5s of silence after the ID).
+                    if not azuracast.autodj_fresh_ready() then
                         azuracast.prefetch_autodj_next()
                     end
                     log("Top-of-Hour ID: AutoDJ held; the next item waits unplayed until the ID/news ends.")
