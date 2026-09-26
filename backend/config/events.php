@@ -158,6 +158,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             // the priority-0 slot first when the log controls playout.
             App\Radio\AutoDJ\LinearLog\LinearLogPlayout::class,
             App\Radio\AutoDJ\QueueBuilder::class,
+            App\Radio\AutoDJ\ScheduleWindowGuard::class,
             App\Radio\AutoDJ\BroadcastClockQueueTimingSubscriber::class,
             App\Radio\AutoDJ\StretchSqueezeQueueTiming::class,
             App\Radio\AutoDJ\StationDiagnosticsRuntimeSubscriber::class,

@@ -120,12 +120,12 @@ final class Annotations implements EventSubscriberInterface
                 );
             }
 
-            // A plugin dropped this slot at the last check (nothing fits before
-            // the Top-of-Hour ID). Refuse rather than send it, or send the next
-            // hour's first song early, either of which the ID would cut.
+            // A listener dropped this slot at the last check (nothing fits before
+            // the Top-of-Hour ID, or its playlist may not play now). Refuse rather
+            // than send it; the next queued row is taken on the retry.
             if (!$this->em->contains($queueRow)) {
                 $this->em->flush();
-                throw new RuntimeException('Final slot before the Top-of-Hour ID was dropped; nothing fits.');
+                throw new RuntimeException('Queued row was dropped at the final check before sending.');
             }
         }
 

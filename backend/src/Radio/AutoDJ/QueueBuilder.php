@@ -171,12 +171,11 @@ final class QueueBuilder implements EventSubscriberInterface
             $typesToPlayByPriority[] = $type . '_unscheduled';
         }
 
-        // FM-automation rule: when ANY scheduled playlist is active and due now,
-        // ALL unscheduled playlists are blocked. Scheduled playlists own the air
-        // exclusively during their time slot — no rotational or always-on playlist
-        // may leak music in, regardless of playlist type. This mirrors how Zetta,
-        // WideOrbit and other FM systems treat scheduled programme blocks.
-        $anyScheduledPlaylistActive = false;
+        // While a scheduled block's window is open, no unscheduled playlist of any
+        // type plays. Decided up front: types are visited Once-per-hour first, so
+        // a flag raised only on reaching the scheduled Standard playlist let
+        // unscheduled promos/rotations through ahead of it.
+        $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $expectedPlayTime);
 
         foreach ($typesToPlayByPriority as $currentPlaylistType) {
             if (empty($activePlaylistsByType[$currentPlaylistType])) {
@@ -185,8 +184,7 @@ final class QueueBuilder implements EventSubscriberInterface
 
             $isUnscheduled = str_ends_with($currentPlaylistType, '_unscheduled');
 
-            // If any scheduled playlist is active, block all unscheduled playlists.
-            if ($isUnscheduled && $anyScheduledPlaylistActive) {
+            if ($isUnscheduled && $scheduledBlockOpen) {
                 continue;
             }
 
@@ -207,12 +205,6 @@ final class QueueBuilder implements EventSubscriberInterface
 
             if (empty($eligiblePlaylists)) {
                 continue;
-            }
-
-            // Record that a scheduled playlist is active so all unscheduled
-            // playlists are blocked for the remainder of this queue slot.
-            if (!$isUnscheduled) {
-                $anyScheduledPlaylistActive = true;
             }
 
             $this->logger->info(

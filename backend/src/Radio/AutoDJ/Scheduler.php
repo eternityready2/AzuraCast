@@ -173,6 +173,44 @@ final class Scheduler
         return $shouldPlay;
     }
 
+    /**
+     * True while an enabled, AutoDJ-played scheduled playlist has its window
+     * open at $at. Such a block owns the air: nothing unscheduled plays then.
+     */
+    public function isScheduledBlockOpenAt(\App\Entity\Station $station, DateTimeImmutable $at): bool
+    {
+        foreach ($station->playlists as $playlist) {
+            if (
+                $playlist->schedule_items->count() > 0
+                && $playlist->isPlayable()
+                && $this->isPlaylistScheduledToPlayNow($playlist, $at, excludeSpecialRules: true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The scheduling rule every playout path must obey (AutoDJ, the queue, and
+     * the saved Linear Log): a scheduled playlist plays only inside its own
+     * window, and an unscheduled playlist never plays while a scheduled block
+     * is open.
+     */
+    public function isPlaylistAllowedAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
+    {
+        if ($playlist->schedule_items->count() > 0) {
+            return $this->isPlaylistScheduledToPlayNow($playlist, $at, excludeSpecialRules: true);
+        }
+
+        if ($this->isPlaylistCoveredByGroupScheduleAt($playlist, $at)) {
+            return true;
+        }
+
+        return !$this->isScheduledBlockOpenAt($playlist->station, $at);
+    }
+
     public function isPlaylistScheduledToPlayNow(
         StationPlaylist $playlist,
         DateTimeImmutable $now,
