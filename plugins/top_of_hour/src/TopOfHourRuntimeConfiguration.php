@@ -220,7 +220,11 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # is larger than that. Promos are never stacked. If nothing fits, the
             # ID starts early as before.
             top_of_hour_fit_tempo = ref(1.0)
+            # Retained for reference/telemetry only. Rule 5 forbids inserting any
+            # of these around the ID, so the fit no longer pushes one; ignore()
+            # keeps the binding from tripping the unused-variable check.
             top_of_hour_fit_promos = [{$fitPromos}]
+            ignore(top_of_hour_fit_promos)
 
             # The final song's OVERALL tempo (upstream stretch/squeeze included),
             # held within +/-{$fitMaxAdjust} so adjustments never stack past it.
@@ -299,53 +303,19 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                             end
                             top_of_hour_air_covered_until := target
                             top_of_hour_clean_landing := true
-                        elsif list.length(requests.queue()) > 0 then
-                            log("Top-of-Hour fit: #{gap}s gap after '#{item}'; the requests queue already has an item to play in it.")
                         else
-                            best_len = ref(0.0)
-                            best_uri = ref("")
-                            list.iter(
-                                fun (promo) -> begin
-                                    let (promo_len, promo_uri) = promo
-                                    rest = gap - promo_len
-                                    if
-                                        rest >= 0.0 - max_adj
-                                        and rest <= max_adj
-                                        and (best_len() <= 0.0 or abs(rest) < abs(gap - best_len()))
-                                    then
-                                        best_len := promo_len
-                                        best_uri := promo_uri
-                                    end
-                                end,
-                                top_of_hour_fit_promos
-                            )
-                            exact = best_len() > 0.0
-                            if not exact then
-                                # No exact fit: the longest promo that still fits,
-                                # with the song slowed as far as allowed.
-                                list.iter(
-                                    fun (promo) -> begin
-                                        let (promo_len, promo_uri) = promo
-                                        if promo_len <= gap + max_adj and promo_len > best_len() then
-                                            best_len := promo_len
-                                            best_uri := promo_uri
-                                        end
-                                    end,
-                                    top_of_hour_fit_promos
-                                )
-                            end
-                            if best_len() > 0.0 then
-                                requests.push(request.create(best_uri()))
-                                song_avail = avail - best_len()
-                                top_of_hour_fit_set(len / song_avail)
-                                top_of_hour_air_covered_until := target
-                                top_of_hour_clean_landing := exact
-                                log("Top-of-Hour fit: #{gap}s gap after '#{item}'; one #{best_len()}s promo queued (exact=#{exact}), song tempo #{top_of_hour_fit_tempo()}.")
-                            else
-                                top_of_hour_fit_set(1.0 - {$fitMaxAdjust})
-                                top_of_hour_air_covered_until := time() + len / (1.0 - {$fitMaxAdjust})
-                                log("Top-of-Hour fit: #{gap}s gap after '#{item}' and no promo fits; song slowed to #{top_of_hour_fit_tempo()}.")
-                            end
+                            # Rule 5: never cram a promo/liner/fragment around the
+                            # ID. A gap too large for the +/-{$fitMaxAdjust} tempo fit
+                            # is closed only by slowing the final song as far as
+                            # allowed; any residual is taken by the on-time ID lane,
+                            # not by inserting a promo. Landing the right-length final
+                            # song is the swap's job (Rule 1), so a large residual
+                            # here is a signal the swap should be tightened -- never a
+                            # reason to stack a promo before the ID.
+                            top_of_hour_fit_set(1.0 - {$fitMaxAdjust})
+                            top_of_hour_air_covered_until := time() + len / (1.0 - {$fitMaxAdjust})
+                            top_of_hour_clean_landing := false
+                            log("Top-of-Hour fit: #{gap}s gap after '#{item}'; song slowed to #{top_of_hour_fit_tempo()} (no promo, Rule 5).")
                         end
                     elsif gap <= 0.0 - max_adj and gap > -60.0 then
                         # Runs over the ID: speed up as far as allowed so the ID
@@ -654,9 +624,17 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 # graph, rigid lane included, so muting after a HARD release would
                 # mute the opening of the rigid programme that owns :00 rather
                 # than an AutoDJ tail.
-                # AutoDJ was held (not clocked) through the lane, so there is no
-                # interrupted tail to hide; muting here would clip the held item.
-                top_of_hour_id_release_epoch := 0.0
+                #
+                # The earlier premise -- that a held AutoDJ leaves no tail, so no
+                # mute is needed -- was wrong. discard_autodj_current_cleanly()
+                # drops the request, but the inner crossfade still holds buffered
+                # PCM of the pre-ID song, which surfaced as a sub-second fragment
+                # of the OLD song at :00 on every open hour (verified in on-air
+                # history 2026-09-25 CT). A bounded mute of release_hold seconds
+                # eats that stale buffer so the interrupted song can never replay.
+                # The held item's own intro may lose up to that window; that is the
+                # accepted cost of Rule 3 (the old song must never resume).
+                top_of_hour_id_release_epoch := if was_hard then 0.0 else time() end
 
                 # Drop the interrupted STRICT-lane item, on every hour.
                 #
