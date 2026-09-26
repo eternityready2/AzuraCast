@@ -404,9 +404,12 @@ final class LinearLogStore
         $queued = [];
         foreach (
             $conn->fetchAllAssociative(
-                'SELECT log_entry_id, UNIX_TIMESTAMP(timestamp_played) AS t, text, title, artist, duration
-                FROM station_queue
-                WHERE station_id = ? AND is_played = 0 AND log_entry_id IS NOT NULL',
+                'SELECT sq.log_entry_id, UNIX_TIMESTAMP(sq.timestamp_played) AS t,
+                        sq.text, sq.title, sq.artist, sq.duration,
+                        sq.playlist_id, sq.album, sp.name AS playlist_name
+                FROM station_queue sq
+                LEFT JOIN station_playlists sp ON sp.id = sq.playlist_id
+                WHERE sq.station_id = ? AND sq.is_played = 0 AND sq.log_entry_id IS NOT NULL',
                 [$station->id]
             ) as $row
         ) {
@@ -462,6 +465,15 @@ final class LinearLogStore
                     $entry['artist'] = $live['artist'];
                     if (null !== $live['duration']) {
                         $entry['duration'] = max(1.0, (float)$live['duration']);
+                    }
+                    // A replacement song may come from a different playlist
+                    // and album; keep the report consistent with what airs.
+                    if (null !== ($live['playlist_id'] ?? null)) {
+                        $entry['playlist_id'] = (int)$live['playlist_id'];
+                        $entry['playlist'] = $live['playlist_name'];
+                    }
+                    if (null !== ($live['album'] ?? null)) {
+                        $entry['album'] = $live['album'];
                     }
                 }
                 continue;

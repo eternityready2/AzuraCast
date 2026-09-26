@@ -146,7 +146,26 @@ final class LinearLogPlayout implements EventSubscriberInterface
 
         $entry->status = StationLogEntry::STATUS_QUEUED;
         if (null !== $note) {
-            $entry->note = $note;
+            $entry->note = mb_substr(
+                $note . '; planned: ' . ($entry->text ?? 'unknown'),
+                0,
+                255,
+            );
+
+            // The replacement is a different song, possibly from a different
+            // playlist. Update the log entry so the Linear Log report shows
+            // the song that actually airs, not the one that was planned.
+            $entry->media = $row->media;
+            $entry->playlist = $row->playlist;
+            $entry->title = $row->title;
+            $entry->artist = $row->artist;
+            $entry->text = mb_substr((string)$row->text, 0, 255) ?: null;
+            $entry->duration = max(1.0, (float)($row->duration ?? 0.0));
+            $entry->payload = [
+                'song_id' => $row->song_id,
+                'album' => $row->album,
+                'media_type' => $row->media?->type,
+            ];
         }
         $this->em->persist($entry);
 
