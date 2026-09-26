@@ -7,6 +7,7 @@ namespace App\Sync\Task;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\StationDiagnostics;
+use App\Utilities\Time;
 use Monolog\LogRecord;
 use Symfony\Component\Messenger\MessageBus;
 use Throwable;
@@ -20,17 +21,29 @@ final class BuildLinearLogTask extends AbstractTask
     ) {
     }
 
+    /** Station-local hour of the daily build (FM-style early-morning log). */
+    private const int BUILD_LOCAL_HOUR = 3;
+
     public static function getSchedulePattern(): string
     {
         // Once a day, like FM traffic/music logs: built early morning through
         // the end of the next day. Live timing is re-computed on the page.
-        return '7 3 * * *';
+        // Sync cron patterns are evaluated in UTC, so fire at :07 every hour and
+        // let run() keep only the station's own local 3am (DST included).
+        return '7 * * * *';
     }
 
     public function run(bool $force = false): void
     {
         foreach ($this->iterateStations() as $station) {
             if (!$force && !$station->backend_config->linear_log_enabled) {
+                continue;
+            }
+
+            if (
+                !$force
+                && self::BUILD_LOCAL_HOUR !== (int)Time::nowInTimezone($station->getTimezoneObject())->format('G')
+            ) {
                 continue;
             }
 
