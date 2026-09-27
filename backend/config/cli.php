@@ -33,6 +33,7 @@ return function (App\Event\BuildConsoleCommands $event) {
         'azuracast:setup:rollback' => Command\RollbackDbCommand::class,
         'azuracast:setup' => Command\SetupCommand::class,
         'azuracast:radio:restart' => Command\RestartRadioCommand::class,
+        'azuracast:radio:build-linear-log' => Command\BuildLinearLogCommand::class,
         'azuracast:sync:nowplaying' => Command\Sync\NowPlayingCommand::class,
         'azuracast:sync:nowplaying:station' => Command\Sync\NowPlayingPerStationCommand::class,
         'azuracast:sync:run' => Command\Sync\RunnerCommand::class,

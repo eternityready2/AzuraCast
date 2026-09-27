@@ -15,7 +15,9 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
+use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Utilities\Time;
+use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
@@ -44,6 +46,7 @@ final class LinearLogBuilder
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly LinearLog\LinearLogStore $logStore,
         private readonly LinearLog\LinearLogRules $logRules,
+        private readonly TopOfHourClock $topOfHourClock,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -338,6 +341,19 @@ final class LinearLogBuilder
                 );
             }
 
+            // The Top-of-Hour Station ID is injected natively by Liquidsoap at
+            // :59:59, so it is never an AutoDJ queue row and would otherwise be
+            // invisible in the log even though it airs every hour. Synthesize a
+            // marker line for each boundary the ID owns so the log reflects what
+            // is really on air across the hour change.
+            foreach ($this->buildTopOfHourIdMarkers($station, $projectionStartTs, $projectionEndTs) as $marker) {
+                $entries[] = $marker;
+                $coverageEnd = max(
+                    $coverageEnd,
+                    (int)$marker['played_at'] + (int)ceil((float)$marker['duration']),
+                );
+            }
+
             usort(
                 $entries,
                 static fn(array $a, array $b): int =>
@@ -533,6 +549,110 @@ final class LinearLogBuilder
             'hour_boundary_max_play_seconds' => null,
             'top_of_hour_pre_id_fade' => false,
         ];
+    }
+
+    /**
+     * One synthetic Top-of-Hour Station ID marker per boundary the native ID lane
+     * owns, for the whole projection range. The ID starts at the configured
+     * :MM:SS (this station: :59:59) and runs its aired length into the next hour.
+     * Boundaries a Clock Wheel owns are skipped -- those carry their own legal-ID
+     * substitute, which already appears as a real queue row.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function buildTopOfHourIdMarkers(Station $station, int $startTs, int $endTs): array
+    {
+        if (!$this->topOfHourClock->isEnabled($station)) {
+            return [];
+        }
+
+        $tz = $station->getTimezoneObject();
+        $idStartMinute = $this->topOfHourClock->getIdStartMinute($station);
+        $idStartSecond = $this->topOfHourClock->getIdStartSecond($station);
+        $idLength = $this->recentTopOfHourIdLength($station);
+
+        $markers = [];
+
+        // Walk each hour in range. The ID for boundary HH+1:00:00 begins in hour
+        // HH at :MM:SS, so start from the hour containing $startTs.
+        $cursor = CarbonImmutable::createFromTimestamp($startTs, $tz)->startOfHour();
+        $rangeEnd = CarbonImmutable::createFromTimestamp($endTs, $tz);
+
+        while ($cursor->getTimestamp() <= $endTs) {
+            $idStart = $cursor->setTime($cursor->hour, $idStartMinute, $idStartSecond);
+            $idStartTs = $idStart->getTimestamp();
+            $cursor = $cursor->addHour();
+
+            if ($idStartTs < $startTs || $idStartTs > $endTs) {
+                continue;
+            }
+
+            $boundary = $idStart->startOfHour()->addHour()->toDateTimeImmutable();
+            if ($this->topOfHourClock->clockWheelOwnsBoundary($station, $boundary)) {
+                continue;
+            }
+
+            $markers[] = [
+                'id' => 'top-of-hour-id-' . $idStartTs,
+                'queue_id' => 0,
+                'song_id' => '',
+                'played_at' => $idStartTs,
+                'cued_at' => $idStartTs,
+                'duration' => (float)$idLength,
+                'title' => 'Top-of-Hour Station ID',
+                'artist' => null,
+                'album' => null,
+                'text' => 'Top-of-Hour Station ID',
+                'playlist' => null,
+                'playlist_id' => null,
+                'playlist_chain' => null,
+                'clock_wheel' => null,
+                'clock_wheel_id' => null,
+                'media_type' => 'id',
+                'source_type' => 'top_of_hour_id',
+                'is_request' => false,
+                'is_live_queue' => false,
+                'sent_to_autodj' => true,
+                'top_of_hour_legal_id' => true,
+                'autodj_custom_uri' => null,
+                'clock_wheel_schedule_mode' => null,
+                'clock_wheel_enforce_cap' => false,
+                'clock_wheel_stretch_ratio' => null,
+                'clock_wheel_legal_id_substitute' => false,
+                'hour_boundary_enforce_cap' => false,
+                'hour_boundary_max_play_seconds' => null,
+                'top_of_hour_pre_id_fade' => false,
+            ];
+        }
+
+        return $markers;
+    }
+
+    /**
+     * The aired length of the most recent Top-of-Hour ID, so the marker's
+     * duration matches reality. Falls back to a typical ID length when none has
+     * aired yet.
+     */
+    private function recentTopOfHourIdLength(Station $station): float
+    {
+        $duration = (float)($this->em->getConnection()->fetchOne(
+            'SELECT duration FROM station_queue
+            WHERE station_id = ? AND top_of_hour_legal_id = 1 AND duration > 0
+            ORDER BY id DESC LIMIT 1',
+            [$station->id]
+        ) ?: 0.0);
+
+        if ($duration <= 0.0) {
+            $duration = (float)($this->em->getConnection()->fetchOne(
+                'SELECT duration FROM song_history
+                WHERE station_id = ? AND duration > 0 AND duration <= 60 AND media_id IS NULL
+                AND (title LIKE ? OR text LIKE ?)
+                ORDER BY id DESC LIMIT 1',
+                [$station->id, '%Station ID%', '%Station ID%']
+            ) ?: 0.0);
+        }
+
+        return $duration > 0.0 ? $duration : 38.0;
     }
 
     private function scheduleKey(\App\Entity\StationSchedule $schedule): int

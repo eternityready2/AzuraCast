@@ -696,35 +696,66 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
+    /**
+     * True when the most recent item on air is itself an AI DJ speech clip, so a
+     * new break must wait for a song (or any non-speech item) in between.
+     *
+     * Read straight from SongHistory, which is the only durable proof a clip
+     * reached air. The previous implementation cross-checked a StationQueue row
+     * for the clip, but createQueueEntry() writes those rows already marked
+     * is_played, so they are pruned soon after the clip airs. Once pruned, the
+     * count was zero and this returned false, letting a second break queue
+     * immediately behind the first -- exactly the back-to-back speech the guard
+     * exists to stop (2026-09-27 1:25pm: Bella "Joke + Bible Verse" then
+     * "Testimony" 22s apart, no song between).
+     *
+     * A DJ clip is a media-less history row whose artist is one of this station's
+     * AI DJ names (matched the same way the cadence watchdog matches, allowing an
+     * optional "<prefix> - <name>" form). Real songs and promos carry a media_id
+     * and so release the guard.
+     */
     private function isDjSpeechOnAir(Station $station): bool
     {
         try {
-            $lastArtist = $this->em->createQuery(
+            /** @var \App\Entity\SongHistory|null $last */
+            $last = $this->em->createQuery(
                 <<<'DQL'
-                    SELECT sh.artist FROM App\Entity\SongHistory sh
+                    SELECT sh FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
                     ORDER BY sh.id DESC
                 DQL
             )->setParameter('station', $station)
                 ->setMaxResults(1)
-                ->getOneOrNullResult()['artist'] ?? null;
+                ->getOneOrNullResult();
 
-            if (null === $lastArtist || '' === $lastArtist) {
+            if (null === $last || null !== $last->media_id) {
                 return false;
             }
 
-            // DJ clips are the only queue rows whose artist is a DJ name.
-            return (int)$this->em->createQuery(
+            $lastArtist = strtolower(trim((string)($last->artist ?? '')));
+            if ('' === $lastArtist) {
+                return false;
+            }
+
+            $djNames = $this->em->createQuery(
                 <<<'DQL'
-                    SELECT COUNT(sq.id) FROM App\Entity\StationQueue sq
-                    WHERE sq.station = :station
-                    AND sq.artist = :artist
-                    AND sq.autodj_custom_uri LIKE :aiDjPath
+                    SELECT dj.name FROM App\Entity\AiDj dj
+                    WHERE dj.station = :station
                 DQL
             )->setParameter('station', $station)
-                ->setParameter('artist', $lastArtist)
-                ->setParameter('aiDjPath', '%/ai_dj/%')
-                ->getSingleScalarResult() > 0;
+                ->getSingleColumnResult();
+
+            foreach ($djNames as $name) {
+                $name = strtolower(trim((string)$name));
+                if ('' === $name) {
+                    continue;
+                }
+                if ($lastArtist === $name || str_ends_with($lastArtist, ' - ' . $name)) {
+                    return true;
+                }
+            }
+
+            return false;
         } catch (\Throwable) {
             return false;
         }
