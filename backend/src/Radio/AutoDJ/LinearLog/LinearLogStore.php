@@ -257,12 +257,10 @@ final class LinearLogStore
      *
      * @param list<array<string, mixed>> $logRows
      * @param list<array<string, mixed>> $entries
-     * @return list<array<string, mixed>>
-     */
-    /**
      * @param list<int> $replacedIds planned lines this rebuild replaces; deleted
      *     in the same transaction that writes the new plan, so a failure cannot
      *     leave the log empty.
+     * @return list<array<string, mixed>>
      */
     public function applyPlan(
         Station $station,

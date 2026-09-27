@@ -371,6 +371,7 @@ final class LinearLogBuilder
                     static fn(int $id): string => 'log-' . $id,
                     $ruleResult['dropped_ids']
                 );
+                /** @var list<array<string, mixed>> $entries */
                 $entries = array_values(array_filter(
                     $entries,
                     static fn(array $entry): bool => !in_array($entry['id'] ?? '', $droppedIds, true),
