@@ -1064,6 +1064,11 @@ return static function (RouteCollectorProxy $group) {
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
                     $group->get(
+                        '/dmca-compliance/exempt-playlists',
+                        Controller\Api\Stations\DmcaCompliance\ExemptPlaylistsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
                         '/ai-dj-talk-rules',
                         Controller\Api\Stations\AiDj\TalkRulesAction::class
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
