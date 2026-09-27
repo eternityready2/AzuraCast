@@ -401,6 +401,27 @@ final class Queue
                     $queueRow,
                 );
 
+                // A scheduled remote stream is switched off at its window end by
+                // Liquidsoap, so its window may never be credited past that point:
+                // a stale stream duration would otherwise push the next scheduled
+                // playlist minutes late everywhere the queue timeline is read.
+                if (null !== $queueRow->autodj_custom_uri && null !== $queueRow->playlist) {
+                    $windowRemaining = (float)$this->scheduler->getPlaylistScheduleDuration(
+                        $queueRow->playlist,
+                        $expectedPlayTime
+                    );
+
+                    if ($windowRemaining < $effectiveDuration) {
+                        $effectiveDuration = max(0.0, $windowRemaining);
+                        $queueRow->duration = $effectiveDuration;
+                        $nextExpectedPlayTime = $this->addDurationToTime(
+                            $station,
+                            $expectedPlayTime,
+                            $effectiveDuration
+                        );
+                    }
+                }
+
                 $queueRow->timestamp_cued = $expectedCueTime;
                 $queueRow->timestamp_played = $expectedPlayTime;
                 $queueRow->updateVisibility();

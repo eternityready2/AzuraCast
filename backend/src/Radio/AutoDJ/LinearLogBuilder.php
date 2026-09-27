@@ -10,6 +10,8 @@ use App\Entity\Repository\AiDjScheduleRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationRepository;
 use App\Entity\Station;
+use App\Entity\StationLogEntry;
+use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
@@ -266,7 +268,7 @@ final class LinearLogBuilder
                         $row,
                         $playedAt,
                         isset($liveQueueIds[$row->id]),
-                        null === $entry ? null : count($entries),
+                        null === $entry ? null : (string)$entry['id'],
                     );
                 }
 
@@ -373,19 +375,24 @@ final class LinearLogBuilder
             );
             $entries = $this->logStore->applyPlan($station, $logRows, $entries, $replacedPlanIds);
 
+            // Create log entries for scheduled_programme markers so operators
+            // can hand-edit (drop / replace) them like any other log line.
+            $entries = $this->persistProgrammeLogEntries($station, $entries);
+
             // Standing operator rules police the plan the builder just wrote, so
             // a line that may not play at its planned time never reaches the log
             // the operator reads (or the queue playout takes it from).
             $ruleResult = $this->logRules->apply($station, $projectionStartTs);
             if ($ruleResult['dropped'] > 0) {
-                $droppedIds = array_map(
-                    static fn(int $id): string => 'log-' . $id,
-                    $ruleResult['dropped_ids']
-                );
+                // Match on the log entry id, not the report entry's 'id': a queue
+                // line keeps its 'projection-N' id, so comparing 'log-N' strings
+                // left every rule-dropped line visible in the log.
+                $droppedIds = array_fill_keys($ruleResult['dropped_ids'], true);
                 /** @var list<array<string, mixed>> $entries */
                 $entries = array_values(array_filter(
                     $entries,
-                    static fn(array $entry): bool => !in_array($entry['id'] ?? '', $droppedIds, true),
+                    static fn(array $entry): bool => empty($entry['log_entry_id'])
+                        || !isset($droppedIds[(int)$entry['log_entry_id']]),
                 ));
             }
         }
@@ -606,6 +613,97 @@ final class LinearLogBuilder
         usort($shifts, static fn(array $a, array $b): int => $a['starts_at'] <=> $b['starts_at']);
 
         return $shifts;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $entries
+     * @return list<array<string, mixed>>
+     */
+    private function persistProgrammeLogEntries(Station $station, array $entries): array
+    {
+        // Remove stale programme log entries from previous builds.
+        $this->em->createQuery(
+            <<<'DQL'
+                DELETE FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.payload LIKE :marker
+                AND e.status = :planned
+                AND e.is_locked = false
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('marker', '%scheduled_programme%')
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->execute();
+
+        $maxSequence = (int)$this->em->createQuery(
+            <<<'DQL'
+                SELECT MAX(e.sequence) FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+            DQL
+        )->setParameter('station', $station)
+            ->getSingleScalarResult();
+
+        // Lines the delete above spared on purpose (already aired, queued or
+        // locked by an operator) must be re-used, not duplicated.
+        /** @var StationLogEntry[] $survivors */
+        $survivors = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.payload LIKE :marker
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('marker', '%scheduled_programme%')
+            ->getResult();
+
+        $survivorByKey = [];
+        foreach ($survivors as $survivor) {
+            $survivorByKey[$survivor->planned_at . '|' . ($survivor->playlist?->id ?? '') . '|' . $survivor->title]
+                = $survivor;
+        }
+
+        /** @var array<int, StationLogEntry> $pending */
+        $pending = [];
+        foreach ($entries as $idx => $entry) {
+            if ('scheduled_programme' !== ($entry['source_type'] ?? '')) {
+                continue;
+            }
+
+            $plannedAt = (int)($entry['played_at'] ?? 0);
+            $survivorKey = $plannedAt . '|' . ($entry['playlist_id'] ?? '') . '|' . ($entry['title'] ?? '');
+            if (isset($survivorByKey[$survivorKey])) {
+                $pending[$idx] = $survivorByKey[$survivorKey];
+                continue;
+            }
+
+            $playlistId = $entry['playlist_id'] ?? null;
+
+            $logEntry = new StationLogEntry($station, $plannedAt, ++$maxSequence);
+            $logEntry->title = $entry['title'] ?? null;
+            $logEntry->text = $entry['text'] ?? null;
+            $logEntry->duration = (float)($entry['duration'] ?? 0);
+            if (null !== $playlistId) {
+                $logEntry->playlist = $this->em->getReference(StationPlaylist::class, (int)$playlistId);
+            }
+            $logEntry->payload = ['source_type' => 'scheduled_programme'];
+            $this->em->persist($logEntry);
+            $pending[$idx] = $logEntry;
+        }
+
+        if ([] !== $pending) {
+            $this->em->flush();
+
+            foreach ($pending as $idx => $logEntry) {
+                $entries[$idx]['log_entry_id'] = $logEntry->id;
+                $entries[$idx]['id'] = 'log-' . $logEntry->id;
+                $entries[$idx]['log_status'] = $logEntry->status;
+                $entries[$idx]['log_note'] = $logEntry->note;
+                $entries[$idx]['aired_at'] = $logEntry->aired_at;
+                $entries[$idx]['is_locked'] = $logEntry->is_locked;
+            }
+        }
+
+        return $entries;
     }
 
     /** @return array<string, mixed> */

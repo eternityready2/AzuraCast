@@ -218,10 +218,13 @@ final class LinearLogStore
      *
      * @return array<string, mixed>
      */
-    public function describeRow(StationQueue $row, int $plannedAt, bool $isLive, ?int $entryIndex): array
+    public function describeRow(StationQueue $row, int $plannedAt, bool $isLive, ?string $entryKey): array
     {
         return [
-            'index' => $entryIndex,
+            // The report entry's stable 'id'. A positional index cannot be used:
+            // the builder re-sorts its entries by air time after all rows are
+            // described, which would silently rebind every log line.
+            'entry_key' => $entryKey,
             'log_entry_id' => $row->log_entry_id,
             'is_live' => $isLive,
             'skip' => $row->top_of_hour_legal_id
@@ -278,7 +281,15 @@ final class LinearLogStore
 
         usort($logRows, static fn(array $a, array $b): int => $a['planned_at'] <=> $b['planned_at']);
 
-        /** @var list<array{StationLogEntry, ?int}> $touched */
+        $positionByKey = [];
+        foreach ($entries as $position => $entry) {
+            $key = $entry['id'] ?? null;
+            if (null !== $key) {
+                $positionByKey[(string)$key] = $position;
+            }
+        }
+
+        /** @var list<array{StationLogEntry, ?string}> $touched */
         $touched = [];
 
         foreach ($logRows as $data) {
@@ -310,7 +321,7 @@ final class LinearLogStore
                     $this->em->persist($entry);
                 }
 
-                $touched[] = [$entry, $data['index']];
+                $touched[] = [$entry, $data['entry_key']];
                 continue;
             }
 
@@ -324,7 +335,7 @@ final class LinearLogStore
             $this->applyRowData($entry, $data);
             $entry->duration = (float)$data['duration'];
             $this->em->persist($entry);
-            $touched[] = [$entry, $data['index']];
+            $touched[] = [$entry, $data['entry_key']];
         }
 
         // One transaction: the plan the rebuild replaces goes out and the new plan
@@ -334,10 +345,13 @@ final class LinearLogStore
             $this->em->flush();
         });
 
-        foreach ($touched as [$entry, $index]) {
-            if (null !== $index && isset($entries[$index])) {
-                $entries[$index] = [...$entries[$index], ...$this->logFields($entry)];
+        foreach ($touched as [$entry, $key]) {
+            if (null === $key || !isset($positionByKey[$key])) {
+                continue;
             }
+
+            $position = $positionByKey[$key];
+            $entries[$position] = [...$entries[$position], ...$this->logFields($entry)];
         }
 
         // This hour's as-run lines (aired, swapped, replaced, dropped).
