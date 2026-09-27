@@ -517,13 +517,14 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 if not top_of_hour_id_enabled() then
                     false
                 elsif top_of_hour_id_active() then
-                    # Own every frame until the :00 boundary, on open hours as
-                    # well as HARD ones, so nothing airs between the ID and the
-                    # new hour. A short ID is followed by silence, not music.
-                    # An ID that overruns :00 on an open hour is still allowed to
-                    # finish.
+                    # Own every frame until the ID (and optional news) finishes.
+                    # The :00 boundary gates the pre-ID window so nothing airs
+                    # in the gap between song end and ID start, but once the ID
+                    # is active it must play through completely on both OPEN and
+                    # HARD hours. On HARD hours top_of_hour_hard_hold (blank)
+                    # fills any gap between ID end and the rigid programme start.
                     (boundary > 0.0 and now < boundary)
-                    or (not top_of_hour_id_hard_boundary() and top_of_hour_id.is_ready())
+                    or top_of_hour_id.is_ready()
                     or top_of_hour_news.is_ready()
                 elsif
                     top_of_hour_id_in_early_window()
