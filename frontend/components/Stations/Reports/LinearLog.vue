@@ -401,9 +401,17 @@ function closeReplace(): void {
 
 function onReplaceSearch(): void {
     if (replaceTimer !== null) window.clearTimeout(replaceTimer);
-    replaceTimer = window.setTimeout(async () => {
+    replaceTimer = window.setTimeout(() => {
         const query = replaceQuery.value.trim();
-        replaceOptions.value = query.length >= 2 ? await searchMedia(query) : [];
+        if (query.length < 2) {
+            replaceOptions.value = [];
+            return;
+        }
+        // setTimeout expects a void return, so the search is kicked off rather
+        // than awaited here.
+        void searchMedia(query).then((options) => {
+            replaceOptions.value = options;
+        });
     }, 250);
 }
 
