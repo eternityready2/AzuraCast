@@ -14,6 +14,7 @@ use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Event\Radio\ResolveQueueClockConstraint;
 use App\Event\Radio\RevalidateQueuedSong;
+use App\Utilities\ScheduleRecurrence;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -35,6 +36,20 @@ final class Queue
      * window: a row this close to the boundary is held until after it instead.
      */
     private const int MIN_BOUNDARY_CAP_SECONDS = 30;
+
+    /** Largest single step the preview cursor takes over a slot it could not fill. */
+    private const int MAX_PREVIEW_GAP_STEP_SECONDS = 300;
+
+    /** Smallest step, so the preview always makes forward progress. */
+    private const int MIN_PREVIEW_GAP_STEP_SECONDS = 1;
+
+    /**
+     * Safety cap on consecutive unfilled slots. The preview now steps to the next
+     * scheduling boundary rather than a flat five minutes, so a genuinely dry
+     * station takes many more (smaller) steps than it used to; this bounds the
+     * loop independently of how much wall-clock time those steps covered.
+     */
+    private const int MAX_CONSECUTIVE_PREVIEW_GAP_STEPS = 500;
 
     public function __construct(
         private readonly EventDispatcherInterface $dispatcher,
@@ -222,6 +237,7 @@ final class Queue
         $maxAttemptsPerSlot = $isPreview ? 25 : (null !== $lookaheadMinutesOverride ? 50 : 10);
         $tracksBuiltThisRun = 0;
         $consecutivePreviewGapSeconds = 0;
+        $consecutivePreviewGapSteps = 0;
         $maxPreviewGapSeconds = (max(
             60,
             $station->backend_config->duplicate_prevention_time_range,
@@ -303,7 +319,7 @@ final class Queue
                 if ($isPreview) {
                     // Never step past the next :00; a short tail before it is owned
                     // by the Top-of-Hour ID lane on air, so it is not dead air.
-                    $gapSeconds = 300;
+                    $gapSeconds = self::MAX_PREVIEW_GAP_STEP_SECONDS;
                     $secondsToTop = $this->hourBoundaryPlanner->secondsUntilNextTopOfHour(
                         $expectedPlayTime,
                         $station->getTimezoneObject(),
@@ -311,6 +327,23 @@ final class Queue
                     if ($secondsToTop > 0 && $secondsToTop < $gapSeconds) {
                         $gapSeconds = $secondsToTop;
                     }
+
+                    // Stop at the end of the scheduled window that owns this slot
+                    // and retry there, instead of writing off the rest of the hour
+                    // on one failed pick. A scheduled programme is exclusive, so
+                    // while its window is open nothing else may fill it -- but the
+                    // moment it closes, ordinary rotation is eligible again. Taking
+                    // the whole remainder in one step both over-reported the gap and
+                    // skipped airtime that really would have been programmed: a
+                    // programme whose audio ended 12s before its 11:00-11:59 window
+                    // closed was logged as 72s of dead air, and the 59s after the
+                    // window reopened was never attempted at all.
+                    $secondsToWindowEnd = $this->secondsToScheduledWindowEnd($station, $expectedPlayTime);
+                    if (null !== $secondsToWindowEnd && $secondsToWindowEnd < $gapSeconds) {
+                        $gapSeconds = $secondsToWindowEnd;
+                    }
+
+                    $gapSeconds = max(self::MIN_PREVIEW_GAP_STEP_SECONDS, $gapSeconds);
 
                     $coveredByTopOfHour = $gapSeconds === $secondsToTop
                         && $secondsToTop <= 60
@@ -324,23 +357,37 @@ final class Queue
                         ];
                         $consecutivePreviewGapSeconds += $gapSeconds;
                     }
+                    $consecutivePreviewGapSteps++;
 
                     $this->logger->warning(
                         'Linear Log preview found no eligible item; advancing the projection cursor.',
                         [
                             'attempts' => $attempts,
                             'expected_play_time' => $expectedPlayTime->format(DateTimeInterface::ATOM),
+                            'step_seconds' => $gapSeconds,
+                            'stepped_to_window_end' => $gapSeconds === $secondsToWindowEnd,
                             'dry_seconds' => $consecutivePreviewGapSeconds,
                         ]
                     );
 
-                    $expectedCueTime = $this->addDurationToTime($station, $expectedCueTime, $gapSeconds);
-                    $expectedPlayTime = $this->addDurationToTime($station, $expectedPlayTime, $gapSeconds);
+                    // Advanced without the crossfade overlap that addDurationToTime()
+                    // applies to real audio: there is nothing here to crossfade, and
+                    // subtracting it would land the retry a moment BEFORE the very
+                    // boundary this step exists to reach, so the same blocked slot
+                    // would be retried forever.
+                    $expectedCueTime = CarbonImmutable::instance($expectedCueTime)->addSeconds($gapSeconds);
+                    $expectedPlayTime = CarbonImmutable::instance($expectedPlayTime)->addSeconds($gapSeconds);
 
-                    if ($consecutivePreviewGapSeconds >= $maxPreviewGapSeconds) {
+                    if (
+                        $consecutivePreviewGapSeconds >= $maxPreviewGapSeconds
+                        || $consecutivePreviewGapSteps >= self::MAX_CONSECUTIVE_PREVIEW_GAP_STEPS
+                    ) {
                         $this->logger->warning(
                             'Linear Log preview stopped after the station remained dry beyond its compliance window.',
-                            ['dry_seconds' => $consecutivePreviewGapSeconds]
+                            [
+                                'dry_seconds' => $consecutivePreviewGapSeconds,
+                                'dry_steps' => $consecutivePreviewGapSteps,
+                            ]
                         );
                         $this->em->flush();
                         break;
@@ -358,6 +405,7 @@ final class Queue
             }
 
             $consecutivePreviewGapSeconds = 0;
+            $consecutivePreviewGapSteps = 0;
 
             foreach ($nextSongs as $queueRow) {
                 // Guard against a corrupt or not-yet-analyzed media duration while
@@ -621,6 +669,66 @@ final class Queue
             $effectiveDuration,
             CarbonImmutable::instance($resumeAt),
         ];
+    }
+
+    /**
+     * Seconds from $at until the earliest end of a scheduled playlist window that
+     * is open at $at, or null when no scheduled window covers it.
+     *
+     * This is the next instant at which the eligibility rules that just rejected
+     * every candidate can change on their own: a scheduled programme owns its
+     * window exclusively, so while it is open nothing else may be placed there,
+     * and when it closes ordinary rotation becomes eligible again. The preview
+     * uses it as a retry point so one blocked slot cannot write off the airtime
+     * on the far side of the boundary.
+     *
+     * Read from the schedule occurrences rather than from
+     * getPlaylistScheduleDuration(), which reports a window's FULL length instead
+     * of the time left in it for any playlist carrying `allow_overrun` -- the
+     * option the station's own programme playlists use, so that route reported no
+     * usable boundary exactly where one was needed.
+     */
+    private function secondsToScheduledWindowEnd(
+        Station $station,
+        DateTimeInterface $at,
+    ): ?int {
+        $tz = $station->getTimezoneObject();
+        $cursor = CarbonImmutable::instance($at)->setTimezone($tz);
+        $atTs = $cursor->getTimestamp();
+        $soonest = null;
+
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled) {
+                continue;
+            }
+
+            foreach ($playlist->schedule_items as $schedule) {
+                $occurrences = ScheduleRecurrence::getOccurrencesInRange(
+                    $schedule,
+                    $tz,
+                    $cursor->subDay(),
+                    $cursor->addDay(),
+                );
+
+                foreach ($occurrences as $occurrence) {
+                    $startTs = $occurrence->start->getTimestamp();
+                    $endTs = $occurrence->end->getTimestamp();
+
+                    // Half-open, matching RigidScheduleWindowResolver: a window
+                    // ending at $at no longer owns the air at $at.
+                    if ($startTs > $atTs || $endTs <= $atTs) {
+                        continue;
+                    }
+
+                    $remaining = $endTs - $atTs;
+                    if (null === $soonest || $remaining < $soonest) {
+                        $soonest = $remaining;
+                    }
+                }
+            }
+        }
+
+        return $soonest;
     }
 
     private function addDurationToTime(
