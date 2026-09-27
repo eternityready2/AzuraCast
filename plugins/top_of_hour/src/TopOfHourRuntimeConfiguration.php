@@ -34,7 +34,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
 
     public function __construct(
         private readonly TopOfHourClock $clock,
-        private readonly EntityManagerInterface $em,
+        private readonly ?EntityManagerInterface $em = null,
     ) {
     }
 
@@ -56,6 +56,10 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
      */
     private function getFitPromoList(Station $station): string
     {
+        if (null === $this->em) {
+            return '[]';
+        }
+
         /** @var StationMedia[] $media */
         $media = $this->em->createQuery(
             <<<'DQL'
