@@ -179,6 +179,13 @@ final class LinearLogBuilder
             $liveQueueIds[$queueRow->id] = true;
         }
 
+        $remoteUrlPlaylistIds = [];
+        foreach ($station->playlists as $pl) {
+            if (PlaylistSources::RemoteUrl === $pl->source) {
+                $remoteUrlPlaylistIds[$pl->id] = true;
+            }
+        }
+
         // Saved linear log (log controls playout): keep the planned lines and
         // only extend them; a rebuild request re-plans hours past the lock.
         $playout = LinearLog\LinearLogPlayout::isPlayoutEnabled($station);
@@ -240,6 +247,10 @@ final class LinearLogBuilder
                 }
 
                 if ($playedAt < ($projectionStartTs - 300) || $playedAt > $projectionEndTs) {
+                    continue;
+                }
+
+                if (null !== $row->playlist_id && isset($remoteUrlPlaylistIds[$row->playlist_id])) {
                     continue;
                 }
 

@@ -63,7 +63,7 @@ final class RigidScheduleWindowResolver
             }
 
             foreach ($playlist->schedule_items as $schedule) {
-                if (!$this->isRigidSchedule($schedule)) {
+                if (!$this->isRigidSchedule($schedule, $playlist)) {
                     continue;
                 }
 
@@ -123,11 +123,16 @@ final class RigidScheduleWindowResolver
         return in_array($playlist->source, [PlaylistSources::Songs, PlaylistSources::RemoteUrl], true);
     }
 
-    private function isRigidSchedule(StationSchedule $schedule): bool
+    private function isRigidSchedule(StationSchedule $schedule, StationPlaylist $playlist): bool
     {
-        // Playlist-wide Start Behavior remains an ordinary/flexible behavior.
-        // Only an explicit Strict / Exact Time row (or emergency row) gets the
-        // outer native wall-clock lane.
+        // Remote URL streams always get an exclusive Liquidsoap switch arm
+        // (schedule_switch_remote_url) regardless of strict_start, so the
+        // linear log must treat them as rigid to show correct times and
+        // prevent bleeding into adjacent scheduled playlists.
+        if (PlaylistSources::RemoteUrl === $playlist->source) {
+            return true;
+        }
+
         return $schedule->strict_start || $schedule->is_emergency;
     }
 }
