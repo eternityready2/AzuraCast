@@ -541,6 +541,7 @@ final class LinearLogStore
 
             if (0 !== $shift && StationLogEntry::STATUS_PLANNED === ($entry['log_status'] ?? null)
                 && (int)($entry['played_at'] ?? 0) < $shiftUntil
+                && 'scheduled_programme' !== ($entry['source_type'] ?? '')
             ) {
                 $entry['played_at'] = (int)$entry['played_at'] + $shift;
             }
