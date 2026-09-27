@@ -1007,6 +1007,17 @@ final class QueueBuilder implements EventSubscriberInterface
             $this->spmRepo->getQueue($playlist),
             $expectedPlayTime,
         );
+        if (empty($mediaQueue)) {
+            // Refill an exhausted rotation, as the sequential and shuffled
+            // selectors do. Without this a random-order playlist stops yielding
+            // tracks for good once every item has been marked played.
+            $this->spmRepo->resetQueue($playlist);
+            $mediaQueue = $this->preparePlaylistQueue(
+                $playlist,
+                $this->spmRepo->getQueue($playlist),
+                $expectedPlayTime,
+            );
+        }
 
         if ($playlist->avoid_duplicates) {
             return $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentSongHistory, $allowDuplicates);

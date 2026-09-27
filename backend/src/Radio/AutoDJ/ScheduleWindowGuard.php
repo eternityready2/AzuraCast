@@ -53,7 +53,8 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
         }
 
         $playlist = $row->playlist;
-        if (!$playlist instanceof StationPlaylist) {
+        $clockWheel = $row->clock_wheel;
+        if (!$playlist instanceof StationPlaylist && null === $clockWheel) {
             return;
         }
 
@@ -62,15 +63,30 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
             $airsAt = $event->getExpectedPlayAt();
         }
 
-        if ($this->scheduler->isPlaylistAllowedAt($playlist, DateTimeImmutable::createFromInterface($airsAt))) {
-            return;
+        $airsAtImmutable = DateTimeImmutable::createFromInterface($airsAt);
+
+        // A wheel's tracks are drawn from member playlists that usually carry no
+        // schedule of their own. Judge such a row by the wheel that owns the
+        // slot, or the wheel's own programme would delete itself.
+        if (null !== $clockWheel) {
+            if ($this->scheduler->isClockWheelAllowedAt($clockWheel, $airsAtImmutable)) {
+                return;
+            }
+
+            $sourceName = $clockWheel->name;
+        } else {
+            if ($this->scheduler->isPlaylistAllowedAt($playlist, $airsAtImmutable)) {
+                return;
+            }
+
+            $sourceName = $playlist->name;
         }
 
         $this->logger->notice(
-            'Removed a queued song whose playlist may not play at its air time.',
+            'Removed a queued song whose source may not play at its air time.',
             [
                 'queue_id' => $row->id,
-                'playlist' => $playlist->name,
+                'source' => $sourceName,
                 'song' => trim(($row->artist ?? '') . ' - ' . ($row->title ?? ''), ' -'),
                 'airs_at' => $airsAt->format(DATE_ATOM),
             ]

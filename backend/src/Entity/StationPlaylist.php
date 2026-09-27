@@ -264,6 +264,17 @@ final class StationPlaylist implements
     ]
     public bool $include_in_on_demand = false;
 
+    #[
+        OA\Property(
+            description: "Whether this playlist carries spoken-word programming (a show, sermon or syndicated "
+            . "episode) rather than music. Programme content is exempt from the DMCA performance complement, "
+            . "which only governs sound recordings.",
+            example: false
+        ),
+        ORM\Column
+    ]
+    public bool $is_programme = false;
+
     #[ORM\Column(name: 'backend_options', length: 255, nullable: true)]
     private ?string $backend_options_raw = '';
 
@@ -520,7 +531,12 @@ final class StationPlaylist implements
             return $this->media_items->count() > 0;
         }
 
-        return PlaylistRemoteTypes::Playlist === $this->remote_type;
+        // Both remote subtypes are playable: QueueBuilder::getMediaFromRemoteUrl
+        // resolves a "playlist" URL into songs and hands a "stream" URL straight
+        // to Liquidsoap as a custom URI. Requiring the "playlist" subtype here
+        // made a scheduled web stream ineligible for the AutoDJ, so ordinary
+        // rotation music filled its window instead.
+        return null !== $this->remote_url;
     }
 
     public function __clone()

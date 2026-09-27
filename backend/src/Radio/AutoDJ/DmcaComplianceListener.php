@@ -109,6 +109,17 @@ final class DmcaComplianceListener implements EventSubscriberInterface
     ): bool {
 
          if ($entry->media?->type !== 'music') { return true; }
+
+        // The DMCA performance complement governs sound recordings, not talk.
+        // A show chopped into episode files is still one programme, so its parts
+        // must not be counted against each other as if they were songs in
+        // rotation -- the AutoDJ would refuse the rest of the episode and fall
+        // back to music. Flagged per playlist, so a scheduled *music* block
+        // stays fully subject to the limits.
+        if ($entry->playlist?->is_programme) {
+            return true;
+        }
+
         $config = $station->backend_config;
 
         $windowMinutes           = $config->dmca_window_minutes           ?? self::DEFAULT_WINDOW_MINUTES;

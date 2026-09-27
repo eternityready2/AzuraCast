@@ -174,41 +174,232 @@ final class Scheduler
     }
 
     /**
-     * True while an enabled, AutoDJ-played scheduled playlist has its window
-     * open at $at. Such a block owns the air: nothing unscheduled plays then.
+     * True while an enabled scheduled playlist has its window open at $at. Such a
+     * block owns the air: nothing unscheduled plays then.
      */
     public function isScheduledBlockOpenAt(\App\Entity\Station $station, DateTimeImmutable $at): bool
     {
-        foreach ($station->playlists as $playlist) {
-            if (
-                $playlist->schedule_items->count() > 0
-                && $playlist->isPlayable()
-                && $this->isPlaylistScheduledToPlayNow($playlist, $at, excludeSpecialRules: true)
-            ) {
-                return true;
-            }
-        }
-
-        return false;
+        return null !== $this->narrowestOpenScheduleSeconds($station, $at);
     }
 
     /**
      * The scheduling rule every playout path must obey (AutoDJ, the queue, and
      * the saved Linear Log): a scheduled playlist plays only inside its own
-     * window, and an unscheduled playlist never plays while a scheduled block
-     * is open.
+     * window, and nothing else plays while that window is open.
      */
     public function isPlaylistAllowedAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
     {
+        $station = $playlist->station;
+        $tz = $station->getTimezoneObject();
+        $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
+
         if ($playlist->schedule_items->count() > 0) {
-            return $this->isPlaylistScheduledToPlayNow($playlist, $at, excludeSpecialRules: true);
+            $ownWindow = $this->openScheduleSecondsForPlaylist($playlist, $tz, $at);
+            if (null === $ownWindow) {
+                return false;
+            }
+
+            // A broad row (an all-day background rotation, say) must not bleed
+            // into a narrower programme block open at the same moment. Equal
+            // widths are left alone; those are deliberate co-programming.
+            return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
         }
 
         if ($this->isPlaylistCoveredByGroupScheduleAt($playlist, $at)) {
             return true;
         }
 
-        return !$this->isScheduledBlockOpenAt($playlist->station, $at);
+        return null === $narrowestOpen;
+    }
+
+    /**
+     * Length in seconds of the narrowest scheduled window open anywhere on the
+     * station at $at, or null when no scheduled block is open.
+     *
+     * Ownership of the air is a property of the schedule row, not of whether the
+     * playlist can hand the AutoDJ a track at this instant. Testing isPlayable()
+     * here silently surrendered the slot for two whole classes of scheduled
+     * programme -- remote web streams (remote_type "stream") and any playlist
+     * flagged to interrupt other songs -- letting rotation music leak into them.
+     */
+    private function narrowestOpenScheduleSeconds(
+        \App\Entity\Station $station,
+        DateTimeImmutable $at
+    ): ?int {
+        $tz = $station->getTimezoneObject();
+        $narrowest = null;
+
+        foreach ($station->playlists as $playlist) {
+            $seconds = $this->openScheduleSecondsForPlaylist($playlist, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
+            }
+        }
+
+        // A scheduled clock wheel is a programme block in exactly the same sense
+        // as a scheduled playlist. ClockWheelScheduler falls through to the
+        // ordinary AutoDJ when a wheel cannot resolve a track, so without this
+        // the fall-through pulled unscheduled rotation music into the wheel's
+        // own window.
+        foreach ($station->clock_wheels as $clockWheel) {
+            if (!$this->canClockWheelOwnScheduledAir($clockWheel)) {
+                continue;
+            }
+
+            foreach ($clockWheel->schedule_items as $schedule) {
+                $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+                if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                    $narrowest = $seconds;
+                }
+            }
+        }
+
+        return $narrowest;
+    }
+
+    private function canClockWheelOwnScheduledAir(\App\Entity\StationClockWheel $clockWheel): bool
+    {
+        return $clockWheel->is_active
+            && ($clockWheel->slots->count() > 0 || $clockWheel->inherits_template_slots);
+    }
+
+    /**
+     * The clock wheel counterpart of isPlaylistAllowedAt. A queue row produced by
+     * a wheel is governed by the wheel's own schedule, not by the window of the
+     * member playlist the track happened to come from.
+     */
+    public function isClockWheelAllowedAt(
+        \App\Entity\StationClockWheel $clockWheel,
+        DateTimeImmutable $at
+    ): bool {
+        // A wheel with no schedule rows of its own is driven by something else
+        // (a holiday override, say); this rule has nothing to say about it.
+        if (0 === $clockWheel->schedule_items->count()) {
+            return true;
+        }
+
+        $station = $clockWheel->station;
+        $tz = $station->getTimezoneObject();
+
+        $ownWindow = null;
+        foreach ($clockWheel->schedule_items as $schedule) {
+            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+            if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
+                $ownWindow = $seconds;
+            }
+        }
+
+        if (null === $ownWindow) {
+            return false;
+        }
+
+        $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
+
+        return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
+    }
+
+    /**
+     * Length in seconds of this playlist's narrowest schedule row open at $at,
+     * or null when the playlist cannot hold the air then.
+     */
+    private function openScheduleSecondsForPlaylist(
+        StationPlaylist $playlist,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): ?int {
+        if (!$this->canOwnScheduledAir($playlist)) {
+            return null;
+        }
+
+        $narrowest = null;
+        foreach ($playlist->schedule_items as $schedule) {
+            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
+            }
+        }
+
+        return $narrowest;
+    }
+
+    /**
+     * Whether a playlist can hold the air for its own scheduled window.
+     * Deliberately independent of interrupt behaviour and of remote subtype; it
+     * only rejects a playlist with no content source at all, so an empty
+     * programme still cannot manufacture silence.
+     */
+    private function canOwnScheduledAir(StationPlaylist $playlist): bool
+    {
+        if (!$playlist->is_enabled || 0 === $playlist->schedule_items->count()) {
+            return false;
+        }
+
+        return match ($playlist->source) {
+            PlaylistSources::Requests => true,
+            PlaylistSources::Playlists => $playlist->playlists->count() > 0,
+            PlaylistSources::Songs => $playlist->media_items->count() > 0,
+            PlaylistSources::RemoteUrl => null !== $playlist->remote_url,
+        };
+    }
+
+    /**
+     * Length of this schedule row's window when it owns the air at $at, or null
+     * when it does not.
+     *
+     * The window is treated as end-exclusive here, unlike shouldSchedulePlayNow()
+     * which counts both boundaries. At a handover -- a block ending at midnight
+     * and another starting there -- both rows would otherwise be open on that
+     * one instant, and the outgoing (usually narrower) block would win the tick
+     * and push the incoming block's first song out of the log. The block that is
+     * starting owns the boundary.
+     */
+    private function ownedWindowSeconds(
+        StationSchedule $schedule,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): ?int {
+        if (!$this->shouldSchedulePlayNow($schedule, $tz, $at, excludeSpecialRules: true)) {
+            return null;
+        }
+
+        $now = Time::nowInTimezone($tz, $at);
+        $start = StationSchedule::getDateTime($schedule->start_time, $tz, $now);
+        $end = StationSchedule::getDateTime($schedule->end_time, $tz, $now);
+
+        // An equal-time row is a short spot block, not a handover; leave it be.
+        if (
+            $start->getTimestamp() !== $end->getTimestamp()
+            && $end->getTimestamp() === $now->getTimestamp()
+        ) {
+            return null;
+        }
+
+        return $this->scheduleWindowSeconds($schedule, $tz, $at);
+    }
+
+    private function scheduleWindowSeconds(
+        StationSchedule $schedule,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): int {
+        $now = Time::nowInTimezone($tz, $at);
+        $start = StationSchedule::getDateTime($schedule->start_time, $tz, $now);
+        $end = StationSchedule::getDateTime($schedule->end_time, $tz, $now);
+
+        $seconds = $end->getTimestamp() - $start->getTimestamp();
+
+        // Match shouldSchedulePlayNow(): equal times are a short 15-minute spot
+        // block, not an all-day row, so rank it as the narrow window it is. An
+        // end before the start wraps past midnight.
+        if (0 === $seconds) {
+            return 900;
+        }
+
+        if ($seconds < 0) {
+            $seconds += 86400;
+        }
+
+        return $seconds;
     }
 
     public function isPlaylistScheduledToPlayNow(

@@ -108,34 +108,56 @@
                     </template>
                 </form-group-checkbox>
 
-                <form-group-multi-check
-                    id="edit_form_type"
+                <form-group-checkbox
+                    id="form_edit_is_programme"
                     class="col-md-6"
-                    :field="r$.type"
-                    :options="typeOptions"
-                    stacked
-                    radio
-                    :label="$gettext('Playlist Type')"
+                    :field="r$.is_programme"
+                    :description="$gettext('Enable this for a show, sermon or syndicated programme rather than music. Programme content is exempt from the DMCA performance limits, so a single show split across several files will not be cut short by its own parts counting as repeated songs. Leave this off for music playlists, including scheduled ones.')"
                 >
-                    <template #description>
-                        <a
-                            href="/docs/user-guide/playlists/#advanced-playlists"
-                            target="_blank"
-                        >
-                            {{ $gettext('Learn about Advanced Playlists') }}
-                        </a>
+                    <template #label>
+                        {{ $gettext('Spoken-Word Programming (Exempt from DMCA Limits)') }}
                     </template>
-                </form-group-multi-check>
+                </form-group-checkbox>
 
-                <form-group-multi-check
-                    id="edit_form_order"
-                    class="col-md-6"
-                    :field="r$.order"
-                    :options="orderOptions"
-                    stacked
-                    radio
-                    :label="$gettext('Song Playback Order')"
-                />
+                <!--
+                    Playlist Type and Song Playback Order belong side by side with
+                    their headings on one line. Kept in a row of their own so no
+                    neighbouring half-width cell can shift or split them, and
+                    top-aligned so the extra description link under Playlist Type
+                    cannot nudge either heading.
+                -->
+                <div class="col-12">
+                    <div class="row g-3 align-items-start">
+                        <form-group-multi-check
+                            id="edit_form_type"
+                            class="col-md-6"
+                            :field="r$.type"
+                            :options="typeOptions"
+                            stacked
+                            radio
+                            :label="$gettext('Playlist Type')"
+                        >
+                            <template #description>
+                                <a
+                                    href="/docs/user-guide/playlists/#advanced-playlists"
+                                    target="_blank"
+                                >
+                                    {{ $gettext('Learn about Advanced Playlists') }}
+                                </a>
+                            </template>
+                        </form-group-multi-check>
+
+                        <form-group-multi-check
+                            id="edit_form_order"
+                            class="col-md-6"
+                            :field="r$.order"
+                            :options="orderOptions"
+                            stacked
+                            radio
+                            :label="$gettext('Song Playback Order')"
+                        />
+                    </div>
+                </div>
 
                 <form-group-field
                     id="form_edit_rotation_goal_days"

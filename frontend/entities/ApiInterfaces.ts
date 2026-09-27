@@ -2473,6 +2473,11 @@ export type StationPlaylist = HasAutoIncrementId & {
    * @example true
    */
   include_in_on_demand?: boolean;
+  /**
+   * Whether this playlist carries spoken-word programming (a show, sermon or syndicated episode) rather than music. Programme content is exempt from the DMCA performance complement, which only governs sound recordings.
+   * @example false
+   */
+  is_programme?: boolean;
   /** @example "interrupt,loop_once,single_track,merge" */
   backend_options?: string[];
   /** @example true */
