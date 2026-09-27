@@ -82,6 +82,7 @@
                         <td v-if="visibleColumns.includes('edit')" class="edit-cell">
                             <div v-if="isEditable(item)" class="btn-group btn-group-sm" role="group">
                                 <button
+                                    v-if="canMove(item)"
                                     type="button"
                                     class="btn btn-outline-secondary"
                                     :title="$gettext('Move up')"
@@ -89,6 +90,7 @@
                                     @click="emit('edit', item, 'up')"
                                 >&uarr;</button>
                                 <button
+                                    v-if="canMove(item)"
                                     type="button"
                                     class="btn btn-outline-secondary"
                                     :title="$gettext('Move down')"
@@ -147,7 +149,14 @@ const emit = defineEmits<{
 
 // Only saved lines that have not been handed to AutoDJ yet can change.
 function isEditable(item: LinearLogItem): boolean {
-    return !!item.log_entry_id && item.log_status === "planned";
+    // A queued line has been handed to the player but has not aired: an operator
+    // can still pull or swap it, as on FM automation. Only re-ordering is limited
+    // to lines that are still unqueued.
+    return !!item.log_entry_id && ["planned", "queued"].includes(item.log_status ?? "");
+}
+
+function canMove(item: LinearLogItem): boolean {
+    return item.log_status === "planned";
 }
 
 const {$gettext} = useTranslate();

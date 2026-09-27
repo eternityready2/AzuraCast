@@ -1035,6 +1035,11 @@ return static function (RouteCollectorProxy $group) {
                         Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':mediaAction'
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
                     $group->post(
+                        '/reports/linear-log/rules/apply',
+                        Controller\Api\Stations\Reports\LinearLogRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->post(
                         '/reports/linear-log/entries/{entry_id}/{edit}',
                         Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':editAction'
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));

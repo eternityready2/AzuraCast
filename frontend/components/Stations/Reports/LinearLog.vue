@@ -160,6 +160,77 @@
                 </div>
             </div>
 
+            <div class="rules-bar">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <span class="filter-label">{{ $gettext('Operator rules') }}</span>
+
+                    <div class="form-check form-switch mb-0">
+                        <input
+                            id="linear_log_rule_enforce_windows"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="rules.linear_log_rule_enforce_windows"
+                            :disabled="isApplyingRules"
+                            @change="setRule('linear_log_rule_enforce_windows', ($event.target as HTMLInputElement).checked)"
+                        >
+                        <label class="form-check-label" for="linear_log_rule_enforce_windows">
+                            {{ $gettext('Take out music that leaks into a scheduled block') }}
+                        </label>
+                    </div>
+
+                    <div class="form-check form-switch mb-0">
+                        <input
+                            id="linear_log_rule_drop_outside_window"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="rules.linear_log_rule_drop_outside_window"
+                            :disabled="isApplyingRules"
+                            @change="setRule('linear_log_rule_drop_outside_window', ($event.target as HTMLInputElement).checked)"
+                        >
+                        <label class="form-check-label" for="linear_log_rule_drop_outside_window">
+                            {{ $gettext('Take out lines planned outside their own window (starting too early)') }}
+                        </label>
+                    </div>
+
+                    <div class="form-check form-switch mb-0">
+                        <input
+                            id="linear_log_rule_refill_dropped"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            :checked="rules.linear_log_rule_refill_dropped"
+                            :disabled="isApplyingRules"
+                            @change="setRule('linear_log_rule_refill_dropped', ($event.target as HTMLInputElement).checked)"
+                        >
+                        <label class="form-check-label" for="linear_log_rule_refill_dropped">
+                            {{ $gettext('Refill what the rules take out') }}
+                        </label>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="btn btn-outline-primary btn-sm fw-semibold ms-md-auto"
+                        :disabled="isApplyingRules || isBuilding || !featureEnabled"
+                        @click="applyRules"
+                    >
+                        <span
+                            v-if="isApplyingRules"
+                            class="spinner-border spinner-border-sm me-1"
+                            role="status"
+                            aria-hidden="true"
+                        />
+                        {{ $gettext('Apply rules to the log now') }}
+                    </button>
+                </div>
+
+                <div class="small mt-2 text-body-secondary">
+                    {{ $gettext('Rules run on every build and every minute, and never touch a line you locked by hand.') }}
+                    <span v-if="ruleResult" class="fw-semibold text-body">{{ ruleResult }}</span>
+                </div>
+            </div>
+
             <div v-if="allItems.length" class="stats-bar">
                 <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
                 <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
@@ -299,6 +370,11 @@ const {
     setEnabled,
     isEditing,
     editEntry,
+    rules,
+    setRule,
+    applyRules,
+    isApplyingRules,
+    ruleResult,
     searchMedia,
 } = useLinearLog();
 
@@ -358,7 +434,7 @@ const columnOptions = [
     {key: "edit", label: $gettext("Edit")},
     {key: "duration", label: $gettext("Duration")},
 ];
-const visibleColumns = ref(["time", "title", "source", "type", "rules", "duration"]);
+const visibleColumns = ref(["time", "title", "source", "type", "rules", "status", "edit", "duration"]);
 
 const typeFilters = [
     {key: "programme", label: $gettext("Scheduled Program"), activeClass: "btn-primary"},
@@ -487,6 +563,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 </script>
 
 <style scoped>
+.rules-bar{padding:.6rem 1rem;border-top:1px solid rgba(var(--bs-body-color-rgb),.08);background:rgba(var(--bs-body-color-rgb),.02)}
+.rules-bar .form-check-label{font-size:.82rem}
 .replace-backdrop{position:fixed;inset:0;z-index:1080;display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;background:rgba(0,0,0,.45)}
 .replace-dialog{width:100%;max-width:520px}
 .replace-results{max-height:50vh;overflow-y:auto}

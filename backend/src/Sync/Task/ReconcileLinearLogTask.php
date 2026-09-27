@@ -8,6 +8,7 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
+use App\Radio\AutoDJ\LinearLog\LinearLogRules;
 use Carbon\CarbonImmutable;
 use Throwable;
 
@@ -22,6 +23,11 @@ use Throwable;
  */
 final class ReconcileLinearLogTask extends AbstractTask
 {
+    public function __construct(
+        private readonly LinearLogRules $rules,
+    ) {
+    }
+
     public static function getSchedulePattern(): string
     {
         return self::SCHEDULE_EVERY_MINUTE;
@@ -45,6 +51,9 @@ final class ReconcileLinearLogTask extends AbstractTask
 
             try {
                 $this->reconcile($station);
+                // Standing operator rules run on every pass, so a wrong line is
+                // taken out of the plan long before its air time.
+                $this->rules->apply($station);
             } catch (Throwable $e) {
                 $this->logger->error('Linear Log reconciliation failed.', [
                     'station_id' => $station->id,

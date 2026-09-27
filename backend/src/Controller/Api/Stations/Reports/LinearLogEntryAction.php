@@ -8,6 +8,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationMedia;
+use App\Entity\StationQueue;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Message\BuildLinearLogMessage;
@@ -45,13 +46,26 @@ final class LinearLogEntryAction
         if (!$entry instanceof StationLogEntry || $entry->station->id !== $station->id) {
             throw new InvalidArgumentException('Log line not found.');
         }
-        if (StationLogEntry::STATUS_PLANNED !== $entry->status) {
-            throw new InvalidArgumentException('This line is already queued or has aired and can no longer be changed.');
+        // A line that has aired is history and never changes. A line already
+        // handed to the AutoDJ queue can still be pulled or swapped, the way an
+        // operator kills the next item on FM automation; its queue row goes with
+        // it. Only re-ordering needs the line to still be unqueued, since moving
+        // a row the player already holds would not change what plays next.
+        if (!$entry->isOpen()) {
+            throw new InvalidArgumentException('This line has already aired and can no longer be changed.');
+        }
+
+        $edit = $params['edit'] ?? '';
+        $isQueued = StationLogEntry::STATUS_QUEUED === $entry->status;
+        if ($isQueued && in_array($edit, ['up', 'down'], true)) {
+            throw new InvalidArgumentException(
+                'This line is already queued to play next; remove or replace it instead of moving it.'
+            );
         }
 
         $data = (array)$request->getParsedBody();
 
-        switch ($params['edit'] ?? '') {
+        switch ($edit) {
             case 'lock':
                 $entry->is_locked = true;
                 break;
@@ -62,14 +76,16 @@ final class LinearLogEntryAction
 
             case 'up':
             case 'down':
-                $this->move($station, $entry, 'up' === $params['edit']);
+                $this->move($station, $entry, 'up' === $edit);
                 break;
 
             case 'remove':
+                $this->dropQueueRow($entry);
                 $this->em->remove($entry);
                 break;
 
             case 'replace':
+                $this->dropQueueRow($entry);
                 $media = $this->em->find(StationMedia::class, (int)($data['media_id'] ?? 0));
                 if (
                     !$media instanceof StationMedia
@@ -91,8 +107,11 @@ final class LinearLogEntryAction
                     'media_type' => $media->type,
                 ];
                 $entry->note = mb_substr('Replaced by hand; planned: ' . ($planned ?? 'unknown'), 0, 255);
-                // A hand-picked song must not be re-planned by a rebuild.
+                // A hand-picked song must not be re-planned by a rebuild, and a
+                // replaced line goes back to being part of the plan so playout
+                // picks up the new song.
                 $entry->is_locked = true;
+                $entry->status = StationLogEntry::STATUS_PLANNED;
                 break;
 
             default:
@@ -100,7 +119,7 @@ final class LinearLogEntryAction
         }
 
         // Changes are only saved for entities passed to persist().
-        if ('remove' !== $params['edit']) {
+        if ('remove' !== $edit) {
             $this->em->persist($entry);
         }
         $this->em->flush();
@@ -144,6 +163,25 @@ final class LinearLogEntryAction
             ],
             $media
         ));
+    }
+
+    /**
+     * Pull the queue row a line already became, so removing or replacing a queued
+     * line actually changes what airs. A row that already started playing is left
+     * alone -- it is on air, and history.
+     */
+    private function dropQueueRow(StationLogEntry $entry): void
+    {
+        if (null === $entry->queue_id) {
+            return;
+        }
+
+        $queueRow = $this->em->find(StationQueue::class, $entry->queue_id);
+        if ($queueRow instanceof StationQueue && !$queueRow->is_played) {
+            $this->em->remove($queueRow);
+        }
+
+        $entry->queue_id = null;
     }
 
     /** Swap play order with the neighbouring planned line. */

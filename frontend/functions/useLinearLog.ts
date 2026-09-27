@@ -34,6 +34,7 @@ export function useLinearLog() {
     const settingsUrl = getStationApiUrl("/reports/linear-log/settings");
     const mediaUrl = getStationApiUrl("/reports/linear-log/media");
     const entriesUrl = getStationApiUrl("/reports/linear-log/entries");
+    const rulesUrl = getStationApiUrl("/reports/linear-log/rules/apply");
 
     const initialLoading = ref(true);
     const buildError = ref("");
@@ -127,6 +128,84 @@ export function useLinearLog() {
         }
     }
 
+    // Standing operator override rules, saved with the log's own settings.
+    const rules = ref({
+        linear_log_rule_enforce_windows: true,
+        linear_log_rule_drop_outside_window: true,
+        linear_log_rule_refill_dropped: true,
+    });
+    const rulesLoaded = ref(false);
+    const ruleResult = ref("");
+
+    async function loadRules(): Promise<void> {
+        try {
+            const {data} = await axios.get<Record<string, boolean | number>>(settingsUrl.value);
+            rules.value = {
+                linear_log_rule_enforce_windows: !!data.linear_log_rule_enforce_windows,
+                linear_log_rule_drop_outside_window: !!data.linear_log_rule_drop_outside_window,
+                linear_log_rule_refill_dropped: !!data.linear_log_rule_refill_dropped,
+            };
+            rulesLoaded.value = true;
+        } catch {
+            // Leave the defaults in place; the log itself still loads.
+        }
+    }
+
+    async function setRule(key: keyof typeof rules.value, value: boolean): Promise<void> {
+        const previous = rules.value[key];
+        rules.value = {...rules.value, [key]: value};
+        try {
+            await axios.put(settingsUrl.value, {[key]: value});
+        } catch (error: unknown) {
+            rules.value = {...rules.value, [key]: previous};
+            buildError.value = errorMessage(error, $gettext("Unable to save the log rule."));
+        }
+    }
+
+    const isApplyingRules = ref(false);
+
+    /** Run the rules against the saved log now and report what they corrected. */
+    async function applyRules(): Promise<void> {
+        isApplyingRules.value = true;
+        buildError.value = "";
+        ruleResult.value = "";
+        try {
+            const {data} = await axios.post<{
+                checked: number;
+                dropped: number;
+                skipped_locked: number;
+                reasons: string[];
+                rebuilding: boolean;
+            }>(rulesUrl.value, {});
+
+            if (data.dropped === 0) {
+                ruleResult.value = $gettext("Checked %{count} planned lines; nothing broke the rules.")
+                    .replace("%{count}", String(data.checked));
+            } else {
+                ruleResult.value = $gettext("Took %{dropped} of %{checked} lines out of the plan: %{reasons}")
+                    .replace("%{dropped}", String(data.dropped))
+                    .replace("%{checked}", String(data.checked))
+                    .replace("%{reasons}", data.reasons.join("; "));
+            }
+
+            if (data.skipped_locked > 0) {
+                ruleResult.value += " " + $gettext("%{locked} locked lines were left as you set them.")
+                    .replace("%{locked}", String(data.skipped_locked));
+            }
+
+            if (data.rebuilding) {
+                status.value = "queued";
+                schedulePoll();
+            } else {
+                await loadSnapshot(false);
+            }
+        } catch (error: unknown) {
+            buildError.value = errorMessage(error, $gettext("Unable to apply the log rules."));
+        } finally {
+            isApplyingRules.value = false;
+        }
+    }
+
     const isSavingSettings = ref(false);
 
     async function setEnabled(enabled: boolean): Promise<void> {
@@ -172,7 +251,10 @@ export function useLinearLog() {
         return data;
     }
 
-    onMounted(() => void loadSnapshot());
+    onMounted(() => {
+        void loadSnapshot();
+        void loadRules();
+    });
     onUnmounted(clearPoll);
 
     return {
@@ -198,5 +280,11 @@ export function useLinearLog() {
         isEditing,
         editEntry,
         searchMedia,
+        rules,
+        rulesLoaded,
+        setRule,
+        applyRules,
+        isApplyingRules,
+        ruleResult,
     };
 }

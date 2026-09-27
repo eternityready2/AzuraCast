@@ -41,6 +41,7 @@ final class LinearLogBuilder
         private readonly RigidScheduleWindowResolver $rigidScheduleWindowResolver,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly LinearLog\LinearLogStore $logStore,
+        private readonly LinearLog\LinearLogRules $logRules,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -355,6 +356,21 @@ final class LinearLogBuilder
                 )),
             );
             $entries = $this->logStore->applyPlan($station, $logRows, $entries);
+
+            // Standing operator rules police the plan the builder just wrote, so
+            // a line that may not play at its planned time never reaches the log
+            // the operator reads (or the queue playout takes it from).
+            $ruleResult = $this->logRules->apply($station, $projectionStartTs);
+            if ($ruleResult['dropped'] > 0) {
+                $droppedIds = array_map(
+                    static fn(int $id): string => 'log-' . $id,
+                    $ruleResult['dropped_ids']
+                );
+                $entries = array_values(array_filter(
+                    $entries,
+                    static fn(array $entry): bool => !in_array($entry['id'] ?? '', $droppedIds, true),
+                ));
+            }
         }
 
         $aiDjShifts = $this->buildAiDjShifts($station, $projectionStartTs, $projectionEndTs);

@@ -179,6 +179,25 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set(bool|null $value) => Types::bool($value);
     }
 
+    // Operator override rules applied to the saved log on every build, on every
+    // reconcile pass, and on demand from the log page. They are the human's
+    // safety net: when a scheduling bug puts a wrong line in the log, the rule
+    // takes the line out of the plan instead of waiting for a code fix.
+    #[OA\Property]
+    public bool $linear_log_rule_enforce_windows = true {
+        set(bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    #[OA\Property]
+    public bool $linear_log_rule_drop_outside_window = true {
+        set(bool|string|null $value) => Types::bool($value, true, true);
+    }
+
+    #[OA\Property]
+    public bool $linear_log_rule_refill_dropped = true {
+        set(bool|string|null $value) => Types::bool($value, true, true);
+    }
+
     protected const int DEFAULT_LINEAR_LOG_HOURS = 24;
 
     protected const int MAX_LINEAR_LOG_HOURS = 48;
