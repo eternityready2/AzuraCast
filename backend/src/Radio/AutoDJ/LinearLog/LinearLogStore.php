@@ -30,11 +30,25 @@ final class LinearLogStore
     /** The next two hours are never re-planned by a rebuild. */
     public const int LOCK_SECONDS = 7200;
 
-    public function clearUnlockedPlan(Station $station, int $lockedUntil): int
+    /**
+     * Ids of the planned lines a rebuild is allowed to re-plan: unlocked, and
+     * past the lock window.
+     *
+     * A rebuild used to delete these up front, before simulating the new plan.
+     * If the build then died -- an exception, or a worker restarted mid-build --
+     * the log was left empty while the snapshot still showed the old plan, and
+     * playout had nothing to follow. The ids are read here instead, excluded
+     * from the simulation, and deleted only once the new plan is ready to be
+     * written in their place.
+     *
+     * @return list<int>
+     */
+    public function unlockedPlanIds(Station $station, int $lockedUntil): array
     {
-        return (int)$this->em->createQuery(
+        /** @var list<array{id: int}> $rows */
+        $rows = $this->em->createQuery(
             <<<'DQL'
-                DELETE FROM App\Entity\StationLogEntry e
+                SELECT e.id FROM App\Entity\StationLogEntry e
                 WHERE e.station = :station
                 AND e.status = :planned
                 AND e.is_locked = 0
@@ -43,6 +57,34 @@ final class LinearLogStore
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->setParameter('lockedUntil', $lockedUntil)
+            ->getScalarResult();
+
+        return array_map(static fn(array $row): int => (int)$row['id'], $rows);
+    }
+
+    /**
+     * Delete planned lines a rebuild has replaced. Locked lines and lines that
+     * have since been queued or aired are left alone.
+     *
+     * @param list<int> $ids
+     */
+    public function removeReplacedPlan(Station $station, array $ids): int
+    {
+        if ([] === $ids) {
+            return 0;
+        }
+
+        return (int)$this->em->createQuery(
+            <<<'DQL'
+                DELETE FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.id IN (:ids)
+                AND e.status = :planned
+                AND e.is_locked = 0
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('ids', $ids)
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->execute();
     }
 
@@ -50,9 +92,15 @@ final class LinearLogStore
      * Put every planned line into the (rolled-back) simulation queue, in log
      * order, after the live queue rows.
      */
-    /** @return list<int> the seeded log line ids */
-    public function seedQueue(Station $station): array
+    /**
+     * @param list<int> $excludeIds lines a rebuild is re-planning; they must not
+     *     seed the simulation, or the planner would simply keep them.
+     * @return list<int> the seeded log line ids
+     */
+    public function seedQueue(Station $station, array $excludeIds = []): array
     {
+        $excluded = array_fill_keys($excludeIds, true);
+
         /** @var StationLogEntry[] $planned */
         $planned = $this->em->createQuery(
             <<<'DQL'
@@ -82,7 +130,7 @@ final class LinearLogStore
         $count = 0;
         $ids = [];
         foreach ($planned as $entry) {
-            if (null === $entry->media) {
+            if (null === $entry->media || isset($excluded[$entry->id])) {
                 continue;
             }
             $ids[] = $entry->id;
@@ -211,8 +259,17 @@ final class LinearLogStore
      * @param list<array<string, mixed>> $entries
      * @return list<array<string, mixed>>
      */
-    public function applyPlan(Station $station, array $logRows, array $entries): array
-    {
+    /**
+     * @param list<int> $replacedIds planned lines this rebuild replaces; deleted
+     *     in the same transaction that writes the new plan, so a failure cannot
+     *     leave the log empty.
+     */
+    public function applyPlan(
+        Station $station,
+        array $logRows,
+        array $entries,
+        array $replacedIds = []
+    ): array {
         $maxSequence = (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT MAX(e.sequence) FROM App\Entity\StationLogEntry e
@@ -272,7 +329,12 @@ final class LinearLogStore
             $touched[] = [$entry, $data['index']];
         }
 
-        $this->em->flush();
+        // One transaction: the plan the rebuild replaces goes out and the new plan
+        // goes in together, or neither does.
+        $this->em->wrapInTransaction(function () use ($station, $replacedIds): void {
+            $this->removeReplacedPlan($station, $replacedIds);
+            $this->em->flush();
+        });
 
         foreach ($touched as [$entry, $index]) {
             if (null !== $index && isset($entries[$index])) {

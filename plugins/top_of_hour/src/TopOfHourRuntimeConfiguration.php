@@ -537,7 +537,7 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                         or (
                             azuracast.autodj_transport_ready()
                             and not source.methods(azuracast.autodj_transport()).is_ready()
-                            and now >= top_of_hour_air_covered_until() - 0.25
+                            and now >= top_of_hour_air_covered_until()
                         )
                     )
                 then

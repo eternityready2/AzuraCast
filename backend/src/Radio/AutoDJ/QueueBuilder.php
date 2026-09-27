@@ -792,9 +792,34 @@ final class QueueBuilder implements EventSubscriberInterface
         DateTimeImmutable $expectedPlayTime,
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
+        if (PlaylistTypes::Standard !== $playlist->type) {
+            return $selectedTrack;
+        }
+
+        $station = $playlist->station;
+
+        // The Top-of-Hour ID is an exact wall-clock deadline that cuts across
+        // every playlist, scheduled or not -- a scheduled programme's own
+        // window does not protect it from being interrupted by the ID a few
+        // seconds later. Try this swap FIRST, and even for a scheduled/grouped
+        // playlist that the general clock-anchor protection below skips,
+        // because that general protection only knows about this playlist's own
+        // schedule boundary, never the ID.
+        if ($this->topOfHourClock->isEnabled($station) && $this->topOfHourClock->isSwapEnabled($station)) {
+            $swapped = $this->applyTopOfHourSwap(
+                $playlist,
+                $selectedTrack,
+                $recentSongHistory,
+                $expectedPlayTime,
+                $allowDuplicates,
+            );
+            if (null !== $swapped) {
+                $selectedTrack = $swapped;
+            }
+        }
+
         if (
-            PlaylistTypes::Standard !== $playlist->type
-            || 0 !== $playlist->schedule_items->count()
+            0 !== $playlist->schedule_items->count()
             || 0 !== $playlist->playlist_groups->count()
         ) {
             return $selectedTrack;
@@ -809,8 +834,7 @@ final class QueueBuilder implements EventSubscriberInterface
         }
 
         // An anchor just before the station-ID target belongs to the Top-of-Hour
-        // swap selector; capping here would force an unfillable few-second slot.
-        $station = $playlist->station;
+        // swap above; capping here too would force an unfillable few-second slot.
         if ($this->topOfHourClock->isEnabled($station) && $this->topOfHourClock->isSwapEnabled($station)) {
             $anchorTs = $expectedPlayTime->getTimestamp() + (int)$maxDuration;
             $idTargetTs = $this->topOfHourClock->getTargetStartFor($station, $expectedPlayTime)->getTimestamp();
@@ -906,6 +930,103 @@ final class QueueBuilder implements EventSubscriberInterface
         }
 
         return $selectedTrack;
+    }
+
+    /**
+     * Requirement 1 (duration-matched song swapping): when the naturally
+     * selected track would run past the Top-of-Hour ID target, look for a
+     * better-fitting track already in this playlist's queue instead of
+     * leaving the Liquidsoap runtime's +/-3% tempo fit to close a gap it
+     * cannot close alone.
+     *
+     * Only runs once a candidate has actually failed to fit -- since
+     * QueueBuilder plans one slot at a time and this hour's boundary is a
+     * hard wall-clock deadline, a candidate that overruns it here IS the
+     * final slot before the ID, whether or not the playlist carries its own
+     * schedule window.
+     *
+     * Returns null to leave the caller's original selection untouched (no
+     * ID configured, plenty of room left, or nothing in the queue fits
+     * better than what was already picked).
+     */
+    private function applyTopOfHourSwap(
+        StationPlaylist $playlist,
+        StationPlaylistQueue $selectedTrack,
+        array $recentSongHistory,
+        DateTimeImmutable $expectedPlayTime,
+        bool $allowDuplicates,
+    ): ?StationPlaylistQueue {
+        $station = $playlist->station;
+
+        $idTargetTs = $this->topOfHourClock->getTargetStartFor($station, $expectedPlayTime)->getTimestamp();
+        $secondsToId = $idTargetTs - $expectedPlayTime->getTimestamp();
+
+        if ($secondsToId <= 0 || $secondsToId > TopOfHour\TopOfHourClock::MAX_SWAP_MIN_GAP_SECONDS) {
+            return null;
+        }
+
+        $minGapSeconds = $this->topOfHourClock->getSwapMinGapSeconds($station);
+        if ($secondsToId < $minGapSeconds) {
+            // Too little room for a whole song; the runtime pre-fade soft
+            // cut is the correct behaviour here, not a manufactured slot.
+            return null;
+        }
+
+        $toleranceSeconds = $this->topOfHourClock->getSwapToleranceSeconds($station);
+
+        $media = $this->em->find(StationMedia::class, $selectedTrack->media_id);
+        if ($media instanceof StationMedia && $media->getCalculatedLength() <= $secondsToId + $toleranceSeconds) {
+            // Already fits (or the runtime's own pitch-preserving tempo fit
+            // can close the remaining gap); nothing to swap.
+            return null;
+        }
+
+        $mediaQueue = $this->spmRepo->getQueue($playlist);
+        $fitting = [];
+
+        foreach ($mediaQueue as $queueItem) {
+            $candidate = $this->em->find(StationMedia::class, $queueItem->media_id);
+            if (!$candidate instanceof StationMedia) {
+                continue;
+            }
+
+            $length = $candidate->getCalculatedLength();
+            if ($length <= 0.0 || $length > $secondsToId + $toleranceSeconds) {
+                continue;
+            }
+
+            $fitting[] = [$queueItem, $length];
+        }
+
+        if ([] === $fitting) {
+            return null;
+        }
+
+        // Closest match to the real remaining time (longest first among
+        // ties), so the runtime's own tempo fit has the smallest possible
+        // gap left to close.
+        usort(
+            $fitting,
+            static fn(array $a, array $b): int => abs($secondsToId - $a[1]) <=> abs($secondsToId - $b[1])
+        );
+
+        $candidates = array_map(
+            static fn(array $row): StationPlaylistQueue => $row[0],
+            $fitting
+        );
+
+        if ($playlist->avoid_duplicates) {
+            $duplicateSafe = $this->duplicatePrevention->preventDuplicates(
+                $candidates,
+                $recentSongHistory,
+                $allowDuplicates
+            );
+            if (null !== $duplicateSafe) {
+                return $duplicateSafe;
+            }
+        }
+
+        return $candidates[0];
     }
 
     private function filterQueueByRotationGoal(StationPlaylist $playlist, array $mediaQueue): array

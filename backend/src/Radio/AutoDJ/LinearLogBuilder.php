@@ -182,12 +182,17 @@ final class LinearLogBuilder
         // Saved linear log (log controls playout): keep the planned lines and
         // only extend them; a rebuild request re-plans hours past the lock.
         $playout = LinearLog\LinearLogPlayout::isPlayoutEnabled($station);
-        if ($playout && $rebuild) {
-            $this->logStore->clearUnlockedPlan(
+
+        // A rebuild re-plans the unlocked hours past the lock window. The lines
+        // it replaces are only read here, and deleted at the end together with
+        // the new plan: deleting them up front left the log empty whenever a
+        // build died in between.
+        $replacedPlanIds = ($playout && $rebuild)
+            ? $this->logStore->unlockedPlanIds(
                 $station,
                 $projectionStartTs + LinearLog\LinearLogStore::LOCK_SECONDS
-            );
-        }
+            )
+            : [];
         $logRows = [];
         $seededIds = [];
         $survivingIds = [];
@@ -204,7 +209,7 @@ final class LinearLogBuilder
             $connection->beginTransaction();
 
             if ($playout) {
-                $seededIds = $this->logStore->seedQueue($station);
+                $seededIds = $this->logStore->seedQueue($station, $replacedPlanIds);
             }
 
             $gaps = $this->queue->buildQueue(
@@ -355,7 +360,7 @@ final class LinearLogBuilder
                     static fn(int $id): bool => !isset($survivingIds[$id]),
                 )),
             );
-            $entries = $this->logStore->applyPlan($station, $logRows, $entries);
+            $entries = $this->logStore->applyPlan($station, $logRows, $entries, $replacedPlanIds);
 
             // Standing operator rules police the plan the builder just wrote, so
             // a line that may not play at its planned time never reaches the log
