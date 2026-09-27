@@ -550,6 +550,80 @@ final class LinearLogStore
 
         usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
 
+        // Collect exclusive windows from scheduled_programme markers AND from
+        // scheduled playlists whose planned entries dominate a time slot. A live
+        // queue entry from a different playlist inside such a window is a leak
+        // that won't (or shouldn't) air.
+        $exclusiveWindows = [];
+        foreach ($entries as $e) {
+            if ('scheduled_programme' === ($e['source_type'] ?? '')) {
+                $exclusiveWindows[] = [
+                    'start' => (int)($e['played_at'] ?? 0),
+                    'end' => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)),
+                    'playlist_id' => $e['playlist_id'] ?? null,
+                ];
+            }
+        }
+
+        // Build scheduled playlist ownership from the station's schedule data.
+        $scheduledPlaylistIds = [];
+        foreach ($station->playlists as $pl) {
+            if ($pl->is_enabled && $pl->schedule_items->count() > 0) {
+                $scheduledPlaylistIds[$pl->id] = true;
+            }
+        }
+
+        if ([] !== $scheduledPlaylistIds) {
+            // For each planned entry from a scheduled playlist, its time slot
+            // belongs to that playlist — any live queue entry from another
+            // playlist at the same time is a leak.
+            foreach ($entries as $e) {
+                $plId = $e['playlist_id'] ?? null;
+                if (null === $plId || !isset($scheduledPlaylistIds[(int)$plId])) {
+                    continue;
+                }
+                if ('scheduled_programme' === ($e['source_type'] ?? '')) {
+                    continue;
+                }
+                $status = $e['log_status'] ?? '';
+                if ($status === 'dropped' || $status === 'swapped') {
+                    continue;
+                }
+                $start = (int)($e['played_at'] ?? 0);
+                $end = $start + (int)ceil((float)($e['duration'] ?? 0));
+                $exclusiveWindows[] = [
+                    'start' => $start,
+                    'end' => $end,
+                    'playlist_id' => (int)$plId,
+                ];
+            }
+        }
+
+        if ([] !== $exclusiveWindows) {
+            $entries = array_values(array_filter(
+                $entries,
+                static function (array $e) use ($exclusiveWindows): bool {
+                    if ('scheduled_programme' === ($e['source_type'] ?? '')) {
+                        return true;
+                    }
+                    $status = $e['log_status'] ?? '';
+                    if ($status === 'dropped' || $status === 'swapped') {
+                        return true;
+                    }
+                    $at = (int)($e['played_at'] ?? 0);
+                    $plId = $e['playlist_id'] ?? null;
+                    foreach ($exclusiveWindows as $w) {
+                        if ($at >= $w['start'] && $at < $w['end']
+                            && null !== $plId && null !== $w['playlist_id']
+                            && (int)$plId !== (int)$w['playlist_id']) {
+                            return false;
+                        }
+                    }
+                    return true;
+                },
+            ));
+        }
+
         // The current hour's history plus the configured hours ahead.
         $from = CarbonImmutable::createFromTimestamp($now, $tz)->startOfHour()->getTimestamp();
         $until = $now + $hours * 3600;
