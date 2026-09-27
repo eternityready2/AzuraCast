@@ -503,7 +503,7 @@ final class QueueController extends AbstractStationApiCrudController
         $apiResponse->sent_to_autodj = false;
         $apiResponse->is_played = false;
         $apiResponse->autodj_custom_uri = null;
-        $apiResponse->media_type = $entry->media?->type ?? 'music';
+        $apiResponse->media_type = $entry->media->type ?? 'music';
         $apiResponse->log = [];
         $apiResponse->links = [];
 
