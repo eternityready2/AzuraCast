@@ -131,11 +131,23 @@ final class AssistantController
                 $msg          = $choice['message'] ?? [];
                 $finishReason = $choice['finish_reason'] ?? 'stop';
             } catch (\Throwable $e) {
+                $this->logger->error('AI Assistant API error: ' . $e->getMessage());
                 return $response->withJson(['error' => $e->getMessage()], 500);
             }
 
+            $this->logger->debug('AI Assistant response', [
+                'iteration'     => $i,
+                'finish_reason' => $finishReason,
+                'has_content'   => isset($msg['content']) && $msg['content'] !== null && $msg['content'] !== '',
+                'has_tools'     => !empty($msg['tool_calls']),
+            ]);
+
             if ($finishReason === 'tool_calls' && !empty($msg['tool_calls'])) {
-                $allMessages[] = $msg;
+                $allMessages[] = [
+                    'role'       => 'assistant',
+                    'content'    => $msg['content'] ?? null,
+                    'tool_calls' => $msg['tool_calls'],
+                ];
 
                 foreach ($msg['tool_calls'] as $call) {
                     $name   = $call['function']['name'] ?? '';
@@ -760,7 +772,7 @@ PROMPT;
     private function defaultModel(string $provider): string
     {
         return match ($provider) {
-            'groq'        => 'llama-3.3-70b-versatile',
+            'groq'        => 'qwen/qwen3.8-27b',
             'openrouter'  => 'meta-llama/llama-3.3-70b-instruct:free',
             default       => 'llama3.2',
         };

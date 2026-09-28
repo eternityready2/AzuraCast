@@ -181,7 +181,7 @@ const saveSuccess = ref(false);
 
 const defaultModelPlaceholder = computed(() => {
     const map: Record<string, string> = {
-        groq: 'llama-3.3-70b-versatile',
+        groq: 'qwen/qwen3.8-27b',
         openrouter: 'meta-llama/llama-3.3-70b-instruct:free',
         ollama: 'llama3.2',
     };
