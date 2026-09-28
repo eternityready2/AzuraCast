@@ -33,6 +33,7 @@ final class Scheduler
         private readonly StationPlaylistRepository $spRepo,
         private readonly StationQueueRepository $queueRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
+        private readonly LinearLogPreviewContext $previewContext,
     ) {
     }
 
@@ -752,6 +753,12 @@ final class Scheduler
             return;
         }
 
+        // A projection simulates the reset; performing it would edit live
+        // rotation state from a read-only report.
+        if ($this->previewContext->isActive()) {
+            return;
+        }
+
         if ($dateRange->contains($playlist->played_at)) {
             return;
         }
@@ -829,7 +836,12 @@ final class Scheduler
         $playlistPlayedAt = $playlist->played_at;
 
         $isQueueEmpty = $this->spmRepo->isQueueEmpty($playlist);
-        $hasCuedPlaylistMedia = $this->queueRepo->hasCuedPlaylistMedia($playlist);
+
+        // Scoped to THIS occurrence. The station-wide question left a show whose
+        // only episode was still cued for today unable to loop tomorrow: the
+        // queue was empty and a cued row existed, so neither reset branch below
+        // ran and the whole window was reported as an unfillable gap.
+        $hasCuedPlaylistMedia = $this->queueRepo->hasCuedPlaylistMediaInRange($playlist, $dateRange);
 
         if (!$dateRange->contains($playlistPlayedAt)) {
             $this->logger->debug('Playlist was not played yet.');

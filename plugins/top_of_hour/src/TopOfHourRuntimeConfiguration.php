@@ -161,18 +161,14 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
             # The final song (or its fill) ends on the target by itself, so the
             # emergency pre-fade is not applied to it.
             top_of_hour_clean_landing = ref(false)
-            # Title handling after the ID: the song that ended/was cut must not have
-            # its title replayed; a held item that already began keeps its own.
-            top_of_hour_last_sq = ref("")
-            top_of_hour_stale_sq = ref("")
-            # The stale marker is only valid for the handful of seconds around
-            # the release in which the old title can be replayed (crossfade and
-            # switch). Leaving it armed until the next ID meant a single armed
-            # marker could still swallow a metadata packet minutes later, and a
-            # swallowed packet sends no feedback at all -- now-playing then sat
-            # on the previous title until some later track happened to refresh
-            # it. Bound the window so suppression can never outlive the release.
-            top_of_hour_stale_until = ref(0.)
+            # Title handling after the ID is NOT done here. Liquidsoap cannot tell
+            # a replayed metadata packet from a real one without guessing, and the
+            # marker that used to try (match sq_id inside a 20s window after the
+            # release) never once suppressed anything in production: the Station
+            # ID's own metadata arrived before the release had set the deadline
+            # and cleared the marker every hour. Every feedback packet already
+            # carries sq_id, and the server knows whether that queue row has
+            # aired, so FeedbackCommand rejects replays on fact instead.
             top_of_hour_held_started = ref(false)
 
             def top_of_hour_id_in_early_window() =
@@ -477,11 +473,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                 {top_of_hour_underlying_gain()},
                 radio
             )
-            source.methods(radio_before_top_of_hour).on_metadata(
-                synchronous=true,
-                fun (m) -> top_of_hour_last_sq := m["sq_id"]
-            )
-
             # Keep the processed underlay alive at zero gain while the ID owns the
             # air, so the inner crossfade operator stays clocked and can consume
             # the release-time clean cut instead of stranding a buffer that would
@@ -580,14 +571,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     # until the ID/news releases. Only the song the ID interrupts is
                     # ended; if the ID was started early because a new item just
                     # began, that item is simply held at its start instead.
-                    # The song on air now is the one the ID ends. Remember it here,
-                    # before the next song's metadata can arrive, so only ITS
-                    # replayed title is suppressed at release (2pm 2026-09-24: it
-                    # was captured at release, after the new song's metadata, so
-                    # the new title was hidden and the old one was reported).
-                    if not started_early then
-                        top_of_hour_stale_sq := top_of_hour_last_sq()
-                    end
                     azuracast.autodj_hold := true
                     # Discard the currently playing song so it cannot resume after
                     # the ID. This must happen whenever the ID didn't start early
@@ -691,11 +674,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     log("Top-of-Hour ID: open-hour lane released; held AutoDJ item resumes from its start.")
                 end
 
-                # The replayed title arrives with the release (crossfade, then
-                # switch). Open the suppression window here rather than at the
-                # ID start, so it covers those replays and nothing later.
-                top_of_hour_stale_until := time() + 20.
-
                 azuracast.autodj_retry_delay := 10.
 
                 new
@@ -711,32 +689,6 @@ final class TopOfHourRuntimeConfiguration implements EventSubscriberInterface
                     ({top_of_hour_id_should_play()}, top_of_hour_clocked_lane),
                     ({true}, radio_before_top_of_hour)
                 ]
-            )
-
-            def top_of_hour_drop_stale_title(m) =
-                stale = top_of_hour_stale_sq()
-                # Armed only for the short window that opens at release: the old
-                # title can be replayed more than once there (crossfade and
-                # switch). Past that window the marker is dropped -- a dropped
-                # metadata packet also drops its now-playing feedback, so an
-                # indefinitely-armed marker could strand the overview on a stale
-                # title until some later track happened to refresh it.
-                if stale != "" and time() >= top_of_hour_stale_until() then
-                    top_of_hour_stale_sq := ""
-                    m
-                elsif stale != "" and m["sq_id"] == stale then
-                    log("Top-of-Hour ID: suppressed the replayed title of the song that ended before the ID.")
-                    []
-                else
-                    m
-                end
-            end
-            radio = metadata.map(
-                id="top_of_hour_stale_title",
-                update=false,
-                strip=true,
-                top_of_hour_drop_stale_title,
-                radio
             )
 
             # Runtime controls use absolute epochs to avoid timezone/DST ambiguity.

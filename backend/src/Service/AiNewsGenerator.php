@@ -238,11 +238,25 @@ final class AiNewsGenerator
         $stagedAt = $now->setTime((int)$now->format('G'), 59);
         $activeDays = $this->normalizeActiveDays($activeDays);
 
-        if ([] !== $activeDays && !in_array((int) $stagedAt->format('N'), $activeDays, true)) {
-            return false;
+        // Also generate for the NEXT staging point, not only this hour's. The
+        // bulletin is a single file with no fallback and CleanupStorageTask
+        // deletes temp files after two days, so the first hour of a window had
+        // nothing on disk whenever its own :50 run failed or the window opened
+        // after days the schedule skipped. Liquidsoap then logged "Nonexistent
+        // file" at 11:59:59 and the noon bulletin was lost, making 1pm look like
+        // the first news of the day. Priming one hour ahead always leaves a
+        // playable file; whether it actually airs stays gated by the window.
+        foreach ([$stagedAt, $stagedAt->modify('+1 hour')] as $candidate) {
+            if ([] !== $activeDays && !in_array((int) $candidate->format('N'), $activeDays, true)) {
+                continue;
+            }
+
+            if ($this->isWithinActiveHours($activeHours, $candidate)) {
+                return true;
+            }
         }
 
-        return $this->isWithinActiveHours($activeHours, $stagedAt);
+        return false;
     }
 
     /**

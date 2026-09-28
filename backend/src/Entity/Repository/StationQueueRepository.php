@@ -10,6 +10,7 @@ use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
+use App\Utilities\DateRange;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -741,6 +742,33 @@ final class StationQueueRepository extends AbstractStationBasedRepository
 
         $cuedPlaylistContentCount = $cuedPlaylistContentCountQuery->getSingleScalarResult();
         return $cuedPlaylistContentCount > 0;
+    }
+
+    /**
+     * Whether the playlist already has an unplayed row expected to air inside
+     * the given window.
+     *
+     * Unlike hasCuedPlaylistMedia(), which asks the station-wide question, this
+     * is scoped to one schedule occurrence. A row cued for today's airing of a
+     * show must not make tomorrow's occurrence of that same show look as though
+     * it were already covered.
+     */
+    public function hasCuedPlaylistMediaInRange(
+        StationPlaylist $playlist,
+        DateRange $dateRange
+    ): bool {
+        $cuedCount = $this->getUnplayedBaseQuery($playlist->station)
+            ->select('count(sq.id)')
+            ->andWhere('sq.playlist = :playlist')
+            ->andWhere('COALESCE(sq.timestamp_played, sq.timestamp_cued) >= :rangeStart')
+            ->andWhere('COALESCE(sq.timestamp_played, sq.timestamp_cued) <= :rangeEnd')
+            ->setParameter('playlist', $playlist)
+            ->setParameter('rangeStart', $dateRange->start)
+            ->setParameter('rangeEnd', $dateRange->end)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return $cuedCount > 0;
     }
 
     public function getUnplayedBaseQuery(Station $station): QueryBuilder

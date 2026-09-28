@@ -9,6 +9,7 @@ use App\Entity\Repository\StorageLocationRepository;
 use App\Entity\Station;
 use App\Entity\StorageLocation;
 use App\Flysystem\StationFilesystems;
+use App\Service\AiNewsGenerator;
 use Exception;
 use League\Flysystem\StorageAttributes;
 use Symfony\Component\Finder\Finder;
@@ -60,6 +61,11 @@ final class CleanupStorageTask extends AbstractTask
         $finder
             ->files()
             ->in($tempDir)
+            // The AI News bulletin lives here and is only regenerated while its
+            // schedule window is open. Over a weekend the window stays shut long
+            // enough for this sweep to delete it, and Monday's first bulletin had
+            // no file to fall back on if its own generation run failed.
+            ->notName(AiNewsGenerator::OUTPUT_FILENAME)
             ->date('before 2 days ago');
 
         foreach ($finder as $file) {

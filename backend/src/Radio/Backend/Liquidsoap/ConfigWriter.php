@@ -625,7 +625,11 @@ final class ConfigWriter implements EventSubscriberInterface
 
         // Parse active_hours for Liquidsoap time check
         $activeHoursStr = $backendConfig->ai_news_active_hours ?? '';
-        $activeHoursCheck = self::buildActiveHoursCheck($activeHoursStr, $station->getTimezoneObject());
+        $activeHoursCheck = self::buildActiveHoursCheck(
+            $activeHoursStr,
+            $station->getTimezoneObject(),
+            $backendConfig->ai_news_active_days ?? []
+        );
 
         $newsBulletinQueueName = 'requests';
         $event->appendBlock(
@@ -657,17 +661,28 @@ final class ConfigWriter implements EventSubscriberInterface
     }
 
     /**
-     * Build Liquidsoap code to check if current time is within active_hours.
-     * Returns empty string if no active_hours configured (always active).
+     * Build Liquidsoap code to check whether now is inside the AI News window.
+     *
+     * Covers active days as well as hours. The hourly cron restricts days on its
+     * own, but when the Top-of-Hour ID is enabled that cron is replaced by the
+     * ID's release path, which called this and so checked hours only -- the
+     * station tried to stage a bulletin on days the schedule excluded (and the
+     * generator had correctly produced no file for).
      */
-    private static function buildActiveHoursCheck(?string $activeHours, DateTimeZone $timezone): string
-    {
-        if (empty($activeHours)) {
-            return 'def is_within_active_hours() = true end';
-        }
+    private static function buildActiveHoursCheck(
+        ?string $activeHours,
+        DateTimeZone $timezone,
+        array $activeDays = []
+    ): string {
+        $dayGuard = self::buildActiveDayGuard($activeDays, $timezone);
 
-        if (!preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
-            return 'def is_within_active_hours() = true end';
+        if (empty($activeHours) || !preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
+            return <<<LIQ
+def is_within_active_hours() =
+{$dayGuard}
+  is_active_day
+end
+LIQ;
         }
 
         $startHour = (int) $matches[1];
@@ -682,29 +697,52 @@ final class ConfigWriter implements EventSubscriberInterface
         $utcStart = ($startMinutes - $tzOffsetMinutes + 1440) % 1440;
         $utcEnd   = ($endMinutes   - $tzOffsetMinutes + 1440) % 1440;
 
-        if ($utcStart <= $utcEnd) {
-            return <<<LIQ
+        $comparison = ($utcStart <= $utcEnd)
+            ? "current >= {$utcStart} and current < {$utcEnd}"
+            : "current >= {$utcStart} or current < {$utcEnd}";
+
+        return <<<LIQ
 def is_within_active_hours() =
+{$dayGuard}
   # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
   local_time = time()
   hour = int_of_float(local_time / 3600.0) mod 24
   minute = int_of_float(local_time / 60.0) mod 60
   current = hour * 60 + minute
-  current >= {$utcStart} and current < {$utcEnd}
+  is_active_day and ({$comparison})
 end
 LIQ;
-        } else {
-            return <<<LIQ
-def is_within_active_hours() =
-  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
-  local_time = time()
-  hour = int_of_float(local_time / 3600.0) mod 24
-  minute = int_of_float(local_time / 60.0) mod 60
-  current = hour * 60 + minute
-  current >= {$utcStart} or current < {$utcEnd}
-end
-LIQ;
+    }
+
+    /**
+     * Liquidsoap lines binding `is_active_day` to whether the station-local
+     * weekday is one of the configured ISO days (1=Mon .. 7=Sun).
+     */
+    private static function buildActiveDayGuard(array $activeDays, DateTimeZone $timezone): string
+    {
+        $days = array_values(array_unique(array_filter(
+            array_map(static fn(mixed $day): int => (int)$day, $activeDays),
+            static fn(int $day): bool => $day >= 1 && $day <= 7
+        )));
+
+        if ([] === $days || 7 === count($days)) {
+            return '  is_active_day = true';
         }
+
+        sort($days);
+        $tzOffsetSeconds = $timezone->getOffset(new \DateTimeImmutable('now', $timezone));
+        $checks = implode(
+            ' or ',
+            array_map(static fn(int $day): string => "iso_weekday == {$day}", $days)
+        );
+
+        // 1970-01-01 (epoch day 0) was a Thursday, ISO weekday 4.
+        return <<<LIQ
+  local_day_epoch = time() + {$tzOffsetSeconds}.
+  epoch_days = int_of_float(local_day_epoch / 86400.0)
+  iso_weekday = ((epoch_days + 3) mod 7) + 1
+  is_active_day = {$checks}
+LIQ;
     }
 
     private static function buildAiNewsCronDays(array $activeDays): string

@@ -16,6 +16,7 @@ use App\Entity\StationQueue;
 use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
+use App\Service\AiNewsGenerator;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -47,6 +48,7 @@ final class LinearLogBuilder
         private readonly LinearLog\LinearLogStore $logStore,
         private readonly LinearLog\LinearLogRules $logRules,
         private readonly TopOfHourClock $topOfHourClock,
+        private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -354,6 +356,18 @@ final class LinearLogBuilder
                 );
             }
 
+            // AI News is likewise Liquidsoap-owned with no queue row: it is
+            // pushed straight into its own lane after the Station ID. Without a
+            // marker the log showed music running across an hour that really
+            // opens with a bulletin.
+            foreach ($this->buildAiNewsMarkers($station, $projectionStartTs, $projectionEndTs) as $marker) {
+                $entries[] = $marker;
+                $coverageEnd = max(
+                    $coverageEnd,
+                    (int)$marker['played_at'] + (int)ceil((float)$marker['duration']),
+                );
+            }
+
             usort(
                 $entries,
                 static fn(array $a, array $b): int =>
@@ -626,6 +640,88 @@ final class LinearLogBuilder
         }
 
         return $markers;
+    }
+
+    /**
+     * Marker lines for each AI News bulletin due to air in the range.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function buildAiNewsMarkers(Station $station, int $startTs, int $endTs): array
+    {
+        $config = $station->backend_config;
+        if (!$config->ai_news_enabled) {
+            return [];
+        }
+
+        $airingTimes = $this->aiNewsScheduleForecast->getAiringTimes(
+            $station,
+            CarbonImmutable::createFromTimestamp($startTs)->toDateTimeImmutable(),
+            CarbonImmutable::createFromTimestamp($endTs)->toDateTimeImmutable(),
+        );
+
+        $duration = $this->currentAiNewsBulletinLength($station);
+        $markers = [];
+
+        foreach ($airingTimes as $airsAt) {
+            $airsAtTs = $airsAt->getTimestamp();
+            if ($airsAtTs < $startTs || $airsAtTs > $endTs) {
+                continue;
+            }
+
+            $markers[] = [
+                'id' => 'ai-news-' . $airsAtTs,
+                'queue_id' => 0,
+                'song_id' => '',
+                'played_at' => $airsAtTs,
+                'cued_at' => $airsAtTs,
+                'duration' => $duration,
+                'title' => 'News Hour',
+                'artist' => 'Eternity Ready',
+                'album' => 'News Bulletin',
+                'text' => 'Eternity Ready - News Hour',
+                'playlist' => null,
+                'playlist_id' => null,
+                'playlist_chain' => null,
+                'clock_wheel' => null,
+                'clock_wheel_id' => null,
+                'media_type' => 'talk',
+                'source_type' => 'ai_news',
+                'is_request' => false,
+                'is_live_queue' => false,
+                'sent_to_autodj' => true,
+                'top_of_hour_legal_id' => false,
+                'autodj_custom_uri' => null,
+                'clock_wheel_schedule_mode' => null,
+                'clock_wheel_enforce_cap' => false,
+                'clock_wheel_stretch_ratio' => null,
+                'clock_wheel_legal_id_substitute' => false,
+                'hour_boundary_enforce_cap' => false,
+                'hour_boundary_max_play_seconds' => null,
+                'top_of_hour_pre_id_fade' => false,
+            ];
+        }
+
+        return $markers;
+    }
+
+    /**
+     * Length of the bulletin currently staged on disk, so the marker reflects
+     * the real thing rather than a guess.
+     */
+    private function currentAiNewsBulletinLength(Station $station): float
+    {
+        $path = $station->getRadioTempDir() . '/' . AiNewsGenerator::OUTPUT_FILENAME;
+        if (!is_file($path)) {
+            return 120.0;
+        }
+
+        $probe = @shell_exec(
+            'ffprobe -v error -show_entries format=duration -of csv=p=0 ' . escapeshellarg($path) . ' 2>/dev/null'
+        );
+        $duration = (float)trim((string)$probe);
+
+        return $duration > 0.0 ? $duration : 120.0;
     }
 
     /**

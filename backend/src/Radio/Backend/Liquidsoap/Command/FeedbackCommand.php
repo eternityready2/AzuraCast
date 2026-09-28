@@ -99,6 +99,21 @@ final class FeedbackCommand extends AbstractCommand
 
         if (!empty($payload['sq_id'])) {
             $sq = $this->em->find(StationQueue::class, $payload['sq_id']);
+
+            // A queue row airs exactly once. Liquidsoap replays the interrupted
+            // song's metadata when the Top-of-Hour lane hands the air back, which
+            // arrives here as a second feedback naming a row that already played
+            // -- and opened a duplicate history entry that pinned Now Playing to
+            // a show which had finished an hour earlier.
+            //
+            // A row is only ever is_played=1 because its own feedback was already
+            // processed, or because it was swept as skipped; NextSongCommand will
+            // not hand out a played row, so neither case can legitimately air now.
+            if ($sq instanceof StationQueue && $sq->is_played) {
+                throw new RuntimeException(
+                    sprintf('Queue row #%s already aired; ignoring replayed metadata.', $sq->id)
+                );
+            }
         } else {
             $sq = $this->queueRepo->findRecentlyCuedSong($station, $media);
 
