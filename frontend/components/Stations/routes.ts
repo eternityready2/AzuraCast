@@ -23,6 +23,7 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'sponsor_plays', component: () => import('~/components/Stations/SponsorPlays.vue'), name: 'stations:sponsor_plays'},
                 {path: 'crossfade_profiles', component: () => import('~/components/Stations/CrossfadeProfiles.vue'), name: 'stations:crossfade_profiles'},
                 {path: 'ai_dj', component: () => import('~/components/Stations/AiDj.vue'), name: 'stations:ai_dj'},
+                {path: 'assistant', component: () => import('~/components/Stations/Assistant.vue'), name: 'stations:assistant:index'},
                 {path: 'logs-diag', component: () => import('~/components/Stations/LogsDiag.vue'), name: 'stations:logs_diag'},
                 {path: 'logs-diag/logs', component: () => import('~/components/Stations/LogsDiag.vue'), name: 'stations:logs_diag:logs', props: {initialTab: 'logs'}},
                 {path: 'logs-diag/diagnostics', component: () => import('~/components/Stations/LogsDiag.vue'), name: 'stations:logs_diag:diagnostics', props: {initialTab: 'diagnostics'}},

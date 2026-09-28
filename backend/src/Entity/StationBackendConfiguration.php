@@ -800,6 +800,15 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         description: 'Custom Liquidsoap Configuration: Post-Broadcast Section'
     )]
     public ?string $custom_config_bottom = null;
+    /** AI Assistant settings */
+    public ?string $ai_assistant_provider = null;
+
+    public ?string $ai_assistant_api_key = null;
+
+    public ?string $ai_assistant_model = null;
+
+    public ?string $ai_assistant_base_url = null;
+
 
     /** @return array<int, string> */
     public static function getCustomConfigurationSections(): array

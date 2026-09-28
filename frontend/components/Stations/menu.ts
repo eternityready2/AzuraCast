@@ -367,6 +367,14 @@ export function useStationsMenu() {
                     },
                     visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                 },
+                {
+                    key: 'ai_assistant',
+                    label: $gettext('Assistant'),
+                    url: {
+                        name: 'stations:assistant:index'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
             ]
         },
         {

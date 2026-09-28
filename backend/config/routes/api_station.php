@@ -207,6 +207,22 @@ return static function (RouteCollectorProxy $group) {
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
+
+                    // AI Assistant
+                    $group->group(
+                        '/assistant',
+                        function (RouteCollectorProxy $group) {
+                            $group->get('/settings', Controller\Api\Stations\AssistantController::class . ':getSettingsAction')
+                                ->setName('api:stations:assistant:settings');
+
+                            $group->post('/settings', Controller\Api\Stations\AssistantController::class . ':saveSettingsAction')
+                                ->setName('api:stations:assistant:settings:save');
+
+                            $group->post('/chat', Controller\Api\Stations\AssistantController::class . ':chatAction')
+                                ->setName('api:stations:assistant:chat');
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Podcast Private Pages
                     $group->group(
                         '',
