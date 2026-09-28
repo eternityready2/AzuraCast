@@ -8,9 +8,13 @@ use App\Cache\NowPlayingCache;
 use App\Container\LoggerAwareTrait;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\StationMount;
 use App\Entity\StationPlaylist;
 use App\Http\Response;
 use App\Http\ServerRequest;
+use App\Nginx\Nginx;
+use App\Radio\Adapters;
+use App\Radio\Configuration;
 use Doctrine\ORM\EntityManagerInterface;
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\RequestOptions;
@@ -25,6 +29,9 @@ final class AssistantController
         private readonly NowPlayingCache $nowPlayingCache,
         private readonly StationQueueRepository $queueRepo,
         private readonly HttpClient $httpClient,
+        private readonly Configuration $configuration,
+        private readonly Nginx $nginx,
+        private readonly Adapters $adapters,
     ) {
     }
 
@@ -160,10 +167,10 @@ final class AssistantController
 
     private function buildSystemPrompt(Station $station): string
     {
-        $now = (new \DateTimeImmutable('now', new \DateTimeZone($station->getTimezone())))->format('l, F j Y g:i A T');
+        $now = (new \DateTimeImmutable('now', $station->getTimezoneObject()))->format('l, F j Y g:i A T');
 
         return <<<PROMPT
-You are an AI assistant for {$station->getName()}, an FM radio station running on AzuraCast.
+You are an AI assistant for {$station->name}, an FM radio station running on AzuraCast.
 Today is {$now}.
 
 You help station staff with operational tasks: checking what is on air, reviewing the 24-hour playout log,
@@ -269,14 +276,64 @@ PROMPT;
                         'type'       => 'object',
                         'properties' => [
                             'name'        => ['type' => 'string', 'description' => 'Playlist name.'],
-                            'type'        => ['type' => 'string', 'enum' => ['default', 'scheduled', 'once_per_x_songs', 'once_per_x_minutes', 'once_per_hour'], 'description' => 'Playlist scheduling type.'],
+                            'type'        => ['type' => 'string', 'enum' => ['default', 'once_per_x_songs', 'once_per_x_minutes', 'once_per_hour', 'custom'], 'description' => 'Playlist scheduling type. Use "default" for general rotation; scheduling to specific times/days requires a separate schedule step not available via this tool.'],
                             'weight'      => ['type' => 'integer', 'description' => 'Playback weight 1-25 (default 3).'],
                             'order'       => ['type' => 'string', 'enum' => ['shuffle', 'random', 'sequential'], 'description' => 'Song order (default shuffle).'],
                             'is_enabled'  => ['type' => 'boolean', 'description' => 'Whether the playlist is active (default true).'],
-                            'play_once_per_x_songs' => ['type' => 'integer', 'description' => 'For once_per_x_songs type: how many songs between plays.'],
-                            'play_once_per_x_minutes' => ['type' => 'integer', 'description' => 'For once_per_x_minutes type: how many minutes between plays.'],
+                            'play_per_songs' => ['type' => 'integer', 'description' => 'For once_per_x_songs type: how many songs between plays.'],
+                            'play_per_minutes' => ['type' => 'integer', 'description' => 'For once_per_x_minutes type: how many minutes between plays.'],
                         ],
                         'required'   => ['name'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'restart_station',
+                    'description' => 'Restarts the station backend (AutoDJ/Liquidsoap) and frontend (streaming server). Use this to fix a station that is stuck, not playing, or misconfigured after a settings change.',
+                    'parameters'  => ['type' => 'object', 'properties' => new \stdClass(), 'required' => []],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'get_liquidsoap_log',
+                    'description' => 'Returns the tail of the Liquidsoap (AutoDJ backend) error/status log — use this to troubleshoot why AutoDJ crashed, won\'t start, or is behaving unexpectedly.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'lines' => ['type' => 'integer', 'description' => 'Number of lines from the end of the log to return (default 60, max 300).'],
+                        ],
+                        'required'   => [],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'list_mount_points',
+                    'description' => 'Lists the station\'s streaming mount points with their format, bitrate, and visibility settings.',
+                    'parameters'  => ['type' => 'object', 'properties' => new \stdClass(), 'required' => []],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'update_mount_point',
+                    'description' => 'Updates a streaming mount point\'s configuration (bitrate, format, visibility, default status).',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'mount_id'      => ['type' => 'integer', 'description' => 'Mount point ID from list_mount_points.'],
+                            'is_default'    => ['type' => 'boolean'],
+                            'is_public'     => ['type' => 'boolean'],
+                            'enable_autodj' => ['type' => 'boolean'],
+                            'autodj_format' => ['type' => 'string', 'enum' => ['mp3', 'ogg', 'aac', 'opus', 'flac']],
+                            'autodj_bitrate' => ['type' => 'integer', 'description' => 'Bitrate in kbps, e.g. 128, 192, 320.'],
+                            'max_listener_duration' => ['type' => 'integer', 'description' => 'Max seconds a listener can stay connected; 0 for unlimited.'],
+                        ],
+                        'required'   => ['mount_id'],
                     ],
                 ],
             ],
@@ -318,6 +375,10 @@ PROMPT;
             'clear_queue'        => $this->toolClearQueue($station),
             'create_playlist'    => $this->toolCreatePlaylist($station, $args),
             'update_playlist'    => $this->toolUpdatePlaylist($station, $args),
+            'restart_station'    => $this->toolRestartStation($station),
+            'get_liquidsoap_log' => $this->toolGetLiquidsoapLog($station, (int)($args['lines'] ?? 60)),
+            'list_mount_points'  => $this->toolListMountPoints($station),
+            'update_mount_point' => $this->toolUpdateMountPoint($station, $args),
             default              => ['error' => "Unknown tool: {$name}"],
         };
     }
@@ -353,7 +414,7 @@ PROMPT;
         $rows = $this->em->createQuery(
             'SELECT e FROM App\Entity\StationLogEntry e
              WHERE e.station = :station
-             AND e.played_at IS NULL
+             AND e.aired_at IS NULL
              AND e.planned_at >= :now
              ORDER BY e.sequence ASC'
         )
@@ -388,9 +449,9 @@ PROMPT;
 
         return array_map(static function ($row) {
             return [
-                'played_at' => (new \DateTimeImmutable('@' . $row->timestamp_start))->format('g:i A'),
-                'title'     => $row->song?->title ?? 'Unknown',
-                'artist'    => $row->song?->artist ?? '',
+                'played_at' => $row->timestamp_start->format('g:i A'),
+                'title'     => $row->title ?? 'Unknown',
+                'artist'    => $row->artist ?? '',
                 'playlist'  => $row->playlist?->name ?? '',
                 'listeners' => $row->listeners_start ?? 0,
             ];
@@ -417,7 +478,7 @@ PROMPT;
                 'order'      => $p->order->value,
                 'weight'     => $p->weight,
                 'is_enabled' => $p->is_enabled,
-                'num_songs'  => $p->num_songs ?? 0,
+                'num_songs'  => $p->media_items->count(),
             ];
         }, $playlists);
     }
@@ -459,16 +520,26 @@ PROMPT;
         $frontendRunning = false;
 
         try {
-            $backendRunning  = $station->is_enabled && $station->backend_type->isEnabled();
-            $frontendRunning = $station->is_enabled && $station->frontend_type->isEnabled();
+            $backend = $this->adapters->getBackendAdapter($station);
+            if (null !== $backend) {
+                $backendRunning = $backend->isRunning($station);
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $frontend = $this->adapters->getFrontendAdapter($station);
+            if (null !== $frontend) {
+                $frontendRunning = $frontend->isRunning($station);
+            }
         } catch (\Throwable) {
         }
 
         return [
-            'station_enabled' => $station->is_enabled,
-            'backend_running' => $backendRunning,
+            'station_enabled'  => $station->is_enabled,
+            'backend_running'  => $backendRunning,
             'frontend_running' => $frontendRunning,
-            'station_name'    => $station->getName(),
+            'station_name'     => $station->name,
         ];
     }
 
@@ -509,12 +580,12 @@ PROMPT;
             }
         }
 
-        if (!empty($args['play_once_per_x_songs'])) {
-            $playlist->play_once_per_x_songs = (int)$args['play_once_per_x_songs'];
+        if (!empty($args['play_per_songs'])) {
+            $playlist->play_per_songs = (int)$args['play_per_songs'];
         }
 
-        if (!empty($args['play_once_per_x_minutes'])) {
-            $playlist->play_once_per_x_minutes = (int)$args['play_once_per_x_minutes'];
+        if (!empty($args['play_per_minutes'])) {
+            $playlist->play_per_minutes = (int)$args['play_per_minutes'];
         }
 
         try {
@@ -565,6 +636,118 @@ PROMPT;
             $this->em->persist($playlist);
             $this->em->flush();
             return ['success' => true, 'message' => "Playlist \"{$playlist->name}\" updated."];
+        } catch (\Throwable $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    private function toolRestartStation(Station $station): mixed
+    {
+        try {
+            $station->has_started = true;
+            $this->em->persist($station);
+            $this->em->flush();
+
+            $this->configuration->writeConfiguration(
+                station: $station,
+                forceRestart: true,
+                attemptReload: false
+            );
+            $this->nginx->writeConfiguration($station);
+
+            return ['success' => true, 'message' => 'Station backend and frontend restarted.'];
+        } catch (\Throwable $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    private function toolGetLiquidsoapLog(Station $station, int $lines): mixed
+    {
+        $lines = min(300, max(1, $lines));
+        $logPath = $station->getRadioConfigDir() . '/liquidsoap.log';
+
+        if (!is_file($logPath) || !is_readable($logPath)) {
+            return ['error' => 'Liquidsoap log is not available. The backend may not have started yet.'];
+        }
+
+        try {
+            $contents = file_get_contents($logPath) ?: '';
+            $filtered = str_replace($station->getFilteredPasswords(), '(PASSWORD)', $contents);
+            $allLines = explode("\n", rtrim($filtered, "\n"));
+            $tail = array_slice($allLines, -$lines);
+
+            return ['log' => implode("\n", $tail)];
+        } catch (\Throwable $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function toolListMountPoints(Station $station): array
+    {
+        /** @var StationMount[] $mounts */
+        $mounts = $this->em->createQuery(
+            'SELECT m FROM App\Entity\StationMount m
+             WHERE m.station = :station
+             ORDER BY m.name ASC'
+        )
+            ->setParameter('station', $station)
+            ->getResult();
+
+        return array_map(static function (StationMount $m) {
+            return [
+                'id'                    => $m->id,
+                'name'                  => $m->name,
+                'is_default'            => $m->is_default,
+                'is_public'             => $m->is_public,
+                'enable_autodj'         => $m->enable_autodj,
+                'autodj_format'         => $m->autodj_format?->value,
+                'autodj_bitrate'        => $m->autodj_bitrate,
+                'max_listener_duration' => $m->max_listener_duration,
+            ];
+        }, $mounts);
+    }
+
+    /** @param array<string, mixed> $args */
+    private function toolUpdateMountPoint(Station $station, array $args): mixed
+    {
+        $id = (int)($args['mount_id'] ?? 0);
+        if (!$id) {
+            return ['error' => 'mount_id is required.'];
+        }
+
+        /** @var StationMount|null $mount */
+        $mount = $this->em->find(StationMount::class, $id);
+        if (null === $mount || $mount->station->id !== $station->id) {
+            return ['error' => "Mount point #{$id} not found."];
+        }
+
+        if (isset($args['is_default'])) {
+            $mount->is_default = (bool)$args['is_default'];
+        }
+        if (isset($args['is_public'])) {
+            $mount->is_public = (bool)$args['is_public'];
+        }
+        if (isset($args['enable_autodj'])) {
+            $mount->enable_autodj = (bool)$args['enable_autodj'];
+        }
+        if (!empty($args['autodj_format'])) {
+            try {
+                $mount->autodj_format = \App\Radio\Enums\StreamFormats::from($args['autodj_format']);
+            } catch (\ValueError) {
+            }
+        }
+        if (isset($args['autodj_bitrate'])) {
+            $mount->autodj_bitrate = (int)$args['autodj_bitrate'];
+        }
+        if (isset($args['max_listener_duration'])) {
+            $mount->max_listener_duration = max(0, (int)$args['max_listener_duration']);
+        }
+
+        try {
+            $this->em->persist($mount);
+            $this->em->flush();
+            return ['success' => true, 'message' => "Mount point \"{$mount->name}\" updated."];
         } catch (\Throwable $e) {
             return ['error' => $e->getMessage()];
         }
