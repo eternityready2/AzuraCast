@@ -45,7 +45,6 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'profile', name: 'stations:profile:index', redirect: {name: 'stations:index'}},
                 {path: 'profile/edit', name: 'stations:profile:edit', redirect: {name: 'stations:settings:index'}},
                 {path: 'mounts', component: () => import('~/components/Stations/Mounts.vue'), name: 'stations:mounts:index'},
-                {path: 'queue', component: () => import('~/components/Stations/Queue.vue'), name: 'stations:queue:index'},
                 {path: 'remotes', component: () => import('~/components/Stations/Remotes.vue'), name: 'stations:remotes:index'},
                 {path: 'reports/overview', component: () => import('~/components/Stations/Reports/Overview.vue'), name: 'stations:reports:overview'},
                 {path: 'reports/linear-log', component: () => import('~/components/Stations/Reports/LinearLog.vue'), name: 'stations:reports:linear-log'},

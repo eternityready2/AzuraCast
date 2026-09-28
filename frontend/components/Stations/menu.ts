@@ -483,15 +483,6 @@ export function useStationsMenu() {
                         && station.value.features.media
                 },
                 {
-                    key: 'queue',
-                    label: $gettext('Upcoming Song Queue'),
-                    url: {
-                        name: 'stations:queue:index',
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                        && station.value.features.autoDjQueue
-                },
-                {
                     key: 'playout_simulator',
                     label: $gettext('Playout Simulator'),
                     url: {
