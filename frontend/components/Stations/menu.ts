@@ -483,14 +483,6 @@ export function useStationsMenu() {
                         && station.value.features.media
                 },
                 {
-                    key: 'playout_simulator',
-                    label: $gettext('Playout Simulator'),
-                    url: {
-                        name: 'stations:playout_simulator'
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                },
-                {
                     key: 'restart',
                     label: $gettext('Restart Broadcasting'),
                     url: {

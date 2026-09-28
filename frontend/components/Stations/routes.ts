@@ -35,7 +35,6 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'shows', component: () => import('~/components/Stations/Shows.vue'), name: 'stations:shows:index'},
                 {path: 'show/new', component: () => import('~/components/Stations/ShowEditor.vue'), name: 'stations:shows:new'},
                 {path: 'show/:show_id', component: () => import('~/components/Stations/ShowEditor.vue'), name: 'stations:shows:edit'},
-                {path: 'playout-simulator', component: () => import('~/components/Stations/PlayoutSimulator.vue'), name: 'stations:playout_simulator'},
                 {path: 'aircheck', name: 'stations:aircheck', redirect: {name: 'stations:logs_diag'}},
                 {path: 'diagnostics', name: 'stations:diagnostics', redirect: {name: 'stations:logs'}},
                 {path: 'smart-blocks', component: () => import('~/components/Stations/SmartBlocks.vue'), name: 'stations:smart-blocks:index'},
