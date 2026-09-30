@@ -493,6 +493,10 @@ function resolveType(item: LinearLogItem): string {
 const filteredItems = computed(() => {
     const query = searchQuery.value.trim().toLowerCase();
     return allItems.value.filter((item) => {
+        // A dropped line was rejected by an operator rule and kept only as an
+        // audit trail (see log_note); whatever refilled its slot is its own
+        // entry, so counting both here double-counts that time in the totals.
+        if (item.log_status === "dropped") return false;
         if (!activeTypes.value.includes(resolveType(item))) return false;
         if (!query) return true;
 
