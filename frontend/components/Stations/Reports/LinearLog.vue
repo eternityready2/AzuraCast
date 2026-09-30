@@ -528,8 +528,11 @@ const totalDurationFormatted = computed(() => secondsToHms(
 ));
 const gapCount = computed(() => gaps.value.length);
 const totalGapDuration = computed(() => secondsToHms(gaps.value.reduce((sum, gap) => sum + gap.duration, 0)));
+// What is on the air, and what follows it, is a fact about the station, not
+// about the operator's current search box or type filter -- both read from the
+// unfiltered log so narrowing the table can never blank the badges out.
 const nextUpItem = computed(
-    () => filteredItems.value.find((item) => (item.played_at ?? 0) >= nowTs.value && item.is_live_queue) ?? null,
+    () => allItems.value.find((item) => (item.played_at ?? 0) >= nowTs.value && item.is_live_queue) ?? null,
 );
 // Mirrors LinearLogSchedule's currentOnAirItem: duration is unreliable once a
 // track has aired (a track cut short live, e.g. by the Top-of-Hour boundary,
@@ -540,7 +543,7 @@ const onAirItem = computed<LinearLogItem | null>(() => {
     let best: LinearLogItem | null = null;
     let bestStart = -Infinity;
 
-    for (const item of filteredItems.value) {
+    for (const item of allItems.value) {
         const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
         if (start === null || start === undefined || start > nowTs.value) {
             continue;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sync\Task;
 
+use App\Entity\Station;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\StationDiagnostics;
@@ -26,11 +27,31 @@ final class BuildLinearLogTask extends AbstractTask
 
     public static function getSchedulePattern(): string
     {
-        // Once a day, like FM traffic/music logs: built early morning through
-        // the end of the next day. Live timing is re-computed on the page.
-        // Sync cron patterns are evaluated in UTC, so fire at :07 every hour and
-        // let run() keep only the station's own local 3am (DST included).
+        // Hourly. run() does the full FM-style daily build at the station's own
+        // local 3am (checked here rather than in the pattern, which is evaluated
+        // in UTC and so cannot express a local hour across DST), and otherwise
+        // only tops the log up when it has decayed below the requested horizon.
         return '7 * * * *';
+    }
+
+    /**
+     * The configured hours are a rolling minimum, not a per-build target: a log
+     * built only at 3am covers less and less as the day airs out of it, so by
+     * evening the page legitimately shows well under 24 hours. Top the log up
+     * on any hourly pass where coverage from *now* has fallen below what the
+     * station asked for.
+     */
+    private function isShortOfHorizon(Station $station): bool
+    {
+        $snapshot = $this->snapshotStore->get($station);
+        if (!in_array($snapshot['status'] ?? null, ['ready', 'failed'], true)) {
+            // A build is already queued or running; let it finish.
+            return false;
+        }
+
+        $hours = max(1, min(48, $station->backend_config->linear_log_hours));
+
+        return ((int)($snapshot['coverage_end'] ?? 0)) - time() < $hours * 3600;
     }
 
     public function run(bool $force = false): void
@@ -40,14 +61,14 @@ final class BuildLinearLogTask extends AbstractTask
                 continue;
             }
 
-            if (
-                !$force
-                && self::BUILD_LOCAL_HOUR !== (int)Time::nowInTimezone($station->getTimezoneObject())->format('G')
-            ) {
+            if (!$station->supportsAutoDjQueue()) {
                 continue;
             }
 
-            if (!$station->supportsAutoDjQueue()) {
+            $isDailyBuild = self::BUILD_LOCAL_HOUR
+                === (int)Time::nowInTimezone($station->getTimezoneObject())->format('G');
+
+            if (!$force && !$isDailyBuild && !$this->isShortOfHorizon($station)) {
                 continue;
             }
 
