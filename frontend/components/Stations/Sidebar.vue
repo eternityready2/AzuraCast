@@ -28,18 +28,17 @@
         >
             <div
                 v-if="np.now_playing?.song?.text"
-                class="onair-line"
-                :title="np.now_playing.song.text"
+                class="onair-row"
             >
                 <span class="onair-label">{{ $gettext('ON AIR') }}</span>
                 <span class="onair-text">{{ np.now_playing.song.text }}</span>
             </div>
             <div
                 v-if="np.playing_next?.song?.text"
-                class="onair-line next-line"
+                class="onair-row"
             >
                 <span class="next-label">{{ $gettext('NEXT') }}</span>
-                <span class="onair-text next-text">{{ np.playing_next.song.text }}</span>
+                <span class="onair-text">{{ np.playing_next.song.text }}</span>
             </div>
         </div>
     </div>
@@ -128,68 +127,71 @@ useIntervalFn(() => {
 }
 
 .station-onair-next {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
     font-size: .74rem;
-    line-height: 1.6;
-    margin-top: .25rem;
+    line-height: 1.4;
+    margin-top: .55rem;
     max-width: 100%;
     min-width: 0;
+    padding: .5rem;
+    border-radius: .35rem;
+    background: color-mix(in srgb, var(--bs-body-color) 6%, transparent);
+    border: 1px solid var(--bs-border-color);
 }
 
-.onair-line {
+.onair-row {
     display: flex;
-    align-items: center;
-    gap: .35rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .3rem;
     max-width: 100%;
     min-width: 0;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.onair-row:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.onair-label,
+.next-label {
+    flex-shrink: 0;
+    display: inline-block;
+    padding: .12rem .45rem;
+    border-radius: .25rem;
+    font-weight: 700;
+    font-size: .65rem;
+    letter-spacing: .05em;
 }
 
 .onair-label {
-    flex-shrink: 0;
-    display: inline-block;
-    padding: .1rem .4rem;
-    border-radius: .25rem;
     border: 1px solid #ff5c5c;
-    font-weight: 700;
-    font-size: .68rem;
+    background: rgba(255, 92, 92, .12);
     color: #ff5c5c;
-    letter-spacing: .04em;
     animation: onair-flash 1.1s ease-in-out infinite;
 }
 
 .next-label {
-    flex-shrink: 0;
-    display: inline-block;
-    padding: .1rem .4rem;
-    border-radius: .25rem;
     border: 1px solid var(--bs-border-color);
-    font-weight: 700;
-    font-size: .68rem;
+    background: color-mix(in srgb, var(--bs-body-color) 8%, transparent);
     color: var(--bs-secondary-color);
-    letter-spacing: .04em;
 }
 
 .onair-text {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    min-width: 0;
-    color: var(--bs-body-color);
-}
-
-.next-line {
-    align-items: flex-start;
-}
-
-.next-text {
     white-space: normal;
     overflow: visible;
-    text-overflow: clip;
     word-break: break-word;
+    color: var(--bs-emphasis-color);
+    font-weight: 500;
 }
 
 @keyframes onair-flash {
-    0%, 100% { opacity: 1; border-color: #ff5c5c; }
-    50% { opacity: .45; border-color: rgba(255, 92, 92, .4); }
+    0%, 100% { opacity: 1; border-color: #ff5c5c; background: rgba(255, 92, 92, .12); }
+    50% { opacity: .55; border-color: rgba(255, 92, 92, .4); background: rgba(255, 92, 92, .05); }
 }
 
 @media (prefers-reduced-motion: reduce) {
