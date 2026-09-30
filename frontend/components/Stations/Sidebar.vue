@@ -23,22 +23,12 @@
         </div>
 
         <div
-            v-if="np.now_playing?.song?.text || np.playing_next?.song?.text"
+            v-if="np.now_playing?.song?.text"
             class="station-onair-next"
         >
-            <div
-                v-if="np.now_playing?.song?.text"
-                class="onair-row"
-            >
+            <div class="onair-row">
                 <span class="onair-label">{{ $gettext('ON AIR') }}</span>
                 <span class="onair-text">{{ np.now_playing.song.text }}</span>
-            </div>
-            <div
-                v-if="np.playing_next?.song?.text"
-                class="onair-row"
-            >
-                <span class="next-label">{{ $gettext('NEXT') }}</span>
-                <span class="onair-text">{{ np.playing_next.song.text }}</span>
             </div>
         </div>
     </div>
@@ -157,8 +147,7 @@ useIntervalFn(() => {
     border-bottom: none;
 }
 
-.onair-label,
-.next-label {
+.onair-label {
     flex-shrink: 0;
     display: inline-block;
     padding: .12rem .45rem;
@@ -166,19 +155,10 @@ useIntervalFn(() => {
     font-weight: 700;
     font-size: .65rem;
     letter-spacing: .05em;
-}
-
-.onair-label {
     border: 1px solid #ff5c5c;
     background: rgba(255, 92, 92, .12);
     color: #ff5c5c;
     animation: onair-flash 1.1s ease-in-out infinite;
-}
-
-.next-label {
-    border: 1px solid var(--bs-border-color);
-    background: color-mix(in srgb, var(--bs-body-color) 8%, transparent);
-    color: var(--bs-secondary-color);
 }
 
 .onair-text {
