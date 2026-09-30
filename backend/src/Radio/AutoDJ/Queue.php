@@ -714,6 +714,21 @@ final class Queue
                     $startTs = $occurrence->start->getTimestamp();
                     $endTs = $occurrence->end->getTimestamp();
 
+                    // A loop-once show releases its window the moment its single
+                    // content pass is exhausted, not when the schedule clock runs
+                    // out: rotation music fills the tail. The effective end is the
+                    // earlier of the two. Without this, the preview cursor jumps a
+                    // full MAX_PREVIEW_GAP_STEP past a finished loop-once show and
+                    // reports the whole remainder of the window as a phantom gap,
+                    // even though on air the next rotation song is already cued.
+                    $loopOnceDuration = $this->scheduler->loopOnceContentDurationSeconds($schedule);
+                    if (null !== $loopOnceDuration) {
+                        $contentEndTs = $startTs + (int)ceil($loopOnceDuration);
+                        if ($contentEndTs < $endTs) {
+                            $endTs = $contentEndTs;
+                        }
+                    }
+
                     // Half-open, matching RigidScheduleWindowResolver: a window
                     // ending at $at no longer owns the air at $at.
                     if ($startTs > $atTs || $endTs <= $atTs) {

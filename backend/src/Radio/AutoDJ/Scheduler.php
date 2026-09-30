@@ -400,6 +400,29 @@ final class Scheduler
     }
 
     /**
+     * For a loop-once Songs schedule, how many seconds after its window opens
+     * its single content pass is exhausted -- the moment ordinary rotation
+     * becomes eligible to fill the tail of the window. Null when the schedule
+     * is not a bounded loop-once Songs block, i.e. nothing releases the window
+     * early. Used by the Linear Log preview to step a projection cursor to the
+     * real release point instead of over-reporting a phantom gap for the whole
+     * remainder of the schedule window.
+     */
+    public function loopOnceContentDurationSeconds(StationSchedule $schedule): ?float
+    {
+        if (!$schedule->loop_once) {
+            return null;
+        }
+
+        $playlist = $schedule->playlist;
+        if (null === $playlist) {
+            return null;
+        }
+
+        return $this->playlistCycleDurationSeconds($playlist);
+    }
+
+    /**
      * Total playable duration of one full pass through a Songs playlist, or
      * null when it has no known length. Static and independent of any
      * mutable "already played" state.
