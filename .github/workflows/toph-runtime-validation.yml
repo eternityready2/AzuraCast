@@ -142,7 +142,7 @@ jobs:
           grep -q 'ResolveQueueClockConstraint' backend/src/Radio/AutoDJ/Queue.php
           grep -q 'top_of_hour_station_id' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
           grep -q 'if (!\$this->clock->isEnabled(\$station))' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
-          grep -q 'if (null !== \$event->getQueueRow())' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
+          grep -q 'self::applyPlan(\$event, \$plan, null !== \$event->getQueueRow());' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
           ! grep -q 'TopOfHourClock' backend/src/Radio/AutoDJ/Queue.php
 
           # Existing duplicate prevention from the normal queue remains intact.

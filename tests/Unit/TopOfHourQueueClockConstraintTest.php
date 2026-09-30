@@ -92,10 +92,9 @@ final class TopOfHourQueueClockConstraintTest extends Unit
         self::assertFalse($event->hasConstraint());
     }
 
-    public function testFutureQueueRowIsNeverCappedByTohForecast(): void
+    public function testFutureQueueRowGetsProjectionOnlyConstraintNeverCapped(): void
     {
         $station = $this->makeStation();
-        $station->backend_config->top_of_hour_id_enabled = true;
 
         $start = CarbonImmutable::parse('2026-09-07 22:56:40', 'UTC');
         /** @var StationQueue $futureRow */
@@ -108,15 +107,29 @@ final class TopOfHourQueueClockConstraintTest extends Unit
             $futureRow,
         );
 
-        // The resolver must return before TopOfHourClock::plan(), so no selector
-        // or persistence infrastructure is needed for this regression.
-        /** @var TopOfHourClock $clock */
-        $clock = (new ReflectionClass(TopOfHourClock::class))->newInstanceWithoutConstructor();
-        (new TopOfHourQueueClockConstraint($clock))->resolve($event);
+        // A future row (has a StationQueue) must still move the projection
+        // cursor across the ID, but only as a projection-only constraint —
+        // it must never be capped with a hard duration. Exercised directly
+        // against applyPlan(), mirroring the sibling tests above, since the
+        // resolver now reaches TopOfHourClock::plan() for future rows too and
+        // that needs real selector/repository infrastructure this test does
+        // not set up.
+        TopOfHourQueueClockConstraint::applyPlan(
+            $event,
+            $this->makePlan(TopOfHourMode::SoftEtm),
+            projectionOnly: null !== $event->getQueueRow(),
+        );
 
-        self::assertFalse($event->hasConstraint());
-        self::assertNull($event->getInterruptAt());
-        self::assertNull($event->getResumeAt());
+        self::assertTrue($event->hasConstraint());
+        self::assertTrue($event->isProjectionOnly());
+        self::assertSame(
+            '2026-09-07 22:59:21.000000',
+            $event->getInterruptAt()?->format('Y-m-d H:i:s.u'),
+        );
+        self::assertSame(
+            '2026-09-07 22:59:58.825000',
+            $event->getResumeAt()?->format('Y-m-d H:i:s.u'),
+        );
     }
 
     public function testDisabledTopOfHourLeavesOrdinaryTimelineUntouched(): void
