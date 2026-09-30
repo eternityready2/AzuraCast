@@ -10,6 +10,7 @@ use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
+use App\Entity\StationLogEntry;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
@@ -578,15 +579,21 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             // item (music first, then promos/sweepers) that still ends before
             // the ID; if nothing fits, drop the slot so nothing is cut.
             $overshoot = $originalLanding - $gap;
-            if ($overshoot <= $tolerance) {
+            if (abs($overshoot) <= $tolerance) {
                 return null;
             }
+
+            // A pick far shorter than the gap left the rest of it empty before
+            // the ID (2026-09-30 11:59: an 8s sweeper, then 27s of nothing,
+            // where the air had filled the same slot with a 34s promo). Look
+            // for something that fills more of it; keep the pick otherwise.
+            $undershoots = $overshoot < 0.0;
 
             $fitLimit = $gap + $tolerance;
             $best = $this->findBestFitMedia($station, $playlists, $media->id, $start, $fitLimit);
             $shortForm = $this->findBestFitMedia(
                 $station,
-                $this->getShortFormFallbackPlaylists($station),
+                $this->getShortFormFallbackPlaylists($station, $start),
                 $media->id,
                 $start,
                 $fitLimit,
@@ -596,6 +603,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 && (null === $best || $this->landingLength($shortForm[1]) > $this->landingLength($best[1]))
             ) {
                 $best = $shortForm;
+            }
+
+            if (
+                $undershoots
+                && (null === $best || $this->landingLength($best[1]) <= $originalLanding)
+            ) {
+                return null;
             }
 
             if (null !== $best) {
@@ -1186,6 +1200,15 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return false;
         }
 
+        // A song an operator locked on the Linear Log is a hand-made decision;
+        // the swap must never replace it.
+        if (null !== $row->log_entry_id) {
+            $entry = $this->em->find(StationLogEntry::class, $row->log_entry_id);
+            if ($entry instanceof StationLogEntry && $entry->is_locked) {
+                return false;
+            }
+        }
+
         return !StationMediaTypes::isStationId($row->media->type);
     }
 
@@ -1287,13 +1310,12 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             if (PlaylistTypes::Standard !== $candidate->type) {
                 continue;
             }
-            if (
-                !$this->scheduler->isPlaylistScheduledToPlayNow(
-                    $candidate,
-                    $start->toDateTimeImmutable(),
-                    true
-                )
-            ) {
+            // The rule every playout path obeys: a scheduled programme owns its
+            // window, so rotation may not be swapped into it. This used
+            // isPlaylistScheduledToPlayNow(), which is true for every
+            // unscheduled playlist and let 90s rotation fill the final slot of
+            // the overnight Hymns block.
+            if (!$this->scheduler->isPlaylistAllowedAt($candidate, $start->toDateTimeImmutable())) {
                 continue;
             }
 
@@ -1318,7 +1340,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
      *
      * @return list<StationPlaylist>
      */
-    private function getShortFormFallbackPlaylists(Station $station): array
+    private function getShortFormFallbackPlaylists(Station $station, CarbonImmutable $start): array
     {
         $eligible = [];
 
@@ -1327,6 +1349,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 continue;
             }
             if (!$candidate->is_enabled || !$candidate->is_jingle) {
+                continue;
+            }
+            // Same exclusivity rule as getEligiblePlaylists(); the send-time
+            // ScheduleWindowGuard would remove anything else.
+            if (!$this->scheduler->isPlaylistAllowedAt($candidate, $start->toDateTimeImmutable())) {
                 continue;
             }
 

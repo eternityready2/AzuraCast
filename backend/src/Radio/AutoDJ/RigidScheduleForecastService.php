@@ -191,7 +191,18 @@ final class RigidScheduleForecastService
             // so a 12 AM–6 AM strict block only shows songs through 1 AM
             // on the queue page when viewed at midnight.
             $rangeEndCarbon = CarbonImmutable::instance($rangeEnd);
+
+            // Same limit as the Liquidsoap play-once gate: past it the strict
+            // lane releases the window to the AutoDJ.
+            $maxTracks = RigidScheduleWindowResolver::maxTracksPerWindow($playlist, $window['schedule']);
+            $windowTracks = 0;
+
             while ($cursor < $window['end'] && $cursor < $rangeEndCarbon && count($items) < $limit) {
+                if (null !== $maxTracks && $windowTracks >= $maxTracks) {
+                    break;
+                }
+                $windowTracks++;
+
                 if ([] === $state['remaining']) {
                     // The planner/queue horizon may need more than one playlist round.
                     // mode="normal" keeps every later round in this same order.

@@ -55,6 +55,12 @@ final class BuildLinearLogCommand extends CommandAbstract
                 InputOption::VALUE_REQUIRED,
                 'How many hours ahead to build the log to.',
                 (string)self::DEFAULT_HOURS,
+            )
+            ->addOption(
+                'rebuild',
+                null,
+                InputOption::VALUE_NONE,
+                'Re-plan unlocked lines past the lock window instead of only extending the log.',
             );
     }
 
@@ -92,7 +98,7 @@ final class BuildLinearLogCommand extends CommandAbstract
             }
 
             try {
-                $this->linearLogBuilder->build($station, $hours);
+                $this->linearLogBuilder->build($station, $hours, (bool)$input->getOption('rebuild'));
             } catch (Throwable $e) {
                 $failures++;
                 $io->warning($station . ': ' . $e->getMessage());

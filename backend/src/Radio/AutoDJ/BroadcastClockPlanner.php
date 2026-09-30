@@ -213,6 +213,7 @@ final class BroadcastClockPlanner
             true,
         );
         $rigidStart = $this->isRigidStart($schedule);
+        $ownsAir = $this->scheduler->doesScheduleOwnAirAt($schedule, $now->toDateTimeImmutable());
 
         if (ScheduleRecurrence::hasRecurrence($schedule)) {
             $occurrences = ScheduleRecurrence::getOccurrencesInRange(
@@ -234,9 +235,11 @@ final class BroadcastClockPlanner
                     continue;
                 }
 
-                // An end only matters while the window is actually running.
+                // An end only matters while the programme still owns the air. A
+                // loop-once show that has finished hands the rest of its window
+                // to rotation, and nothing happens at its end time.
                 $occEnd = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
-                if ($now->between($occStart, $occEnd)) {
+                if ($now->between($occStart, $occEnd) && $ownsAir) {
                     $boundaries[] = $occEnd;
                 }
             }
@@ -269,7 +272,7 @@ final class BroadcastClockPlanner
             if ($schedule->start_time > $schedule->end_time) {
                 $end = $end->addDay();
             }
-            if ($now->between($start, $end)) {
+            if ($now->between($start, $end) && $ownsAir) {
                 $boundaries[] = $end;
             }
         }

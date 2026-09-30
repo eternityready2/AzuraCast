@@ -63,6 +63,9 @@ final class TopOfHourClock
     public const int MIN_SWAP_MIN_GAP_SECONDS = 15;
     public const int MAX_SWAP_MIN_GAP_SECONDS = 600;
 
+    /** Anything due this close before the ID is held and opens the new hour. */
+    public const int HOLD_BEFORE_ID_SECONDS = 30;
+
     public const int DEFAULT_ID_START_MINUTE = 59;
     public const int MIN_ID_START_MINUTE = 59;
     public const int MAX_ID_START_MINUTE = 59;
@@ -300,6 +303,38 @@ final class TopOfHourClock
         }
 
         return false;
+    }
+
+    /**
+     * When an item due at $at really starts on air.
+     *
+     * An item due while the ID owns the air, or less than HOLD_BEFORE_ID_SECONDS
+     * before it, is held and opens the new hour once the ID releases (see
+     * Queue::resolveQueueClockConstraint and Annotations). Whatever is picked for
+     * such a slot must be eligible at that later time: a pick judged at 10:59:5x
+     * opened the 11:00 programme's window with rotation music.
+     */
+    public function airStartFor(Station $station, DateTimeImmutable $at): DateTimeImmutable
+    {
+        if (!$this->isEnabled($station)) {
+            return $at;
+        }
+
+        // Look up from before $at so an item due just after :00 is matched to
+        // the ID that is still on air, not to the next hour's.
+        $plan = $this->plan($station, $at->modify('-' . self::MAX_ID_MAX_SECONDS . ' seconds'));
+        if (null === $plan || $this->clockWheelOwnsBoundary($station, $plan->boundaryAt)) {
+            return $at;
+        }
+
+        $target = CarbonImmutable::instance($plan->targetStartAt);
+        $release = $target->addMilliseconds((int)round($plan->durationSeconds * 1000));
+
+        if ($at >= $target->subSeconds(self::HOLD_BEFORE_ID_SECONDS) && $at < $release) {
+            return $release->toDateTimeImmutable();
+        }
+
+        return $at;
     }
 
     public function secondsUntilPlayoutAnchor(

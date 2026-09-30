@@ -246,6 +246,16 @@ final class LinearLogBuilder
                 }
             }
 
+            // When each strict programme's own songs run out. Past that point the
+            // native strict source has nothing to play and the air falls through
+            // to the AutoDJ, so its rows there are real airplay, not duplicates.
+            $rigidContentEnds = [];
+            foreach ($rigidForecastItems as $forecastItem) {
+                $key = $this->scheduleKey($forecastItem->schedule);
+                $itemEnd = $forecastItem->playedAt->getTimestamp() + (int)ceil($forecastItem->duration);
+                $rigidContentEnds[$key] = max($rigidContentEnds[$key] ?? 0, $itemEnd);
+            }
+
             $sequence = 0;
             foreach ($rows as $row) {
                 $playedAt = $row->timestamp_played?->getTimestamp();
@@ -266,7 +276,7 @@ final class LinearLogBuilder
                     ++$sequence,
                     isset($liveQueueIds[$row->id]),
                 );
-                $entry = $this->applyRigidWindowsToQueueEntry($entry, $rigidWindows);
+                $entry = $this->applyRigidWindowsToQueueEntry($entry, $rigidWindows, $rigidContentEnds);
 
                 if ($playout) {
                     $logRows[] = $this->logStore->describeRow(
@@ -448,7 +458,7 @@ final class LinearLogBuilder
      * @param list<array{playlist: \App\Entity\StationPlaylist, schedule: \App\Entity\StationSchedule, start: \Carbon\CarbonImmutable, end: \Carbon\CarbonImmutable}> $windows
      * @return array<string, mixed>|null
      */
-    private function applyRigidWindowsToQueueEntry(array $entry, array $windows): ?array
+    private function applyRigidWindowsToQueueEntry(array $entry, array $windows, array $contentEnds = []): ?array
     {
         if ((bool)$entry['top_of_hour_legal_id']) {
             return $entry;
@@ -462,6 +472,20 @@ final class LinearLogBuilder
             $windowEnd = $window['end']->getTimestamp();
 
             if ($start >= $windowStart && $start < $windowEnd) {
+                // The strict programme's own episode is aired by the native
+                // strict source; an AutoDJ copy of it is always a duplicate.
+                if ((int)($entry['playlist_id'] ?? 0) === $window['playlist']->id) {
+                    return null;
+                }
+
+                // After the programme's content has finished, the AutoDJ fills
+                // the rest of the window. Remote strict sources have no forecast
+                // and own the whole window.
+                $contentEnd = $contentEnds[$this->scheduleKey($window['schedule'])] ?? $windowEnd;
+                if ($start >= $contentEnd) {
+                    continue;
+                }
+
                 return null;
             }
 

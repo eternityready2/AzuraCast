@@ -121,6 +121,12 @@ final class Scheduler
             return false;
         }
 
+        if ($this->isAiredByStrictLaneAt($playlist, $now)) {
+            $this->logger->debug('Playlist is aired by the native strict lane in this window, not by the AutoDJ.');
+            $this->logger->popProcessor();
+            return false;
+        }
+
         $shouldPlay = true;
 
         switch ($playlist->type) {
@@ -523,6 +529,47 @@ final class Scheduler
         }
 
         return $seconds;
+    }
+
+    /**
+     * True while this schedule row still owns the air at $at: its window is open
+     * and, for a loop-once row, its content has not run out. The same test that
+     * releases the window to rotation (openScheduleSecondsForPlaylist).
+     */
+    public function doesScheduleOwnAirAt(StationSchedule $schedule, DateTimeImmutable $at): bool
+    {
+        $playlist = $schedule->playlist;
+        if (null === $playlist) {
+            return false;
+        }
+
+        $tz = $playlist->station->getTimezoneObject();
+        if (null === $this->ownedWindowSeconds($schedule, $tz, $at)) {
+            return false;
+        }
+
+        return !$schedule->loop_once || $this->isLoopOnceContentAvailable($schedule, $tz, $at);
+    }
+
+    /**
+     * True when the schedule row active at $now belongs to the native strict lane.
+     * That lane plays the programme itself, so the AutoDJ must not queue a
+     * second copy of it (live or in the Linear Log simulation).
+     */
+    public function isAiredByStrictLaneAt(StationPlaylist $playlist, DateTimeImmutable $now): bool
+    {
+        if (0 === $playlist->schedule_items->count()) {
+            return false;
+        }
+
+        $active = $this->getActiveScheduleFromCollection(
+            $playlist->schedule_items,
+            $playlist->station->getTimezoneObject(),
+            $now,
+            true
+        );
+
+        return null !== $active && RigidScheduleWindowResolver::isAiredByStrictLane($playlist, $active);
     }
 
     public function isPlaylistScheduledToPlayNow(

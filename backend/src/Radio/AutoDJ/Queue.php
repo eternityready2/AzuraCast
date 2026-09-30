@@ -44,6 +44,15 @@ final class Queue
     private const int MIN_PREVIEW_GAP_STEP_SECONDS = 1;
 
     /**
+     * How soon the live AutoDJ asks again after a refused pick: Liquidsoap's
+     * azuracast.autodj_retry_delay. Before the Top-of-Hour ID a pick is often
+     * refused only because it does not land on the ID, and a few seconds later a
+     * different one does. The preview retries on the same cadence there, or it
+     * wrote off the last minutes of the hour that really are filled on air.
+     */
+    private const int PREVIEW_RETRY_SECONDS = 10;
+
+    /**
      * Safety cap on consecutive unfilled slots. The preview now steps to the next
      * scheduling boundary rather than a flat five minutes, so a genuinely dry
      * station takes many more (smaller) steps than it used to; this bounds the
@@ -194,12 +203,16 @@ final class Queue
                 }
             }
 
-            [$effectiveDuration, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
+            $constraint = $this->resolveQueueClockConstraint(
                 $station,
                 CarbonImmutable::instance($expectedPlayTime),
                 $effectiveDuration,
                 $queueRow,
             );
+            [$effectiveDuration, $nextExpectedPlayTime] = $constraint;
+            if (isset($constraint[2])) {
+                $expectedPlayTime = $constraint[2];
+            }
 
             if ($queueRow->sent_to_autodj) {
                 $expectedCueTime = $this->addDurationToTime(
@@ -343,11 +356,19 @@ final class Queue
                         $gapSeconds = $secondsToWindowEnd;
                     }
 
+                    $topOfHourProtected = $this->hourBoundaryPlanner->isTopOfHourProtectionEnabled($station);
+                    if (
+                        $topOfHourProtected
+                        && $secondsToTop > 0
+                        && $secondsToTop <= self::MAX_PREVIEW_GAP_STEP_SECONDS
+                    ) {
+                        $gapSeconds = min($gapSeconds, self::PREVIEW_RETRY_SECONDS);
+                    }
+
                     $gapSeconds = max(self::MIN_PREVIEW_GAP_STEP_SECONDS, $gapSeconds);
 
-                    $coveredByTopOfHour = $gapSeconds === $secondsToTop
-                        && $secondsToTop <= 60
-                        && $this->hourBoundaryPlanner->isTopOfHourProtectionEnabled($station);
+                    // The final minute belongs to the ID lane's pre-fade on air.
+                    $coveredByTopOfHour = $topOfHourProtected && $secondsToTop <= 60;
 
                     if (!$coveredByTopOfHour) {
                         $previewGaps[] = [
@@ -442,12 +463,16 @@ final class Queue
                     }
                 }
 
-                [$effectiveDuration, $nextExpectedPlayTime] = $this->resolveQueueClockConstraint(
+                $constraint = $this->resolveQueueClockConstraint(
                     $station,
                     CarbonImmutable::instance($expectedPlayTime),
                     $effectiveDuration,
                     $queueRow,
                 );
+                [$effectiveDuration, $nextExpectedPlayTime] = $constraint;
+                if (isset($constraint[2])) {
+                    $expectedPlayTime = $constraint[2];
+                }
 
                 // A scheduled remote stream is switched off at its window end by
                 // Liquidsoap, so its window may never be credited past that point:
@@ -571,7 +596,10 @@ final class Queue
      * actual playout, while the projected next-play cursor can jump over content
      * that lives in an external/plugin-owned clock lane.
      *
-     * @return array{0:float,1:CarbonImmutable}
+     * The optional third element is the item's own start when the constraint
+     * moved it (it would have started while the interruption owned the air).
+     *
+     * @return array{0:float,1:CarbonImmutable,2?:CarbonImmutable}
      */
     private function resolveQueueClockConstraint(
         Station $station,
@@ -611,6 +639,29 @@ final class Queue
             ];
         }
 
+        if ($event->isProjectionOnly()) {
+            // An item that would start while the interruption owns the air, or
+            // too close before it to be worth starting, is held and starts when
+            // it releases, at its natural length (the same rule as below). One
+            // that is playing when it begins yields to it, and the next item
+            // follows its release.
+            $secondsBeforeInterrupt = $interruptAt->getTimestamp() - $expectedPlayTime->getTimestamp();
+            if ($secondsBeforeInterrupt < self::MIN_BOUNDARY_CAP_SECONDS) {
+                $rowStart = CarbonImmutable::instance($resumeAt);
+
+                return [
+                    $effectiveDuration,
+                    $this->addDurationToTime($station, $rowStart, $effectiveDuration),
+                    $rowStart,
+                ];
+            }
+
+            return [
+                $effectiveDuration,
+                CarbonImmutable::instance($resumeAt),
+            ];
+        }
+
         $capSeconds = max(
             1,
             $interruptAt->getTimestamp() - $expectedPlayTime->getTimestamp(),
@@ -637,13 +688,12 @@ final class Queue
             $queueRow->hour_boundary_enforce_cap = false;
             $queueRow->hour_boundary_max_play_seconds = null;
 
+            $rowStart = CarbonImmutable::instance($resumeAt);
+
             return [
                 $effectiveDuration,
-                $this->addDurationToTime(
-                    $station,
-                    CarbonImmutable::instance($resumeAt),
-                    $effectiveDuration,
-                ),
+                $this->addDurationToTime($station, $rowStart, $effectiveDuration),
+                $rowStart,
             ];
         }
 

@@ -91,6 +91,11 @@ final class QueueBuilder implements EventSubscriberInterface
         $expectedPlayTime = $event->getExpectedPlayTime();
         $tz = $station->getTimezoneObject();
 
+        // Schedule rules are judged at the time the pick really airs. A slot due
+        // inside the Top-of-Hour ID, or just before it, is held and opens the new
+        // hour, so it must belong to whatever owns the air then.
+        $airsAt = $this->topOfHourClock->airStartFor($station, $expectedPlayTime);
+
         $sponsorPlaylistIdsBehindPace = [];
         if ($event->isInterrupting()) {
             foreach ($this->sponsorGuarantee->getPlaylistsBehindPace($station, $expectedPlayTime) as $sponsorPlaylist) {
@@ -104,7 +109,7 @@ final class QueueBuilder implements EventSubscriberInterface
             if ($playlist->playlist_groups->count() > 0) {
                 if (
                     0 === $playlist->schedule_items->count()
-                    || $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $expectedPlayTime)
+                    || $this->scheduler->isPlaylistCoveredByGroupScheduleAt($playlist, $airsAt)
                 ) {
                     continue;
                 }
@@ -133,7 +138,7 @@ final class QueueBuilder implements EventSubscriberInterface
             $station->backend_config->duplicate_prevention_time_range
         );
 
-        $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $expectedPlayTime);
+        $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $airsAt);
         if ($holidayPlaylist !== null) {
             foreach ([false, true] as $allowDuplicates) {
                 $selection = $this->playSongFromPlaylist(
@@ -175,7 +180,7 @@ final class QueueBuilder implements EventSubscriberInterface
         // type plays. Decided up front: types are visited Once-per-hour first, so
         // a flag raised only on reaching the scheduled Standard playlist let
         // unscheduled promos/rotations through ahead of it.
-        $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $expectedPlayTime);
+        $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $airsAt);
 
         foreach ($typesToPlayByPriority as $currentPlaylistType) {
             if (empty($activePlaylistsByType[$currentPlaylistType])) {
@@ -191,7 +196,7 @@ final class QueueBuilder implements EventSubscriberInterface
             $eligiblePlaylists = [];
             $logPlaylists = [];
             foreach ($activePlaylistsByType[$currentPlaylistType] as $playlistId => $playlist) {
-                if (!$this->scheduler->shouldPlaylistPlayNow($playlist, $expectedPlayTime)) {
+                if (!$this->scheduler->shouldPlaylistPlayNow($playlist, $airsAt)) {
                     continue;
                 }
 

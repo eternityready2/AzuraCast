@@ -46,8 +46,6 @@
                                 class="form-select form-select-sm hours-select"
                                 :disabled="isBuilding"
                             >
-                                <option :value="6">6 {{ $gettext('hours') }}</option>
-                                <option :value="12">12 {{ $gettext('hours') }}</option>
                                 <option :value="24">24 {{ $gettext('hours') }}</option>
                                 <option :value="48">48 {{ $gettext('hours') }}</option>
                             </select>

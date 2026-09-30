@@ -26,6 +26,8 @@ final class ResolveQueueClockConstraint extends Event
 
     private ?string $reason = null;
 
+    private bool $projectionOnly = false;
+
     public function __construct(
         private readonly Station $station,
         private readonly DateTimeImmutable $expectedPlayAt,
@@ -54,15 +56,24 @@ final class ResolveQueueClockConstraint extends Event
         return $this->queueRow;
     }
 
+    /**
+     * @param bool $projectionOnly Move the projection cursor across the
+     *   interruption without capping the item. For future rows: the runtime
+     *   performs the real cut, and a cap persisted on a row outlives the timing
+     *   it was computed from.
+     */
     public function constrain(
         DateTimeImmutable $interruptAt,
         DateTimeImmutable $resumeAt,
         string $reason,
+        bool $projectionOnly = false,
     ): void {
+        // The interruption must touch this item: start inside it, or begin
+        // while the item is playing.
         if (
-            $interruptAt <= $this->expectedPlayAt
-            || $interruptAt > $this->projectedEndAt
+            $interruptAt > $this->projectedEndAt
             || $resumeAt < $interruptAt
+            || $resumeAt <= $this->expectedPlayAt
         ) {
             return;
         }
@@ -76,6 +87,12 @@ final class ResolveQueueClockConstraint extends Event
         $this->interruptAt = $interruptAt;
         $this->resumeAt = $resumeAt;
         $this->reason = $reason;
+        $this->projectionOnly = $projectionOnly;
+    }
+
+    public function isProjectionOnly(): bool
+    {
+        return $this->projectionOnly;
     }
 
     public function hasConstraint(): bool

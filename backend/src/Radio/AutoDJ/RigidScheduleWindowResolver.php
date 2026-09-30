@@ -100,6 +100,52 @@ final class RigidScheduleWindowResolver
         return $windows;
     }
 
+    /**
+     * True when this schedule row is aired by the native strict lane
+     * (RigidScheduleRuntimeConfiguration) rather than by the PHP AutoDJ.
+     *
+     * The one rule both sides share: the strict lane plays exactly these rows,
+     * and the AutoDJ never selects them. When both could pick the same
+     * programme, it was queued twice and aired on top of itself.
+     */
+    public static function isAiredByStrictLane(StationPlaylist $playlist, StationSchedule $schedule): bool
+    {
+        if (!$playlist->is_enabled || count($playlist->group_memberships) > 0) {
+            return false;
+        }
+
+        $hasNativeSource = PlaylistSources::Songs === $playlist->source
+            || (PlaylistSources::RemoteUrl === $playlist->source && null !== $playlist->remote_url);
+
+        return $hasNativeSource && ($schedule->strict_start || $schedule->is_emergency);
+    }
+
+    /**
+     * How many tracks the strict lane plays in one window before handing the air
+     * back to the AutoDJ, or null when it holds the whole window.
+     *
+     * The native source loops its M3U (mode="normal") while its window is open.
+     * A "play once" or "play single track" programme therefore needs a limit, or
+     * it restarts as soon as it finishes and is cut mid-episode when the window
+     * closes. The Liquidsoap gate and the forecast both use this value.
+     */
+    public static function maxTracksPerWindow(StationPlaylist $playlist, StationSchedule $schedule): ?int
+    {
+        if (PlaylistSources::Songs !== $playlist->source) {
+            return null;
+        }
+
+        if ($playlist->backendPlaySingleTrack()) {
+            return 1;
+        }
+
+        if ($schedule->loop_once) {
+            return max(1, $playlist->media_items->count());
+        }
+
+        return null;
+    }
+
     private function isRuntimeEligiblePlaylist(StationPlaylist $playlist): bool
     {
         if (!$playlist->is_enabled) {

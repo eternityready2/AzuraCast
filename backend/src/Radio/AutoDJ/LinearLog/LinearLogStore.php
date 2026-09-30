@@ -342,6 +342,32 @@ final class LinearLogStore
                 continue;
             }
 
+            // The builder removed this row from the report because a strict
+            // programme's native source owns its air time. Saving it as a planned
+            // line handed it to playout anyway, so the same episode was queued a
+            // second time on top of the strict programme (Faith Horizons,
+            // 2026-09-30 17:00 and 17:00:03).
+            if (null === $data['entry_key']) {
+                if (null !== $data['log_entry_id']) {
+                    $entry = $this->em->find(StationLogEntry::class, (int)$data['log_entry_id']);
+                    if ($entry instanceof StationLogEntry && $entry->isOpen() && !$entry->is_locked) {
+                        if (null !== $entry->queue_id) {
+                            $queueRow = $this->em->find(StationQueue::class, $entry->queue_id);
+                            if ($queueRow instanceof StationQueue && !$queueRow->is_played) {
+                                $this->em->remove($queueRow);
+                            }
+                        }
+
+                        $entry->status = StationLogEntry::STATUS_DROPPED;
+                        $entry->note = 'Dropped: a strict programme owns this air time';
+                        $entry->queue_id = null;
+                        $this->em->persist($entry);
+                    }
+                }
+
+                continue;
+            }
+
             if (null !== $data['log_entry_id']) {
                 $entry = $this->em->find(StationLogEntry::class, (int)$data['log_entry_id']);
                 if (!$entry instanceof StationLogEntry) {
@@ -353,10 +379,11 @@ final class LinearLogStore
                     $entry->duration = (float)$data['duration'];
 
                     // The planner fitted a different song into this line (the
-                    // final-song swap). Keep it unless the line is locked.
+                    // final-song swap). Keep it unless the line is locked. A
+                    // queued line is included: the swap can re-fit a row that is
+                    // already queued, and the log must name what will air.
                     if (
-                        StationLogEntry::STATUS_PLANNED === $entry->status
-                        && !$entry->is_locked
+                        !$entry->is_locked
                         && null !== $data['media_id']
                         && $entry->media?->id !== $data['media_id']
                     ) {
