@@ -227,6 +227,15 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 return $entry;
             }
 
+            // A media-less line that is a scheduled programme (a remote-stream
+            // window) is not a missing file: it must air. Anything scheduled in
+            // AzuraCast has to be honored by the log, so these are never dropped
+            // -- the remote stream plays through a custom-URI queue row, exactly
+            // as the AutoDJ would outside the log.
+            if ($this->store->isScheduledProgramme($entry)) {
+                return $entry;
+            }
+
             $entry->status = StationLogEntry::STATUS_DROPPED;
             $entry->note = 'Dropped: the planned file was removed from the library';
             $this->em->persist($entry);

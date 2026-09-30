@@ -315,12 +315,111 @@ final class Scheduler
         $narrowest = null;
         foreach ($playlist->schedule_items as $schedule) {
             $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+            if (null === $seconds) {
+                continue;
+            }
+
+            // A loop-once show that has finished its content no longer owns the
+            // air: rotation music should fill the tail of the window instead of
+            // dead air. ownedWindowSeconds uses excludeSpecialRules so it always
+            // sees the schedule as active; check the content state here.
+            if ($schedule->loop_once && !$this->isLoopOnceContentAvailable($schedule, $tz, $at)) {
+                continue;
+            }
+
+            if (null === $narrowest || $seconds < $narrowest) {
                 $narrowest = $seconds;
             }
         }
 
         return $narrowest;
+    }
+
+    /**
+     * Whether a loop-once schedule still has content to play in its current
+     * occurrence. When content is exhausted, the window releases so rotation
+     * music can fill the tail instead of dead air.
+     *
+     * Deliberately time-based rather than reading the playlist's played_at /
+     * queue_reset_at: those only reflect whatever really happened the last time
+     * this ran, so a check made ahead of air time (the Linear Log builder's
+     * simulation is rolled back, and LinearLogRules re-checks the saved plan
+     * afterward against live state) sees last time's stale values and reports
+     * the window as still open, silently deleting the rotation music the
+     * builder correctly planned to fill the tail. Elapsed-time-since-window-
+     * start vs. one full cycle's duration gives the same answer regardless of
+     * when or in what state it is asked.
+     */
+    private function isLoopOnceContentAvailable(
+        StationSchedule $schedule,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): bool {
+        $playlist = $schedule->playlist;
+        if (null === $playlist) {
+            return true;
+        }
+
+        $now = Time::nowInTimezone($tz, $at);
+        $startTime = StationSchedule::getDateTime($schedule->start_time, $tz, $now);
+        $endTime = StationSchedule::getDateTime($schedule->end_time, $tz, $now);
+
+        if ($startTime->equalTo($endTime)) {
+            $ranges = [
+                new DateRange($startTime, $endTime->addMinutes(15)),
+                new DateRange($startTime->subDay(), $endTime->subDay()->addMinutes(15)),
+                new DateRange($startTime->addDay(), $endTime->addDay()->addMinutes(15)),
+            ];
+        } elseif ($startTime->greaterThan($endTime)) {
+            $ranges = [
+                new DateRange($startTime->subDay(), $endTime),
+                new DateRange($startTime, $endTime->addDay()),
+            ];
+        } else {
+            $ranges = [new DateRange($startTime, $endTime)];
+        }
+
+        foreach ($ranges as $dateRange) {
+            if (!$dateRange->contains($now)) {
+                continue;
+            }
+
+            $elapsedSeconds = $now->getTimestamp() - $dateRange->start->getTimestamp();
+            $cycleSeconds = $this->playlistCycleDurationSeconds($playlist);
+
+            if (null === $cycleSeconds) {
+                // No known duration (e.g. an empty playlist): fall back to the
+                // live-state check rather than guessing.
+                return $this->shouldPlaylistLoopNow($schedule, $dateRange);
+            }
+
+            return $elapsedSeconds < $cycleSeconds;
+        }
+
+        return true;
+    }
+
+    /**
+     * Total playable duration of one full pass through a Songs playlist, or
+     * null when it has no known length. Static and independent of any
+     * mutable "already played" state.
+     */
+    private function playlistCycleDurationSeconds(StationPlaylist $playlist): ?float
+    {
+        if (PlaylistSources::Songs !== $playlist->source) {
+            return null;
+        }
+
+        $total = $this->em->createQuery(
+            <<<'DQL'
+                SELECT SUM(sm.length) FROM App\Entity\StationPlaylistMedia spm
+                JOIN spm.media sm
+                WHERE spm.playlist = :playlist
+            DQL
+        )->setParameter('playlist', $playlist)
+            ->getSingleScalarResult();
+
+        return null !== $total ? (float)$total : null;
     }
 
     /**

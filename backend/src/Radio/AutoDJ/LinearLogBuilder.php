@@ -888,7 +888,18 @@ final class LinearLogBuilder
             $plannedAt = (int)($entry['played_at'] ?? 0);
             $survivorKey = $plannedAt . '|' . ($entry['playlist_id'] ?? '') . '|' . ($entry['title'] ?? '');
             if (isset($survivorByKey[$survivorKey])) {
-                $pending[$idx] = $survivorByKey[$survivorKey];
+                $survivor = $survivorByKey[$survivorKey];
+
+                // A programme block a past bug dropped (e.g. a remote stream
+                // mistaken for a missing file) must come back as planned: the
+                // window is still scheduled, so the log has to honor it.
+                if (StationLogEntry::STATUS_DROPPED === $survivor->status && !$survivor->is_locked) {
+                    $survivor->status = StationLogEntry::STATUS_PLANNED;
+                    $survivor->note = null;
+                    $this->em->persist($survivor);
+                }
+
+                $pending[$idx] = $survivor;
                 continue;
             }
 

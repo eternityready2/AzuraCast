@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\LinearLog;
 
 use App\Container\EntityManagerAwareTrait;
+use App\Entity\Enums\PlaylistRemoteTypes;
+use App\Entity\Enums\PlaylistSources;
+use App\Entity\Song;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationLogEntry;
@@ -176,7 +179,12 @@ final class LinearLogStore
     public function toQueueRow(Station $station, StationLogEntry $entry, ?DateTimeInterface $markPlayedAt): StationQueue
     {
         $media = $entry->media;
-        assert($media instanceof StationMedia);
+        if (!$media instanceof StationMedia) {
+            // A scheduled remote-stream programme has no library file; it airs
+            // through a custom-URI queue row. Queue timing caps its duration to
+            // the window that remains, so a full-window value is fine here.
+            return $this->toRemoteProgrammeRow($station, $entry);
+        }
 
         $row = StationQueue::fromMedia($station, $media);
         $row->playlist = $entry->playlist;
@@ -208,6 +216,43 @@ final class LinearLogStore
                 $this->em->persist($spm);
             }
         }
+
+        return $row;
+    }
+
+    /**
+     * A saved log line that is a scheduled programme the AutoDJ can air on its
+     * own -- a remote-stream window, which plays through a custom-URI queue row
+     * and so has no library file. Anything scheduled in AzuraCast must be
+     * honored by the log, so these lines are never treated as missing files.
+     */
+    public function isScheduledProgramme(StationLogEntry $entry): bool
+    {
+        if ('scheduled_programme' !== ($entry->payload['source_type'] ?? null)) {
+            return false;
+        }
+
+        $playlist = $entry->playlist;
+
+        return $playlist instanceof StationPlaylist
+            && PlaylistSources::RemoteUrl === $playlist->source
+            && PlaylistRemoteTypes::Stream === ($playlist->remote_type ?? PlaylistRemoteTypes::Stream)
+            && null !== $playlist->remote_url;
+    }
+
+    /**
+     * Queue row that airs a scheduled remote-stream programme block.
+     */
+    private function toRemoteProgrammeRow(Station $station, StationLogEntry $entry): StationQueue
+    {
+        $playlist = $entry->playlist;
+        assert($playlist instanceof StationPlaylist);
+
+        $row = new StationQueue($station, Song::createFromText('Remote Playlist URL'));
+        $row->playlist = $playlist;
+        $row->autodj_custom_uri = $playlist->remote_url;
+        $row->duration = max(1.0, (float)$entry->duration);
+        $row->log_entry_id = $entry->id;
 
         return $row;
     }
