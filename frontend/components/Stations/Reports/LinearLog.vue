@@ -245,12 +245,15 @@
                         <span v-if="coverageEnd">
                             {{ $gettext('Coverage through') }} <strong>{{ formatDateTime(coverageEnd) }}</strong>
                         </span>
-                        <span v-if="onAirItem">
-                            {{ $gettext('On air now') }}:
+                        <span
+                            v-if="onAirItem"
+                            class="on-air-indicator"
+                        >
+                            <span class="on-air-badge">{{ $gettext('ON AIR') }}</span>
                             <strong>{{ displayTitle(onAirItem) }}</strong>
                         </span>
                         <span v-if="nextUpItem">
-                            {{ $gettext('Next up') }}:
+                            <span class="next-up-badge">{{ $gettext('NEXT') }}</span>
                             <strong>{{ displayTitle(nextUpItem) }}</strong>
                             {{ $gettext('at') }} <strong>{{ formatTime(nextUpItem.played_at) }}</strong>
                         </span>
@@ -634,6 +637,11 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 .filter-label{font-size:.8rem;font-weight:700}
 .search-box{width:230px}
 .stats-bar{display:flex;flex-wrap:wrap;gap:1.2rem;padding:.65rem 1rem;border-bottom:1px solid var(--bs-border-color);background:color-mix(in srgb,var(--bs-secondary-bg) 65%,var(--bs-body-bg));font-size:.8rem}
+.on-air-indicator{display:inline-flex;align-items:center;gap:.4rem}
+.on-air-badge{display:inline-block;padding:.15rem .5rem;border-radius:.25rem;background:var(--bs-danger);color:#fff;font-weight:700;font-size:.72rem;letter-spacing:.04em;animation:on-air-flash 1.1s ease-in-out infinite}
+.next-up-badge{display:inline-block;padding:.15rem .5rem;border-radius:.25rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color);border:1px solid var(--bs-border-color);font-weight:700;font-size:.72rem;letter-spacing:.04em;margin-right:.4rem}
+@keyframes on-air-flash{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){.on-air-badge{animation:none}}
 .coverage-warning{padding:.6rem 1rem;border-bottom:1px solid var(--bs-warning-border-subtle);background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.82rem}
 .loading-state,.empty-state{padding:4rem 1.5rem;text-align:center}
 .empty-state p{max-width:760px;margin:.5rem auto 0;color:var(--bs-secondary-color)}
