@@ -84,7 +84,8 @@ final class LinearLogBuilder
 
         for ($attempt = 1; ; $attempt++) {
             try {
-                return $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow);
+                $result = $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow);
+                return $this->fillShortfall($station, $hoursOverride, $rebuild, $throughTomorrow, $result);
             } catch (Throwable $e) {
                 if ($attempt >= $maxAttempts || !self::isTransientTransactionError($e)) {
                     throw $e;
@@ -118,6 +119,68 @@ final class LinearLogBuilder
                 usleep(random_int(1_500_000, 4_000_000));
             }
         }
+    }
+
+    /**
+     * A build is a minimum, not a best-effort: the requested hours must
+     * actually be covered before a log is published as ready. The first pass
+     * can legitimately come up short (e.g. a playlist needed more lookahead
+     * than the default runway gave it), so make one padded attempt to fill
+     * the gap before accepting a short log. Bounded to a single retry so a
+     * genuinely unfillable window (no content available) cannot loop.
+     *
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    private function fillShortfall(
+        Station $station,
+        ?int $hoursOverride,
+        bool $rebuild,
+        bool $throughTomorrow,
+        array $result,
+    ): array {
+        if ('ready' !== ($result['status'] ?? null)) {
+            return $result;
+        }
+
+        $requestedHours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
+        $coverageStart = (int)($result['coverage_start'] ?? 0);
+        $coverageEnd = (int)($result['coverage_end'] ?? 0);
+        if ($coverageStart <= 0) {
+            return $result;
+        }
+
+        $shortfall = ($coverageStart + ($requestedHours * 3600)) - $coverageEnd;
+        if ($shortfall <= 300) {
+            return $result;
+        }
+
+        $this->logger->warning(
+            'Linear Log build came up short of its requested window; retrying once with a padded horizon.',
+            ['station_id' => $station->id, 'requested_hours' => $requestedHours, 'shortfall_seconds' => $shortfall]
+        );
+
+        $extraHours = min(24, (int)ceil($shortfall / 3600) + 1);
+        $padded = $this->buildOnce($station, $requestedHours + $extraHours, $rebuild, $throughTomorrow);
+        if ('ready' !== ($padded['status'] ?? null)) {
+            return $result;
+        }
+
+        // Re-publish under the originally requested hours so the page title
+        // and coverage math still reflect what was actually asked for; only
+        // the (now sufficient) coverage/entries come from the padded pass.
+        $this->snapshotStore->storeReady(
+            $station,
+            $requestedHours,
+            (int)$padded['started_at'],
+            (int)$padded['coverage_start'],
+            (int)$padded['coverage_end'],
+            $padded['entries'],
+            $padded['gaps'],
+            $padded['ai_dj_shifts'],
+        );
+
+        return $this->snapshotStore->get($station);
     }
 
     private static function isTransientTransactionError(Throwable $e): bool
