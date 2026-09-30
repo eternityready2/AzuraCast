@@ -23,7 +23,6 @@ on:
       - 'tests/Unit/TopOfHourClockTest.php'
       - 'tests/Unit/TopOfHourQueueClockConstraintTest.php'
       - 'tests/Unit/TopOfHourRuntimeConfigurationTest.php'
-      - '.github/workflows/toph-runtime-validation.yml'
   pull_request:
     branches: [dev]
     paths:
@@ -39,7 +38,6 @@ on:
       - 'tests/Unit/**TopOfHour**'
       - 'tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php'
       - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
-      - '.github/workflows/toph-runtime-validation.yml'
 
 permissions:
   contents: read
