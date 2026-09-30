@@ -4,6 +4,12 @@
             class="linear-log-card"
             :class="{'is-disabled': !initialLoading && !featureEnabled}"
         >
+            <tabs
+                nav-tabs-class="nav-tabs linear-log-tabs"
+                content-class="mt-0"
+                destroy-on-hide
+            >
+                <tab :label="$gettext('Linear Log')">
             <header class="linear-log-header">
                 <div>
                     <h1>{{ pageTitle }}</h1>
@@ -337,6 +343,12 @@
             <footer class="linear-log-footer">
                 {{ $gettext('Strict scheduled programs use the authoritative strict-playlist forecast, so their projected songs match the same source used by Playing Next and Upcoming Song Queue. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
             </footer>
+                </tab>
+
+                <tab :label="$gettext('Upcoming Song Queue')">
+                    <linear-log-queue-tab />
+                </tab>
+            </tabs>
         </section>
     </div>
 </template>
@@ -345,6 +357,9 @@
 import {computed, ref} from "vue";
 import LinearLogAiDjShifts from "~/components/Stations/Reports/LinearLogAiDjShifts.vue";
 import LinearLogSchedule from "~/components/Stations/Reports/LinearLogSchedule.vue";
+import LinearLogQueueTab from "~/components/Stations/Reports/LinearLogQueueTab.vue";
+import Tabs from "~/components/Common/Tabs.vue";
+import Tab from "~/components/Common/Tab.vue";
 import type {LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
 import {useTranslate} from "~/vendor/gettext";
