@@ -21,7 +21,7 @@ abstract class AbstractBackendSettingsAction implements SingleActionInterface
     use EntityManagerAwareTrait;
 
     /**
-     * @return array<string, array{type: 'bool'|'int', min?: int, max?: int, default: bool|int}>
+     * @return array<string, array{type: 'bool'|'int', min?: int, max?: int, allowed?: int[], default: bool|int}>
      */
     abstract protected function fields(): array;
 
@@ -64,6 +64,17 @@ abstract class AbstractBackendSettingsAction implements SingleActionInterface
                     new Error(400, sprintf('%s must be between %d and %d.', $key, $field['min'], $field['max']))
                 );
             }
+
+            if (isset($field['allowed']) && !in_array($value, $field['allowed'], true)) {
+                return $response->withStatus(400)->withJson(
+                    new Error(400, sprintf(
+                        '%s must be one of: %s.',
+                        $key,
+                        implode(', ', $field['allowed'])
+                    ))
+                );
+            }
+
             $updates[$key] = $value;
         }
 

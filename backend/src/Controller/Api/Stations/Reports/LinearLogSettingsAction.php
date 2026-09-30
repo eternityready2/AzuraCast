@@ -12,7 +12,14 @@ final class LinearLogSettingsAction extends AbstractBackendSettingsAction
     {
         return [
             'linear_log_enabled' => ['type' => 'bool', 'default' => false],
-            'linear_log_hours' => ['type' => 'int', 'min' => 1, 'max' => 48, 'default' => 24],
+            'linear_log_hours' => [
+                'type' => 'int',
+                'min' => 1,
+                'max' => 48,
+                // Must match the <option> values in LinearLog.vue's hours dropdown.
+                'allowed' => [24, 48],
+                'default' => 24,
+            ],
             'linear_log_rule_enforce_windows' => ['type' => 'bool', 'default' => true],
             'linear_log_rule_drop_outside_window' => ['type' => 'bool', 'default' => true],
             'linear_log_rule_refill_dropped' => ['type' => 'bool', 'default' => true],

@@ -1025,7 +1025,20 @@ final class Scheduler
                 $this->spmRepo->resetQueue($playlist, $now);
                 $isQueueEmpty = false;
             }
-        } elseif ($isQueueEmpty && !$hasCuedPlaylistMedia) {
+
+            // Nothing has aired for this occurrence yet, so there is no completed
+            // pass to detect here. queue_reset_at is not a reliable signal in this
+            // branch: unrelated per-playlist queue refills (QueueBuilder emptying
+            // and reshuffling this playlist's own track queue) stamp it to "now"
+            // the moment the window opens, which the check below would otherwise
+            // misread as "already looped." Falling through into that check turned
+            // a never-played occurrence into a permanent "should NOT loop" for the
+            // rest of the window -- dead air where the schedule owns the air but
+            // refuses to fill it.
+            return !$isQueueEmpty;
+        }
+
+        if ($isQueueEmpty && !$hasCuedPlaylistMedia) {
             $this->logger->debug('Resetting playlist queue.');
 
             $this->spmRepo->resetQueue($playlist);

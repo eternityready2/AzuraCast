@@ -245,6 +245,10 @@
                         <span v-if="coverageEnd">
                             {{ $gettext('Coverage through') }} <strong>{{ formatDateTime(coverageEnd) }}</strong>
                         </span>
+                        <span v-if="onAirItem">
+                            {{ $gettext('On air now') }}:
+                            <strong>{{ displayTitle(onAirItem) }}</strong>
+                        </span>
                         <span v-if="nextUpItem">
                             {{ $gettext('Next up') }}:
                             <strong>{{ displayTitle(nextUpItem) }}</strong>
@@ -520,6 +524,28 @@ const totalGapDuration = computed(() => secondsToHms(gaps.value.reduce((sum, gap
 const nextUpItem = computed(
     () => filteredItems.value.find((item) => (item.played_at ?? 0) >= nowTs.value && item.is_live_queue) ?? null,
 );
+// Mirrors LinearLogSchedule's currentOnAirItem: duration is unreliable once a
+// track has aired (a track cut short live, e.g. by the Top-of-Hour boundary,
+// still carries its full planned length), so the on-air item is found as the
+// most recently started item whose start time has already passed, not a
+// duration-based window.
+const onAirItem = computed<LinearLogItem | null>(() => {
+    let best: LinearLogItem | null = null;
+    let bestStart = -Infinity;
+
+    for (const item of filteredItems.value) {
+        const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
+        if (start === null || start === undefined || start > nowTs.value) {
+            continue;
+        }
+        if (start > bestStart) {
+            best = item;
+            bestStart = start;
+        }
+    }
+
+    return best;
+});
 
 function displayTitle(item: LinearLogItem): string {
     return item.title || item.text || $gettext("Untitled");
