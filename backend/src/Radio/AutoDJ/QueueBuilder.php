@@ -177,23 +177,6 @@ final class QueueBuilder implements EventSubscriberInterface
         // unscheduled promos/rotations through ahead of it.
         $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $expectedPlayTime);
 
-        // Post-ID protection zone: in the first 3 minutes of the hour, also
-        // block rotation when a scheduled programme opens within the next 180s.
-        // Without this, the gap between the ID ending (~:00:37) and a programme
-        // starting (e.g. :01) allows rotation to bleed through.
-        if (!$scheduledBlockOpen && $this->topOfHourClock->isEnabled($station)) {
-            $localMinute = (int)(new \DateTimeImmutable(
-                '@' . $expectedPlayTime->getTimestamp()
-            ))->setTimezone($tz)->format('i');
-            if ($localMinute < 3) {
-                $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt(
-                    $station,
-                    $expectedPlayTime,
-                    180
-                );
-            }
-        }
-
         foreach ($typesToPlayByPriority as $currentPlaylistType) {
             if (empty($activePlaylistsByType[$currentPlaylistType])) {
                 continue;

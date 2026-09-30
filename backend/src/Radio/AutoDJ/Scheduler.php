@@ -177,27 +177,10 @@ final class Scheduler
     /**
      * True while an enabled scheduled playlist has its window open at $at. Such a
      * block owns the air: nothing unscheduled plays then.
-     *
-     * @param int $lookaheadSeconds Also return true when a window opens within
-     *   this many seconds of $at. Used to prevent rotation from bleeding into
-     *   the gap between a TOH ID ending (~:00:37) and a programme starting.
      */
-    public function isScheduledBlockOpenAt(
-        \App\Entity\Station $station,
-        DateTimeImmutable $at,
-        int $lookaheadSeconds = 0,
-    ): bool {
-        if (null !== $this->narrowestOpenScheduleSeconds($station, $at)) {
-            return true;
-        }
-
-        if ($lookaheadSeconds > 0) {
-            $future = (new \DateTimeImmutable('@' . ($at->getTimestamp() + $lookaheadSeconds)))
-                ->setTimezone($at->getTimezone());
-            return null !== $this->narrowestOpenScheduleSeconds($station, $future);
-        }
-
-        return false;
+    public function isScheduledBlockOpenAt(\App\Entity\Station $station, DateTimeImmutable $at): bool
+    {
+        return null !== $this->narrowestOpenScheduleSeconds($station, $at);
     }
 
     /**

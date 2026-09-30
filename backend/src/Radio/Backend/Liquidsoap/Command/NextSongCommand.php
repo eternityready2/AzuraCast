@@ -7,14 +7,11 @@ namespace App\Radio\Backend\Liquidsoap\Command;
 use App\Cache\AutoCueCache;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
-use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\Annotations;
-use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\Backend\Liquidsoap;
-use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\SimpleCache\CacheInterface;
@@ -91,7 +88,6 @@ final class NextSongCommand extends AbstractCommand
         private readonly AutoCueCache $autoCueCache,
         private readonly EventDispatcherInterface $dispatcher,
         private readonly CacheInterface $cache,
-        private readonly Scheduler $scheduler,
     ) {
     }
 
@@ -106,14 +102,13 @@ final class NextSongCommand extends AbstractCommand
         $heldByTopOfHour = $insideIdWindow && $this->isAutoDjHeldByLiquidsoap($station);
 
         if ($insideIdWindow && !$heldByTopOfHour) {
-            // Discard any pre-loaded track whose playlist window is closing at
-            // the boundary. Without this, a programme track loaded before the
-            // ID resumes after the ID even though the next programme's window
-            // is now open. Must run before warmNextHourOpeners so the stale
-            // track is gone before we try to pre-warm the replacement.
-            $this->discardStalePreloadedTrack($station);
-
             $this->warmNextHourOpeners($station);
+
+            // Nothing is handed back to the queue here. The ID lane holds
+            // AutoDJ rather than discarding what it has loaded, so an item
+            // already in Liquidsoap plays from its start after the ID; handing
+            // its row back as well aired it twice (7pm 2026-09-24: "I Exalt
+            // Thee" played back to back).
 
             // Non-200 -> Liquidsoap reads this as "no request available".
             throw new RuntimeException(
@@ -256,93 +251,6 @@ final class NextSongCommand extends AbstractCommand
             }
         } catch (Throwable $e) {
             $this->logger->warning('Top-of-Hour ID: AutoCue warm-up failed.', ['exception' => $e->getMessage()]);
-        }
-    }
-
-    /**
-     * If a track was pre-loaded into Liquidsoap's crossfade buffer from a
-     * playlist whose window is closing at the approaching boundary, discard it
-     * so the new hour opens with the correct programme.
-     *
-     * Without this, the held track plays after the ID even though the next
-     * programme's window is now open -- e.g. God Family Country resuming at
-     * 11:00 when Christian Music Spotlight should start.
-     *
-     * Called on every refused nextsong request during the ID window, so a
-     * one-shot cache flag prevents discarding more than once per boundary.
-     */
-    private function discardStalePreloadedTrack(Station $station): void
-    {
-        $boundary = $this->topOfHourClock->getNextBoundary(
-            $station,
-            Time::nowUtc()->toDateTimeImmutable()
-        );
-        $flag = 'toh_stale_discard_' . $station->id . '_' . $boundary->getTimestamp();
-        if ($this->cache->has($flag)) {
-            return;
-        }
-
-        try {
-            // Find the pre-loaded (sent, unplayed) AutoDJ track.
-            $sentRows = $this->queueRepo->getUnairedSentRows($station);
-            $staleRow = null;
-
-            foreach ($sentRows as $row) {
-                if (!$row instanceof StationQueue) {
-                    continue;
-                }
-                if (null === $row->playlist) {
-                    continue;
-                }
-
-                // Check the playlist at 30 seconds past the boundary (safely
-                // inside the new hour, past any start-time rounding).
-                $checkAt = (new \DateTimeImmutable(
-                    '@' . ($boundary->getTimestamp() + 30)
-                ))->setTimezone($station->getTimezoneObject());
-
-                if (!$this->scheduler->isPlaylistAllowedAt($row->playlist, $checkAt)) {
-                    $staleRow = $row;
-                    break;
-                }
-            }
-
-            if (null === $staleRow) {
-                $this->cache->set($flag, true, 300);
-                return;
-            }
-
-            $this->logger->notice(
-                'Top-of-Hour ID: discarding pre-loaded track whose playlist window '
-                . 'closes at the boundary.',
-                [
-                    'queue_id' => $staleRow->id,
-                    'playlist' => $staleRow->playlist->name ?? '?',
-                    'song' => trim(($staleRow->artist ?? '') . ' - ' . ($staleRow->title ?? ''), ' -'),
-                    'boundary' => $boundary->format(\DATE_ATOM),
-                ]
-            );
-
-            // Release the DB row (marks it unsent, moves to front of queue).
-            // The ScheduleWindowGuard will remove it on the next revalidation.
-            $this->topOfHourClock->releasePendingAutoDjReserve($station);
-
-            // Tell Liquidsoap to skip the loaded audio so it does not play
-            // after the ID. The next nextsong request (held=true) will fetch
-            // the correct track for the new hour.
-            $backend = $this->adapters->getBackendAdapter($station);
-            if ($backend instanceof Liquidsoap) {
-                $backend->command($station, 'azuracast.discard_autodj_current_cleanly()');
-            }
-
-            $this->cache->set($flag, true, 300);
-        } catch (Throwable $e) {
-            $this->logger->warning(
-                'Top-of-Hour ID: stale pre-loaded track discard failed.',
-                ['exception' => $e->getMessage()]
-            );
-            // Set the flag even on failure to prevent repeated attempts.
-            $this->cache->set($flag, true, 300);
         }
     }
 }
