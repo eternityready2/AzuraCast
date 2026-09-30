@@ -10,339 +10,339 @@
                 destroy-on-hide
             >
                 <tab :label="$gettext('Linear Log')">
-            <header class="linear-log-header">
-                <div>
-                    <h1>{{ pageTitle }}</h1>
-                    <p>{{ $gettext('Upcoming scheduled programming built by AutoDJ') }}</p>
-                </div>
-
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <div class="form-check form-switch mb-0 me-2">
-                        <input
-                            id="linear_log_enabled"
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            :checked="featureEnabled"
-                            :disabled="initialLoading || isSavingSettings || isBuilding"
-                            @change="setEnabled(($event.target as HTMLInputElement).checked)"
-                        >
-                        <label class="form-check-label fw-semibold" for="linear_log_enabled">
-                            {{ $gettext('Enable 24-Hour Playout Log') }}
-                        </label>
-                    </div>
-                    <span
-                        v-if="!initialLoading"
-                        class="badge state-badge"
-                        :class="featureEnabled ? 'text-bg-success' : 'text-bg-danger'"
-                    >
-                        {{ featureEnabled ? $gettext('ON') : $gettext('OFF') }}
-                    </span>
-
-                    <label class="visually-hidden" for="linear_log_hours">{{ $gettext('Hours') }}</label>
-                    <select
-                        id="linear_log_hours"
-                        v-model.number="hoursAhead"
-                        class="form-select form-select-sm hours-select"
-                        :disabled="isBuilding"
-                    >
-                        <option :value="6">6 {{ $gettext('hours') }}</option>
-                        <option :value="12">12 {{ $gettext('hours') }}</option>
-                        <option :value="24">24 {{ $gettext('hours') }}</option>
-                        <option :value="48">48 {{ $gettext('hours') }}</option>
-                    </select>
-
-                    <button
-                        type="button"
-                        class="btn btn-light btn-sm fw-semibold"
-                        :disabled="isBuilding || !featureEnabled"
-                        @click="requestBuild"
-                    >
-                        <span
-                            v-if="isBuilding"
-                            class="spinner-border spinner-border-sm me-1"
-                            role="status"
-                            aria-hidden="true"
-                        />
-                        {{ isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH') }}
-                    </button>
-                </div>
-            </header>
-
-            <div
-                v-if="!initialLoading && !featureEnabled"
-                class="alert alert-danger disabled-banner rounded-0 border-start-0 border-end-0 mb-0"
-                role="status"
-            >
-                <div>
-                    <div class="fw-bold fs-5">
-                        {{ $gettext('24-Hour Playout Log is OFF') }}
-                    </div>
-                    <div>
-                        {{ $gettext('No new snapshots are being built. Anything shown below is the last snapshot from before it was turned off and is not being updated.') }}
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    class="btn btn-danger fw-semibold"
-                    :disabled="isSavingSettings"
-                    @click="setEnabled(true)"
-                >
-                    {{ $gettext('Turn On') }}
-                </button>
-            </div>
-
-            <div v-if="buildError" class="alert alert-danger rounded-0 border-start-0 border-end-0 mb-0">
-                <strong>{{ $gettext('Linear Log build failed.') }}</strong>
-                {{ buildError }}
-            </div>
-
-            <div v-else-if="isBuilding" class="build-status">
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
-                <span>
-                    {{ status === 'queued'
-                        ? $gettext('The Linear Log build is queued in the background.')
-                        : $gettext('AutoDJ is calculating the isolated playout projection in the background.') }}
-                </span>
-                <span v-if="allItems.length" class="text-body-secondary">
-                    {{ $gettext('The last completed snapshot remains visible below.') }}
-                </span>
-            </div>
-
-            <div v-if="gapCount > 0" class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0">
-                <div class="fw-semibold">
-                    {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
-                </div>
-                <div class="small mt-1">
-                    {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced up to five minutes (never past the top of the hour) and kept calculating instead of silently truncating the day.') }}
-                </div>
-            </div>
-
-            <div class="filter-bar">
-                <div class="d-flex flex-wrap align-items-center gap-2">
-                    <span class="filter-label">{{ $gettext('Show') }}</span>
-                    <button
-                        v-for="filter in typeFilters"
-                        :key="filter.key"
-                        type="button"
-                        class="btn btn-sm"
-                        :class="activeTypes.includes(filter.key) ? filter.activeClass : 'btn-outline-secondary'"
-                        @click="toggleType(filter.key)"
-                    >
-                        {{ filter.label }}
-                    </button>
-
-                    <div class="ms-md-auto d-flex gap-2 flex-wrap">
-                        <input
-                            v-model="searchQuery"
-                            type="search"
-                            class="form-control form-control-sm search-box"
-                            :placeholder="$gettext('Search title, artist or source')"
-                        >
-
-                        <div class="dropdown">
-                            <button
-                                class="btn btn-outline-secondary btn-sm dropdown-toggle"
-                                type="button"
-                                data-bs-toggle="dropdown"
-                            >
-                                {{ $gettext('Columns') }}
-                            </button>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li v-for="column in columnOptions" :key="column.key">
-                                    <label class="dropdown-item d-flex align-items-center gap-2 mb-0">
-                                        <input
-                                            v-model="visibleColumns"
-                                            class="form-check-input mt-0"
-                                            type="checkbox"
-                                            :value="column.key"
-                                        >
-                                        {{ column.label }}
-                                    </label>
-                                </li>
-                            </ul>
+                    <header class="linear-log-header">
+                        <div>
+                            <h1>{{ pageTitle }}</h1>
+                            <p>{{ $gettext('Upcoming scheduled programming built by AutoDJ') }}</p>
                         </div>
-                    </div>
-                </div>
-            </div>
 
-            <div class="rules-bar">
-                <div class="d-flex flex-wrap align-items-center gap-3">
-                    <span class="filter-label">{{ $gettext('Operator rules') }}</span>
-
-                    <div class="form-check form-switch mb-0">
-                        <input
-                            id="linear_log_rule_enforce_windows"
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            :checked="rules.linear_log_rule_enforce_windows"
-                            :disabled="isApplyingRules"
-                            @change="setRule('linear_log_rule_enforce_windows', ($event.target as HTMLInputElement).checked)"
-                        >
-                        <label class="form-check-label" for="linear_log_rule_enforce_windows">
-                            {{ $gettext('Take out music that leaks into a scheduled block') }}
-                        </label>
-                    </div>
-
-                    <div class="form-check form-switch mb-0">
-                        <input
-                            id="linear_log_rule_drop_outside_window"
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            :checked="rules.linear_log_rule_drop_outside_window"
-                            :disabled="isApplyingRules"
-                            @change="setRule('linear_log_rule_drop_outside_window', ($event.target as HTMLInputElement).checked)"
-                        >
-                        <label class="form-check-label" for="linear_log_rule_drop_outside_window">
-                            {{ $gettext('Take out lines planned outside their own window (starting too early)') }}
-                        </label>
-                    </div>
-
-                    <div class="form-check form-switch mb-0">
-                        <input
-                            id="linear_log_rule_refill_dropped"
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            :checked="rules.linear_log_rule_refill_dropped"
-                            :disabled="isApplyingRules"
-                            @change="setRule('linear_log_rule_refill_dropped', ($event.target as HTMLInputElement).checked)"
-                        >
-                        <label class="form-check-label" for="linear_log_rule_refill_dropped">
-                            {{ $gettext('Refill what the rules take out') }}
-                        </label>
-                    </div>
-
-                    <button
-                        type="button"
-                        class="btn btn-outline-primary btn-sm fw-semibold ms-md-auto"
-                        :disabled="isApplyingRules || isBuilding || !featureEnabled"
-                        @click="applyRules"
-                    >
-                        <span
-                            v-if="isApplyingRules"
-                            class="spinner-border spinner-border-sm me-1"
-                            role="status"
-                            aria-hidden="true"
-                        />
-                        {{ $gettext('Apply rules to the log now') }}
-                    </button>
-                </div>
-
-                <div class="small mt-2 text-body-secondary">
-                    {{ $gettext('Rules run on every build and every minute, and never touch a line you locked by hand.') }}
-                    <span v-if="ruleResult" class="fw-semibold text-body">{{ ruleResult }}</span>
-                </div>
-            </div>
-
-            <div v-if="allItems.length" class="stats-bar">
-                <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
-                <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
-                <span><strong>{{ snapshotHours }}</strong> {{ $gettext('hour snapshot') }}</span>
-                <span v-if="builtAt">
-                    {{ $gettext('Built') }} <strong>{{ formatDateTime(builtAt) }}</strong>
-                </span>
-                <span v-if="coverageEnd">
-                    {{ $gettext('Coverage through') }} <strong>{{ formatDateTime(coverageEnd) }}</strong>
-                </span>
-                <span v-if="nextUpItem">
-                    {{ $gettext('Next up') }}:
-                    <strong>{{ displayTitle(nextUpItem) }}</strong>
-                    {{ $gettext('at') }} <strong>{{ formatTime(nextUpItem.played_at) }}</strong>
-                </span>
-            </div>
-
-            <linear-log-ai-dj-shifts :shifts="aiDjShifts" />
-
-            <div v-if="coverageWarning" class="coverage-warning">
-                <strong>{{ $gettext('Projection ended before the requested horizon.') }}</strong>
-                {{ coverageWarning }}
-            </div>
-
-            <div v-if="initialLoading" class="loading-state">
-                <div class="spinner-border text-primary" role="status" />
-                <div class="mt-3 fw-semibold">{{ $gettext('Loading Linear Log...') }}</div>
-            </div>
-
-            <div v-else-if="0 === allItems.length" class="empty-state">
-                <h2>{{ $gettext('No Linear Log Snapshot Yet') }}</h2>
-                <p>
-                    {{ $gettext('Build the log to calculate an isolated AutoDJ projection. The preview does not write a 24-hour fake queue into live station playback.') }}
-                </p>
-                <button
-                    type="button"
-                    class="btn btn-primary mt-3"
-                    :disabled="isBuilding || !featureEnabled"
-                    @click="requestBuild"
-                >
-                    {{ $gettext('Build Linear Log') }}
-                </button>
-            </div>
-
-            <linear-log-schedule
-                v-else
-                :groups="hourGroups"
-                :visible-columns="visibleColumns"
-                :now-ts="nowTs"
-                :busy="isEditing || isBuilding"
-                @edit="onEdit"
-                @replace="openReplace"
-            />
-
-            <div
-                v-if="replaceItem"
-                class="replace-backdrop"
-                role="dialog"
-                aria-modal="true"
-                @click.self="closeReplace"
-            >
-                <div class="replace-dialog card shadow">
-                    <div class="card-header d-flex align-items-center">
-                        <strong>{{ $gettext('Replace log line') }}</strong>
-                        <button type="button" class="btn-close ms-auto" :aria-label="$gettext('Close')" @click="closeReplace" />
-                    </div>
-                    <div class="card-body">
-                        <div class="small text-body-secondary mb-2">
-                            {{ formatTime(replaceItem.played_at) }} &middot; {{ displayTitle(replaceItem) }}
-                        </div>
-                        <input
-                            v-model="replaceQuery"
-                            type="search"
-                            class="form-control form-control-sm mb-2"
-                            :placeholder="$gettext('Search the library by title or artist')"
-                            @input="onReplaceSearch"
-                        >
-                        <div class="list-group replace-results">
-                            <button
-                                v-for="option in replaceOptions"
-                                :key="option.id"
-                                type="button"
-                                class="list-group-item list-group-item-action d-flex gap-2"
-                                :disabled="isEditing"
-                                @click="applyReplace(option.id)"
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <div class="form-check form-switch mb-0 me-2">
+                                <input
+                                    id="linear_log_enabled"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="featureEnabled"
+                                    :disabled="initialLoading || isSavingSettings || isBuilding"
+                                    @change="setEnabled(($event.target as HTMLInputElement).checked)"
+                                >
+                                <label class="form-check-label fw-semibold" for="linear_log_enabled">
+                                    {{ $gettext('Enable 24-Hour Playout Log') }}
+                                </label>
+                            </div>
+                            <span
+                                v-if="!initialLoading"
+                                class="badge state-badge"
+                                :class="featureEnabled ? 'text-bg-success' : 'text-bg-danger'"
                             >
-                                <span class="flex-grow-1 text-start">
-                                    <strong>{{ option.title || option.text }}</strong>
-                                    <span v-if="option.artist" class="d-block small text-body-secondary">{{ option.artist }}</span>
-                                </span>
-                                <span class="small font-monospace">{{ formatLength(option.length) }}</span>
+                                {{ featureEnabled ? $gettext('ON') : $gettext('OFF') }}
+                            </span>
+
+                            <label class="visually-hidden" for="linear_log_hours">{{ $gettext('Hours') }}</label>
+                            <select
+                                id="linear_log_hours"
+                                v-model.number="hoursAhead"
+                                class="form-select form-select-sm hours-select"
+                                :disabled="isBuilding"
+                            >
+                                <option :value="6">6 {{ $gettext('hours') }}</option>
+                                <option :value="12">12 {{ $gettext('hours') }}</option>
+                                <option :value="24">24 {{ $gettext('hours') }}</option>
+                                <option :value="48">48 {{ $gettext('hours') }}</option>
+                            </select>
+
+                            <button
+                                type="button"
+                                class="btn btn-light btn-sm fw-semibold"
+                                :disabled="isBuilding || !featureEnabled"
+                                @click="requestBuild"
+                            >
+                                <span
+                                    v-if="isBuilding"
+                                    class="spinner-border spinner-border-sm me-1"
+                                    role="status"
+                                    aria-hidden="true"
+                                />
+                                {{ isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH') }}
                             </button>
-                            <div v-if="replaceQuery.length >= 2 && !replaceOptions.length" class="small text-body-secondary p-2">
-                                {{ $gettext('No matches.') }}
+                        </div>
+                    </header>
+
+                    <div
+                        v-if="!initialLoading && !featureEnabled"
+                        class="alert alert-danger disabled-banner rounded-0 border-start-0 border-end-0 mb-0"
+                        role="status"
+                    >
+                        <div>
+                            <div class="fw-bold fs-5">
+                                {{ $gettext('24-Hour Playout Log is OFF') }}
+                            </div>
+                            <div>
+                                {{ $gettext('No new snapshots are being built. Anything shown below is the last snapshot from before it was turned off and is not being updated.') }}
                             </div>
                         </div>
-                        <div class="small text-body-secondary mt-2">
-                            {{ $gettext('The replacement is locked so a rebuild keeps it.') }}
+                        <button
+                            type="button"
+                            class="btn btn-danger fw-semibold"
+                            :disabled="isSavingSettings"
+                            @click="setEnabled(true)"
+                        >
+                            {{ $gettext('Turn On') }}
+                        </button>
+                    </div>
+
+                    <div v-if="buildError" class="alert alert-danger rounded-0 border-start-0 border-end-0 mb-0">
+                        <strong>{{ $gettext('Linear Log build failed.') }}</strong>
+                        {{ buildError }}
+                    </div>
+
+                    <div v-else-if="isBuilding" class="build-status">
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                        <span>
+                            {{ status === 'queued'
+                                ? $gettext('The Linear Log build is queued in the background.')
+                                : $gettext('AutoDJ is calculating the isolated playout projection in the background.') }}
+                        </span>
+                        <span v-if="allItems.length" class="text-body-secondary">
+                            {{ $gettext('The last completed snapshot remains visible below.') }}
+                        </span>
+                    </div>
+
+                    <div v-if="gapCount > 0" class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0">
+                        <div class="fw-semibold">
+                            {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
+                        </div>
+                        <div class="small mt-1">
+                            {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced up to five minutes (never past the top of the hour) and kept calculating instead of silently truncating the day.') }}
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <footer class="linear-log-footer">
-                {{ $gettext('Strict scheduled programs use the authoritative strict-playlist forecast, so their projected songs match the same source used by Playing Next and Upcoming Song Queue. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
-            </footer>
+                    <div class="filter-bar">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <span class="filter-label">{{ $gettext('Show') }}</span>
+                            <button
+                                v-for="filter in typeFilters"
+                                :key="filter.key"
+                                type="button"
+                                class="btn btn-sm"
+                                :class="activeTypes.includes(filter.key) ? filter.activeClass : 'btn-outline-secondary'"
+                                @click="toggleType(filter.key)"
+                            >
+                                {{ filter.label }}
+                            </button>
+
+                            <div class="ms-md-auto d-flex gap-2 flex-wrap">
+                                <input
+                                    v-model="searchQuery"
+                                    type="search"
+                                    class="form-control form-control-sm search-box"
+                                    :placeholder="$gettext('Search title, artist or source')"
+                                >
+
+                                <div class="dropdown">
+                                    <button
+                                        class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                                        type="button"
+                                        data-bs-toggle="dropdown"
+                                    >
+                                        {{ $gettext('Columns') }}
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li v-for="column in columnOptions" :key="column.key">
+                                            <label class="dropdown-item d-flex align-items-center gap-2 mb-0">
+                                                <input
+                                                    v-model="visibleColumns"
+                                                    class="form-check-input mt-0"
+                                                    type="checkbox"
+                                                    :value="column.key"
+                                                >
+                                                {{ column.label }}
+                                            </label>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rules-bar">
+                        <div class="d-flex flex-wrap align-items-center gap-3">
+                            <span class="filter-label">{{ $gettext('Operator rules') }}</span>
+
+                            <div class="form-check form-switch mb-0">
+                                <input
+                                    id="linear_log_rule_enforce_windows"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="rules.linear_log_rule_enforce_windows"
+                                    :disabled="isApplyingRules"
+                                    @change="setRule('linear_log_rule_enforce_windows', ($event.target as HTMLInputElement).checked)"
+                                >
+                                <label class="form-check-label" for="linear_log_rule_enforce_windows">
+                                    {{ $gettext('Take out music that leaks into a scheduled block') }}
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch mb-0">
+                                <input
+                                    id="linear_log_rule_drop_outside_window"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="rules.linear_log_rule_drop_outside_window"
+                                    :disabled="isApplyingRules"
+                                    @change="setRule('linear_log_rule_drop_outside_window', ($event.target as HTMLInputElement).checked)"
+                                >
+                                <label class="form-check-label" for="linear_log_rule_drop_outside_window">
+                                    {{ $gettext('Take out lines planned outside their own window (starting too early)') }}
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch mb-0">
+                                <input
+                                    id="linear_log_rule_refill_dropped"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    role="switch"
+                                    :checked="rules.linear_log_rule_refill_dropped"
+                                    :disabled="isApplyingRules"
+                                    @change="setRule('linear_log_rule_refill_dropped', ($event.target as HTMLInputElement).checked)"
+                                >
+                                <label class="form-check-label" for="linear_log_rule_refill_dropped">
+                                    {{ $gettext('Refill what the rules take out') }}
+                                </label>
+                            </div>
+
+                            <button
+                                type="button"
+                                class="btn btn-outline-primary btn-sm fw-semibold ms-md-auto"
+                                :disabled="isApplyingRules || isBuilding || !featureEnabled"
+                                @click="applyRules"
+                            >
+                                <span
+                                    v-if="isApplyingRules"
+                                    class="spinner-border spinner-border-sm me-1"
+                                    role="status"
+                                    aria-hidden="true"
+                                />
+                                {{ $gettext('Apply rules to the log now') }}
+                            </button>
+                        </div>
+
+                        <div class="small mt-2 text-body-secondary">
+                            {{ $gettext('Rules run on every build and every minute, and never touch a line you locked by hand.') }}
+                            <span v-if="ruleResult" class="fw-semibold text-body">{{ ruleResult }}</span>
+                        </div>
+                    </div>
+
+                    <div v-if="allItems.length" class="stats-bar">
+                        <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
+                        <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
+                        <span><strong>{{ snapshotHours }}</strong> {{ $gettext('hour snapshot') }}</span>
+                        <span v-if="builtAt">
+                            {{ $gettext('Built') }} <strong>{{ formatDateTime(builtAt) }}</strong>
+                        </span>
+                        <span v-if="coverageEnd">
+                            {{ $gettext('Coverage through') }} <strong>{{ formatDateTime(coverageEnd) }}</strong>
+                        </span>
+                        <span v-if="nextUpItem">
+                            {{ $gettext('Next up') }}:
+                            <strong>{{ displayTitle(nextUpItem) }}</strong>
+                            {{ $gettext('at') }} <strong>{{ formatTime(nextUpItem.played_at) }}</strong>
+                        </span>
+                    </div>
+
+                    <linear-log-ai-dj-shifts :shifts="aiDjShifts" />
+
+                    <div v-if="coverageWarning" class="coverage-warning">
+                        <strong>{{ $gettext('Projection ended before the requested horizon.') }}</strong>
+                        {{ coverageWarning }}
+                    </div>
+
+                    <div v-if="initialLoading" class="loading-state">
+                        <div class="spinner-border text-primary" role="status" />
+                        <div class="mt-3 fw-semibold">{{ $gettext('Loading Linear Log...') }}</div>
+                    </div>
+
+                    <div v-else-if="0 === allItems.length" class="empty-state">
+                        <h2>{{ $gettext('No Linear Log Snapshot Yet') }}</h2>
+                        <p>
+                            {{ $gettext('Build the log to calculate an isolated AutoDJ projection. The preview does not write a 24-hour fake queue into live station playback.') }}
+                        </p>
+                        <button
+                            type="button"
+                            class="btn btn-primary mt-3"
+                            :disabled="isBuilding || !featureEnabled"
+                            @click="requestBuild"
+                        >
+                            {{ $gettext('Build Linear Log') }}
+                        </button>
+                    </div>
+
+                    <linear-log-schedule
+                        v-else
+                        :groups="hourGroups"
+                        :visible-columns="visibleColumns"
+                        :now-ts="nowTs"
+                        :busy="isEditing || isBuilding"
+                        @edit="onEdit"
+                        @replace="openReplace"
+                    />
+
+                    <div
+                        v-if="replaceItem"
+                        class="replace-backdrop"
+                        role="dialog"
+                        aria-modal="true"
+                        @click.self="closeReplace"
+                    >
+                        <div class="replace-dialog card shadow">
+                            <div class="card-header d-flex align-items-center">
+                                <strong>{{ $gettext('Replace log line') }}</strong>
+                                <button type="button" class="btn-close ms-auto" :aria-label="$gettext('Close')" @click="closeReplace" />
+                            </div>
+                            <div class="card-body">
+                                <div class="small text-body-secondary mb-2">
+                                    {{ formatTime(replaceItem.played_at) }} &middot; {{ displayTitle(replaceItem) }}
+                                </div>
+                                <input
+                                    v-model="replaceQuery"
+                                    type="search"
+                                    class="form-control form-control-sm mb-2"
+                                    :placeholder="$gettext('Search the library by title or artist')"
+                                    @input="onReplaceSearch"
+                                >
+                                <div class="list-group replace-results">
+                                    <button
+                                        v-for="option in replaceOptions"
+                                        :key="option.id"
+                                        type="button"
+                                        class="list-group-item list-group-item-action d-flex gap-2"
+                                        :disabled="isEditing"
+                                        @click="applyReplace(option.id)"
+                                    >
+                                        <span class="flex-grow-1 text-start">
+                                            <strong>{{ option.title || option.text }}</strong>
+                                            <span v-if="option.artist" class="d-block small text-body-secondary">{{ option.artist }}</span>
+                                        </span>
+                                        <span class="small font-monospace">{{ formatLength(option.length) }}</span>
+                                    </button>
+                                    <div v-if="replaceQuery.length >= 2 && !replaceOptions.length" class="small text-body-secondary p-2">
+                                        {{ $gettext('No matches.') }}
+                                    </div>
+                                </div>
+                                <div class="small text-body-secondary mt-2">
+                                    {{ $gettext('The replacement is locked so a rebuild keeps it.') }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <footer class="linear-log-footer">
+                        {{ $gettext('Strict scheduled programs use the authoritative strict-playlist forecast, so their projected songs match the same source used by Playing Next and Upcoming Song Queue. AI DJ work shifts are shown, but speech remains live-generated and is never synthesized or enqueued by this preview.') }}
+                    </footer>
                 </tab>
 
                 <tab :label="$gettext('Upcoming Song Queue')">

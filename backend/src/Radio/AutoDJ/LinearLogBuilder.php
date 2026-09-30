@@ -874,7 +874,7 @@ final class LinearLogBuilder
 
         $survivorByKey = [];
         foreach ($survivors as $survivor) {
-            $survivorByKey[$survivor->planned_at . '|' . ($survivor->playlist?->id ?? '') . '|' . $survivor->title]
+            $survivorByKey[$survivor->planned_at . '|' . ($survivor->playlist->id ?? '') . '|' . $survivor->title]
                 = $survivor;
         }
 
