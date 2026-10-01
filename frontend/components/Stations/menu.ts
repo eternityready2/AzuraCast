@@ -379,7 +379,7 @@ export function useStationsMenu() {
         },
         {
             key: 'linear_log',
-            label: $gettext('24-Hour Playout Log'),
+            label: $gettext('Future Playout Queue'),
             icon: () => IconIcList,
             url: {
                 name: 'stations:reports:linear-log',
