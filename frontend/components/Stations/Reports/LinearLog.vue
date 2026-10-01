@@ -239,6 +239,7 @@
                         <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
                         <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
                         <span><strong>{{ snapshotHours }}</strong> {{ $gettext('hour snapshot') }}</span>
+                        <span v-if="zoneLabel">{{ $gettext('Station time') }} <strong>{{ zoneLabel }}</strong></span>
                         <span v-if="builtAt">
                             {{ $gettext('Built') }} <strong>{{ formatDateTime(builtAt) }}</strong>
                         </span>
@@ -291,6 +292,7 @@
                         :groups="hourGroups"
                         :visible-columns="visibleColumns"
                         :now-ts="nowTs"
+                        :on-air-item="onAirItem"
                         :busy="isEditing || isBuilding"
                         @edit="onEdit"
                         @replace="openReplace"
@@ -367,6 +369,7 @@ import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
 import type {LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
+import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
 
 const {$gettext} = useTranslate();
@@ -384,6 +387,7 @@ const {
     gaps,
     aiDjShifts,
     nowTs,
+    onAirItem,
     isBuilding,
     requestBuild,
     isSavingSettings,
@@ -534,51 +538,31 @@ const totalGapDuration = computed(() => secondsToHms(gaps.value.reduce((sum, gap
 const nextUpItem = computed(
     () => allItems.value.find((item) => (item.played_at ?? 0) >= nowTs.value && item.is_live_queue) ?? null,
 );
-// Mirrors LinearLogSchedule's currentOnAirItem: duration is unreliable once a
-// track has aired (a track cut short live, e.g. by the Top-of-Hour boundary,
-// still carries its full planned length), so the on-air item is found as the
-// most recently started item whose start time has already passed, not a
-// duration-based window.
-const onAirItem = computed<LinearLogItem | null>(() => {
-    let best: LinearLogItem | null = null;
-    let bestStart = -Infinity;
-
-    for (const item of allItems.value) {
-        const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
-        if (start === null || start === undefined || start > nowTs.value) {
-            continue;
-        }
-        if (start > bestStart) {
-            best = item;
-            bestStart = start;
-        }
-    }
-
-    return best;
-});
-
 function displayTitle(item: LinearLogItem): string {
     return item.title || item.text || $gettext("Untitled");
 }
 
+// Station time, like the station clock and Upcoming Song Queue, not the viewer's PC.
+const {formatTimestampAsTime, formatTimestampAsDateTime, timestampToDateTime} = useStationDateTimeFormatter();
+
+const zoneLabel = computed(() => timestampToDateTime(nowTs.value).offsetNameShort ?? "");
+
 function formatTime(timestamp: number | null): string {
     if (!timestamp) return "-";
-    return new Date(timestamp * 1000).toLocaleTimeString([], {
+    return formatTimestampAsTime(timestamp, {
         hour: "numeric",
         minute: "2-digit",
         second: "2-digit",
-        hour12: true,
     });
 }
 
 function formatDateTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString([], {
+    return formatTimestampAsDateTime(timestamp, {
         weekday: "short",
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
-        hour12: true,
     });
 }
 

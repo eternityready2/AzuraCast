@@ -1,4 +1,7 @@
-import {computed, onMounted, onUnmounted, ref} from "vue";
+import {computed, onMounted, onUnmounted, ref, watch} from "vue";
+import {useIntervalFn} from "@vueuse/core";
+import useNowPlaying from "~/functions/useNowPlaying.ts";
+import {useStationData} from "~/functions/useStationQuery.ts";
 import type {
     LinearLogAiDjShift,
     LinearLogGap,
@@ -251,6 +254,68 @@ export function useLinearLog() {
         return data;
     }
 
+    // ON AIR follows the same live now-playing stream as the sidebar, not the
+    // forecast, and the log re-times the moment the song changes.
+    const stationData = useStationData();
+    const {np} = useNowPlaying(computed(() => ({
+        stationShortName: stationData.value.shortName,
+        useStatic: false,
+        useSse: true,
+    })));
+
+    const liveSongId = computed(() => np.value.now_playing?.song?.id || null);
+    const livePlayedAt = computed(() => np.value.now_playing?.played_at || null);
+
+    watch(livePlayedAt, (next, prev) => {
+        if (next && prev && next !== prev && featureEnabled.value && !isBuilding.value) {
+            void loadSnapshot(false);
+        }
+    });
+
+    useIntervalFn(() => {
+        nowTs.value = Math.floor(Date.now() / 1000);
+    }, 1000);
+
+    const onAirItem = computed<LinearLogItem | null>(() => {
+        if (liveSongId.value && livePlayedAt.value) {
+            let match: LinearLogItem | null = null;
+            let bestDiff = 900;
+            for (const item of allItems.value) {
+                if (item.song_id !== liveSongId.value) {
+                    continue;
+                }
+                const start = item.aired_at ?? item.played_at;
+                if (!start) {
+                    continue;
+                }
+                const diff = Math.abs(start - livePlayedAt.value);
+                if (diff <= bestDiff) {
+                    match = item;
+                    bestDiff = diff;
+                }
+            }
+            if (match) {
+                return match;
+            }
+        }
+
+        // No live match (stream offline, or the song is not in the log): fall
+        // back to the most recently started line.
+        let best: LinearLogItem | null = null;
+        let bestStart = -Infinity;
+        for (const item of allItems.value) {
+            const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
+            if (start === null || start === undefined || start > nowTs.value) {
+                continue;
+            }
+            if (start > bestStart) {
+                best = item;
+                bestStart = start;
+            }
+        }
+        return best;
+    });
+
     onMounted(() => {
         void loadSnapshot();
         void loadRules();
@@ -272,6 +337,7 @@ export function useLinearLog() {
         gaps,
         aiDjShifts,
         nowTs,
+        onAirItem,
         isBuilding,
         loadSnapshot,
         requestBuild,

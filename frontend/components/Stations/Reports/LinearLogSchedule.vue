@@ -132,14 +132,15 @@
 </template>
 
 <script setup lang="ts">
-import {computed} from "vue";
 import type {LinearLogHourGroup, LinearLogItem} from "~/entities/LinearLog";
+import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
 
 const props = defineProps<{
     groups: LinearLogHourGroup[];
     visibleColumns: string[];
     nowTs: number;
+    onAirItem: LinearLogItem | null;
     busy?: boolean;
 }>();
 
@@ -166,34 +167,8 @@ function isNextUp(item: LinearLogItem): boolean {
     return (item.played_at ?? 0) >= props.nowTs && item.is_live_queue;
 }
 
-// duration is unreliable once a track has aired: a track cut short live (e.g.
-// by the Top-of-Hour boundary) still carries its full planned length, which
-// made "on air" keep showing a finished track for many minutes after the real
-// broadcast had already moved on. Exactly one thing is ever really on air, so
-// find it directly: the most recently started item whose start time has
-// already passed, across all items, not a duration-based window on each one.
-const currentOnAirItem = computed<LinearLogItem | null>(() => {
-    let best: LinearLogItem | null = null;
-    let bestStart = -Infinity;
-
-    for (const group of props.groups) {
-        for (const item of group.items) {
-            const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
-            if (start === null || start === undefined || start > props.nowTs) {
-                continue;
-            }
-            if (start > bestStart) {
-                best = item;
-                bestStart = start;
-            }
-        }
-    }
-
-    return best;
-});
-
 function isOnAir(item: LinearLogItem): boolean {
-    return currentOnAirItem.value === item;
+    return props.onAirItem?.id === item.id;
 }
 
 function logMarker(item: LinearLogItem): {label: string, cls: string} | null {
@@ -291,13 +266,14 @@ function rowClasses(item: LinearLogItem): Record<string, boolean> {
     };
 }
 
+const {formatTimestampAsTime} = useStationDateTimeFormatter();
+
 function formatTime(timestamp: number | null): string {
     if (!timestamp) return "-";
-    return new Date(timestamp * 1000).toLocaleTimeString([], {
+    return formatTimestampAsTime(timestamp, {
         hour: "numeric",
         minute: "2-digit",
         second: "2-digit",
-        hour12: true,
     });
 }
 

@@ -20,19 +20,21 @@
 
 <script setup lang="ts">
 import type {LinearLogAiDjShift} from "~/entities/LinearLog";
+import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 
 defineProps<{
     shifts: LinearLogAiDjShift[];
 }>();
 
+const {formatTimestampAsDateTime} = useStationDateTimeFormatter();
+
 function formatDateTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString([], {
+    return formatTimestampAsDateTime(timestamp, {
         weekday: "short",
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
-        hour12: true,
     });
 }
 </script>
