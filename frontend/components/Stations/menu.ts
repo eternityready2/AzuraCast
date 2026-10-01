@@ -175,59 +175,58 @@ export function useStationsMenu() {
         },
         {
             key: 'playlists',
-            label: $gettext('Playlists'),
+            label: $gettext('Playlists & More'),
             icon: () => IconIcQueueMusic,
-            url: {
-                name: 'stations:playlists:index'
-            },
             visible: () => userAllowedForStation(StationPermissions.Media)
                 && station.value.features.media,
-        },
-        {
-            key: 'shows',
-            label: $gettext('Shows'),
-            icon: () => IconIcSchedule,
-            url: {
-                name: 'stations:shows:index'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Broadcasting),
-        },
-        {
-            key: 'smart-blocks',
-            label: $gettext('Smart Blocks'),
-            icon: () => IconIcAutoAwesome,
-            url: {
-                name: 'stations:smart-blocks:index'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Media)
-                && station.value.features.media,
-        },
-        {
-            key: 'web_streams',
-            label: $gettext('Web / Remote Streams'),
-            icon: () => IconIcPublic,
-            url: {
-                name: 'stations:web_streams:index'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Media),
+            items: [
+                {
+                    key: 'playlists_index',
+                    label: $gettext('Playlists'),
+                    url: {
+                        name: 'stations:playlists:index'
+                    },
+                },
+                {
+                    key: 'clock_wheels_sub',
+                    label: $gettext('Clock Wheels'),
+                    url: {
+                        name: 'stations:clock_wheels:index'
+                    },
+                },
+                {
+                    key: 'smart_blocks_sub',
+                    label: $gettext('Smart Blocks'),
+                    url: {
+                        name: 'stations:smart-blocks:index'
+                    },
+                },
+                {
+                    key: 'shows_sub',
+                    label: $gettext('Shows'),
+                    url: {
+                        name: 'stations:shows:index'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting),
+                },
+                {
+                    key: 'web_streams_sub',
+                    label: $gettext('Web / Remote Streams'),
+                    url: {
+                        name: 'stations:web_streams:index'
+                    },
+                },
+            ]
         },
         {
             key: 'podcasts',
-            label: $gettext('Podcasts'),
+            label: $gettext('Podcasts & RSS'),
             icon: () => IconIcPodcasts,
             url: {
                 name: 'stations:podcasts:index'
             },
             visible: () => userAllowedForStation(StationPermissions.Podcasts)
                 && station.value.features.podcasts,
-        },
-        {
-            key: 'clock_wheels',
-            label: $gettext('Clock Wheels'),
-            icon: () => IconIcSchedule,
-            url: {
-                name: 'stations:clock_wheels:index'
-            },
         },
         {
             key: 'media_categories',
@@ -272,8 +271,8 @@ export function useStationsMenu() {
                 && station.value.features.webhooks,
         },
         {
-            key: 'reports',
-            label: $gettext('Reports'),
+            key: 'station_analytics',
+            label: $gettext('Station Analytics'),
             icon: () => IconIcInsertChart,
             visible: () => userAllowedForStation(StationPermissions.Reports),
             items: [
@@ -292,20 +291,35 @@ export function useStationsMenu() {
                     }
                 },
                 {
-                    key: 'reports_requests',
-                    label: $gettext('Song Requests'),
-                    url: {
-                        name: 'stations:reports:requests'
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                        && station.value.enableRequests
-                },
-                {
                     key: 'reports_timeline',
                     label: $gettext('Song Playback Timeline'),
                     url: {
                         name: 'stations:reports:timeline'
                     }
+                },
+                {
+                    key: 'reports_sponsor_plays',
+                    label: $gettext('Sponsor Play Report'),
+                    url: {
+                        name: 'stations:sponsor_plays'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
+            ]
+        },
+        {
+            key: 'music_licensing',
+            label: $gettext('Music Licensing'),
+            icon: () => IconIcShield,
+            visible: () => userAllowedForStation(StationPermissions.Reports),
+            items: [
+                {
+                    key: 'dmca_compliance',
+                    label: $gettext('DMCA Compliance'),
+                    url: {
+                        name: 'stations:dmca_compliance'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                 },
                 {
                     key: 'reports_soundexchange',
@@ -335,25 +349,27 @@ export function useStationsMenu() {
                         name: 'stations:reports:cadence'
                     }
                 },
-                {
-                    key: 'reports_sponsor_plays',
-                    label: $gettext('Sponsor Play Report'),
-                    url: {
-                        name: 'stations:sponsor_plays'
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                }
             ]
         },
         {
+            key: 'reports_requests',
+            label: $gettext('Song Requests'),
+            icon: () => IconIcQueueMusic,
+            url: {
+                name: 'stations:reports:requests'
+            },
+            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                && station.value.enableRequests
+        },
+        {
             key: 'ai',
-            label: $gettext('AI'),
+            label: $gettext('AI Studio'),
             icon: () => IconIcPsychology,
             visible: () => userAllowedForStation(StationPermissions.Broadcasting),
             items: [
                 {
                     key: 'ai_news',
-                    label: $gettext('News Bulletins'),
+                    label: $gettext('AI News'),
                     url: {
                         name: 'stations:ai_news'
                     },
@@ -361,7 +377,7 @@ export function useStationsMenu() {
                 },
                 {
                     key: 'ai_dj',
-                    label: $gettext('DJ'),
+                    label: $gettext('AI DJ\'s'),
                     url: {
                         name: 'stations:ai_dj'
                     },
@@ -369,7 +385,7 @@ export function useStationsMenu() {
                 },
                 {
                     key: 'ai_assistant',
-                    label: $gettext('Assistant'),
+                    label: $gettext('AI Assistant'),
                     url: {
                         name: 'stations:assistant:index'
                     },
@@ -386,15 +402,6 @@ export function useStationsMenu() {
             },
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                 && station.value.features.autoDjQueue
-        },
-        {
-            key: 'dmca_compliance',
-            label: $gettext('DMCA Compliance'),
-            icon: () => IconIcShield,
-            url: {
-                name: 'stations:dmca_compliance'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
         {
             key: 'top_of_hour',
