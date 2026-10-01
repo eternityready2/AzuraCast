@@ -374,6 +374,8 @@ final class FeatureSuiteController
     {
         $station = $request->getStation();
         $snapshot = $this->linearLogSnapshotStore->get($station);
+        $hours = $station->backend_config->linear_log_hours;
+        $coverage = null;
 
         // Live times, like an FM automation log: re-timed from what is actually
         // playing on every load instead of waiting for the next rebuild.
@@ -382,10 +384,17 @@ final class FeatureSuiteController
                 $snapshot['entries'] = $this->linearLogStore->liveEntries(
                     $station,
                     $snapshot['entries'],
-                    $station->backend_config->linear_log_hours,
+                    $hours,
                 );
+
+                // How deep the log actually is, measured on exactly the rendered
+                // lines below -- not a sum of their durations, which stays
+                // plausible even with a hole in the middle of the day, and not
+                // the raw build-time snapshot, which does not see what the page
+                // just filtered out. This is the number an operator can trust.
+                $coverage = $this->linearLogStore->measureCoverage($station, $snapshot['entries'], $hours);
             } catch (Throwable $e) {
-                // Fall back to the snapshot's own times.
+                // Fall back to the snapshot's own times; no coverage claim.
             }
         }
 
@@ -394,8 +403,14 @@ final class FeatureSuiteController
             'enabled' => $station->backend_config->linear_log_enabled,
             // An enabled log always drives playout (no separate switch).
             'playout_enabled' => $station->backend_config->linear_log_enabled,
-            'configured_hours' => $station->backend_config->linear_log_hours,
+            'configured_hours' => $hours,
             'ai_dj_projection' => 'shifts_only',
+            'coverage' => null === $coverage ? null : [
+                'continuous_seconds' => $coverage->continuousSeconds(),
+                'required_seconds' => $hours * 3600,
+                'satisfied' => $coverage->satisfies($hours * 3600),
+                'holes' => array_values($coverage->holes),
+            ],
         ]);
     }
 

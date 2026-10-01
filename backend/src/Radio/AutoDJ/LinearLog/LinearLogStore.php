@@ -583,8 +583,16 @@ final class LinearLogStore
 
         usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
 
-        $shift = 0;
-        $shiftUntil = 0;
+        // A line is re-timed only from its own live-queue row. The saved log is
+        // the authority for every other line.
+        //
+        // This used to take the delta of whichever queued line it saw and push
+        // it onto every planned line left in the hour. One queue row that has
+        // been re-planned since the log was built is enough to drag the rest of
+        // the hour backwards -- a -20m delta moved the evening's music inside a
+        // programme's exclusive window, where the leak filter below then deleted
+        // it, leaving a 23-minute hole that existed in neither the saved log nor
+        // the queue and reading ~23h instead of 24h on the page.
         foreach ($entries as &$entry) {
             $id = (int)($entry['log_entry_id'] ?? 0);
             if ($id > 0 && isset($saved[$id])) {
@@ -601,8 +609,6 @@ final class LinearLogStore
             if ($id > 0 && isset($queued[$id])) {
                 $live = $queued[$id];
                 $liveAt = (int)$live['t'];
-                $shift = $liveAt - (int)($entry['played_at'] ?? $liveAt);
-                $shiftUntil = CarbonImmutable::createFromTimestamp($liveAt, $tz)->startOfHour()->addHour()->getTimestamp();
                 $entry['played_at'] = $liveAt;
                 $entry['is_live_queue'] = true;
                 if (($live['text'] ?? null) !== ($entry['text'] ?? null)) {
@@ -623,13 +629,6 @@ final class LinearLogStore
                     }
                 }
                 continue;
-            }
-
-            if (0 !== $shift && StationLogEntry::STATUS_PLANNED === ($entry['log_status'] ?? null)
-                && (int)($entry['played_at'] ?? 0) < $shiftUntil
-                && 'scheduled_programme' !== ($entry['source_type'] ?? '')
-            ) {
-                $entry['played_at'] = (int)$entry['played_at'] + $shift;
             }
         }
         unset($entry);
@@ -711,14 +710,109 @@ final class LinearLogStore
         }
 
         // The current hour's history plus the configured hours ahead.
-        $from = CarbonImmutable::createFromTimestamp($now, $tz)->startOfHour()->getTimestamp();
-        $until = $now + $hours * 3600;
+        [$from, $until] = self::window($station, $hours, $now);
 
         return array_values(array_filter(
             $entries,
             static fn(array $e): bool => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
                 && (int)($e['played_at'] ?? 0) <= $until
         ));
+    }
+
+    /**
+     * How deep the log actually runs *from right now*: this is the one place
+     * anything that cares whether the log is "whole" has to ask, so the page,
+     * the hourly top-up, and the repair pass can never disagree about it the
+     * way the duration-sum ("program runtime") and the raw build snapshot did.
+     *
+     * Deliberately not the same window {@see liveEntries()} filters by --
+     * that window starts at the top of the current hour so the page can show
+     * what already aired, but depth has to start at now: a few seconds of
+     * rounding in already-aired history must never make a whole log measure
+     * as broken.
+     *
+     * Takes the same live-rendered entries {@see liveEntries()} produces --
+     * dropped/swapped lines are not airable and must be excluded by the
+     * caller the same way liveEntries() already excludes them from the page.
+     *
+     * @param list<array<string, mixed>> $liveEntries
+     */
+    public function measureCoverage(Station $station, array $liveEntries, int $hours): LinearLogCoverage
+    {
+        // Depth is measured from this instant forward, never from the top of
+        // the current hour. The past cannot be repaired, and a few seconds of
+        // write/rounding slack in history already aired (the Top-of-Hour ID's
+        // exact end time, a crossfade write landing a beat late) would
+        // otherwise read as a hole every single hour, forever, and never let
+        // the log be measured as whole.
+        $now = time();
+        [, $until] = self::window($station, $hours, $now);
+        $from = $now;
+
+        $airable = array_filter(
+            $liveEntries,
+            static fn(array $e): bool => !in_array($e['log_status'] ?? null, ['dropped', 'swapped'], true),
+        );
+
+        $spans = array_map(
+            static function (array $e): array {
+                $start = (int)($e['played_at'] ?? 0);
+                return [
+                    'start' => $start,
+                    'end' => $start + (int)ceil((float)($e['duration'] ?? 0)),
+                    'media_type' => $e['media_type'] ?? null,
+                ];
+            },
+            array_values($airable),
+        );
+        usort($spans, static fn(array $a, array $b): int => $a['start'] <=> $b['start']);
+
+        return LinearLogCoverage::measure($this->absorbPreIdSlack($spans), $from, $until);
+    }
+
+    /**
+     * The queue simulation projects a static plan; the real Top-of-Hour swap
+     * stretches or squeezes the last song, or falls back to Liquidsoap's own
+     * fit/pre-fade, to land exactly on the ID at :59:59 (see the station's
+     * standing Top-of-Hour rules). None of that runtime fit-up is visible to
+     * this projection, so a short, bounded gap immediately before an ID marker
+     * is Liquidsoap's job, not a dead-air hole -- counting it as one would mark
+     * every single hour boundary as a failure, forever, even on a station
+     * playing cleanly.
+     *
+     * @param list<array{start: int, end: int, media_type: string|null}> $spans Sorted by start.
+     * @return list<array{start: int, end: int}>
+     */
+    private function absorbPreIdSlack(array $spans): array
+    {
+        /** Generous enough for normal swap/fit variance, nowhere near large
+         *  enough to hide a real hole (every one fixed so far has run minutes). */
+        $tolerance = 30;
+
+        for ($i = 1, $count = count($spans); $i < $count; $i++) {
+            if ('id' !== $spans[$i]['media_type']) {
+                continue;
+            }
+            $gap = $spans[$i]['start'] - $spans[$i - 1]['end'];
+            if ($gap > 0 && $gap <= $tolerance) {
+                $spans[$i]['start'] = $spans[$i - 1]['end'];
+            }
+        }
+
+        return array_map(
+            static fn(array $s): array => ['start' => $s['start'], 'end' => $s['end']],
+            $spans,
+        );
+    }
+
+    /** @return array{0: int, 1: int} [from, until] */
+    private static function window(Station $station, int $hours, ?int $now = null): array
+    {
+        $now ??= time();
+        $from = CarbonImmutable::createFromTimestamp($now, $station->getTimezoneObject())
+            ->startOfHour()->getTimestamp();
+
+        return [$from, $now + $hours * 3600];
     }
 
     private static function cut(mixed $value): ?string

@@ -6,6 +6,7 @@ namespace App\Sync\Task;
 
 use App\Entity\Station;
 use App\Message\BuildLinearLogMessage;
+use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\StationDiagnostics;
 use App\Utilities\Time;
@@ -18,6 +19,7 @@ final class BuildLinearLogTask extends AbstractTask
     public function __construct(
         private readonly MessageBus $messageBus,
         private readonly LinearLogSnapshotStore $snapshotStore,
+        private readonly LinearLogStore $logStore,
         private readonly StationDiagnostics $diagnostics,
     ) {
     }
@@ -36,10 +38,13 @@ final class BuildLinearLogTask extends AbstractTask
 
     /**
      * The configured hours are a rolling minimum, not a per-build target: a log
-     * built only at 3am covers less and less as the day airs out of it, so by
-     * evening the page legitimately shows well under 24 hours. Top the log up
-     * on any hourly pass where coverage from *now* has fallen below what the
-     * station asked for.
+     * built only at 3am covers less and less as the day airs out of it, and a
+     * line dropped by a standing rule after the build leaves a hole a mere
+     * extend-build never notices. Measured the same way {@see LinearLogStore::
+     * measureCoverage()} measures it for the page, so this can never give a
+     * different answer than what an operator sees -- that disagreement, not a
+     * short build, was the actual cause of a log that read ~23h on 2026-10-01
+     * while its own snapshot showed 25h of saved lines.
      */
     private function isShortOfHorizon(Station $station): bool
     {
@@ -49,9 +54,21 @@ final class BuildLinearLogTask extends AbstractTask
             return false;
         }
 
+        if (empty($snapshot['entries'])) {
+            return true;
+        }
+
         $hours = max(1, min(48, $station->backend_config->linear_log_hours));
 
-        return ((int)($snapshot['coverage_end'] ?? 0)) - time() < $hours * 3600;
+        try {
+            $live = $this->logStore->liveEntries($station, $snapshot['entries'], $hours);
+            $coverage = $this->logStore->measureCoverage($station, $live, $hours);
+        } catch (Throwable) {
+            // Can't prove the log is whole; have the build pass settle it.
+            return true;
+        }
+
+        return !$coverage->satisfies($hours * 3600);
     }
 
     public function run(bool $force = false): void
