@@ -64,6 +64,12 @@ final class StationPlaylist implements
     #[ORM\Column(nullable: false, insertable: false, updatable: false)]
     public private(set) int $station_id;
 
+    /** Doctrine does not re-fetch `insertable: false` columns after an INSERT. */
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+    }
+
     #[
         OA\Property(example: "Test Playlist"),
         ORM\Column(length: 200),

@@ -267,6 +267,16 @@ final class PlaylistsController extends AbstractScheduledEntityController
         );
     }
 
+    protected function editRecord(?array $data, ?object $record = null, array $context = []): object
+    {
+        $record = parent::editRecord($data, $record, $context);
+        assert($record instanceof StationPlaylist);
+
+        $record->syncReadOnlyForeignKeys();
+
+        return $record;
+    }
+
     protected function viewRecord(object $record, ServerRequest $request): array
     {
         /** @var StationPlaylist $record */
