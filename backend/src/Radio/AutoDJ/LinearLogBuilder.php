@@ -82,6 +82,15 @@ final class LinearLogBuilder
         $stationId = $station->id;
         $maxAttempts = 2;
 
+        // Any earlier failure in this worker process leaves Doctrine's
+        // EntityManager closed, and the build then dies on "The EntityManager is
+        // closed." before touching the database -- the failure operators actually
+        // see on the Linear Log page. Start from a usable one.
+        if (!$this->em->isOpen()) {
+            $this->em->open();
+            $station = $this->stationRepo->findByIdentifier((string)$stationId) ?? $station;
+        }
+
         for ($attempt = 1; ; $attempt++) {
             try {
                 return $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow);
@@ -99,16 +108,8 @@ final class LinearLogBuilder
                     ['station_id' => $stationId, 'attempt' => $attempt, 'error' => $e->getMessage()]
                 );
 
-                $connection = $this->em->getConnection();
-                if ($connection->isTransactionActive()) {
-                    try {
-                        $connection->rollBack();
-                    } catch (Throwable) {
-                        // Transaction state is already gone; nothing to roll back.
-                    }
-                }
+                $this->resetConnectionState();
 
-                $this->em->clear();
                 $reloaded = $this->stationRepo->findByIdentifier((string)$stationId);
                 if (!$reloaded instanceof Station) {
                     throw $e;
@@ -118,6 +119,36 @@ final class LinearLogBuilder
                 usleep(random_int(1_500_000, 4_000_000));
             }
         }
+    }
+
+    /**
+     * Unwind every open nesting level, then make sure the EntityManager is usable.
+     *
+     * A single rollBack() drops only one level, and once MySQL has killed the
+     * transaction the savepoint rollback throws without DBAL decrementing its
+     * counter -- so the retry opened SAVEPOINT DOCTRINE_3 on a connection with no
+     * transaction and died the same way. Closing the connection resets the level
+     * to zero. Doctrine also closes the EntityManager on the original exception,
+     * which otherwise leaves this worker unable to handle any later message
+     * ("The EntityManager is closed." on every NowPlaying/webhook until restart).
+     */
+    private function resetConnectionState(): void
+    {
+        $connection = $this->em->getConnection();
+        while ($connection->isTransactionActive()) {
+            try {
+                $connection->rollBack();
+            } catch (Throwable) {
+                $connection->close();
+                break;
+            }
+        }
+
+        if (!$this->em->isOpen()) {
+            $this->em->open();
+        }
+
+        $this->em->clear();
     }
 
     private static function isTransientTransactionError(Throwable $e): bool
@@ -130,6 +161,10 @@ final class LinearLogBuilder
                 || str_contains($message, 'Lock wait timeout')
                 || str_contains($message, 'server has gone away')
                 || str_contains($message, 'Lost connection')
+                // Doctrine closes the EntityManager on the underlying DBAL error,
+                // so a mid-build closure is the same transient fault seen one
+                // layer up; resetConnectionState() reopens it before the retry.
+                || str_contains($message, 'EntityManager is closed')
             ) {
                 return true;
             }
@@ -387,12 +422,22 @@ final class LinearLogBuilder
             $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
             throw $e;
         } finally {
-            if ($connection->isTransactionActive()) {
-                $connection->rollBack();
+            // Unguarded, a throwing rollBack() here replaces the real exception
+            // and hides why the build failed. Unwind every level instead.
+            while ($connection->isTransactionActive()) {
+                try {
+                    $connection->rollBack();
+                } catch (Throwable) {
+                    $connection->close();
+                    break;
+                }
             }
 
             $this->previewContext->end();
-            $this->em->clear();
+
+            if ($this->em->isOpen()) {
+                $this->em->clear();
+            }
         }
 
         $managedStation = $this->stationRepo->findByIdentifier((string)$stationId);
