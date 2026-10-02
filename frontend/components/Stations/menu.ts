@@ -422,15 +422,6 @@ export function useStationsMenu() {
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
         {
-            key: 'crossfade_profiles',
-            label: $gettext('Crossfade Profiles'),
-            icon: () => IconIcGraphicEq,
-            url: {
-                name: 'stations:crossfade_profiles'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-        },
-        {
             key: 'broadcasting',
             label: $gettext('Broadcasting'),
             icon: () => IconBiBroadcast,
@@ -489,14 +480,6 @@ export function useStationsMenu() {
                     visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                         && station.value.features.media
                 },
-                {
-                    key: 'restart',
-                    label: $gettext('Restart Broadcasting'),
-                    url: {
-                        name: 'stations:restart:index',
-                    },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
-                }
             ]
         },
         {
