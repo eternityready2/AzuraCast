@@ -9,7 +9,6 @@ use App\Entity\Enums\PlaylistSources;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Event\Radio\WriteLiquidsoapConfiguration;
-use App\Radio\AutoDJ\RigidScheduleWindowResolver;
 use App\Radio\Backend\Liquidsoap\ConfigWriter;
 use App\Radio\Backend\Liquidsoap\PlaylistFileWriter;
 use App\Utilities\ScheduleRecurrence;
@@ -51,19 +50,6 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
         $station = $event->getStation();
         $rigidBranches = [];
 
-        // Defined before the strict branches: their play-once gates read it.
-        // This state is only emitted as a helper definition. With no strict
-        // branches below, this subscriber does not wrap or replace `radio`.
-        $event->appendBlock(
-            <<<'LIQ'
-            # Strict schedule state (Top-of-Hour plugin).
-            rigid_schedule_active = ref(false)
-            # Set by the Top-of-Hour lane while its ID/news owns the air.
-            rigid_schedule_toh_lane_owns_air = ref(false)
-            LIQ
-        );
-
-
         foreach ($station->playlists as $playlist) {
             if (!$playlist->is_enabled) {
                 continue;
@@ -83,8 +69,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
 
             $rigidSchedules = [];
             foreach ($playlist->schedule_items as $scheduleItem) {
-                // Shared with the AutoDJ, which never selects these rows.
-                if (RigidScheduleWindowResolver::isAiredByStrictLane($playlist, $scheduleItem)) {
+                if ($this->isRigidSchedule($scheduleItem)) {
                     $rigidSchedules[] = $scheduleItem;
                 }
             }
@@ -106,25 +91,27 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
             }
 
             foreach ($rigidSchedules as $scheduleItem) {
-                $windowOpen = $this->getScheduledPlaylistPlayTime($event, $scheduleItem);
+                $playTime = $this->getScheduledPlaylistPlayTime($event, $scheduleItem);
                 // A scheduled programme waits while the Top-of-Hour ID/news owns
                 // the air; otherwise it runs silently under them and listeners
                 // join it minutes in. It starts from its top when they finish.
-                $playTime = '(' . $windowOpen . ') and not rigid_schedule_toh_lane_owns_air()';
-
-                $maxTracks = RigidScheduleWindowResolver::maxTracksPerWindow($playlist, $scheduleItem);
-                if (null === $maxTracks) {
-                    $rigidBranches[] = '({ ' . $playTime . ' }, ' . $playlistVarName . ')';
-                    continue;
-                }
-
-                $scheduleKey = isset($scheduleItem->id) ? $scheduleItem->id : spl_object_id($scheduleItem);
-                $gateName = $playlistVarName . '_pass_' . $scheduleKey;
-                $event->appendLines($this->writePlayOnceGate($gateName, $playlistVarName, $windowOpen, $maxTracks));
-                $rigidBranches[] = '(' . $gateName . ', ' . $playlistVarName . ')';
+                $playTime = '(' . $playTime . ') and not rigid_schedule_toh_lane_owns_air()';
+                $rigidBranches[] = $playlist->backendPlaySingleTrack()
+                    ? '(predicate.at_most(1, {' . $playTime . '}), ' . $playlistVarName . ')'
+                    : '({ ' . $playTime . ' }, ' . $playlistVarName . ')';
             }
         }
 
+        // This state is only emitted as a helper definition. With no strict
+        // branches below, this subscriber does not wrap or replace `radio`.
+        $event->appendBlock(
+            <<<'LIQ'
+            # Strict schedule state (Top-of-Hour plugin).
+            rigid_schedule_active = ref(false)
+            # Set by the Top-of-Hour lane while its ID/news owns the air.
+            rigid_schedule_toh_lane_owns_air = ref(false)
+            LIQ
+        );
 
         if ([] === $rigidBranches) {
             return;
@@ -290,57 +277,14 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
         return true;
     }
 
-    /**
-     * One pass per window, counted from the source's real track starts.
-     *
-     * The strict switch is track_sensitive=false, so its predicates run every
-     * frame; a call counter such as predicate.at_most() turns false within a
-     * frame. Instead the gate closes a fraction of a second before the last
-     * allowed track ends (RigidScheduleWindowResolver::maxTracksPerWindow).
-     *
-     * The counter resets only on the window itself opening, not on the TOH
-     * term: an ID inside a long window must not grant the programme a replay.
-     * Whenever a window closes after the source played, it is skipped so the
-     * next window does not resume the tail of a cut or finished track.
-     *
-     * @return list<string>
-     */
-    private function writePlayOnceGate(
-        string $gateName,
-        string $sourceName,
-        string $windowOpen,
-        int $maxTracks,
-    ): array {
-        return [
-            '# Play-once gate: at most ' . $maxTracks . ' track(s) per window, then the AutoDJ.',
-            $gateName . '_started = ref(0)',
-            $gateName . '_done = ref(false)',
-            $gateName . '_was_open = ref(false)',
-            $sourceName . '.on_track(synchronous=true, fun (_) ->',
-            '    ' . $gateName . '_started := ' . $gateName . '_started() + 1',
-            ')',
-            $sourceName . '.on_position(position=0.2, remaining=true, allow_partial=true, synchronous=true,',
-            '    fun (_, _) ->',
-            '        if ' . $gateName . '_was_open() and ' . $gateName . '_started() >= ' . $maxTracks . ' then',
-            '            ' . $gateName . '_done := true',
-            '        end',
-            ')',
-            'def ' . $gateName . '() =',
-            '    is_open = (' . $windowOpen . ')',
-            '    if is_open and not ' . $gateName . '_was_open() then',
-            '        ' . $gateName . '_started := 0',
-            '        ' . $gateName . '_done := false',
-            '    end',
-            '    if not is_open and ' . $gateName . '_was_open() and ' . $gateName . '_started() > 0 then',
-            '        ' . $sourceName . '.skip()',
-            '    end',
-            '    ' . $gateName . '_was_open := is_open',
-            '    is_open and not rigid_schedule_toh_lane_owns_air() and not ' . $gateName . '_done()',
-            'end',
-            '',
-        ];
+    private function isRigidSchedule(StationSchedule $schedule): bool
+    {
+        // Playlist-wide Start Behavior belongs to ordinary/flexible scheduling.
+        // Only an explicit Strict / Exact Time row (or emergency row) gets the
+        // outer native wall-clock lane. This prevents a playlist-wide Programme
+        // choice from silently converting every Flexible row into Strict.
+        return $schedule->strict_start || $schedule->is_emergency;
     }
-
 
     /**
      * Mirrors ConfigWriter's schedule predicate generation so the outer strict
