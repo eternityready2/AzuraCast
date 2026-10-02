@@ -145,8 +145,16 @@ final class LinearLogRules
         }
 
         // A scheduled playlist planned outside its own window: the "starts too
-        // early" case.
+        // early" case. isPlaylistAllowedAt() can also say no here purely from
+        // the cross-playlist "a narrower block wins" comparison -- some other
+        // schedule row opened at the same instant -- and that must never drop
+        // the playlist's own occurrence from the live queue: a playlist always
+        // owns its air inside its own real scheduled time, full stop.
         if ($playlist->schedule_items->count() > 0) {
+            if ($this->scheduler->isPlaylistScheduledToPlayNow($playlist, $at, excludeSpecialRules: true)) {
+                return null;
+            }
+
             return $dropOutside
                 ? sprintf('"%s" is planned outside its own scheduled window', $playlist->name)
                 : null;

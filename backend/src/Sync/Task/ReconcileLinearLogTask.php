@@ -8,6 +8,7 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
+use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
 use Carbon\CarbonImmutable;
 use Throwable;
@@ -130,6 +131,10 @@ final class ReconcileLinearLogTask extends AbstractTask
                 $entry->title = $row->title;
                 $entry->artist = $row->artist;
                 $entry->text = $row->text;
+                // The ON AIR match is by payload.song_id, not by title/artist; left
+                // stale here it keeps pointing at the pre-swap song, so the Linear
+                // Log page can show a different song than what's actually airing.
+                $entry->payload = LinearLogStore::payloadForQueueRow($row);
             } else {
                 $entry->status = StationLogEntry::STATUS_AIRED;
             }

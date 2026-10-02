@@ -283,19 +283,33 @@ final class LinearLogStore
             'title' => $row->title,
             'artist' => $row->artist,
             'text' => $row->text,
-            'payload' => [
-                'clock_wheel_id' => $row->clock_wheel?->id,
-                'clock_wheel' => $row->clock_wheel?->name,
-                'clock_wheel_max_play_seconds' => $row->clock_wheel_max_play_seconds,
-                'clock_wheel_schedule_mode' => $row->clock_wheel_schedule_mode,
-                'clock_wheel_enforce_cap' => $row->clock_wheel_enforce_cap,
-                'clock_wheel_stretch_ratio' => $row->clock_wheel_stretch_ratio,
-                'clock_wheel_legal_id_substitute' => $row->clock_wheel_legal_id_substitute,
-                'playlist_chain' => $row->playlist_chain,
-                'album' => $row->album,
-                'song_id' => $row->song_id,
-                'media_type' => $row->media?->type,
-            ],
+            'payload' => self::payloadForQueueRow($row),
+        ];
+    }
+
+    /**
+     * The log entry payload describing a queue row: which song it actually is
+     * (song_id/album, for the ON AIR match) plus clock wheel/playlist-chain
+     * context. Shared so a row re-describing an entry after the fact (a
+     * swap/replace reconciled once it airs) builds the exact same shape as a
+     * freshly planned one, rather than leaving stale pre-swap data behind.
+     *
+     * @return array<string, mixed>
+     */
+    public static function payloadForQueueRow(StationQueue $row): array
+    {
+        return [
+            'clock_wheel_id' => $row->clock_wheel?->id,
+            'clock_wheel' => $row->clock_wheel?->name,
+            'clock_wheel_max_play_seconds' => $row->clock_wheel_max_play_seconds,
+            'clock_wheel_schedule_mode' => $row->clock_wheel_schedule_mode,
+            'clock_wheel_enforce_cap' => $row->clock_wheel_enforce_cap,
+            'clock_wheel_stretch_ratio' => $row->clock_wheel_stretch_ratio,
+            'clock_wheel_legal_id_substitute' => $row->clock_wheel_legal_id_substitute,
+            'playlist_chain' => $row->playlist_chain,
+            'album' => $row->album,
+            'song_id' => $row->song_id,
+            'media_type' => $row->media?->type,
         ];
     }
 

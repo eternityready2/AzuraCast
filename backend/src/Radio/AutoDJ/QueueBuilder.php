@@ -175,7 +175,13 @@ final class QueueBuilder implements EventSubscriberInterface
         // type plays. Decided up front: types are visited Once-per-hour first, so
         // a flag raised only on reaching the scheduled Standard playlist let
         // unscheduled promos/rotations through ahead of it.
-        $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $expectedPlayTime);
+        //
+        // $expectedPlayTime is a prediction, built ahead of real time from the
+        // durations of songs already queued before this slot; it can land a few
+        // seconds early against the real clock. A 90-second lookahead keeps an
+        // unscheduled pick from being approved for a predicted time just before
+        // a scheduled block opens, only to actually air just inside it.
+        $scheduledBlockOpen = $this->scheduler->isScheduledBlockOpenAt($station, $expectedPlayTime, 90);
 
         foreach ($typesToPlayByPriority as $currentPlaylistType) {
             if (empty($activePlaylistsByType[$currentPlaylistType])) {

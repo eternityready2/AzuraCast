@@ -175,12 +175,35 @@ final class Scheduler
     }
 
     /**
-     * True while an enabled scheduled playlist has its window open at $at. Such a
-     * block owns the air: nothing unscheduled plays then.
+     * True while an enabled scheduled playlist has its window open at $at, or
+     * will within $lookaheadSeconds. Such a block owns the air: nothing
+     * unscheduled plays then.
+     *
+     * The lookahead exists because the queue is built ahead of real time: a
+     * rotation pick's $at is predicted from how long the songs queued before
+     * it are expected to run, and that prediction drifts a little against the
+     * real clock. A pick predicted to land just before a scheduled block opens
+     * can actually air a few seconds into it once real playback catches up,
+     * so an unscheduled song gets approved for a slot that ends up inside the
+     * scheduled window. Checking a short window ahead of $at as well closes
+     * that gap without changing anything about how the ID, swap, or any
+     * already-open scheduled block behaves.
      */
-    public function isScheduledBlockOpenAt(\App\Entity\Station $station, DateTimeImmutable $at): bool
-    {
-        return null !== $this->narrowestOpenScheduleSeconds($station, $at);
+    public function isScheduledBlockOpenAt(
+        \App\Entity\Station $station,
+        DateTimeImmutable $at,
+        int $lookaheadSeconds = 0
+    ): bool {
+        if (null !== $this->narrowestOpenScheduleSeconds($station, $at)) {
+            return true;
+        }
+
+        if ($lookaheadSeconds > 0) {
+            $ahead = CarbonImmutable::instance($at)->addSeconds($lookaheadSeconds);
+            return null !== $this->narrowestOpenScheduleSeconds($station, $ahead);
+        }
+
+        return false;
     }
 
     /**
