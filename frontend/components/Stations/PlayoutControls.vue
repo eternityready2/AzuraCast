@@ -389,63 +389,83 @@
                 >
                     <div class="row">
                         <div class="col col-md-6">
-                            <h3 class="h5 mb-2">
-                                {{ $gettext('Reload Configuration') }}
-                            </h3>
-
-                            <p class="card-text">
-                                {{ $gettext('Stations using Icecast can soft-reload the station configuration, applying changes while keeping the stream broadcast running.') }}
-                            </p>
-
-                            <p class="card-text has-text-weight-bold text-body-emphasis">
-                                {{ $gettext('Reloading broadcasting will not disconnect your listeners.') }}
-                            </p>
-
-                            <template v-if="canReload">
-                                <p class="card-text text-success">
-                                    {{ $gettext('Your station supports reloading configuration.') }}
-                                </p>
-                                <div class="buttons">
-                                    <button
-                                        type="button"
-                                        class="btn btn-warning"
-                                        :disabled="broadcastBusy"
-                                        @click="doReload"
+                            <section
+                                class="card"
+                                role="region"
+                                aria-labelledby="hdr_soft_reload"
+                            >
+                                <div class="card-header text-bg-primary">
+                                    <h3
+                                        id="hdr_soft_reload"
+                                        class="card-title"
                                     >
                                         {{ $gettext('Reload Configuration') }}
-                                    </button>
+                                    </h3>
                                 </div>
-                            </template>
-                            <template v-else>
-                                <p class="card-text text-danger">
-                                    {{ $gettext('Your station does not support reloading configuration. Restart broadcasting instead to apply changes.') }}
-                                </p>
-                            </template>
+                                <div class="card-body">
+                                    <p class="card-text">
+                                        {{ $gettext('Stations using Icecast can soft-reload the station configuration, applying changes while keeping the stream broadcast running.') }}
+                                    </p>
+                                    <p class="card-text has-text-weight-bold text-body-emphasis">
+                                        {{ $gettext('Reloading broadcasting will not disconnect your listeners.') }}
+                                    </p>
+                                    <template v-if="canReload">
+                                        <p class="card-text text-success">
+                                            {{ $gettext('Your station supports reloading configuration.') }}
+                                        </p>
+                                        <div class="buttons">
+                                            <button
+                                                type="button"
+                                                class="btn btn-warning"
+                                                :disabled="broadcastBusy"
+                                                @click="doReload"
+                                            >
+                                                {{ $gettext('Reload Configuration') }}
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <template v-else>
+                                        <p class="card-text text-danger">
+                                            {{ $gettext('Your station does not support reloading configuration. Restart broadcasting instead to apply changes.') }}
+                                        </p>
+                                    </template>
+                                </div>
+                            </section>
                         </div>
 
                         <div class="col col-md-6">
-                            <h3 class="h5 mb-2">
-                                {{ $gettext('Restart Broadcasting') }}
-                            </h3>
-
-                            <p class="card-text">
-                                {{ $gettext('Restarting broadcasting will rewrite all configuration files and restart all services.') }}
-                            </p>
-
-                            <p class="card-text has-text-weight-bold text-body-emphasis">
-                                {{ $gettext('Restarting broadcasting will briefly disconnect your listeners.') }}
-                            </p>
-
-                            <div class="buttons">
-                                <button
-                                    type="button"
-                                    class="btn btn-warning"
-                                    :disabled="broadcastBusy"
-                                    @click="doRestart"
-                                >
-                                    {{ $gettext('Restart Broadcasting') }}
-                                </button>
-                            </div>
+                            <section
+                                class="card"
+                                role="region"
+                                aria-labelledby="hdr_restart_broadcasting"
+                            >
+                                <div class="card-header text-bg-primary">
+                                    <h3
+                                        id="hdr_restart_broadcasting"
+                                        class="card-title"
+                                    >
+                                        {{ $gettext('Restart Broadcasting') }}
+                                    </h3>
+                                </div>
+                                <div class="card-body">
+                                    <p class="card-text">
+                                        {{ $gettext('Restarting broadcasting will rewrite all configuration files and restart all services.') }}
+                                    </p>
+                                    <p class="card-text has-text-weight-bold text-body-emphasis">
+                                        {{ $gettext('Restarting broadcasting will briefly disconnect your listeners.') }}
+                                    </p>
+                                    <div class="buttons">
+                                        <button
+                                            type="button"
+                                            class="btn btn-warning"
+                                            :disabled="broadcastBusy"
+                                            @click="doRestart"
+                                        >
+                                            {{ $gettext('Restart Broadcasting') }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </div>
                 </tab>
