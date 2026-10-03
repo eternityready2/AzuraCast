@@ -911,7 +911,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $dj->getVoiceModelPath(),
                 $outputPath,
                 $dj->getVoiceSpeed(),
-                $dj->useBackgroundAudio()
+                $dj->useBackgroundAudio(),
+                AiDjGenerator::MOOD_WARM
             );
 
             if ($clipPath === null) {
@@ -1030,7 +1031,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 ? $segment1Title . ' + ' . $segment2Title
                 : $segment1Title;
 
-            $clipPath = $this->generator->generateComboBreak($dj, $introText, $payloadText, $station);
+            $clipPath = $this->generator->generateComboBreak(
+                $dj,
+                $introText,
+                $payloadText,
+                $station,
+                $usedType !== null ? AiDjGenerator::moodForContentType($usedType) : AiDjGenerator::MOOD_WARM,
+                $c2 !== null ? AiDjGenerator::moodForContentType($c2->type) : null,
+            );
             if (null === $clipPath) {
                 $this->pushContentLiner($dj, $station, $backend);
                 return;

@@ -49,16 +49,44 @@ final class AiNewsGenerator
     ];
 
     /**
-     * Discover every installed Piper .onnx voice under the Docker voice library.
+     * Discover every installed Piper .onnx voice: the station's own voices first
+     * (uploaded on this server, then bundled with the fork), then the Docker voice library.
      * Shared by AI Newscaster and AI DJ Piper fallback voice pickers.
      *
      * @return list<array{label: string, path: string}>
      */
     public static function getAvailableVoiceModels(): array
     {
-        $voicesDir = self::PIPER_VOICES_DIR;
+        // A voice uploaded on this server wins over the bundled copy of the same file.
+        $station = [];
+        foreach ([PiperVoices::CUSTOM_VOICES_DIR, PiperVoices::BUNDLED_VOICES_DIR] as $dir) {
+            foreach (self::findVoiceModels($dir) as $path) {
+                $station[basename($path)] ??= $path;
+            }
+        }
+        $custom = array_map(
+            static fn(string $path): array => ['label' => PiperVoices::customLabel($path), 'path' => $path],
+            array_values($station)
+        );
+        $library = array_map(
+            static fn(string $path): array => ['label' => basename($path, '.onnx'), 'path' => $path],
+            self::findVoiceModels(self::PIPER_VOICES_DIR)
+        );
+
+        if ($library === []) {
+            $library = self::AVAILABLE_VOICE_MODELS;
+        }
+
+        return [...$custom, ...$library];
+    }
+
+    /**
+     * @return list<string> .onnx paths that have their .onnx.json config beside them
+     */
+    private static function findVoiceModels(string $voicesDir): array
+    {
         if (!is_dir($voicesDir)) {
-            return self::AVAILABLE_VOICE_MODELS;
+            return [];
         }
 
         $found = [];
@@ -71,33 +99,15 @@ final class AiNewsGenerator
 
         /** @var \SplFileInfo $file */
         foreach ($iterator as $file) {
-            if (!$file->isFile()) {
-                continue;
-            }
-
-            $name = $file->getFilename();
-            if (!str_ends_with($name, '.onnx') || str_ends_with($name, '.onnx.json')) {
-                continue;
-            }
-
             $path = str_replace('\\', '/', $file->getPathname());
-            $basename = $file->getBasename('.onnx');
-            $found[] = [
-                'label' => $basename,
-                'path' => $path,
-            ];
+            if ($file->isFile() && str_ends_with($path, '.onnx') && is_file($path . '.json')) {
+                $found[$file->getBasename('.onnx')] = $path;
+            }
         }
 
-        if ($found === []) {
-            return self::AVAILABLE_VOICE_MODELS;
-        }
+        ksort($found);
 
-        usort(
-            $found,
-            static fn(array $a, array $b): int => strcmp($a['label'], $b['label'])
-        );
-
-        return $found;
+        return array_values($found);
     }
 
     public const string OUTPUT_FILENAME = 'news_bulletin.mp3';

@@ -102,6 +102,25 @@ final class AiDjGenerator
 
     private const array IDENT_TOKENS = ['{{dj_name}}', '{{station_name}}', '{{show_name}}'];
 
+    /**
+     * Delivery moods of a Piper mood voice (e.g. Kim Rasmussen's four styles).
+     * Each break picks the mood that fits its script; voices without moods
+     * (Kokoro, single-style Piper) ignore it.
+     */
+    public const string MOOD_WARM = 'warm';
+    public const string MOOD_CALM = 'calm';
+    public const string MOOD_UPBEAT = 'upbeat';
+    public const string MOOD_AMUSED = 'amused';
+
+    public static function moodForContentType(string $type): string
+    {
+        return match ($type) {
+            AiDjContent::TYPE_BIBLE_VERSE => self::MOOD_CALM,
+            AiDjContent::TYPE_JOKE => self::MOOD_AMUSED,
+            default => self::MOOD_WARM,
+        };
+    }
+
     public function __construct(
         private readonly AiDjCleanup $cleanup,
         private readonly AiDjContentRepository $contentRepo,
@@ -180,6 +199,7 @@ final class AiDjGenerator
 
     /**
      * Generate TTS audio from text using Piper or Kokoro, depending on the voice model.
+     * $mood (MOOD_*) picks the delivery on a Piper mood voice; other voices ignore it.
      *
      * @return string|null MP3 path on success, null on failure/timeout
      */
@@ -189,7 +209,8 @@ final class AiDjGenerator
         ?string $voiceModelPath,
         string $outputPath,
         float $voiceSpeed = 1.0,
-        bool $useBackgroundAudio = false
+        bool $useBackgroundAudio = false,
+        ?string $mood = null
     ): ?string {
         $tempDir = dirname($outputPath);
 
@@ -206,7 +227,7 @@ final class AiDjGenerator
         if ($isKokoro) {
             $result = $this->generateWithKokoro($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed);
         } else {
-            $result = $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed);
+            $result = $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed, $mood);
         }
 
         if ($result !== null && $useBackgroundAudio) {
@@ -262,33 +283,14 @@ final class AiDjGenerator
         ?string $voiceModelPath,
         string $outputPath,
         string $tempDir,
-        float $voiceSpeed = 1.0
+        float $voiceSpeed = 1.0,
+        ?string $mood = null
     ): ?string {
-        $modelPath = $voiceModelPath
-            ?: (AiNewsGenerator::getAvailableVoiceModels()[0]['path'] ?? null);
         $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
         $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
 
         try {
-            $piperArgs = [
-                self::PIPER_BIN,
-                '--model', $modelPath,
-                '--output_file', $wavFile,
-            ];
-            if ($voiceSpeed !== 1.0) {
-                $piperArgs[] = '--length_scale';
-                $piperArgs[] = (string) (1.0 / $voiceSpeed); // Piper: lower length_scale = faster speech
-            }
-            $piper = new Process($piperArgs);
-            $piper->setInput($text);
-            $piper->setTimeout(self::TTS_TIMEOUT);
-            $piper->run();
-
-            if (!$piper->isSuccessful()) {
-                $this->logger->warning(sprintf(
-                    'Piper TTS failed or timed out: %s',
-                    $piper->getErrorOutput() ?: 'Unknown error'
-                ));
+            if (!$this->renderPiperWav($text, $voiceModelPath, $wavFile, $voiceSpeed, $mood)) {
                 return null;
             }
 
@@ -300,6 +302,61 @@ final class AiDjGenerator
             @unlink($wavFile);
             @unlink($tmpMp3);
         }
+    }
+
+    /**
+     * Render raw Piper speech to a wav. On a mood voice the mood selects the
+     * speaker and that mood's own pace/expression from the voice's config.
+     */
+    private function renderPiperWav(
+        string $text,
+        ?string $voiceModelPath,
+        string $wavFile,
+        float $voiceSpeed,
+        ?string $mood
+    ): bool {
+        $modelPath = $voiceModelPath
+            ?: (AiNewsGenerator::getAvailableVoiceModels()[0]['path'] ?? null);
+
+        $piperArgs = [
+            self::PIPER_BIN,
+            '--model', $modelPath,
+            '--output_file', $wavFile,
+        ];
+
+        $moods = PiperVoices::moods((string)$modelPath);
+        $mood = isset($moods[$mood ?? '']) ? $mood : null;
+        if (null !== $mood) {
+            $inference = PiperVoices::inference((string)$modelPath, $mood);
+            $piperArgs[] = '--speaker';
+            $piperArgs[] = (string)$moods[$mood];
+            foreach (['noise_scale' => '--noise_scale', 'noise_w' => '--noise_w'] as $key => $flag) {
+                if (isset($inference[$key])) {
+                    $piperArgs[] = $flag;
+                    $piperArgs[] = (string)$inference[$key];
+                }
+            }
+            $piperArgs[] = '--length_scale';
+            $piperArgs[] = (string)((float)($inference['length_scale'] ?? 1.0) / $voiceSpeed);
+        } elseif ($voiceSpeed !== 1.0) {
+            $piperArgs[] = '--length_scale';
+            $piperArgs[] = (string) (1.0 / $voiceSpeed); // Piper: lower length_scale = faster speech
+        }
+
+        $piper = new Process($piperArgs);
+        $piper->setInput($text);
+        $piper->setTimeout(self::TTS_TIMEOUT);
+        $piper->run();
+
+        if (!$piper->isSuccessful()) {
+            $this->logger->warning(sprintf(
+                'Piper TTS failed or timed out: %s',
+                $piper->getErrorOutput() ?: 'Unknown error'
+            ));
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -374,7 +431,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'song_intro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
     }
 
     /**
@@ -407,7 +464,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'post_song');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
     }
 
     /**
@@ -479,7 +536,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'shift_outro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
     }
 
     /**
@@ -510,7 +567,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'shift_intro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_UPBEAT);
     }
 
     /**
@@ -531,7 +588,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'liner');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::moodForContentType($content->type));
     }
 
     /**
@@ -566,7 +623,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'short_liner');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_UPBEAT);
     }
 
     /**
@@ -574,26 +631,107 @@ final class AiDjGenerator
      * clip. Segment 1 carries the single self-intro; segment 2 is intro-free. One
      * render, one mp3 (no ffmpeg concat, so no mid-clip dead air). An empty payload
      * degrades cleanly to a valid single-segment clip.
+     *
+     * On a Piper mood voice whose two segments want different moods (song
+     * commentary warm, then a joke amused), each segment is rendered in its own
+     * mood and the two wavs are joined with a short breath before encoding.
      */
-    public function generateComboBreak(AiDj $dj, string $introText, string $payloadText, Station $station): ?string
-    {
+    public function generateComboBreak(
+        AiDj $dj,
+        string $introText,
+        string $payloadText,
+        Station $station,
+        ?string $introMood = null,
+        ?string $payloadMood = null,
+    ): ?string {
         if ($this->isOverDiskQuota($station, logWarning: false)) {
             return null;
         }
 
         $intro = $this->truncateForTts(trim($introText), self::COMBO_SEGMENT_CHARS);
         $payload = trim($payloadText);
-        $combined = $payload === ''
-            ? $intro
-            : $intro . ' ' . $this->truncateForTts($payload, self::COMBO_SEGMENT_CHARS);
+        $payload = $payload === '' ? '' : $this->truncateForTts($payload, self::COMBO_SEGMENT_CHARS);
+        $combined = $payload === '' ? $intro : $intro . ' ' . $payload;
 
         if ($combined === '') {
             return null;
         }
 
         $outputPath = $this->buildClipOutputPath($station, 'combo');
+        $voice = $dj->getVoiceModelPath();
+        $moods = $voice !== null && !str_starts_with($voice, self::KOKORO_PREFIX)
+            ? PiperVoices::moods($voice)
+            : [];
 
-        return $this->generateAudio($combined, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio());
+        if ($payload !== '' && $introMood !== $payloadMood && isset($moods[$introMood ?? ''], $moods[$payloadMood ?? ''])) {
+            $result = $this->renderTwoMoodCombo($dj, $intro, $introMood, $payload, $payloadMood, $outputPath);
+            if ($result !== null) {
+                return $dj->useBackgroundAudio()
+                    ? $this->mixWithBackgroundAudio($result, dirname($outputPath))
+                    : $result;
+            }
+            // Fall back to one single-mood render rather than losing the break.
+        }
+
+        return $this->generateAudio($combined, $voice, $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), $introMood);
+    }
+
+    private function renderTwoMoodCombo(
+        AiDj $dj,
+        string $intro,
+        string $introMood,
+        string $payload,
+        string $payloadMood,
+        string $outputPath,
+    ): ?string {
+        $tempDir = dirname($outputPath);
+        if (!is_dir($tempDir) && !@mkdir($tempDir, 0755, true)) {
+            return null;
+        }
+
+        $id = uniqid();
+        $first = $tempDir . '/combo_a_' . $id . '.wav';
+        $second = $tempDir . '/combo_b_' . $id . '.wav';
+        $joined = $tempDir . '/combo_' . $id . '.wav';
+        $tmpMp3 = $tempDir . '/combo_' . $id . '_tmp.mp3';
+
+        try {
+            $voice = $dj->getVoiceModelPath();
+            if (
+                !$this->renderPiperWav($intro, $voice, $first, $dj->getVoiceSpeed(), $introMood)
+                || !$this->renderPiperWav($payload, $voice, $second, $dj->getVoiceSpeed(), $payloadMood)
+            ) {
+                return null;
+            }
+
+            // Both halves come from the same model, so sample rate and format match
+            // and the wavs concatenate cleanly; 0.35s is a natural breath between them.
+            $ffmpeg = new Process([
+                self::FFMPEG_BIN,
+                '-y',
+                '-i', $first,
+                '-i', $second,
+                '-filter_complex', '[0:a]apad=pad_dur=0.35[a];[a][1:a]concat=n=2:v=0:a=1',
+                $joined,
+            ]);
+            $ffmpeg->setTimeout(10);
+            $ffmpeg->run();
+
+            if (!$ffmpeg->isSuccessful()) {
+                $this->logger->warning('AI DJ: Joining a two-mood combo failed.');
+                return null;
+            }
+
+            return $this->finalizeAudioClip($joined, $tmpMp3, $outputPath, '128k');
+        } catch (Throwable $e) {
+            $this->logger->error(sprintf('AI DJ two-mood combo failed: %s', $e->getMessage()));
+            return null;
+        } finally {
+            @unlink($first);
+            @unlink($second);
+            @unlink($joined);
+            @unlink($tmpMp3);
+        }
     }
 
     /**
