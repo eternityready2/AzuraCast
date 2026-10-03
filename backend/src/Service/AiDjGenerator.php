@@ -567,7 +567,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'shift_intro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_UPBEAT);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
     }
 
     /**
