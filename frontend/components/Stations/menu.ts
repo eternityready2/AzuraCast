@@ -9,7 +9,6 @@ import IconIcLibraryMusic from "~icons/ic/baseline-library-music";
 import IconIcAssignment from "~icons/ic/baseline-assignment";
 import IconIcMic from "~icons/ic/baseline-mic";
 import IconIcQueueMusic from "~icons/ic/baseline-queue-music";
-import IconIcAutoAwesome from "~icons/ic/baseline-auto-awesome";
 import IconIcPodcasts from "~icons/ic/baseline-podcasts";
 import IconIcPublic from "~icons/ic/baseline-public";
 import IconIcInsertChart from "~icons/ic/baseline-insert-chart";
