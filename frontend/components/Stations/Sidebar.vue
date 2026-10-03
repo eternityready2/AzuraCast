@@ -52,7 +52,7 @@
             class="navdrawer-alert bg-warning-subtle text-warning-emphasis"
         >
             <router-link
-                :to="{name: 'stations:restart:index'}"
+                :to="{name: 'stations:playout_controls', query: {tab: 'restart_broadcasting'}}"
             >
                 <span class="fw-bold">{{ $gettext('Reload to Apply Changes') }}</span><br>
                 <small>

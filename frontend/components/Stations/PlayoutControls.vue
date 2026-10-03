@@ -488,7 +488,7 @@ import type {PlayoutControlsSettings} from '~/entities/PlayoutControls.ts';
 import {useAxios} from '~/vendor/axios.ts';
 import {onMounted, ref} from 'vue';
 import {useTranslate} from '~/vendor/gettext.ts';
-import {useRouter} from 'vue-router';
+import {useRoute, useRouter} from 'vue-router';
 import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
 import {useClearAllStationQueries, useStationData} from '~/functions/useStationQuery.ts';
 import {ApiStatus, FlashLevels} from '~/entities/ApiInterfaces.ts';
@@ -502,7 +502,8 @@ const {$gettext} = useTranslate();
 const router = useRouter();
 const {showAlert} = useDialog();
 
-const activeTab = ref('live_controls');
+const route = useRoute();
+const activeTab = ref(typeof route.query.tab === 'string' ? route.query.tab : 'live_controls');
 
 // Audio settings
 const apiUrl = getStationApiUrl('/playout-controls');
