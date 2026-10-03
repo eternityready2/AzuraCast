@@ -237,16 +237,13 @@ final class AiDjGenerator
         return $result;
     }
 
-    private function generateWithKokoro(
+    private function renderKokoroWav(
         string $text,
         string $voiceModelPath,
-        string $outputPath,
-        string $tempDir,
-        float $voiceSpeed = 1.0
-    ): ?string {
+        string $wavFile,
+        float $voiceSpeed
+    ): bool {
         $voiceId = substr($voiceModelPath, strlen(self::KOKORO_PREFIX));
-        $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
-        $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
 
         try {
             $kokoro = new Process([
@@ -265,6 +262,43 @@ final class AiDjGenerator
                     'Kokoro TTS failed: %s',
                     $kokoro->getErrorOutput() ?: 'Unknown error'
                 ));
+                return false;
+            }
+
+            return true;
+        } catch (Throwable $e) {
+            $this->logger->error(sprintf('Kokoro AI DJ audio generation failed: %s', $e->getMessage()));
+            return false;
+        }
+    }
+
+    // Renders either a Piper or Kokoro voice to a raw wav, picked by the voice path's prefix.
+    private function renderPieceWav(
+        string $text,
+        ?string $voiceModelPath,
+        string $wavFile,
+        float $voiceSpeed,
+        ?string $mood
+    ): bool {
+        if ($voiceModelPath !== null && str_starts_with($voiceModelPath, self::KOKORO_PREFIX)) {
+            return $this->renderKokoroWav($text, $voiceModelPath, $wavFile, $voiceSpeed);
+        }
+
+        return $this->renderPiperWav($text, $voiceModelPath, $wavFile, $voiceSpeed, $mood);
+    }
+
+    private function generateWithKokoro(
+        string $text,
+        string $voiceModelPath,
+        string $outputPath,
+        string $tempDir,
+        float $voiceSpeed = 1.0
+    ): ?string {
+        $wavFile = $tempDir . '/audio_' . uniqid() . '.wav';
+        $tmpMp3 = $tempDir . '/audio_' . uniqid() . '_tmp.mp3';
+
+        try {
+            if (!$this->renderKokoroWav($text, $voiceModelPath, $wavFile, $voiceSpeed)) {
                 return null;
             }
 
@@ -651,37 +685,38 @@ final class AiDjGenerator
         $intro = $this->truncateForTts(trim($introText), self::COMBO_SEGMENT_CHARS);
         $payload = trim($payloadText);
         $payload = $payload === '' ? '' : $this->truncateForTts($payload, self::COMBO_SEGMENT_CHARS);
-        $combined = $payload === '' ? $intro : $intro . ' ' . $payload;
 
-        if ($combined === '') {
+        if ($intro === '' && $payload === '') {
             return null;
         }
 
         $outputPath = $this->buildClipOutputPath($station, 'combo');
         $voice = $dj->getVoiceModelPath();
-        $moods = $voice !== null && !str_starts_with($voice, self::KOKORO_PREFIX)
-            ? PiperVoices::moods($voice)
-            : [];
 
-        if ($payload !== '' && $introMood !== $payloadMood && isset($moods[$introMood ?? ''], $moods[$payloadMood ?? ''])) {
-            $result = $this->renderTwoMoodCombo($dj, $intro, $introMood, $payload, $payloadMood, $outputPath);
+        // Each half is rendered as its own TTS pass and joined with a brief pause,
+        // rather than spoken as one continuous line. Gluing two unrelated sentences
+        // into a single TTS call produced an audible stretched/held word right at
+        // the seam between them.
+        if ($payload !== '') {
+            $result = $this->renderTwoPieceCombo($dj, $intro, $introMood, $payload, $payloadMood, $outputPath);
             if ($result !== null) {
                 return $dj->useBackgroundAudio()
                     ? $this->mixWithBackgroundAudio($result, dirname($outputPath))
                     : $result;
             }
-            // Fall back to one single-mood render rather than losing the break.
+            // Fall back to one combined render rather than losing the break.
         }
 
+        $combined = $payload === '' ? $intro : $intro . ' ' . $payload;
         return $this->generateAudio($combined, $voice, $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), $introMood);
     }
 
-    private function renderTwoMoodCombo(
+    private function renderTwoPieceCombo(
         AiDj $dj,
         string $intro,
-        string $introMood,
+        ?string $introMood,
         string $payload,
-        string $payloadMood,
+        ?string $payloadMood,
         string $outputPath,
     ): ?string {
         $tempDir = dirname($outputPath);
@@ -697,14 +732,15 @@ final class AiDjGenerator
 
         try {
             $voice = $dj->getVoiceModelPath();
+            $speed = $dj->getVoiceSpeed();
             if (
-                !$this->renderPiperWav($intro, $voice, $first, $dj->getVoiceSpeed(), $introMood)
-                || !$this->renderPiperWav($payload, $voice, $second, $dj->getVoiceSpeed(), $payloadMood)
+                !$this->renderPieceWav($intro, $voice, $first, $speed, $introMood)
+                || !$this->renderPieceWav($payload, $voice, $second, $speed, $payloadMood)
             ) {
                 return null;
             }
 
-            // Both halves come from the same model, so sample rate and format match
+            // Both halves come from the same voice, so sample rate and format match
             // and the wavs concatenate cleanly; 0.35s is a natural breath between them.
             $ffmpeg = new Process([
                 self::FFMPEG_BIN,
@@ -718,13 +754,13 @@ final class AiDjGenerator
             $ffmpeg->run();
 
             if (!$ffmpeg->isSuccessful()) {
-                $this->logger->warning('AI DJ: Joining a two-mood combo failed.');
+                $this->logger->warning('AI DJ: Joining a combo break failed.');
                 return null;
             }
 
             return $this->finalizeAudioClip($joined, $tmpMp3, $outputPath, '128k');
         } catch (Throwable $e) {
-            $this->logger->error(sprintf('AI DJ two-mood combo failed: %s', $e->getMessage()));
+            $this->logger->error(sprintf('AI DJ combo break failed: %s', $e->getMessage()));
             return null;
         } finally {
             @unlink($first);
