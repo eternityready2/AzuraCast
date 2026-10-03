@@ -36,7 +36,8 @@
 </template>
 
 <script setup lang="ts">
-import {onMounted, ref} from "vue";
+import {inject, onMounted, ref, watch} from "vue";
+import {routeLocationKey} from "vue-router";
 import {TabParentProps, useTabParent} from "~/functions/tabs.ts";
 
 const props = withDefaults(
@@ -62,15 +63,25 @@ const selectTab = (computedId: string): void => {
     emit('update:modelValue', computedId);
 }
 
+// Optional: Tabs also render on pages without a router.
+const route = inject(routeLocationKey, null);
+
+const findTab = (id: unknown) => state.tabs.find((tab) => tab.computedId === id);
+
 onMounted(() => {
     if (!state.tabs.length) {
         return;
     }
 
-    const initialTab = state.tabs.find(
-        (tab) => tab.computedId === activeId.value
-    );
+    const initialTab = findTab(route?.query.tab) ?? findTab(activeId.value);
 
     selectTab(initialTab?.computedId ?? state.tabs[0].computedId);
+});
+
+watch(() => route?.query.tab, (tabId) => {
+    const tab = findTab(tabId);
+    if (tab) {
+        selectTab(tab.computedId);
+    }
 });
 </script>

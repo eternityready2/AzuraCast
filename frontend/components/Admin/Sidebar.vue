@@ -9,13 +9,20 @@
     </div>
 
     <div class="offcanvas-body">
-        <sidebar-menu :menu="menuItems" />
+        <sidebar-menu
+            :menu="menuItems"
+            :search-sources="[adminSearch]"
+            :data-sources="dataSources"
+        />
     </div>
 </template>
 
 <script setup lang="ts">
 import SidebarMenu from "~/components/Common/SidebarMenu.vue";
-import {useAdminMenu} from "~/components/Admin/menu";
+import {useAdminMenu, useAdminSearchSource} from "~/components/Admin/menu";
+import {useAdminSearchSources} from "~/components/Admin/searchSources.ts";
 
 const menuItems = useAdminMenu();
+const adminSearch = useAdminSearchSource();
+const dataSources = useAdminSearchSources();
 </script>

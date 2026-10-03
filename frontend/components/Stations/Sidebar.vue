@@ -63,7 +63,11 @@
     </template>
 
     <div class="offcanvas-body">
-        <sidebar-menu :menu="menuItems" />
+        <sidebar-menu
+            :menu="menuItems"
+            :search-sources="[{section: name ?? '', menu: menuItems}, adminSearch]"
+            :data-sources="dataSources"
+        />
     </div>
 </template>
 
@@ -72,6 +76,9 @@ import {computed, ref} from "vue";
 import SidebarMenu from "~/components/Common/SidebarMenu.vue";
 import {toRefs, useIntervalFn} from "@vueuse/core";
 import {useStationsMenu} from "~/components/Stations/menu";
+import {useAdminSearchSource} from "~/components/Admin/menu";
+import {useStationSearchSources} from "~/components/Stations/searchSources.ts";
+import {useAdminSearchSources} from "~/components/Admin/searchSources.ts";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useLuxon} from "~/vendor/luxon.ts";
 import {ApiNowPlayingVueProps, StationPermissions} from "~/entities/ApiInterfaces.ts";
@@ -81,6 +88,8 @@ import useNowPlaying from "~/functions/useNowPlaying.ts";
 import IconIcHeadphones from "~icons/ic/baseline-headphones";
 
 const menuItems = useStationsMenu();
+const adminSearch = useAdminSearchSource();
+const dataSources = [...useStationSearchSources(), ...useAdminSearchSources()];
 const {userAllowedForStation} = useUserAllowedForStation();
 
 const stationData = useStationData();
