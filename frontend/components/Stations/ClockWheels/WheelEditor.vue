@@ -569,7 +569,7 @@
                                     <tr>
                                         <th style="width: 1.5rem;" />
                                         <th>{{ $gettext('Position') }}</th>
-                                        <th>{{ $gettext('What plays here') }}</th>
+                                        <th>{{ $gettext('Type / Category') }}</th>
                                         <th>{{ $gettext('Playlist / Smart block') }}</th>
                                         <th>{{ $gettext('Algorithm') }}</th>
                                         <th>{{ $gettext('Max Sec') }}</th>
@@ -614,7 +614,7 @@
                                             <select
                                                 :value="clockWheelContentKey(entry)"
                                                 class="form-select form-select-sm"
-                                                :aria-label="$gettext('What plays here')"
+                                                :aria-label="$gettext('Type / Category')"
                                                 @change="onContentChange(entry, $event)"
                                             >
                                                 <optgroup
@@ -931,7 +931,7 @@ const timelineWarnings = computed(() => [
 const layoutValid = computed(() => entries.length > 0 && timelineWarnings.value.length === 0
     && hourBudget.value.overSeconds === 0);
 
-// "What plays here": one choice that sets type, category or playlist together.
+// "Type / Category": one choice that sets the type or a music category.
 const contentGroups = computed(() => buildClockWheelContentGroups(
     typeOptions.value,
     categoryOptions.value,
