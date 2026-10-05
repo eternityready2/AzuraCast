@@ -335,7 +335,7 @@ export function fixClockWheelHour(
 }
 
 export interface ClockWheelBuildOptions {
-    /** The music every song slot plays from (a "What plays here" row). */
+    /** The music every song slot plays from (a "Type / Category" row). */
     music: ClockWheelSlotEditorRow;
     promoBreaks: number;
     promosPerBreak: number;

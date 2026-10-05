@@ -4,7 +4,7 @@ import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 /**
  * A wheel entry is set with two dropdowns:
- *  - "What plays here": the type (with its description) or a music category,
+ *  - "Type / Category": the type (with its description) or a music category,
  *    one choice instead of separate Type and Category fields that could
  *    contradict each other. Keys: "type:<type>", "cat:<categoryId>".
  *  - "Playlist / Smart block": optionally narrows that to one playlist or
@@ -79,7 +79,7 @@ export function clockWheelPlaylistKey(row: Pick<ClockWheelSlotEditorRow, 'playli
     return row.playlist_id ? `pl:${row.playlist_id}` : '';
 }
 
-/** Applies a "What plays here" choice; the playlist choice is left as it is. */
+/** Applies a "Type / Category" choice; the playlist choice is left as it is. */
 export function applyClockWheelContentKey(row: ClockWheelSlotEditorRow, key: string): void {
     const [kind, value] = key.split(':');
     row.category_id = null;
