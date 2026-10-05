@@ -55,7 +55,7 @@ final class StationMediaRepository extends Repository
         $storageLocation = $this->getStorageLocation($station);
 
         /** @var StationMedia|null $media */
-        $media = $this->repository->findOneBy(
+        $media = $this->getRepository()->findOneBy(
             [
                 'storage_location' => $storageLocation,
                 'id' => $id,
@@ -86,7 +86,7 @@ final class StationMediaRepository extends Repository
         $storageLocation = $this->getStorageLocation($source);
 
         /** @var StationMedia|null $media */
-        $media = $this->repository->findOneBy(
+        $media = $this->getRepository()->findOneBy(
             [
                 'storage_location' => $storageLocation,
                 'path' => $path,
@@ -120,7 +120,7 @@ final class StationMediaRepository extends Repository
         $storageLocation = $this->getStorageLocation($source);
 
         /** @var StationMedia|null $media */
-        $media = $this->repository->findOneBy(
+        $media = $this->getRepository()->findOneBy(
             [
                 'storage_location' => $storageLocation,
                 'unique_id' => $uniqueId,

@@ -13,6 +13,7 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
+use App\Lock\LockFactory;
 use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
@@ -36,6 +37,9 @@ final class LinearLogBuilder
      */
     public const int SAFETY_RUNWAY_MINUTES = 60;
 
+    /** Longest a build may hold the station's build lock, and wait for it. */
+    private const int BUILD_LOCK_SECONDS = 1200;
+
     public function __construct(
         private readonly Queue $queue,
         private readonly StationQueueRepository $queueRepo,
@@ -50,6 +54,7 @@ final class LinearLogBuilder
         private readonly TopOfHourClock $topOfHourClock,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
         private readonly LoggerInterface $logger,
+        private readonly LockFactory $lockFactory,
     ) {
     }
 
@@ -69,7 +74,13 @@ final class LinearLogBuilder
             return;
         }
 
-        $this->build($station, $message->hours, $message->rebuild, $message->throughTomorrow);
+        $this->build(
+            $station,
+            $message->hours,
+            $message->rebuild,
+            $message->throughTomorrow,
+            $message->replanLockWindow,
+        );
     }
 
     /** @return array<string, mixed> */
@@ -78,9 +89,9 @@ final class LinearLogBuilder
         ?int $hoursOverride = null,
         bool $rebuild = false,
         bool $throughTomorrow = false,
+        bool $replanLockWindow = false,
     ): array {
         $stationId = $station->id;
-        $maxAttempts = 2;
 
         // Any earlier failure in this worker process leaves Doctrine's
         // EntityManager closed, and the build then dies on "The EntityManager is
@@ -91,11 +102,50 @@ final class LinearLogBuilder
             $station = $this->stationRepo->findByIdentifier((string)$stationId) ?? $station;
         }
 
+        // One build per station at a time. Two overlapping builds each replace
+        // the plan they read at their start, so both plans survive: the 3am daily
+        // build and a manual rebuild on 2026-10-05 left 529 overlapping lines and
+        // two copies of the 10:00 and 11:00 shows.
+        $lock = $this->lockFactory->createLock('linear_log_build_' . $stationId, self::BUILD_LOCK_SECONDS);
+        $waitUntil = time() + self::BUILD_LOCK_SECONDS;
+        while (!$lock->acquire()) {
+            if (time() >= $waitUntil) {
+                throw new RuntimeException('Another Linear Log build for this station is still running.');
+            }
+            sleep(2);
+        }
+
+        try {
+            // The build that held the lock changed the plan; start from it.
+            $this->em->clear();
+            $station = $this->stationRepo->findByIdentifier((string)$stationId) ?? $station;
+
+            return $this->buildWithRetry($station, $hoursOverride, $rebuild, $throughTomorrow, $replanLockWindow);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function buildWithRetry(
+        Station $station,
+        ?int $hoursOverride,
+        bool $rebuild,
+        bool $throughTomorrow,
+        bool $replanLockWindow,
+    ): array {
+        $stationId = $station->id;
+
         for ($attempt = 1; ; $attempt++) {
             try {
-                return $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow);
+                return $this->buildOnce($station, $hoursOverride, $rebuild, $throughTomorrow, $replanLockWindow);
             } catch (Throwable $e) {
-                if ($attempt >= $maxAttempts || !self::isTransientTransactionError($e)) {
+                // A plan conflict gets a third attempt: playout keeps taking
+                // lines while a lock-window re-plan runs, and each retry starts
+                // from the log as playout left it.
+                $isConflict = $e instanceof LinearLog\LinearLogPlanConflict;
+                $maxAttempts = $isConflict ? 3 : 2;
+                if ($attempt >= $maxAttempts || !($isConflict || self::isTransientTransactionError($e))) {
                     throw $e;
                 }
 
@@ -104,7 +154,7 @@ final class LinearLogBuilder
                 // later savepoint statements fail with "SAVEPOINT DOCTRINE_n does not exist",
                 // which hides the real cause. Wait briefly and retry once from a clean state.
                 $this->logger->warning(
-                    'Linear Log build hit a transient database error; retrying once.',
+                    'Linear Log build hit a transient error; retrying.',
                     ['station_id' => $stationId, 'attempt' => $attempt, 'error' => $e->getMessage()]
                 );
 
@@ -179,6 +229,7 @@ final class LinearLogBuilder
         ?int $hoursOverride = null,
         bool $rebuild = false,
         bool $throughTomorrow = false,
+        bool $replanLockWindow = false,
     ): array {
         $stationId = $station->id;
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
@@ -236,11 +287,13 @@ final class LinearLogBuilder
         // it replaces are only read here, and deleted at the end together with
         // the new plan: deleting them up front left the log empty whenever a
         // build died in between.
+        // After a schedule change the lock window is re-planned too: only lines
+        // already handed to the live queue (and hand-locked lines) stay.
+        $lockedUntil = $replanLockWindow
+            ? $projectionStartTs
+            : $projectionStartTs + LinearLog\LinearLogStore::LOCK_SECONDS;
         $replacedPlanIds = ($playout && $rebuild)
-            ? $this->logStore->unlockedPlanIds(
-                $station,
-                $projectionStartTs + LinearLog\LinearLogStore::LOCK_SECONDS
-            )
+            ? $this->logStore->unlockedPlanIds($station, $lockedUntil)
             : [];
         $logRows = [];
         $seededIds = [];
@@ -258,7 +311,11 @@ final class LinearLogBuilder
             $connection->beginTransaction();
 
             if ($playout) {
-                $seededIds = $this->logStore->seedQueue($station, $replacedPlanIds);
+                $seededIds = $this->logStore->seedQueue(
+                    $station,
+                    $replacedPlanIds,
+                    $rebuild ? $lockedUntil : null,
+                );
             }
 
             $gaps = $this->queue->buildQueue(

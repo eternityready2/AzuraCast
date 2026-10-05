@@ -1,212 +1,361 @@
 <template>
-    <div class="clock-workspace-editor">
-        <header class="clock-workspace-editor__header">
+    <section
+        class="card"
+        role="region"
+        aria-labelledby="hdr_daypart_editor"
+    >
+        <div class="card-header text-bg-primary d-flex align-items-center gap-3 flex-wrap">
             <button
                 type="button"
-                class="btn btn-link p-0 text-decoration-none clock-workspace-editor__back"
+                class="btn btn-sm btn-light"
                 @click="emit('cancel')"
             >
-                <span aria-hidden="true">←</span>
-                {{ $gettext('Back to all Dayparts') }}
+                ← {{ $gettext('All Dayparts') }}
             </button>
-
-            <h2 class="h5 mb-1">
-                {{ isEditMode ? $gettext('Edit Daypart') : $gettext('Add Daypart') }}
+            <h2
+                id="hdr_daypart_editor"
+                class="card-title my-0 flex-fill"
+            >
+                {{ isEditMode ? form.name || $gettext('Edit Daypart') : $gettext('New Daypart') }}
             </h2>
-            <p class="mb-0 text-muted small">
-                {{ $gettext('Choose a reusable Template and an hour range. AzuraCast will create or update one Clock Wheel for each hour.') }}
-            </p>
-        </header>
+        </div>
 
         <div
             v-if="error"
-            class="alert alert-danger m-3 mb-0"
+            class="alert alert-danger rounded-0 mb-0"
         >
             {{ error }}
         </div>
 
-        <div class="clock-workspace-editor__body">
-            <div class="clock-workspace-section">
-                <div class="clock-workspace-section__heading">
-                    <h3 class="h6 mb-1">{{ $gettext('Daypart basics') }}</h3>
-                    <p class="small text-muted mb-0">
-                        {{ $gettext('Name the block, choose its Template, and set the hours it should cover.') }}
-                    </p>
-                </div>
-
-                <form-group-field
-                    id="daypart_name"
-                    class="mb-3"
-                    :field="r$.name"
-                    :label="$gettext('Name')"
-                />
-
-                <form-group-select
-                    id="daypart_template"
-                    class="mb-3"
-                    :field="r$.template_id"
-                    :label="$gettext('Clock Template')"
-                    :options="templateOptions"
-                    :description="$gettext('The template supplies the reusable slot layout for every generated hourly wheel.')"
-                />
-
-                <div class="row mb-3">
-                    <form-group-field
-                        id="daypart_start_hour"
-                        class="col-md-6"
-                        :field="r$.start_hour"
-                        :label="$gettext('Start hour')"
-                        :description="$gettext('Station local hour (:00 only).')"
-                    >
-                        <template #default="{id, model, fieldClass}">
-                            <am-pm-time-input
-                                :input-id="id"
-                                v-model="model.$model"
-                                mode="hour"
-                                :field-class="fieldClass"
+        <loading
+            :loading="busy && !loaded"
+            lazy
+        >
+            <div class="card-body">
+                <div class="row g-4">
+                    <div class="col-lg-4">
+                        <div class="d-flex justify-content-center mb-3">
+                            <wheel-dial
+                                :slots="templateDialSlots"
+                                :size="240"
+                                :show-ticks="false"
+                                :center-label="selectedTemplate?.name ?? $gettext('No template')"
+                                :center-sub="$gettext('every hour')"
+                                :aria-label="$gettext('Hour template preview')"
                             />
-                        </template>
-                    </form-group-field>
-                    <form-group-field
-                        id="daypart_end_hour"
-                        class="col-md-6"
-                        :field="r$.end_hour"
-                        :label="$gettext('End hour')"
-                        :description="hourRangeHint"
-                    >
-                        <template #default="{id, model, fieldClass}">
-                            <am-pm-time-input
-                                :input-id="id"
-                                v-model="model.$model"
-                                mode="hour"
-                                :field-class="fieldClass"
-                            />
-                        </template>
-                    </form-group-field>
-                </div>
+                        </div>
 
-                <div class="row align-items-end">
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-semibold">{{ $gettext('Color (optional)') }}</label>
-                        <input
-                            v-model="form.color"
-                            type="color"
-                            class="form-control form-control-color"
-                        >
+                        <div class="card bg-body-tertiary">
+                            <div class="card-body">
+                                <h3 class="h6 mb-2">
+                                    {{ $gettext('On Air') }}
+                                </h3>
+                                <p class="mb-2">
+                                    <strong>{{ hoursLabel }}</strong><br>
+                                    <span class="text-muted">{{ daysLabel }}</span>
+                                </p>
+                                <div
+                                    class="hour-strip mb-2"
+                                    :aria-label="$gettext('Hours covered')"
+                                >
+                                    <span
+                                        v-for="hour in 24"
+                                        :key="hour"
+                                        class="hour-strip__cell"
+                                        :class="{'is-on': coveredHours.includes(hour - 1)}"
+                                        :style="coveredHours.includes(hour - 1) ? {background: form.color || 'var(--bs-primary)'} : {}"
+                                        :title="formatHourOfDayToAmPm(hour - 1)"
+                                    />
+                                </div>
+                                <div class="d-flex justify-content-between small text-muted mb-3">
+                                    <span>12 AM</span>
+                                    <span>6 AM</span>
+                                    <span>12 PM</span>
+                                    <span>6 PM</span>
+                                    <span>12 AM</span>
+                                </div>
+                                <p class="small text-muted mb-0">
+                                    {{ $ngettext(
+                                        'Creates and schedules %{n} hourly Clock Wheel.',
+                                        'Creates and schedules %{n} hourly Clock Wheels.',
+                                        coveredHours.length,
+                                        {n: String(coveredHours.length)}
+                                    ) }}
+                                    {{ $gettext('Scheduled shows and programmes keep priority in their own hours.') }}
+                                </p>
+                            </div>
+                        </div>
                     </div>
-                    <form-group-checkbox
-                        id="daypart_is_active"
-                        class="col-md-6 mb-3"
-                        :field="r$.is_active"
-                        :label="$gettext('Active')"
-                        :description="$gettext('Inactive dayparts keep their wheels but mark them inactive on sync.')"
-                    />
-                </div>
-            </div>
 
-            <div class="clock-workspace-section mt-3">
-                <div class="clock-workspace-section__heading">
-                    <h3 class="h6 mb-1">{{ $gettext('Optional separation override') }}</h3>
-                    <p class="small text-muted mb-0">
-                        {{ $gettext('Leave this off to use each generated wheel\'s own separation settings.') }}
-                    </p>
-                </div>
+                    <div class="col-lg-8">
+                        <h3 class="h6">
+                            {{ $gettext('Daypart Details') }}
+                        </h3>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-7">
+                                <label
+                                    class="form-label"
+                                    for="dp_name"
+                                >{{ $gettext('Name') }}</label>
+                                <input
+                                    id="dp_name"
+                                    v-model="form.name"
+                                    type="text"
+                                    class="form-control"
+                                    :class="{'is-invalid': submitted && !form.name.trim()}"
+                                    :placeholder="$gettext('e.g. Morning Drive')"
+                                    required
+                                >
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <label
+                                    class="form-label"
+                                    for="dp_color"
+                                >{{ $gettext('Color') }}</label>
+                                <input
+                                    id="dp_color"
+                                    v-model="form.color"
+                                    type="color"
+                                    class="form-control form-control-color w-100"
+                                >
+                            </div>
+                            <div class="col-md-3 col-8">
+                                <label
+                                    class="form-label"
+                                    for="dp_status"
+                                >{{ $gettext('Status') }}</label>
+                                <select
+                                    id="dp_status"
+                                    v-model="form.is_active"
+                                    class="form-select"
+                                >
+                                    <option :value="true">
+                                        {{ $gettext('Active') }}
+                                    </option>
+                                    <option :value="false">
+                                        {{ $gettext('Inactive') }}
+                                    </option>
+                                </select>
+                            </div>
 
-                <form-group-checkbox
-                    id="daypart_separation_override_enabled"
-                    class="mb-3"
-                    :field="r$.separation_override_enabled"
-                    :label="$gettext('Override separation rules')"
-                    :description="$gettext('Apply one shared separation policy to every hourly wheel generated by this daypart.')"
-                />
+                            <div class="col-12">
+                                <label
+                                    class="form-label"
+                                    for="dp_template"
+                                >{{ $gettext('Hour Template') }}</label>
+                                <select
+                                    id="dp_template"
+                                    v-model="form.template_id"
+                                    class="form-select"
+                                    :class="{'is-invalid': submitted && !form.template_id}"
+                                >
+                                    <option
+                                        :value="null"
+                                        disabled
+                                    >
+                                        {{ templates.length ? $gettext('Choose a template…') : $gettext('Create an Hour Template first') }}
+                                    </option>
+                                    <option
+                                        v-for="template in templates"
+                                        :key="template.id"
+                                        :value="template.id"
+                                    >
+                                        {{ template.name }}
+                                    </option>
+                                </select>
+                                <div class="form-text">
+                                    {{ $gettext('Every hour in this daypart plays this template\'s clock.') }}
+                                </div>
+                            </div>
 
-                <template v-if="form.separation_override_enabled">
-                    <form-group-checkbox
-                        id="daypart_separation_enabled"
-                        class="mb-3"
-                        :field="r$.separation_enabled"
-                        :label="$gettext('Enable separation rules')"
-                    />
+                            <div class="col-md-6">
+                                <label
+                                    class="form-label"
+                                    for="dp_start_hour"
+                                >{{ $gettext('From') }}</label>
+                                <am-pm-time-input
+                                    input-id="dp_start_hour"
+                                    v-model="form.start_hour"
+                                    mode="hour"
+                                />
+                            </div>
+                            <div class="col-md-6">
+                                <label
+                                    class="form-label"
+                                    for="dp_end_hour"
+                                >{{ $gettext('Through the hour starting') }}</label>
+                                <am-pm-time-input
+                                    input-id="dp_end_hour"
+                                    v-model="form.end_hour"
+                                    mode="hour"
+                                />
+                            </div>
 
-                    <div
-                        v-if="form.separation_enabled"
-                        class="row mb-3"
-                    >
-                        <form-group-field
-                            id="daypart_separation_artist_minutes"
-                            class="col-md-4"
-                            :field="r$.separation_artist_minutes"
-                            :label="$gettext('Artist separation (min)')"
-                            type="number"
-                        />
-                        <form-group-field
-                            id="daypart_separation_title_minutes"
-                            class="col-md-4"
-                            :field="r$.separation_title_minutes"
-                            :label="$gettext('Title separation (min)')"
-                            type="number"
-                        />
-                        <form-group-field
-                            id="daypart_burn_rate_max_plays_24h"
-                            class="col-md-4"
-                            :field="r$.burn_rate_max_plays_24h"
-                            :label="$gettext('Max plays / 24h')"
-                            type="number"
-                            :description="$gettext('Leave empty to disable burn-rate deprioritization.')"
-                        />
+                            <div class="col-12">
+                                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-1">
+                                    <span class="form-label mb-0">{{ $gettext('Days') }}</span>
+                                    <div class="d-flex gap-1">
+                                        <button
+                                            v-for="preset in dayPresets"
+                                            :key="preset.label"
+                                            type="button"
+                                            class="btn btn-sm btn-link p-0 px-1"
+                                            @click="form.days = [...preset.days]"
+                                        >
+                                            {{ preset.label }}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div
+                                    class="btn-group w-100 flex-wrap"
+                                    role="group"
+                                    :aria-label="$gettext('Days')"
+                                >
+                                    <button
+                                        v-for="day in weekDays"
+                                        :key="day.value"
+                                        type="button"
+                                        class="btn"
+                                        :class="isDayOn(day.value) ? 'btn-primary' : 'btn-outline-primary'"
+                                        :aria-pressed="isDayOn(day.value)"
+                                        @click="toggleDay(day.value)"
+                                    >
+                                        {{ day.short }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <details class="advanced">
+                            <summary class="h6 mb-0">
+                                {{ $gettext('Advanced: separation rules') }}
+                            </summary>
+                            <div class="pt-3">
+                                <div class="form-check mb-2">
+                                    <input
+                                        id="dp_sep_override"
+                                        v-model="form.separation_override_enabled"
+                                        class="form-check-input"
+                                        type="checkbox"
+                                    >
+                                    <label
+                                        class="form-check-label"
+                                        for="dp_sep_override"
+                                    >
+                                        {{ $gettext('Use one separation policy for every hour of this daypart') }}
+                                    </label>
+                                </div>
+                                <template v-if="form.separation_override_enabled">
+                                    <div class="form-check mb-3">
+                                        <input
+                                            id="dp_sep_enabled"
+                                            v-model="form.separation_enabled"
+                                            class="form-check-input"
+                                            type="checkbox"
+                                        >
+                                        <label
+                                            class="form-check-label"
+                                            for="dp_sep_enabled"
+                                        >
+                                            {{ $gettext('Enable separation rules') }}
+                                        </label>
+                                    </div>
+                                    <div
+                                        v-if="form.separation_enabled"
+                                        class="row g-3"
+                                    >
+                                        <div class="col-md-4">
+                                            <label
+                                                class="form-label"
+                                                for="dp_sep_artist"
+                                            >{{ $gettext('Artist separation (min)') }}</label>
+                                            <input
+                                                id="dp_sep_artist"
+                                                v-model.number="form.separation_artist_minutes"
+                                                type="number"
+                                                min="0"
+                                                class="form-control"
+                                            >
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label
+                                                class="form-label"
+                                                for="dp_sep_title"
+                                            >{{ $gettext('Title separation (min)') }}</label>
+                                            <input
+                                                id="dp_sep_title"
+                                                v-model.number="form.separation_title_minutes"
+                                                type="number"
+                                                min="0"
+                                                class="form-control"
+                                            >
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label
+                                                class="form-label"
+                                                for="dp_burn"
+                                            >{{ $gettext('Max plays / 24h') }}</label>
+                                            <input
+                                                id="dp_burn"
+                                                v-model.number="form.burn_rate_max_plays_24h"
+                                                type="number"
+                                                min="0"
+                                                class="form-control"
+                                                :placeholder="$gettext('Off')"
+                                            >
+                                        </div>
+                                    </div>
+                                </template>
+                                <p class="form-text mb-0">
+                                    {{ $gettext('Leave this off to use each hourly wheel\'s own separation settings.') }}
+                                </p>
+                            </div>
+                        </details>
                     </div>
-                </template>
+                </div>
             </div>
+        </loading>
 
-            <div class="alert alert-info py-2 mt-3 mb-0">
-                <strong>{{ $gettext('What happens when you save:') }}</strong>
-                {{ $gettext('one Clock Wheel is created or updated for each hour in this range and linked to the selected Template. Schedule those Wheels on the station Schedule page as needed.') }}
-            </div>
-        </div>
-
-        <footer class="clock-workspace-editor__footer">
+        <div class="card-footer d-flex flex-wrap gap-2">
             <button
                 v-if="isEditMode"
                 type="button"
-                class="btn btn-outline-danger me-auto"
-                :disabled="loading"
+                class="btn btn-outline-danger"
+                :disabled="busy"
                 @click="doDeleteFromEditor"
             >
-                {{ $gettext('Delete Daypart') }}
+                {{ $gettext('Delete') }}
             </button>
             <button
                 v-if="isEditMode"
                 type="button"
                 class="btn btn-outline-secondary"
-                :disabled="loading || syncing"
+                :disabled="busy || syncing"
+                :title="$gettext('Copy the template\'s current slots into this daypart\'s wheels again.')"
                 @click="doResync"
             >
                 {{ syncing ? $gettext('Syncing…') : $gettext('Re-sync Wheels') }}
             </button>
-            <button
-                type="button"
-                class="btn btn-outline-secondary"
-                :disabled="loading"
-                @click="emit('cancel')"
-            >
-                {{ $gettext('Cancel') }}
-            </button>
-            <button
-                type="button"
-                class="btn btn-primary"
-                :disabled="loading || r$.$invalid"
-                @click="doSubmit"
-            >
-                <span
-                    v-if="loading"
-                    class="spinner-border spinner-border-sm me-2"
-                    role="status"
-                    aria-hidden="true"
-                />
-                {{ loading ? $gettext('Saving…') : $gettext('Save Daypart') }}
-            </button>
-        </footer>
-    </div>
+            <div class="ms-auto d-flex gap-2">
+                <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    :disabled="busy"
+                    @click="emit('cancel')"
+                >
+                    {{ $gettext('Cancel') }}
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    :disabled="busy"
+                    @click="doSubmit"
+                >
+                    {{ busy && loaded ? $gettext('Saving…') : $gettext('Save Daypart') }}
+                </button>
+            </div>
+        </div>
+    </section>
 </template>
 
 <script setup lang="ts">
@@ -214,21 +363,29 @@ import {computed, onMounted, ref} from 'vue';
 import {useAxios} from '~/vendor/axios';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
-import {useAppRegle} from '~/vendor/regle.ts';
-import {required} from '@regle/rules';
-import mergeExisting from '~/functions/mergeExisting.ts';
 import useConfirmAndDelete from '~/functions/useConfirmAndDelete.ts';
-import FormGroupField from '~/components/Form/FormGroupField.vue';
-import FormGroupSelect from '~/components/Form/FormGroupSelect.vue';
-import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
+import Loading from '~/components/Common/Loading.vue';
 import AmPmTimeInput from '~/components/Common/AmPmTimeInput.vue';
+import WheelDial from '~/components/Stations/ClockWheels/WheelDial.vue';
 import {formatHourOfDayToAmPm} from '~/functions/amPmTime.ts';
+import {mapApiSlotToEditorRow} from '~/functions/clockWheelSlotEditor.ts';
 
-const props = defineProps<{
+type TemplateRow = {
+    id: number;
+    name: string;
+    color?: string | null;
+    slots?: Record<string, unknown>[];
+};
+
+const props = withDefaults(defineProps<{
     createUrl: string;
     templatesUrl: string;
     recordUrl?: string | null;
-}>();
+    presetTemplateId?: number | null;
+}>(), {
+    recordUrl: null,
+    presetTemplateId: null,
+});
 
 const emit = defineEmits<{
     (e: 'saved'): void;
@@ -236,21 +393,26 @@ const emit = defineEmits<{
     (e: 'changed'): void;
 }>();
 
-const {$gettext} = useTranslate();
+const {$gettext, $ngettext} = useTranslate();
 const {axios} = useAxios();
 const {notifySuccess, notifyError} = useNotify();
 
-const loading = ref(false);
+const ALL_DAYS = [1, 2, 3, 4, 5, 6, 7];
+
+const busy = ref(false);
+const loaded = ref(false);
 const syncing = ref(false);
+const submitted = ref(false);
 const error = ref<string | null>(null);
-const templateOptions = ref<{value: number; text: string}[]>([]);
+const templates = ref<TemplateRow[]>([]);
 const isEditMode = computed(() => Boolean(props.recordUrl));
 
-const blankForm = {
+const form = ref({
     name: '',
-    template_id: null as number | null,
+    template_id: props.presetTemplateId,
     start_hour: 6,
-    end_hour: 10,
+    end_hour: 9,
+    days: [...ALL_DAYS] as number[],
     color: '#e87722',
     is_active: true,
     separation_override_enabled: false,
@@ -258,144 +420,160 @@ const blankForm = {
     separation_artist_minutes: 45,
     separation_title_minutes: 90,
     burn_rate_max_plays_24h: null as number | null,
-};
-
-const form = ref({...blankForm});
-
-const {r$} = useAppRegle(form, {
-    name: {required},
-    template_id: {required},
-    start_hour: {required},
-    end_hour: {required},
-    is_active: {},
-    separation_override_enabled: {},
-    separation_enabled: {},
-    separation_artist_minutes: {},
-    separation_title_minutes: {},
-    burn_rate_max_plays_24h: {},
 });
 
-const hourRangeHint = computed(() => {
+const weekDays = computed(() => [
+    {value: 1, short: $gettext('Mon')},
+    {value: 2, short: $gettext('Tue')},
+    {value: 3, short: $gettext('Wed')},
+    {value: 4, short: $gettext('Thu')},
+    {value: 5, short: $gettext('Fri')},
+    {value: 6, short: $gettext('Sat')},
+    {value: 7, short: $gettext('Sun')},
+]);
+
+const dayPresets = computed(() => [
+    {label: $gettext('Every day'), days: ALL_DAYS},
+    {label: $gettext('Weekdays'), days: [1, 2, 3, 4, 5]},
+    {label: $gettext('Weekends'), days: [6, 7]},
+]);
+
+const isDayOn = (day: number) => form.value.days.includes(day);
+
+const toggleDay = (day: number) => {
+    const days = form.value.days.filter((d) => d !== day);
+    form.value.days = isDayOn(day) ? days : [...days, day].sort((a, b) => a - b);
+};
+
+const coveredHours = computed(() => {
     const start = Number(form.value.start_hour);
     const end = Number(form.value.end_hour);
     if (Number.isNaN(start) || Number.isNaN(end)) {
-        return $gettext('Inclusive end hour. If end is before start, the range spans overnight.');
+        return [];
     }
-
-    const count = countHoursInDaypartRange(start, end);
-    const overnight = end < start ? ' ' + $gettext('(overnight span)') : '';
-
-    return $gettext(
-        'Generates %{count} hourly Clock Wheels from %{start} through %{end}%{overnight}.',
-        {
-            count: String(count),
-            start: formatHourOfDayToAmPm(start),
-            end: formatHourOfDayToAmPm(end),
-            overnight,
+    const hours: number[] = [];
+    for (let hour = start; hours.length <= 24; hour = (hour + 1) % 24) {
+        hours.push(hour);
+        if (hour === end) {
+            break;
         }
-    );
+    }
+    return hours;
 });
 
-function countHoursInDaypartRange(startHour: number, endHour: number): number {
-    let count = 0;
-    let hour = startHour;
-
-    while (true) {
-        count++;
-        if (hour === endHour) {
-            break;
-        }
-        hour = (hour + 1) % 24;
-        if (count > 24) {
-            break;
-        }
+const hoursLabel = computed(() => {
+    const hours = coveredHours.value;
+    if (hours.length === 0) {
+        return '';
     }
-
-    return count;
-}
-
-const resetForm = () => {
-    form.value = {...blankForm};
-};
-
-const populateForm = (data: Record<string, unknown>) => {
-    form.value = mergeExisting(form.value, {
-        ...data,
-        template_id: data.template_id != null ? Number(data.template_id) : null,
-        start_hour: Number(data.start_hour ?? 6),
-        end_hour: Number(data.end_hour ?? 10),
-        separation_override_enabled: Boolean(data.separation_override_enabled),
-        separation_enabled: Boolean(data.separation_enabled),
-        separation_artist_minutes: Number(data.separation_artist_minutes ?? 45),
-        separation_title_minutes: Number(data.separation_title_minutes ?? 90),
-        burn_rate_max_plays_24h: data.burn_rate_max_plays_24h != null
-            ? Number(data.burn_rate_max_plays_24h)
-            : null,
+    return $gettext('%{start} – %{end}', {
+        start: formatHourOfDayToAmPm(hours[0]),
+        end: formatHourOfDayToAmPm((hours[hours.length - 1] + 1) % 24),
     });
-};
+});
 
-const loadEditor = async () => {
-    loading.value = true;
-    error.value = null;
-    resetForm();
+const daysLabel = computed(() => {
+    const days = form.value.days;
+    if (days.length === 0) {
+        return $gettext('No days selected');
+    }
+    const preset = dayPresets.value.find((p) => p.days.length === days.length && p.days.every((d) => days.includes(d)));
+    if (preset) {
+        return preset.label;
+    }
+    return weekDays.value.filter((d) => days.includes(d.value)).map((d) => d.short).join(', ');
+});
 
+const selectedTemplate = computed(() => templates.value.find((t) => t.id === form.value.template_id) ?? null);
+
+const templateDialSlots = computed(() =>
+    (selectedTemplate.value?.slots ?? [])
+        .map((s) => mapApiSlotToEditorRow(s))
+        .map((r) => ({position_seconds: r.position_seconds, type: r.type}))
+);
+
+const requestError = (err: unknown, fallback: string): string =>
+    (err as {response?: {data?: {message?: string}}})?.response?.data?.message ?? fallback;
+
+onMounted(async () => {
+    busy.value = true;
     try {
-        const {data: templates} = await axios.get(props.templatesUrl);
-        templateOptions.value = (templates as Array<{id: number; name: string}>).map((template) => ({
-            value: template.id,
-            text: template.name,
-        }));
+        const {data} = await axios.get<TemplateRow[]>(props.templatesUrl);
+        templates.value = Array.isArray(data) ? data : [];
 
         if (props.recordUrl) {
-            const {data} = await axios.get(props.recordUrl);
-            populateForm(data as Record<string, unknown>);
+            const {data: record} = await axios.get<Record<string, unknown>>(props.recordUrl);
+            const days = Array.isArray(record.days) ? (record.days as unknown[]).map(Number) : [];
+            form.value = {
+                ...form.value,
+                name: typeof record.name === 'string' ? record.name : '',
+                template_id: record.template_id != null ? Number(record.template_id) : null,
+                start_hour: Number(record.start_hour ?? 6),
+                end_hour: Number(record.end_hour ?? 9),
+                days: days.length ? days : [...ALL_DAYS],
+                color: typeof record.color === 'string' && record.color ? record.color : '#e87722',
+                is_active: Boolean(record.is_active),
+                separation_override_enabled: Boolean(record.separation_override_enabled),
+                separation_enabled: Boolean(record.separation_enabled),
+                separation_artist_minutes: Number(record.separation_artist_minutes ?? 45),
+                separation_title_minutes: Number(record.separation_title_minutes ?? 90),
+                burn_rate_max_plays_24h: record.burn_rate_max_plays_24h != null
+                    ? Number(record.burn_rate_max_plays_24h)
+                    : null,
+            };
+        } else if (null === form.value.template_id && templates.value.length === 1) {
+            form.value.template_id = templates.value[0].id;
         }
-    } catch (err: any) {
-        error.value = err?.response?.data?.message ?? $gettext('Could not load this daypart.');
+        loaded.value = true;
+    } catch (err) {
+        error.value = requestError(err, $gettext('Could not load this daypart.'));
     } finally {
-        loading.value = false;
+        busy.value = false;
     }
-};
+});
 
-onMounted(loadEditor);
-
-const buildPayload = async () => {
-    const {valid} = await r$.$validate();
-    if (!valid) {
+const buildPayload = (): Record<string, unknown> | null => {
+    submitted.value = true;
+    if (!form.value.name.trim()) {
+        error.value = $gettext('Please enter a name for this daypart.');
+        return null;
+    }
+    if (!form.value.template_id) {
+        error.value = $gettext('Please choose an hour template.');
+        return null;
+    }
+    if (form.value.days.length === 0) {
+        error.value = $gettext('Please choose at least one day.');
         return null;
     }
 
+    const override = form.value.separation_override_enabled;
     return {
-        ...form.value,
-        template_id: form.value.template_id != null ? Number(form.value.template_id) : null,
+        name: form.value.name.trim(),
+        template_id: Number(form.value.template_id),
         start_hour: Number(form.value.start_hour),
         end_hour: Number(form.value.end_hour),
+        // Every day is stored as "no restriction".
+        days: form.value.days.length === 7 ? [] : form.value.days,
         color: form.value.color || null,
-        separation_override_enabled: form.value.separation_override_enabled,
-        separation_enabled: form.value.separation_override_enabled
-            ? form.value.separation_enabled
-            : false,
-        separation_artist_minutes: form.value.separation_override_enabled
-            ? Number(form.value.separation_artist_minutes) || 45
-            : 45,
-        separation_title_minutes: form.value.separation_override_enabled
-            ? Number(form.value.separation_title_minutes) || 90
-            : 90,
-        burn_rate_max_plays_24h: form.value.separation_override_enabled
-            && form.value.burn_rate_max_plays_24h != null
-            && form.value.burn_rate_max_plays_24h > 0
+        is_active: form.value.is_active,
+        separation_override_enabled: override,
+        separation_enabled: override ? form.value.separation_enabled : false,
+        separation_artist_minutes: override ? Number(form.value.separation_artist_minutes) || 45 : 45,
+        separation_title_minutes: override ? Number(form.value.separation_title_minutes) || 90 : 90,
+        burn_rate_max_plays_24h: override && Number(form.value.burn_rate_max_plays_24h) > 0
             ? Number(form.value.burn_rate_max_plays_24h)
             : null,
     };
 };
 
 const doSubmit = async () => {
-    const payload = await buildPayload();
+    const payload = buildPayload();
     if (!payload) {
         return;
     }
 
-    loading.value = true;
+    busy.value = true;
     error.value = null;
 
     try {
@@ -404,17 +582,17 @@ const doSubmit = async () => {
         } else {
             await axios.post(props.createUrl, payload);
         }
-        notifySuccess($gettext('Daypart saved and hourly Wheels synced.'));
+        notifySuccess($gettext('Daypart saved. Its hourly Clock Wheels are scheduled and the 24-hour log is re-planning.'));
         emit('saved');
-    } catch (err: any) {
-        error.value = err?.response?.data?.message ?? $gettext('Could not save this daypart.');
+    } catch (err) {
+        error.value = requestError(err, $gettext('Could not save this daypart.'));
     } finally {
-        loading.value = false;
+        busy.value = false;
     }
 };
 
 const {doDelete} = useConfirmAndDelete(
-    $gettext('Delete this daypart and its generated hourly Wheels?'),
+    $gettext('Delete this daypart? Its hourly Clock Wheels and their schedule are removed too.'),
     () => emit('saved')
 );
 
@@ -433,10 +611,10 @@ const doResync = async () => {
 
     try {
         await axios.post(`${props.recordUrl}/sync`);
-        notifySuccess($gettext('Daypart hourly Wheels re-synced from Template.'));
+        notifySuccess($gettext('Daypart wheels re-synced from the hour template.'));
         emit('changed');
     } catch {
-        notifyError($gettext('Could not re-sync daypart Wheels.'));
+        notifyError($gettext('Could not re-sync daypart wheels.'));
     } finally {
         syncing.value = false;
     }
@@ -444,77 +622,24 @@ const doResync = async () => {
 </script>
 
 <style scoped>
-.clock-workspace-editor {
-    overflow: hidden;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .75rem;
-    background: var(--bs-body-bg);
-    box-shadow: 0 .25rem .85rem rgba(0, 0, 0, .08);
+.hour-strip {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
 }
 
-.clock-workspace-editor__header,
-.clock-workspace-editor__body,
-.clock-workspace-editor__footer {
-    padding: 1rem 1.1rem;
+.hour-strip__cell {
+    height: 1.1rem;
+    border-radius: .2rem;
+    background: var(--bs-secondary-bg);
 }
 
-.clock-workspace-editor__header {
-    border-bottom: 1px solid var(--bs-border-color);
-    background: var(--bs-tertiary-bg);
-}
-
-.clock-workspace-editor__back {
-    display: inline-flex;
-    align-items: center;
-    gap: .35rem;
-    margin-bottom: .6rem;
-    font-weight: 700;
-}
-
-.clock-workspace-section {
-    padding: 1rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .6rem;
-    background: color-mix(in srgb, var(--bs-tertiary-bg) 45%, transparent);
-}
-
-.clock-workspace-section__heading {
-    margin-bottom: 1rem;
-    padding-bottom: .7rem;
-    border-bottom: 1px solid var(--bs-border-color);
-}
-
-.clock-workspace-editor__footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: .65rem;
+.advanced {
     border-top: 1px solid var(--bs-border-color);
+    padding-top: 1rem;
 }
 
-@media (max-width: 575.98px) {
-    .clock-workspace-editor__header,
-    .clock-workspace-editor__body,
-    .clock-workspace-editor__footer {
-        padding: .85rem;
-    }
-
-    .clock-workspace-section {
-        padding: .85rem;
-    }
-
-    .clock-workspace-editor__footer {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .clock-workspace-editor__footer .me-auto {
-        grid-column: 1 / -1;
-        margin-right: 0 !important;
-    }
-
-    .clock-workspace-editor__footer .btn {
-        width: 100%;
-    }
+.advanced summary {
+    cursor: pointer;
 }
 </style>

@@ -203,14 +203,14 @@ final class StationScheduleRepository extends Repository
     public function findByRelation(StationPlaylist|StationStreamer|StationClockWheel $relation): array
     {
         if ($relation instanceof StationPlaylist) {
-            return $this->repository->findBy(['playlist' => $relation]);
+            return $this->getRepository()->findBy(['playlist' => $relation]);
         }
 
         if ($relation instanceof StationClockWheel) {
-            return $this->repository->findBy(['clock_wheel' => $relation]);
+            return $this->getRepository()->findBy(['clock_wheel' => $relation]);
         }
 
-        return $this->repository->findBy(['streamer' => $relation]);
+        return $this->getRepository()->findBy(['streamer' => $relation]);
     }
 
     /**

@@ -64,6 +64,21 @@
                                 />
                                 {{ isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH') }}
                             </button>
+
+                            <a
+                                class="btn btn-light btn-sm fw-semibold"
+                                :href="exportUrl"
+                            >
+                                {{ $gettext('EXPORT CSV') }}
+                            </a>
+                            <a
+                                class="btn btn-light btn-sm fw-semibold"
+                                :href="exportUrl + '?format=print'"
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                {{ $gettext('PRINT') }}
+                            </a>
                         </div>
                     </header>
 
@@ -371,8 +386,11 @@ import type {LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/en
 import {useLinearLog} from "~/functions/useLinearLog";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
+import {useApiRouter} from "~/functions/useApiRouter";
 
 const {$gettext} = useTranslate();
+const {getStationApiUrl} = useApiRouter();
+const exportUrl = getStationApiUrl("/reports/linear-log/export");
 const {
     initialLoading,
     buildError,

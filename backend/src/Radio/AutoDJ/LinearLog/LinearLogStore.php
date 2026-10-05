@@ -17,6 +17,7 @@ use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
+use Doctrine\DBAL\LockMode;
 
 /**
  * Persistence for the saved 24-hour linear log.
@@ -92,15 +93,52 @@ final class LinearLogStore
     }
 
     /**
+     * Lock the lines a rebuild replaces and make sure playout has not taken any
+     * of them while the build ran. A schedule-change rebuild re-plans lines
+     * inside the queue's reach: "It's Beginning To Rain" was queued 30s into
+     * one, the new plan had its own line at the same 02:20:34, and both stayed.
+     *
+     * @param list<int> $ids
+     */
+    private function assertReplacedStillPlanned(Station $station, array $ids): void
+    {
+        if ([] === $ids) {
+            return;
+        }
+
+        /** @var list<array{id: int, status: string}> $rows */
+        $rows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e.id, e.status FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station AND e.id IN (:ids)
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('ids', $ids)
+            ->setLockMode(LockMode::PESSIMISTIC_WRITE)
+            ->getScalarResult();
+
+        foreach ($rows as $row) {
+            if (StationLogEntry::STATUS_PLANNED !== $row['status']) {
+                throw new LinearLogPlanConflict(
+                    sprintf('Log line %d was %s while the build ran.', $row['id'], $row['status'])
+                );
+            }
+        }
+    }
+
+    /**
      * Put every planned line into the (rolled-back) simulation queue, in log
      * order, after the live queue rows.
      */
     /**
      * @param list<int> $excludeIds lines a rebuild is re-planning; they must not
      *     seed the simulation, or the planner would simply keep them.
+     * @param int|null $pinnedAfter on a rebuild, the end of the lock window: a
+     *     locked line after it keeps its air time and is fitted around by
+     *     applyPlan(). Seeded, it played straight after the lock window instead.
      * @return list<int> the seeded log line ids
      */
-    public function seedQueue(Station $station, array $excludeIds = []): array
+    public function seedQueue(Station $station, array $excludeIds = [], ?int $pinnedAfter = null): array
     {
         $excluded = array_fill_keys($excludeIds, true);
 
@@ -109,7 +147,7 @@ final class LinearLogStore
             <<<'DQL'
                 SELECT e FROM App\Entity\StationLogEntry e
                 WHERE e.station = :station AND e.status = :planned
-                ORDER BY e.sequence ASC
+                ORDER BY e.planned_at ASC, e.sequence ASC
             DQL
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
@@ -134,6 +172,9 @@ final class LinearLogStore
         $ids = [];
         foreach ($planned as $entry) {
             if (null === $entry->media || isset($excluded[$entry->id])) {
+                continue;
+            }
+            if (null !== $pinnedAfter && $entry->is_locked && $entry->planned_at > $pinnedAfter) {
                 continue;
             }
             $ids[] = $entry->id;
@@ -351,6 +392,10 @@ final class LinearLogStore
         /** @var list<array{StationLogEntry, ?string}> $touched */
         $touched = [];
 
+        $pinned = $this->pinnedLines($station, $logRows);
+        /** @var array<string, true> $displacedKeys */
+        $displacedKeys = [];
+
         foreach ($logRows as $data) {
             if ($data['skip']) {
                 continue;
@@ -417,6 +462,15 @@ final class LinearLogStore
                 continue;
             }
 
+            // A locked line holds its air time. The simulation cannot place it
+            // there, so it fills that time as if it were free; saving that fill
+            // put the same programme in the log twice (CMS Week 22 at Mon 11:00,
+            // lines 69767 and 70058).
+            if ($this->overlapsPinned($data, $pinned)) {
+                $displacedKeys[(string)$data['entry_key']] = true;
+                continue;
+            }
+
             $entry = new StationLogEntry($station, (int)$data['planned_at'], ++$maxSequence);
             $this->applyRowData($entry, $data);
             $entry->duration = (float)$data['duration'];
@@ -427,6 +481,7 @@ final class LinearLogStore
         // One transaction: the plan the rebuild replaces goes out and the new plan
         // goes in together, or neither does.
         $this->em->wrapInTransaction(function () use ($station, $replacedIds): void {
+            $this->assertReplacedStillPlanned($station, $replacedIds);
             $this->removeReplacedPlan($station, $replacedIds);
             $this->em->flush();
         });
@@ -438,6 +493,16 @@ final class LinearLogStore
 
             $position = $positionByKey[$key];
             $entries[$position] = [...$entries[$position], ...$this->logFields($entry)];
+        }
+
+        if ([] !== $displacedKeys) {
+            $entries = array_values(array_filter(
+                $entries,
+                static fn(array $entry): bool => !isset($displacedKeys[(string)($entry['id'] ?? '')]),
+            ));
+        }
+        foreach ($pinned as $entry) {
+            $entries[] = $this->mapEntry($entry);
         }
 
         // This hour's as-run lines (aired, swapped, replaced, dropped).
@@ -466,6 +531,61 @@ final class LinearLogStore
         );
 
         return $entries;
+    }
+
+    /**
+     * Locked lines still to air that the simulation did not carry: their air
+     * time is fixed, so the rest of the plan has to fit around them.
+     *
+     * @param list<array<string, mixed>> $logRows
+     * @return list<StationLogEntry>
+     */
+    private function pinnedLines(Station $station, array $logRows): array
+    {
+        $carried = [];
+        foreach ($logRows as $data) {
+            if (null !== $data['log_entry_id']) {
+                $carried[(int)$data['log_entry_id']] = true;
+            }
+        }
+
+        /** @var StationLogEntry[] $locked */
+        $locked = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.status IN (:open)
+                AND e.is_locked = 1
+                AND e.media IS NOT NULL
+                AND e.planned_at + e.duration > :now
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('open', [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED])
+            ->setParameter('now', time())
+            ->getResult();
+
+        return array_values(array_filter(
+            $locked,
+            static fn(StationLogEntry $entry): bool => !isset($carried[$entry->id]),
+        ));
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param list<StationLogEntry> $pinned
+     */
+    private function overlapsPinned(array $data, array $pinned): bool
+    {
+        $start = (int)$data['planned_at'];
+        $end = $start + (float)$data['duration'];
+
+        foreach ($pinned as $entry) {
+            if ($start < $entry->planned_at + $entry->duration && $end > $entry->planned_at) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param array<string, mixed> $data */

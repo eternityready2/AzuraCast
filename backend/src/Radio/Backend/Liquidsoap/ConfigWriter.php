@@ -324,7 +324,13 @@ final class ConfigWriter implements EventSubscriberInterface
                     continue;
                 }
 
-                $playlistConfigLines[] = $playlistVarName . ' = mksafe(' . $remoteUrlFunc . ')';
+                // No mksafe(): it fills a dropped feed with silence, which kept the
+                // schedule switch on this source and put dead air on the station
+                // (Nightsounds, Sun 2026-10-04 23:28-23:30: 94s). Left fallible,
+                // an empty buffer lets the switch fall through to the AutoDJ while
+                // input.http keeps reconnecting, and the switch returns to the
+                // programme as soon as the feed refills the buffer.
+                $playlistConfigLines[] = $playlistVarName . ' = ' . $remoteUrlFunc;
                 $event->appendLines($playlistConfigLines);
 
                 foreach ($scheduleItems as $scheduleItem) {

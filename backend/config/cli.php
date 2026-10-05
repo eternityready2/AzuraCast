@@ -34,6 +34,7 @@ return function (App\Event\BuildConsoleCommands $event) {
         'azuracast:setup' => Command\SetupCommand::class,
         'azuracast:radio:restart' => Command\RestartRadioCommand::class,
         'azuracast:radio:build-linear-log' => Command\BuildLinearLogCommand::class,
+        'azuracast:radio:check-linear-log' => Command\CheckLinearLogCommand::class,
         'azuracast:sync:nowplaying' => Command\Sync\NowPlayingCommand::class,
         'azuracast:sync:nowplaying:station' => Command\Sync\NowPlayingPerStationCommand::class,
         'azuracast:sync:run' => Command\Sync\RunnerCommand::class,

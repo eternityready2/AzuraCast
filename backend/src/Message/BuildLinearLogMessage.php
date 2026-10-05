@@ -19,6 +19,10 @@ final class BuildLinearLogMessage extends AbstractUniqueMessage
         // Daily FM-style build: plan through the end of tomorrow (max 48h), so
         // tomorrow's log is ready before today's ends.
         public readonly bool $throughTomorrow = false,
+        // The schedule changed: re-plan from the end of the live queue, not
+        // from the end of the two-hour lock. The lock keeps the near log
+        // stable for operators; it must not keep a schedule change out of it.
+        public readonly bool $replanLockWindow = false,
     ) {
         $this->force = $force;
     }

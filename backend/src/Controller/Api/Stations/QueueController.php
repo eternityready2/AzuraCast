@@ -477,7 +477,7 @@ final class QueueController extends AbstractStationApiCrudController
                 AND e.status = :planned
                 AND e.planned_at < :hourEnd
                 AND e.media IS NOT NULL
-                ORDER BY e.sequence ASC
+                ORDER BY e.planned_at ASC, e.sequence ASC
             DQL
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)

@@ -21,7 +21,7 @@ final class StationRemoteRepository extends AbstractStationBasedRepository
      */
     public function getDisplayNames(Station $station): array
     {
-        $remotes = $this->repository->findBy(['station' => $station]);
+        $remotes = $this->getRepository()->findBy(['station' => $station]);
 
         $displayNames = [];
 

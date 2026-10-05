@@ -30,7 +30,7 @@ final class StorageLocationRepository extends Repository
             $type = $type->value;
         }
 
-        return $this->repository->findOneBy(
+        return $this->getRepository()->findOneBy(
             [
                 'type' => $type,
                 'id' => $id,
@@ -49,7 +49,7 @@ final class StorageLocationRepository extends Repository
             $type = $type->value;
         }
 
-        return $this->repository->findBy(
+        return $this->getRepository()->findBy(
             [
                 'type' => $type,
             ]

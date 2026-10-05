@@ -36,6 +36,8 @@ export interface LinearLogItem {
     log_note?: string | null;
     aired_at?: number | null;
     is_locked?: boolean;
+    timing?: 'hard' | 'soft';
+    timing_reason?: string | null;
 }
 
 export interface LinearLogGap {

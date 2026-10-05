@@ -20,7 +20,7 @@ final class AiDjScheduleRepository extends Repository
      */
     public function findOneBy(array $criteria): ?AiDjSchedule
     {
-        return $this->repository->findOneBy($criteria);
+        return $this->getRepository()->findOneBy($criteria);
     }
 
     /**
@@ -141,7 +141,7 @@ final class AiDjScheduleRepository extends Repository
 
     public function findForDj(int $scheduleId, AiDj $dj): ?AiDjSchedule
     {
-        return $this->repository->findOneBy([
+        return $this->getRepository()->findOneBy([
             'id' => $scheduleId,
             'ai_dj' => $dj,
         ]);

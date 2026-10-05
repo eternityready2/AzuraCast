@@ -27,7 +27,7 @@ final class StationRequestRepository extends AbstractStationBasedRepository
 
     public function getPendingRequest(int|string $id, Station $station): ?StationRequest
     {
-        return $this->repository->findOneBy(
+        return $this->getRepository()->findOneBy(
             [
                 'id' => $id,
                 'station' => $station,

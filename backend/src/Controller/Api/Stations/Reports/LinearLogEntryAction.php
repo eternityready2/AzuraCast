@@ -187,14 +187,20 @@ final class LinearLogEntryAction
     /** Swap play order with the neighbouring planned line. */
     private function move(Station $station, StationLogEntry $entry, bool $up): void
     {
+        // Neighbour in air-time order, the order playout takes lines in.
         $neighbor = $this->em->createQuery(
             $up
                 ? 'SELECT e FROM App\Entity\StationLogEntry e WHERE e.station = :station
-                    AND e.status = :planned AND e.sequence < :seq ORDER BY e.sequence DESC'
+                    AND e.status = :planned AND e.media IS NOT NULL
+                    AND (e.planned_at < :at OR (e.planned_at = :at AND e.sequence < :seq))
+                    ORDER BY e.planned_at DESC, e.sequence DESC'
                 : 'SELECT e FROM App\Entity\StationLogEntry e WHERE e.station = :station
-                    AND e.status = :planned AND e.sequence > :seq ORDER BY e.sequence ASC'
+                    AND e.status = :planned AND e.media IS NOT NULL
+                    AND (e.planned_at > :at OR (e.planned_at = :at AND e.sequence > :seq))
+                    ORDER BY e.planned_at ASC, e.sequence ASC'
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setParameter('at', $entry->planned_at)
             ->setParameter('seq', $entry->sequence)
             ->setMaxResults(1)
             ->getOneOrNullResult();

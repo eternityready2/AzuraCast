@@ -17,7 +17,7 @@ final class UserRepository extends Repository
     public function findByIdOrEmail(int|string $identifier): ?User
     {
         if (is_numeric($identifier)) {
-            return $this->repository->find($identifier);
+            return $this->getRepository()->find($identifier);
         }
 
         return $this->findByEmail((string)$identifier);
@@ -25,7 +25,7 @@ final class UserRepository extends Repository
 
     public function findByEmail(string $email): ?User
     {
-        return $this->repository->findOneby(['email' => $email]);
+        return $this->getRepository()->findOneby(['email' => $email]);
     }
 
     public function authenticate(string $username, string $password): ?User

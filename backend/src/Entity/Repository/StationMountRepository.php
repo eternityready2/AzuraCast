@@ -81,7 +81,7 @@ final class StationMountRepository extends AbstractStationBasedRepository
      */
     public function getDisplayNames(Station $station): array
     {
-        $mounts = $this->repository->findBy(['station' => $station]);
+        $mounts = $this->getRepository()->findBy(['station' => $station]);
 
         $displayNames = [];
 
@@ -95,7 +95,7 @@ final class StationMountRepository extends AbstractStationBasedRepository
 
     public function getDefaultMount(Station $station): ?StationMount
     {
-        $mount = $this->repository->findOneBy(['station' => $station, 'is_default' => true]);
+        $mount = $this->getRepository()->findOneBy(['station' => $station, 'is_default' => true]);
 
         if ($mount instanceof StationMount) {
             return $mount;

@@ -161,6 +161,12 @@ final class ClockWheelDaypartsController extends AbstractStationApiCrudControlle
             $data[$key] = (int) $data[$key];
         }
 
+        if (array_key_exists('days', $data)) {
+            $data['days'] = is_array($data['days'])
+                ? array_map(static fn($day) => (int)$day, $data['days'])
+                : [];
+        }
+
         foreach (['is_active', 'separation_override_enabled', 'separation_enabled'] as $key) {
             if (array_key_exists($key, $data)) {
                 $data[$key] = filter_var($data[$key], FILTER_VALIDATE_BOOLEAN);

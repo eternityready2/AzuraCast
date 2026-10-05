@@ -24,7 +24,7 @@ final class CustomFieldRepository extends Repository
     {
         $fields = [];
 
-        foreach ($this->repository->findAll() as $field) {
+        foreach ($this->getRepository()->findAll() as $field) {
             /** @var CustomField $field */
             if (empty($field->auto_assign)) {
                 continue;

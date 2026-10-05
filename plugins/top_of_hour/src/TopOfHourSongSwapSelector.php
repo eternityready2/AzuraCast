@@ -1296,6 +1296,12 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             ) {
                 continue;
             }
+            // An unscheduled rotation playlist always counts as "scheduled to
+            // play", even while another playlist's block owns the air. Pulling
+            // a substitute from it put the wrong format into that block.
+            if (!$this->scheduler->isPlaylistAllowedAt($candidate, $start->toDateTimeImmutable())) {
+                continue;
+            }
 
             $eligible[$candidate->id] = $candidate;
         }

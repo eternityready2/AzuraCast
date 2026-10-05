@@ -78,7 +78,51 @@ final class LinearLogPlayout implements EventSubscriberInterface
             return false;
         }
 
-        return null !== $this->findNextPlannedId($station);
+        return $this->hasLineForHour($station, $event->getExpectedPlayTime());
+    }
+
+    /**
+     * End of the clock hour $expected falls in, in station time.
+     */
+    private static function hourEnd(Station $station, DateTimeInterface $expected): int
+    {
+        return CarbonImmutable::instance($expected)
+            ->setTimezone($station->getTimezoneObject())
+            ->startOfHour()
+            ->addHour()
+            ->getTimestamp();
+    }
+
+    /**
+     * True when the next planned line belongs to this hour (or an earlier one).
+     *
+     * The log is taken in order, so when an hour runs out of lines the next one
+     * up is the following hour's opener. Airing it now pulled every later hour
+     * forward with it: lines planned for 02:43 went out at 01:48, and the hours
+     * behind them were left with nothing planned. An hour that comes up short is
+     * filled by the normal pickers instead, as on FM automation, and each
+     * hour's own lines stay in their hour.
+     *
+     * "In order" is air-time order. Sequence is only the order lines were
+     * written: a locked line keeps its old sequence through a rebuild, and
+     * programme lines are written after the music around them, so taking by
+     * sequence put an 11:00 locked line ahead of the 03:00-10:59 lines and
+     * this guard then held back every hour in between.
+     */
+    private function hasLineForHour(Station $station, DateTimeInterface $expected): bool
+    {
+        $plannedAt = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e.planned_at FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station AND e.status = :planned
+                ORDER BY e.planned_at ASC, e.sequence ASC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return is_array($plannedAt) && (int)$plannedAt['planned_at'] < self::hourEnd($station, $expected);
     }
 
     public function supplyFromLog(BuildQueue $event): void
@@ -118,6 +162,11 @@ final class LinearLogPlayout implements EventSubscriberInterface
 
     public function linkSelection(BuildQueue $event): void
     {
+        // The planner's simulation never claims a line; it is rolled back.
+        if ($this->previewContext->isActive()) {
+            return;
+        }
+
         $at = $event->getExpectedPlayTime()->getTimestamp();
         $rows = $event->getNextSongs();
         if (1 !== count($rows)) {
@@ -141,6 +190,39 @@ final class LinearLogPlayout implements EventSubscriberInterface
 
         $entry = $this->em->find(StationLogEntry::class, $entryId);
         if (!$entry instanceof StationLogEntry) {
+            return;
+        }
+
+        // Claim the line in the database, not only in memory: a schedule-change
+        // re-plan may have replaced it since takeNext() read it. Its commit
+        // locks the lines it replaces, so either this claim lands first and the
+        // re-plan starts over, or the line is gone and this row airs as an
+        // ordinary live pick instead of pointing at a deleted line.
+        $claimed = $this->em->createQuery(
+            <<<'DQL'
+                UPDATE App\Entity\StationLogEntry e SET e.status = :queued
+                WHERE e.id = :id AND e.status = :planned
+            DQL
+        )->setParameter('queued', StationLogEntry::STATUS_QUEUED)
+            ->setParameter('id', $entryId)
+            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->execute();
+        // MySQL counts changed rows, so a line that was already queued (a
+        // re-offer) reports 0 here too; only a missing or closed line is lost.
+        $dbStatus = 0 === $claimed
+            ? $this->em->getConnection()->fetchOne('SELECT status FROM station_log_entries WHERE id = ?', [$entryId])
+            : StationLogEntry::STATUS_QUEUED;
+        if (StationLogEntry::STATUS_QUEUED !== $dbStatus) {
+            $this->logger->notice('Linear Log: planned line was taken away before it was queued; airing as a live pick.', [
+                'log_entry_id' => $entryId,
+                'status_now' => false === $dbStatus ? 'deleted' : $dbStatus,
+                'song' => $row->text,
+            ]);
+            $row->log_entry_id = null;
+            $this->em->detach($entry);
+            if ($this->offeredEntryId === $entryId) {
+                $this->offeredEntryId = null;
+            }
             return;
         }
 
@@ -218,7 +300,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 <<<'DQL'
                     SELECT e FROM App\Entity\StationLogEntry e
                     WHERE e.station = :station AND e.status = :planned
-                    ORDER BY e.sequence ASC
+                    ORDER BY e.planned_at ASC, e.sequence ASC
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
@@ -226,6 +308,11 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 ->getOneOrNullResult();
 
             if (!$entry instanceof StationLogEntry) {
+                return null;
+            }
+
+            // A later hour's line stays in its hour; see hasLineForHour().
+            if ($entry->planned_at >= self::hourEnd($station, $expected)) {
                 return null;
             }
 
@@ -249,21 +336,6 @@ final class LinearLogPlayout implements EventSubscriberInterface
         }
 
         return null;
-    }
-
-    private function findNextPlannedId(Station $station): ?int
-    {
-        $id = $this->em->createQuery(
-            <<<'DQL'
-                SELECT e.id FROM App\Entity\StationLogEntry e
-                WHERE e.station = :station AND e.status = :planned
-            DQL
-        )->setParameter('station', $station)
-            ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
-            ->setMaxResults(1)
-            ->getOneOrNullResult();
-
-        return is_array($id) ? (int)$id['id'] : null;
     }
 
     private function materialize(

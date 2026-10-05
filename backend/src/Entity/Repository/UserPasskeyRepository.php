@@ -18,7 +18,7 @@ final class UserPasskeyRepository extends Repository
 
     public function findById(string $id): ?UserPasskey
     {
-        $record = $this->repository->find(WebAuthnPasskey::hashIdentifier($id));
+        $record = $this->getRepository()->find(WebAuthnPasskey::hashIdentifier($id));
         if (!($record instanceof UserPasskey)) {
             return null;
         }

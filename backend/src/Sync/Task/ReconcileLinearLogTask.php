@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sync\Task;
 
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
@@ -24,8 +25,22 @@ use Throwable;
  */
 final class ReconcileLinearLogTask extends AbstractTask
 {
+    private const string NO_AUDIO_NOTE = 'Dropped: no audio from the stream during its window';
+
+    /**
+     * How far song history may sit from a queue row's played time and still
+     * be that play. Liquidsoap reports a track as it starts, so after it is
+     * quick; before it is wide because history keeps one row for a song
+     * repeated back to back, and the queue's played times for those repeats
+     * ran minutes late (Sun 21:00 clock wheel: aired 21:02 and 21:04, rows
+     * say 21:06 and 21:08).
+     */
+    private const int HEARD_AFTER_SECONDS = 120;
+    private const int HEARD_BEFORE_SECONDS = 600;
+
     public function __construct(
         private readonly LinearLogRules $rules,
+        private readonly LinearLogStore $store,
     ) {
     }
 
@@ -69,6 +84,8 @@ final class ReconcileLinearLogTask extends AbstractTask
         $now = time();
         $hourStart = CarbonImmutable::now($station->getTimezoneObject())->startOfHour()->getTimestamp();
 
+        $this->settleStreamProgrammes($station, $now);
+
         /** @var StationLogEntry[] $queued */
         $queued = $this->em->createQuery(
             <<<'DQL'
@@ -111,7 +128,25 @@ final class ReconcileLinearLogTask extends AbstractTask
                 continue;
             }
 
-            $entry->aired_at = $row->timestamp_played?->getTimestamp() ?? $now;
+            // A played flag is not airplay. The Top-of-Hour hold can refuse a
+            // queued item that is still marked played afterwards: "Old Time
+            // Religion" (line 67370, 00:40:24) was logged as aired and never
+            // reached the air. Song history is what Liquidsoap reported playing.
+            $playedAt = $row->timestamp_played?->getTimestamp() ?? $now;
+            if (null !== $row->media && !$this->wasHeard($station, $row->media->id, $playedAt)) {
+                if ($now < $playedAt + self::HEARD_AFTER_SECONDS) {
+                    // Liquidsoap's report may still be on its way.
+                    $this->em->persist($entry);
+                    continue;
+                }
+
+                $entry->status = StationLogEntry::STATUS_DROPPED;
+                $entry->note = 'Dropped: marked played but never aired';
+                $this->em->persist($entry);
+                continue;
+            }
+
+            $entry->aired_at = $playedAt;
 
             $plannedMediaId = $entry->media?->id;
             $airedMedia = $row->media;
@@ -174,6 +209,16 @@ final class ReconcileLinearLogTask extends AbstractTask
             }
 
             $airedAt = $row->timestamp_played?->getTimestamp() ?? $now;
+
+            // A stream programme's queue row is only marked played when the
+            // AutoDJ gets the air back, long after the window opened. It is
+            // the programme's own log line, not a new live item.
+            $programmeLine = $this->findStreamProgrammeLine($station, $row, $airedAt);
+            if (null !== $programmeLine) {
+                $row->log_entry_id = $programmeLine->id;
+                $this->em->persist($row);
+                continue;
+            }
             $entry = new StationLogEntry($station, $airedAt, 0);
             $entry->status = StationLogEntry::STATUS_AIRED;
             $entry->aired_at = $airedAt;
@@ -203,5 +248,119 @@ final class ReconcileLinearLogTask extends AbstractTask
             $row->log_entry_id = $entry->id;
             $this->em->persist($row);
         }
+    }
+
+    /**
+     * A scheduled stream programme airs from its own wall-clock switch in
+     * Liquidsoap, not from the AutoDJ queue, so no queue row reports it. Its
+     * log line is as-run from the moment its window opens -- once the stream
+     * has been heard. Its track titles reach song history as rows with no
+     * library file, and nothing else airs inside the window, so one such row
+     * proves the audio. A window that closes without one aired silence
+     * (Liquidsoap's mksafe fills a dead stream with blank), and its line says
+     * so instead of claiming the programme aired.
+     */
+    private function settleStreamProgrammes(Station $station, int $now): void
+    {
+        /** @var StationLogEntry[] $lines */
+        $lines = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.status IN (:open)
+                AND e.media IS NULL
+                AND e.payload LIKE :programme
+                AND e.planned_at <= :now
+                AND e.planned_at >= :since
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('open', [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED])
+            ->setParameter('programme', '%scheduled_programme%')
+            ->setParameter('now', $now)
+            ->setParameter('since', $now - 86400)
+            ->getResult();
+
+        foreach ($lines as $line) {
+            if (!$this->store->isScheduledProgramme($line) || true !== $line->playlist?->is_enabled) {
+                continue;
+            }
+
+            $windowEnd = $line->planned_at + (int)ceil($line->duration);
+            $heard = $this->em->getConnection()->fetchOne(
+                'SELECT 1 FROM song_history
+                WHERE station_id = ? AND media_id IS NULL
+                AND timestamp_start >= ? AND timestamp_start < ?
+                LIMIT 1',
+                [$station->id, gmdate('Y-m-d H:i:s', $line->planned_at), gmdate('Y-m-d H:i:s', min($now, $windowEnd))]
+            );
+
+            if (false !== $heard) {
+                $line->status = StationLogEntry::STATUS_AIRED;
+                $line->aired_at = $line->planned_at;
+            } elseif ($now >= $windowEnd) {
+                $line->status = StationLogEntry::STATUS_DROPPED;
+                $line->note = self::NO_AUDIO_NOTE;
+            } else {
+                continue;
+            }
+            $this->em->persist($line);
+        }
+    }
+
+    private function wasHeard(Station $station, int $mediaId, int $playedAt): bool
+    {
+        return false !== $this->em->getConnection()->fetchOne(
+            'SELECT 1 FROM song_history
+            WHERE station_id = ? AND media_id = ?
+            AND timestamp_start >= ? AND timestamp_start <= ?
+            LIMIT 1',
+            [
+                $station->id,
+                $mediaId,
+                gmdate('Y-m-d H:i:s', $playedAt - self::HEARD_BEFORE_SECONDS),
+                gmdate('Y-m-d H:i:s', $playedAt + self::HEARD_AFTER_SECONDS),
+            ]
+        );
+    }
+
+    /**
+     * The log line of the stream programme window a played queue row belongs to.
+     */
+    private function findStreamProgrammeLine(Station $station, StationQueue $row, int $airedAt): ?StationLogEntry
+    {
+        $playlist = $row->playlist;
+        if (
+            null === $row->autodj_custom_uri
+            || null === $playlist
+            || PlaylistSources::RemoteUrl !== $playlist->source
+        ) {
+            return null;
+        }
+
+        /** @var StationLogEntry|null $line */
+        $line = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station
+                AND e.playlist = :playlist
+                AND e.media IS NULL
+                AND e.payload LIKE :programme
+                AND (e.status = :aired OR (e.status = :dropped AND e.note = :noAudio))
+                AND e.planned_at <= :airedAt
+                AND e.planned_at >= :since
+                ORDER BY e.planned_at DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('playlist', $playlist)
+            ->setParameter('programme', '%scheduled_programme%')
+            ->setParameter('aired', StationLogEntry::STATUS_AIRED)
+            ->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
+            ->setParameter('noAudio', self::NO_AUDIO_NOTE)
+            ->setParameter('airedAt', $airedAt)
+            ->setParameter('since', $airedAt - 86400)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return $line;
     }
 }

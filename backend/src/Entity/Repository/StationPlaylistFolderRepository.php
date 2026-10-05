@@ -142,7 +142,7 @@ final class StationPlaylistFolderRepository extends AbstractStationBasedReposito
         $path = self::filterPath($path);
 
         /** @var StationPlaylistFolder[] $folders */
-        $folders = $this->repository->findBy([
+        $folders = $this->getRepository()->findBy([
             'path' => $path,
             'station' => $station,
         ]);
@@ -156,7 +156,7 @@ final class StationPlaylistFolderRepository extends AbstractStationBasedReposito
 
             $folders = array_merge(
                 $folders,
-                $this->repository->findBy([
+                $this->getRepository()->findBy([
                     'path' => self::filterPath($pathToSearch),
                     'station' => $station,
                 ])

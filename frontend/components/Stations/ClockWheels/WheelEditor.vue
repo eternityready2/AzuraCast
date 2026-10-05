@@ -10,13 +10,13 @@
                 class="btn btn-sm btn-light"
                 @click="emit('cancel')"
             >
-                ← {{ $gettext('All Clock Wheels') }}
+                ← {{ isTemplate ? $gettext('All Hour Templates') : $gettext('All Clock Wheels') }}
             </button>
             <h2
                 id="hdr_clock_wheel_editor"
                 class="card-title my-0 flex-fill"
             >
-                {{ isEditMode ? form.name || $gettext('Edit Clock Wheel') : $gettext('New Clock Wheel') }}
+                {{ isEditMode ? form.name || titleEdit : titleNew }}
             </h2>
         </div>
 
@@ -25,6 +25,12 @@
             class="alert alert-danger rounded-0 mb-0"
         >
             {{ error }}
+        </div>
+        <div
+            v-if="isTemplate"
+            class="alert alert-info rounded-0 mb-0"
+        >
+            {{ $gettext('An hour template is a master clock wheel. Every wheel made from it, including the hourly wheels a daypart creates, follows these slots; save here and they all update.') }}
         </div>
         <div
             v-if="isDaypartManaged"
@@ -44,7 +50,7 @@
                             <wheel-dial
                                 :slots="dialSlots"
                                 :size="300"
-                                :center-label="form.name || $gettext('New Wheel')"
+                                :center-label="form.name || (isTemplate ? $gettext('New Template') : $gettext('New Wheel'))"
                                 :center-sub="$ngettext('%{n} slot', '%{n} slots', entries.length, {n: String(entries.length)})"
                                 :selected-index="selectedIndex"
                                 :aria-label="$gettext('Clock wheel preview')"
@@ -105,10 +111,10 @@
 
                     <div class="col-lg-8">
                         <h3 class="h6">
-                            {{ $gettext('Wheel Details') }}
+                            {{ isTemplate ? $gettext('Template Details') : $gettext('Wheel Details') }}
                         </h3>
                         <div class="row g-3 mb-4">
-                            <div class="col-md-5">
+                            <div :class="isTemplate ? 'col-md-10' : 'col-md-5'">
                                 <label
                                     class="form-label"
                                     for="cw_name"
@@ -134,7 +140,10 @@
                                     class="form-control form-control-color w-100"
                                 >
                             </div>
-                            <div class="col-md-2 col-8">
+                            <div
+                                v-if="!isTemplate"
+                                class="col-md-2 col-8"
+                            >
                                 <label
                                     class="form-label"
                                     for="cw_status"
@@ -152,7 +161,10 @@
                                     </option>
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div
+                                v-if="!isTemplate"
+                                class="col-md-3"
+                            >
                                 <label
                                     class="form-label"
                                     for="cw_fill"
@@ -170,7 +182,16 @@
                                     </option>
                                 </select>
                             </div>
-                            <div class="col-12 form-text mt-1">
+                            <div
+                                v-if="isTemplate"
+                                class="col-12 form-text mt-1"
+                            >
+                                {{ $gettext('Templates never air by themselves. Put one on air with a Daypart.') }}
+                            </div>
+                            <div
+                                v-else
+                                class="col-12 form-text mt-1"
+                            >
                                 {{ $gettext('Conservative skips a slot that does not fit its window; Aggressive picks the shortest track that fits.') }}
                                 {{ $gettext('Air times are set on the Schedule page.') }}
                             </div>
@@ -353,7 +374,7 @@
                 {{ $gettext('Delete') }}
             </button>
             <button
-                v-if="isEditMode"
+                v-if="isEditMode && !isTemplate"
                 type="button"
                 class="btn btn-outline-secondary"
                 :disabled="isBusy"
@@ -376,7 +397,7 @@
                     :disabled="isBusy"
                     @click="doSubmit"
                 >
-                    {{ isBusy && loaded ? $gettext('Saving…') : $gettext('Save Clock Wheel') }}
+                    {{ isBusy && loaded ? $gettext('Saving…') : (isTemplate ? $gettext('Save Template') : $gettext('Save Clock Wheel')) }}
                 </button>
             </div>
         </div>
@@ -414,10 +435,14 @@ import {
     type ClockWheelSlotEditorRow,
 } from '~/functions/clockWheelSlotEditor.ts';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     createUrl: string;
     recordUrl?: string | null;
-}>();
+    mode?: 'wheel' | 'template';
+}>(), {
+    recordUrl: null,
+    mode: 'wheel',
+});
 
 const emit = defineEmits<{
     (e: 'saved'): void;
@@ -431,6 +456,10 @@ const {confirmDelete} = useDialog();
 const {categoryOptions, load: loadCategories} = useClockWheelSlotOptions();
 
 const isEditMode = computed(() => Boolean(props.recordUrl));
+const isTemplate = computed(() => props.mode === 'template');
+const titleEdit = computed(() => isTemplate.value ? $gettext('Edit Hour Template') : $gettext('Edit Clock Wheel'));
+const titleNew = computed(() => isTemplate.value ? $gettext('New Hour Template') : $gettext('New Clock Wheel'));
+const noun = computed(() => isTemplate.value ? $gettext('hour template') : $gettext('clock wheel'));
 const isBusy = ref(false);
 const loaded = ref(false);
 const submitted = ref(false);
@@ -561,7 +590,7 @@ onMounted(async () => {
         }
         loaded.value = true;
     } catch (err) {
-        error.value = requestError(err, $gettext('Could not load this clock wheel.'));
+        error.value = requestError(err, $gettext('Could not load this %{noun}.', {noun: noun.value}));
     } finally {
         isBusy.value = false;
     }
@@ -584,13 +613,17 @@ onMounted(async () => {
 const buildPayload = (): Record<string, unknown> | null => {
     submitted.value = true;
     if (!form.value.name.trim()) {
-        error.value = $gettext('Please enter a name for this clock wheel.');
+        error.value = $gettext('Please enter a name for this %{noun}.', {noun: noun.value});
         return null;
+    }
+    const slots = entries.map((e) => mapEditorRowToApiSlot(e));
+    if (isTemplate.value) {
+        return {name: form.value.name.trim(), color: form.value.color, slots};
     }
     const payload: Record<string, unknown> = {
         ...form.value,
         name: form.value.name.trim(),
-        slots: entries.map((e) => mapEditorRowToApiSlot(e)),
+        slots,
     };
     // Slots edited here become this wheel's own layout.
     if (inheritedTemplateSlots.value && !isDaypartManaged.value) {
@@ -622,9 +655,11 @@ const doSubmit = async () => {
         } else {
             await axios.post(props.createUrl, payload);
         }
-        notifySuccess($gettext('Clock Wheel saved.'));
+        notifySuccess(isTemplate.value
+            ? $gettext('Hour template saved. Wheels made from it were updated.')
+            : $gettext('Clock Wheel saved.'));
         emit('saved');
-    }, $gettext('Could not save this clock wheel.'));
+    }, $gettext('Could not save this %{noun}.', {noun: noun.value}));
 };
 
 const doDuplicate = async () => {
@@ -654,9 +689,11 @@ const doDelete = async () => {
     }
     await run(async () => {
         await axios.delete(props.recordUrl as string);
-        notifySuccess($gettext('Clock Wheel deleted.'));
+        notifySuccess(isTemplate.value ? $gettext('Hour template deleted.') : $gettext('Clock Wheel deleted.'));
         emit('saved');
-    }, $gettext('Could not delete this clock wheel.'));
+    }, isTemplate.value
+        ? $gettext('Could not delete this hour template. Remove the dayparts that use it first.')
+        : $gettext('Could not delete this clock wheel.'));
 };
 </script>
 

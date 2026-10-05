@@ -26,7 +26,7 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
      */
     public function getAllForStation(Station $station): array
     {
-        return $this->repository->findBy([
+        return $this->getRepository()->findBy([
             'station' => $station,
         ]);
     }

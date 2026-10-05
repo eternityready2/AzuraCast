@@ -23,6 +23,7 @@ use App\Radio\Backend\Liquidsoap\ConfigWriter as LiquidsoapConfigWriter;
 use App\Radio\Configuration;
 use App\Radio\Frontend\Icecast;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
+use App\Radio\AutoDJ\LinearLog\LinearLogTiming;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\AirCheckFrontendConnectivityProbe;
 use App\Service\GuzzleFactory;
@@ -44,6 +45,7 @@ final class FeatureSuiteController
         private readonly MediaProcessor $mediaProcessor,
         private readonly LinearLogSnapshotStore $linearLogSnapshotStore,
         private readonly LinearLogStore $linearLogStore,
+        private readonly LinearLogTiming $linearLogTiming,
         private readonly MessageBus $messageBus,
         private readonly Configuration $configuration,
         private readonly CacheInterface $cache,
@@ -393,6 +395,9 @@ final class FeatureSuiteController
                 // the raw build-time snapshot, which does not see what the page
                 // just filtered out. This is the number an operator can trust.
                 $coverage = $this->linearLogStore->measureCoverage($station, $snapshot['entries'], $hours);
+
+                // FM-style hard/soft timing for the HARD marker on the page.
+                $snapshot['entries'] = $this->linearLogTiming->tagEntries($station, $snapshot['entries']);
             } catch (Throwable $e) {
                 // Fall back to the snapshot's own times; no coverage claim.
             }

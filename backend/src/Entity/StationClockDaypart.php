@@ -75,6 +75,34 @@ final class StationClockDaypart implements
     ]
     public int $end_hour = 10;
 
+    #[ORM\Column(name: 'days', length: 50, nullable: true)]
+    private ?string $days_raw = null;
+
+    /**
+     * ISO-8601 days (1 = Monday, 7 = Sunday) the generated hourly wheels are
+     * scheduled on. Empty means every day.
+     *
+     * @var int[]
+     */
+    #[OA\Property(example: [1, 2, 3, 4, 5])]
+    public array $days {
+        get {
+            if (empty($this->days_raw)) {
+                return [];
+            }
+
+            return array_map(static fn($day) => (int)$day, explode(',', $this->days_raw));
+        }
+        set {
+            $days = array_values(array_unique(array_filter(
+                array_map(static fn($day) => (int)$day, $value),
+                static fn(int $day): bool => $day >= 1 && $day <= 7
+            )));
+            sort($days);
+            $this->days_raw = [] === $days ? null : implode(',', $days);
+        }
+    }
+
     #[
         OA\Property(example: '#e87722', nullable: true),
         ORM\Column(length: 7, nullable: true),

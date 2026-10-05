@@ -148,7 +148,7 @@ final class StationPlaylistMediaRepository extends Repository
         $isNonSequential = PlaylistOrders::Sequential !== $playlist->order;
 
         $record = ($isNonSequential)
-            ? $this->repository->findOneBy(
+            ? $this->getRepository()->findOneBy(
                 [
                     'media' => $media,
                     'playlist' => $playlist,
@@ -195,7 +195,7 @@ final class StationPlaylistMediaRepository extends Repository
             throw new RuntimeException('This playlist is not meant to contain songs!');
         }
 
-        $existingRecord = $this->repository->findOneBy([
+        $existingRecord = $this->getRepository()->findOneBy([
             'media' => $media,
             'playlist' => $playlist,
             'folder' => null,
@@ -366,8 +366,17 @@ final class StationPlaylistMediaRepository extends Repository
                 continue;
             }
 
+            // A restart reshuffles; it is not a pass through the playlist. The
+            // scheduler reads queue_reset_at inside a "loop once" window as
+            // "already played through", so stamping it here blocked Hymns for
+            // the rest of its 00:00-06:00 window after a 02:01 restart and left
+            // 03:24-06:00 with nothing to play (2026-10-05).
+            $lastReset = $playlist->queue_reset_at;
             $this->resetQueue($playlist, $now);
+            $playlist->queue_reset_at = $lastReset;
+            $this->em->persist($playlist);
         }
+        $this->em->flush();
     }
 
     public function getQueue(StationPlaylist $playlist): array

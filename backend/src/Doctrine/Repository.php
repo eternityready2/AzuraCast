@@ -22,22 +22,24 @@ class Repository
     /** @var class-string<TEntity> */
     protected string $entityClass;
 
-    /** @var ObjectRepository<TEntity> */
-    protected ObjectRepository $repository;
-
     #[Inject]
     public function setEntityManager(ReloadableEntityManagerInterface $em): void
     {
         $this->em = $em;
-        $this->repository = $em->getRepository($this->entityClass);
     }
 
     /**
+     * Resolved on every call. Stored once, it stayed bound to the EntityManager
+     * that existed at injection; after open() replaced a closed one, lookups
+     * still returned entities from the dead manager, and the next flush failed
+     * with "A new entity was found through the relationship
+     * ClockWheelEvent#station" (Linear Log build retry).
+     *
      * @return ObjectRepository<TEntity>
      */
     public function getRepository(): ObjectRepository
     {
-        return $this->repository;
+        return $this->em->getRepository($this->entityClass);
     }
 
     public function getEntityManager(): ReloadableEntityManagerInterface

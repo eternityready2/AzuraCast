@@ -69,6 +69,13 @@
                             <span v-if="item.hour_boundary_enforce_cap" class="badge text-bg-warning me-1">BOUNDARY</span>
                             <span v-if="item.is_request" class="badge text-bg-primary me-1">REQUEST</span>
                             <span v-if="item.is_locked" class="badge text-bg-dark">LOCKED</span>
+                            <span
+                                v-if="item.timing === 'hard' && item.source_type !== 'scheduled_programme' && !item.top_of_hour_legal_id && !item.is_locked"
+                                class="badge text-bg-danger me-1"
+                                :title="item.timing_reason ?? ''"
+                            >
+                                {{ $gettext('HARD') }}
+                            </span>
                         </td>
 
                         <td v-if="visibleColumns.includes('aired')" class="queue-time">

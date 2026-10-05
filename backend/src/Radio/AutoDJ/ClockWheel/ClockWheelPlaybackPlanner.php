@@ -25,6 +25,7 @@ use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use DateTimeInterface;
 use DateTimeZone;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -92,6 +93,22 @@ final class ClockWheelPlaybackPlanner
         $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
         $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
         $minWindow = $this->getMinWindowSeconds($activeSlot);
+
+        // A top-of-hour legal ID airs once. Its slot stays "active" by time until
+        // the next slot's position, and every pick in that span used to queue the
+        // ID again: nine IDs in a row at 6:00 for a template whose next slot sat
+        // at 5:00 (2026-10-05). Once this hour's ID is in, move on to the next slot.
+        while (
+            ClockWheelSlotTypes::isMandatoryTopOfHourSlot($activeSlot->type, $activeSlot->position_seconds)
+            && isset($slots[$activeIndex + 1])
+            && $this->isLegalIdInThisHour($station, $activeSlot, $recentHistory, $expectedPlayTime)
+        ) {
+            $activeIndex++;
+            $activeSlot = $slots[$activeIndex];
+            $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
+            $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
+            $minWindow = $this->getMinWindowSeconds($activeSlot);
+        }
 
         $this->logger->info('Clock Wheel slot selection.', [
             'clock_wheel_id' => $wheel->id,
@@ -315,11 +332,25 @@ final class ClockWheelPlaybackPlanner
         return $this->getNextAnchorSeconds($slots, $activeIndex) >= HourBoundaryPlanner::HOUR_SECONDS;
     }
 
+    /**
+     * The top of the hour a legal-ID slot belongs to: this hour within 30s of
+     * :00, otherwise the next one. HourBoundaryPlanner's method of the same name
+     * was deleted with the legacy TOH planner (11f44590a) while this call stayed,
+     * so the first wheel with a :00 legal-ID slot to be scheduled (a daypart,
+     * 2026-10-05) failed every Linear Log build with "Call to undefined method".
+     */
     private function resolveTopOfHourExpectedPlayAt(
         Station $station,
         DateTimeImmutable $expectedPlayTime,
     ): DateTimeImmutable {
-        return $this->hourBoundaryPlanner->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
+        $local = CarbonImmutable::instance($expectedPlayTime)->setTimezone($station->getTimezoneObject());
+        $hourStart = $local->startOf('hour');
+
+        if ($local->getTimestamp() - $hourStart->getTimestamp() > 30) {
+            return $hourStart->addHour()->toDateTimeImmutable();
+        }
+
+        return $hourStart->toDateTimeImmutable();
     }
 
     /**
@@ -475,8 +506,14 @@ final class ClockWheelPlaybackPlanner
             $mediaQueue[] = $q;
         }
 
-        $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
-        $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
+        // Nothing fits the window: filterByDuration() returned the candidates
+        // shortest first, and that order is the choice -- the slot's algorithm
+        // would put a long song first and the cap would cut most of it.
+        $noneFit = $candidates[0]->getCalculatedLength() > $maxDuration;
+        if (!$noneFit) {
+            $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
+            $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
+        }
 
         $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
             ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
@@ -552,6 +589,46 @@ final class ClockWheelPlaybackPlanner
         ]);
 
         return $queueEntry;
+    }
+
+    /**
+     * True when an ID from this slot's pool has already aired or been queued in
+     * the hour $expectedPlayTime falls in (history includes queued rows).
+     *
+     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
+     */
+    private function isLegalIdInThisHour(
+        Station $station,
+        StationClockWheelSlot $slot,
+        array $recentHistory,
+        DateTimeImmutable $expectedPlayTime,
+    ): bool {
+        $hourStart = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime)->getTimestamp();
+        if ($hourStart > $expectedPlayTime->getTimestamp()) {
+            // Past :00:30 the helper points at the next hour; this hour started one earlier.
+            $hourStart -= HourBoundaryPlanner::HOUR_SECONDS;
+        }
+
+        $idSongs = [];
+        foreach ($this->loadStationIdCandidates($station, $slot) as $media) {
+            $idSongs[$media->song_id] = true;
+        }
+
+        foreach ($recentHistory as $row) {
+            if (!isset($idSongs[$row['song_id'] ?? ''])) {
+                continue;
+            }
+            $played = $row['timestamp_played'] ?? null;
+            $playedTs = $played instanceof DateTimeInterface
+                ? $played->getTimestamp()
+                : (is_string($played) ? (int)strtotime($played) : 0);
+            // The ID may start a moment before :00 (the station ID lane fires at :59:59).
+            if ($playedTs >= $hourStart - 60) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -998,6 +1075,10 @@ final class ClockWheelPlaybackPlanner
             return [];
         }
 
+        // Every candidate, shortest first, so duplicate prevention takes the
+        // shortest one that has not just played. Returning the shortest alone
+        // left it no choice: the same 2-minute song filled every tight slot of
+        // the "Test" wheel, three times in a row at Sun 2026-10-04 21:00.
         usort(
             $candidates,
             static fn (StationMedia $a, StationMedia $b): int =>
@@ -1019,7 +1100,7 @@ final class ClockWheelPlaybackPlanner
             ]
         );
 
-        return [$shortest];
+        return $candidates;
     }
 
     /**

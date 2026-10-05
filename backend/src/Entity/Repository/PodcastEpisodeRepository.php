@@ -41,7 +41,7 @@ final class PodcastEpisodeRepository extends Repository
 
     public function fetchEpisodeForPodcast(Podcast $podcast, string $episodeId): ?PodcastEpisode
     {
-        return $this->repository->findOneBy([
+        return $this->getRepository()->findOneBy([
             'id' => $episodeId,
             'podcast' => $podcast,
         ]);

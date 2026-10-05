@@ -21,7 +21,7 @@ final class UnprocessableMediaRepository extends Repository
         StorageLocation $storageLocation
     ): ?UnprocessableMedia {
         /** @var UnprocessableMedia|null $record */
-        $record = $this->repository->findOneBy(
+        $record = $this->getRepository()->findOneBy(
             [
                 'storage_location' => $storageLocation,
                 'path' => $path,
@@ -61,7 +61,7 @@ final class UnprocessableMediaRepository extends Repository
         string $path,
         ?string $error = null
     ): void {
-        $record = $this->repository->findOneBy(
+        $record = $this->getRepository()->findOneBy(
             [
                 'storage_location' => $storageLocation,
                 'path' => $path,

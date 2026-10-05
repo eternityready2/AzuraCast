@@ -431,7 +431,7 @@ PROMPT;
              WHERE e.station = :station
              AND e.aired_at IS NULL
              AND e.planned_at >= :now
-             ORDER BY e.sequence ASC'
+             ORDER BY e.planned_at ASC, e.sequence ASC'
         )
             ->setParameter('station', $station)
             ->setParameter('now', $now)
