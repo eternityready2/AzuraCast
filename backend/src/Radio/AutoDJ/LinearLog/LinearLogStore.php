@@ -248,7 +248,7 @@ final class LinearLogStore
         $playlist = $entry->playlist;
         assert($playlist instanceof StationPlaylist);
 
-        $row = new StationQueue($station, Song::createFromText('Remote Playlist URL'));
+        $row = new StationQueue($station, Song::createFromText($playlist->name));
         $row->playlist = $playlist;
         $row->autodj_custom_uri = $playlist->remote_url;
         $row->duration = max(1.0, (float)$entry->duration);
@@ -504,6 +504,9 @@ final class LinearLogStore
     {
         $payload = $entry->payload ?? [];
         $isRequest = null !== $entry->note && str_contains($entry->note, 'listener request');
+        // A scheduled programme block stays a programme line in every state;
+        // read back as-run it used to turn into a "Music" line.
+        $isProgramme = 'scheduled_programme' === ($payload['source_type'] ?? null);
 
         return [
             'id' => 'log-' . $entry->id,
@@ -521,8 +524,11 @@ final class LinearLogStore
             'playlist_chain' => $payload['playlist_chain'] ?? null,
             'clock_wheel' => $payload['clock_wheel'] ?? null,
             'clock_wheel_id' => $payload['clock_wheel_id'] ?? null,
-            'media_type' => $entry->media->type ?? ($payload['media_type'] ?? 'music'),
+            'media_type' => $isProgramme
+                ? 'programme'
+                : ($entry->media->type ?? ($payload['media_type'] ?? 'music')),
             'source_type' => match (true) {
+                $isProgramme => 'scheduled_programme',
                 $isRequest => 'request',
                 !empty($payload['clock_wheel_id']) => 'clock_wheel',
                 null !== $entry->playlist => 'playlist',
@@ -561,6 +567,12 @@ final class LinearLogStore
         $now = time();
         $tz = $station->getTimezoneObject();
 
+        // Include recently-played rows (last 10 min) so the currently-on-air
+        // song stays in the map while ReconcileLinearLogTask catches up and
+        // sets aired_at. Without this, the entry drops out the moment
+        // Liquidsoap marks is_played=1 and the ON AIR badge shows the wrong
+        // line for up to a minute.
+        $recentCutoff = $now - 600;
         $queued = [];
         foreach (
             $conn->fetchAllAssociative(
@@ -569,8 +581,11 @@ final class LinearLogStore
                         sq.playlist_id, sq.album, sp.name AS playlist_name
                 FROM station_queue sq
                 LEFT JOIN station_playlists sp ON sp.id = sq.playlist_id
-                WHERE sq.station_id = ? AND sq.is_played = 0 AND sq.log_entry_id IS NOT NULL',
-                [$station->id]
+                WHERE sq.station_id = ? AND sq.log_entry_id IS NOT NULL
+                AND (sq.is_played = 0
+                     OR (sq.is_played = 1
+                         AND sq.timestamp_played >= FROM_UNIXTIME(?)))',
+                [$station->id, $recentCutoff]
             ) as $row
         ) {
             $queued[(int)$row['log_entry_id']] = $row;
@@ -649,79 +664,14 @@ final class LinearLogStore
 
         usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
 
-        // Collect exclusive windows from scheduled_programme markers AND from
-        // scheduled playlists whose planned entries dominate a time slot. A live
-        // queue entry from a different playlist inside such a window is a leak
-        // that won't (or shouldn't) air.
-        $exclusiveWindows = [];
-        foreach ($entries as $e) {
-            if ('scheduled_programme' === ($e['source_type'] ?? '')) {
-                $exclusiveWindows[] = [
-                    'start' => (int)($e['played_at'] ?? 0),
-                    'end' => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)),
-                    'playlist_id' => $e['playlist_id'] ?? null,
-                ];
-            }
-        }
-
-        // Build scheduled playlist ownership from the station's schedule data.
-        $scheduledPlaylistIds = [];
-        foreach ($station->playlists as $pl) {
-            if ($pl->is_enabled && $pl->schedule_items->count() > 0) {
-                $scheduledPlaylistIds[$pl->id] = true;
-            }
-        }
-
-        if ([] !== $scheduledPlaylistIds) {
-            // For each planned entry from a scheduled playlist, its time slot
-            // belongs to that playlist — any live queue entry from another
-            // playlist at the same time is a leak.
-            foreach ($entries as $e) {
-                $plId = $e['playlist_id'] ?? null;
-                if (null === $plId || !isset($scheduledPlaylistIds[(int)$plId])) {
-                    continue;
-                }
-                if ('scheduled_programme' === ($e['source_type'] ?? '')) {
-                    continue;
-                }
-                $status = $e['log_status'] ?? '';
-                if ($status === 'dropped' || $status === 'swapped') {
-                    continue;
-                }
-                $start = (int)($e['played_at'] ?? 0);
-                $end = $start + (int)ceil((float)($e['duration'] ?? 0));
-                $exclusiveWindows[] = [
-                    'start' => $start,
-                    'end' => $end,
-                    'playlist_id' => (int)$plId,
-                ];
-            }
-        }
-
-        if ([] !== $exclusiveWindows) {
-            $entries = array_values(array_filter(
-                $entries,
-                static function (array $e) use ($exclusiveWindows): bool {
-                    if ('scheduled_programme' === ($e['source_type'] ?? '')) {
-                        return true;
-                    }
-                    $status = $e['log_status'] ?? '';
-                    if ($status === 'dropped' || $status === 'swapped') {
-                        return true;
-                    }
-                    $at = (int)($e['played_at'] ?? 0);
-                    $plId = $e['playlist_id'] ?? null;
-                    foreach ($exclusiveWindows as $w) {
-                        if ($at >= $w['start'] && $at < $w['end']
-                            && null !== $plId && null !== $w['playlist_id']
-                            && (int)$plId !== (int)$w['playlist_id']) {
-                            return false;
-                        }
-                    }
-                    return true;
-                },
-            ));
-        }
+        // Schedule exclusivity (a live-queue fill-in leaking into a scheduled
+        // playlist's window) is enforced by LinearLogRules::apply(), which runs
+        // every minute against the authoritative Scheduler, drops the line with
+        // a recorded reason, and respects operator locks. That is the single
+        // authority; no ad-hoc re-derivation of windows happens here. (A removed
+        // filter used to rebuild windows from this page's own entries using
+        // queue-shifted played_at times, which could disagree with the saved log
+        // and silently blank lines that were never actually dropped.)
 
         // The current hour's history plus the configured hours ahead.
         [$from, $until] = self::window($station, $hours, $now);

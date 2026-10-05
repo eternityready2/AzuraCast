@@ -77,7 +77,9 @@ export function useLinearLog() {
         }
 
         try {
-            const {data} = await axios.get<LinearLogResponse>(statusUrl.value);
+            const {data} = await axios.get<LinearLogResponse>(statusUrl.value, {
+                params: {_: Date.now()},
+            });
             status.value = data.status;
             featureEnabled.value = data.enabled;
             playoutEnabled.value = data.playout_enabled ?? false;
@@ -266,8 +268,9 @@ export function useLinearLog() {
     const liveSongId = computed(() => np.value.now_playing?.song?.id || null);
     const livePlayedAt = computed(() => np.value.now_playing?.played_at || null);
 
-    watch(livePlayedAt, (next, prev) => {
-        if (next && prev && next !== prev && featureEnabled.value && !isBuilding.value) {
+    watch([liveSongId, livePlayedAt], ([nextId, nextAt], [prevId, prevAt]) => {
+        const changed = (nextId && nextId !== prevId) || (nextAt && prevAt && nextAt !== prevAt);
+        if (changed && featureEnabled.value && !isBuilding.value) {
             void loadSnapshot(false);
         }
     });
@@ -279,8 +282,12 @@ export function useLinearLog() {
     const onAirItem = computed<LinearLogItem | null>(() => {
         if (liveSongId.value && livePlayedAt.value) {
             let match: LinearLogItem | null = null;
-            let bestDiff = 900;
+            let bestDiff = 300;
             for (const item of allItems.value) {
+                const status = item.log_status;
+                if (status === "dropped" || status === "swapped") {
+                    continue;
+                }
                 if (item.song_id !== liveSongId.value) {
                     continue;
                 }
@@ -289,7 +296,7 @@ export function useLinearLog() {
                     continue;
                 }
                 const diff = Math.abs(start - livePlayedAt.value);
-                if (diff <= bestDiff) {
+                if (diff < bestDiff) {
                     match = item;
                     bestDiff = diff;
                 }
@@ -300,12 +307,20 @@ export function useLinearLog() {
         }
 
         // No live match (stream offline, or the song is not in the log): fall
-        // back to the most recently started line.
+        // back to the most recently started line that hasn't finished yet.
         let best: LinearLogItem | null = null;
         let bestStart = -Infinity;
         for (const item of allItems.value) {
-            const start = item.aired_at ?? (item.is_live_queue ? item.played_at : null);
+            const status = item.log_status;
+            if (status === "dropped" || status === "swapped") {
+                continue;
+            }
+            const start = item.aired_at ?? item.played_at;
             if (start === null || start === undefined || start > nowTs.value) {
+                continue;
+            }
+            const end = start + Math.ceil(item.duration || 0);
+            if (end < nowTs.value) {
                 continue;
             }
             if (start > bestStart) {

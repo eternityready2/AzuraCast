@@ -302,7 +302,11 @@ final class LinearLogBuilder
                     continue;
                 }
 
-                if (null !== $row->playlist_id && isset($remoteUrlPlaylistIds[$row->playlist_id])) {
+                // Read the relation, not playlist_id: that column is read-only and
+                // stays null on rows created in this same unit of work (the seeded
+                // stream programmes), which let them be re-timed off the window.
+                $rowPlaylistId = $row->playlist?->id;
+                if (null !== $rowPlaylistId && isset($remoteUrlPlaylistIds[$rowPlaylistId])) {
                     continue;
                 }
 
@@ -590,9 +594,12 @@ final class LinearLogBuilder
      */
     private function mapRigidScheduleWindow(array $window, int $projectionStartTs, int $projectionEndTs): ?array
     {
-        $start = max($projectionStartTs, $window['start']->getTimestamp());
+        // A programme already on air keeps its real start. Clipping it to the
+        // build time gave the same block a new start, and so a new log line, on
+        // every rebuild.
+        $start = $window['start']->getTimestamp();
         $end = min($projectionEndTs, $window['end']->getTimestamp());
-        if ($end <= $start) {
+        if ($end <= max($projectionStartTs, $start)) {
             return null;
         }
 
@@ -950,7 +957,9 @@ final class LinearLogBuilder
         /** @var array<int, StationLogEntry> $pending */
         $pending = [];
         foreach ($entries as $idx => $entry) {
-            if ('scheduled_programme' !== ($entry['source_type'] ?? '')) {
+            // Only this build's programme blocks; as-run lines read back from
+            // the log already have their line and stay as they are.
+            if ('scheduled_programme' !== ($entry['source_type'] ?? '') || !empty($entry['log_entry_id'])) {
                 continue;
             }
 
@@ -989,6 +998,18 @@ final class LinearLogBuilder
         if ([] !== $pending) {
             $this->em->flush();
 
+            // A re-used line that was dropped is already in $entries as an
+            // as-run line; left there it showed the same programme twice.
+            $reusedKeys = [];
+            foreach ($pending as $logEntry) {
+                $reusedKeys['log-' . $logEntry->id] = true;
+            }
+            foreach ($entries as $idx => $entry) {
+                if (!isset($pending[$idx]) && isset($reusedKeys[(string)($entry['id'] ?? '')])) {
+                    unset($entries[$idx]);
+                }
+            }
+
             foreach ($pending as $idx => $logEntry) {
                 $entries[$idx]['log_entry_id'] = $logEntry->id;
                 $entries[$idx]['id'] = 'log-' . $logEntry->id;
@@ -999,7 +1020,7 @@ final class LinearLogBuilder
             }
         }
 
-        return $entries;
+        return array_values($entries);
     }
 
     /** @return array<string, mixed> */

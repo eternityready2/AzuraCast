@@ -8,8 +8,8 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
-use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
+use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use Carbon\CarbonImmutable;
 use Throwable;
 
@@ -167,6 +167,7 @@ final class ReconcileLinearLogTask extends AbstractTask
             ->setParameter('since', CarbonImmutable::createFromTimestamp($now - 3600))
             ->getResult();
 
+        $pending = [];
         foreach ($rows as $row) {
             if (null === $row->media && null === $row->autodj_custom_uri) {
                 continue;
@@ -183,13 +184,22 @@ final class ReconcileLinearLogTask extends AbstractTask
             $entry->title = $row->title;
             $entry->artist = $row->artist;
             $entry->text = $row->text;
+            $entry->payload = LinearLogStore::payloadForQueueRow($row);
             $entry->note = null !== $row->request
                 ? 'Live: listener request'
                 : (null !== $row->autodj_custom_uri ? 'Live: AI DJ' : 'Live: picked by AutoDJ (no log line was ready)');
             $this->em->persist($entry);
-            $this->em->flush();
+            $pending[] = [$row, $entry];
+        }
 
-            // Link it so it is recorded only once.
+        if ([] === $pending) {
+            return;
+        }
+
+        $this->em->flush();
+
+        // Link each row only after its line has an id, so it is recorded once.
+        foreach ($pending as [$row, $entry]) {
             $row->log_entry_id = $entry->id;
             $this->em->persist($row);
         }

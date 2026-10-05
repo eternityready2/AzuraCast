@@ -117,7 +117,10 @@ final class AssistantController
                 'messages'    => $allMessages,
                 'tools'       => $tools,
                 'tool_choice' => 'auto',
-                'max_tokens'  => 4096,
+                // Groq's free tier enforces an output-tokens-per-minute cap (1000 on
+                // this account); 4096 exceeded it on every call and the API rejected
+                // the request with 429 before the model replied at all.
+                'max_tokens'  => 800,
             ];
 
             try {

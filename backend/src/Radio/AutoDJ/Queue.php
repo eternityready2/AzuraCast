@@ -7,6 +7,7 @@ namespace App\Radio\AutoDJ;
 use App\Cache\QueueLogCache;
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationMedia;
@@ -200,6 +201,26 @@ final class Queue
                 $effectiveDuration,
                 $queueRow,
             );
+
+            // A stream row handed to Liquidsoap is not marked played while its
+            // programme airs, so it kept its full stored length from "now" on
+            // every pass and pushed everything behind it that far late. What
+            // really holds the air is the run of scheduled stream programmes
+            // open right now: the next row starts when that run ends.
+            if (
+                $queueRow->sent_to_autodj
+                && null !== $queueRow->autodj_custom_uri
+                && PlaylistSources::RemoteUrl === $queueRow->playlist?->source
+            ) {
+                $streamBlockEnd = $this->scheduledStreamBlockEnd($station, $expectedPlayTime);
+                if (null !== $streamBlockEnd) {
+                    $effectiveDuration = (float)max(
+                        0,
+                        $streamBlockEnd->getTimestamp() - $expectedPlayTime->getTimestamp()
+                    );
+                    $nextExpectedPlayTime = $streamBlockEnd;
+                }
+            }
 
             if ($queueRow->sent_to_autodj) {
                 $expectedCueTime = $this->addDurationToTime(
@@ -744,6 +765,55 @@ final class Queue
         }
 
         return $soonest;
+    }
+
+    /**
+     * When the scheduled remote stream programmes that own the air at $at hand
+     * it back: the end of the last window in an unbroken run of them (one
+     * programme following another counts as a single block). Null when no
+     * stream programme is scheduled at $at.
+     */
+    private function scheduledStreamBlockEnd(
+        Station $station,
+        DateTimeInterface $at,
+    ): ?CarbonImmutable {
+        $tz = $station->getTimezoneObject();
+        $start = CarbonImmutable::instance($at)->setTimezone($tz);
+
+        $windows = [];
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled || PlaylistSources::RemoteUrl !== $playlist->source) {
+                continue;
+            }
+
+            foreach ($playlist->schedule_items as $schedule) {
+                $occurrences = ScheduleRecurrence::getOccurrencesInRange(
+                    $schedule,
+                    $tz,
+                    $start->subDay(),
+                    $start->addDay(),
+                );
+
+                foreach ($occurrences as $occurrence) {
+                    $windows[] = [$occurrence->start->getTimestamp(), $occurrence->end->getTimestamp()];
+                }
+            }
+        }
+
+        usort($windows, static fn(array $a, array $b): int => $a[0] <=> $b[0]);
+
+        // Half-open, matching secondsToScheduledWindowEnd(): a window ending at
+        // the cursor no longer owns the air there.
+        $endTs = $start->getTimestamp();
+        foreach ($windows as [$windowStart, $windowEnd]) {
+            if ($windowStart <= $endTs && $windowEnd > $endTs) {
+                $endTs = $windowEnd;
+            }
+        }
+
+        return $endTs > $start->getTimestamp()
+            ? CarbonImmutable::createFromTimestamp($endTs, $tz)
+            : null;
     }
 
     private function addDurationToTime(

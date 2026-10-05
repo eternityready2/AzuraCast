@@ -729,7 +729,7 @@ final class QueueBuilder implements EventSubscriberInterface
 
             $stationQueueEntry = new StationQueue(
                 $playlist->station,
-                Song::createFromText('Remote Playlist URL')
+                Song::createFromText($playlist->name)
             );
 
             $stationQueueEntry->playlist = $playlist;

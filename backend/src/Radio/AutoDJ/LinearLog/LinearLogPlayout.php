@@ -192,9 +192,15 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 WHERE e.station = :station
                 AND e.status = :planned
                 AND e.planned_at < :hourStart
+                AND (e.payload IS NULL OR e.payload NOT LIKE :programme OR e.planned_at + e.duration <= :now)
             DQL
         )->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
             ->setParameter('note', 'Dropped: its hour ran long')
+            // A scheduled programme block is not a leftover while its window is
+            // still open: the next music line can belong to the following hour
+            // because the programme owns the air until then.
+            ->setParameter('programme', '%scheduled_programme%')
+            ->setParameter('now', time())
             ->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->setParameter('hourStart', $hourStart)

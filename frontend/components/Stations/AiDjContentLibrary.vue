@@ -396,6 +396,7 @@
 
             <div
                 v-if="editorOpen"
+                ref="editorEl"
                 class="card card-body bg-body-tertiary mb-3"
             >
                 <h4 class="h6">
@@ -488,7 +489,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue';
+import {computed, nextTick, onMounted, ref} from 'vue';
 import {useGettext} from 'vue3-gettext';
 import Loading from '~/components/Common/Loading.vue';
 import {useAxios} from '~/vendor/axios';
@@ -644,6 +645,7 @@ const isActiveTabRequired = computed(() =>
 );
 const items = ref<ContentItem[]>([]);
 const editorOpen = ref(false);
+const editorEl = ref<HTMLElement | null>(null);
 const editingItem = ref<ContentItem | null>(null);
 const deleteTarget = ref<ContentItem | null>(null);
 const searchQuery = ref('');
@@ -733,12 +735,18 @@ const loadItems = async (): Promise<void> => {
     }
 };
 
+const scrollToEditor = async (): Promise<void> => {
+    await nextTick();
+    editorEl.value?.scrollIntoView({behavior: 'smooth', block: 'center'});
+};
+
 const openCreate = (): void => {
     editingItem.value = null;
     form.value = defaultForm();
     form.value.type = activeTab.value;
     deleteTarget.value = null;
     editorOpen.value = true;
+    void scrollToEditor();
 };
 
 const openEdit = (item: ContentItem): void => {
@@ -752,6 +760,7 @@ const openEdit = (item: ContentItem): void => {
     };
     deleteTarget.value = null;
     editorOpen.value = true;
+    void scrollToEditor();
 };
 
 const closeEditor = (): void => {
