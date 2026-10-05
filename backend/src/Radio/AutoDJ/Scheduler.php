@@ -646,22 +646,25 @@ final class Scheduler
             return false;
         }
 
-        $stationNow = CarbonImmutable::instance($now)
+        // Upstream rule: play only in the 15 minutes after the target minute,
+        // and not if it already played in the last 30. The fork's catch-up
+        // version aired a missed :30 slot at the next open moment -- after a
+        // show that is right after the top-of-hour ID (promos at 9:00:35,
+        // 11:58:55 and 12:03, Mon 2026-10-05).
+        $now = CarbonImmutable::instance($now)
             ->setTimezone($playlist->station->getTimezoneObject());
-        $targetTime = $stationNow
-            ->startOfHour()
-            ->addMinutes($playlist->play_per_hour_minute);
 
-        $playedAt = $playlist->played_at;
-        if (null === $playedAt) {
-            return !$targetTime->isAfter($stationNow);
+        $targetMinute = $playlist->play_per_hour_minute;
+        $targetTime = ($now->minute < $targetMinute)
+            ? $now->subHour()->minute($targetMinute)->second(0)
+            : $now->minute($targetMinute)->second(0);
+
+        $playlistDiff = $targetTime->diffInMinutes($now);
+        if ($playlistDiff < 0 || $playlistDiff > 15) {
+            return false;
         }
 
-        if ($targetTime->isAfter($stationNow)) {
-            $targetTime = $targetTime->subHour();
-        }
-
-        return CarbonImmutable::instance($playedAt)->isBefore($targetTime);
+        return !$this->wasPlaylistPlayedInLastXMinutes($playlist, $now, 30);
     }
 
     private function wasPlaylistPlayedInLastXMinutes(

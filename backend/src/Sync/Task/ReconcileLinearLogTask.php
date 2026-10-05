@@ -110,6 +110,20 @@ final class ReconcileLinearLogTask extends AbstractTask
                 ->getOneOrNullResult();
 
             if (!$row instanceof StationQueue) {
+                // A live pick's line is written when the AutoDJ picks the song.
+                // If the pick was then discarded (e.g. a back-to-back retry), the
+                // line describes nothing; it must not turn into a planned line
+                // that playout would later air. The grace period covers the few
+                // seconds before the picked row itself is saved.
+                if (
+                    null !== $entry->note
+                    && str_starts_with($entry->note, 'Live:')
+                    && $entry->created_at < $now - 120
+                ) {
+                    $this->em->remove($entry);
+                    continue;
+                }
+
                 // Removed from the queue before airing.
                 if ($entry->planned_at >= $hourStart) {
                     $entry->status = StationLogEntry::STATUS_PLANNED;

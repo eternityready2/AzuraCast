@@ -185,6 +185,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
         unset($this->replacementFor[$at]);
 
         if (null === $entryId) {
+            $this->writeLiveLine($event->getStation(), $row, $at);
             return;
         }
 
@@ -257,12 +258,59 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
+     * A song the AutoDJ picked on its own (the log had no line ready) goes into
+     * the log the moment it is queued, as FM automation would show it, not only
+     * once it has aired. Until now such a song was invisible in the upcoming log
+     * and showed as a hole (Brandon Heath, queued for 15:02:55 on Mon
+     * 2026-10-05). Written with plain SQL so no other pending change is flushed
+     * mid-build; ReconcileLinearLogTask then settles it like any queued line.
+     */
+    private function writeLiveLine(Station $station, StationQueue $row, int $at): void
+    {
+        if (null === $row->media || $row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
+            return;
+        }
+
+        $conn = $this->em->getConnection();
+        $sequence = 1 + (int)$conn->fetchOne(
+            'SELECT COALESCE(MAX(sequence), 0) FROM station_log_entries WHERE station_id = ?',
+            [$station->id]
+        );
+
+        $conn->insert('station_log_entries', [
+            'station_id' => $station->id,
+            'media_id' => $row->media->id,
+            'playlist_id' => $row->playlist?->id,
+            'planned_at' => $at,
+            'sequence' => $sequence,
+            'duration' => max(1.0, (float)($row->duration ?? $row->media->length ?? 0.0)),
+            'status' => StationLogEntry::STATUS_QUEUED,
+            'text' => mb_substr((string)$row->text, 0, 255) ?: null,
+            'title' => null !== $row->title ? mb_substr($row->title, 0, 255) : null,
+            'artist' => null !== $row->artist ? mb_substr($row->artist, 0, 255) : null,
+            'payload' => json_encode(LinearLogStore::payloadForQueueRow($row), JSON_THROW_ON_ERROR),
+            'note' => null !== $row->request
+                ? 'Live: listener request'
+                : 'Live: picked by AutoDJ (no log line was ready)',
+            'is_locked' => 0,
+            'created_at' => time(),
+        ]);
+
+        $row->log_entry_id = (int)$conn->lastInsertId();
+    }
+
+    /**
      * Next planned line, dropping any left over from an hour that has already
      * ended ("hit the post": the new hour opens with its own first line).
      */
     private function takeNext(Station $station, DateTimeImmutable $expected): ?StationLogEntry
     {
-        $hourStart = CarbonImmutable::instance($expected)
+        // An hour has only "ended" once the wall clock is past it. The expected
+        // slot time can run hours ahead of the clock (a long programme row in
+        // the queue put it at 11:07 at 08:59), and using it alone dropped the
+        // 10:00 God Family & Country line as a leftover before its hour began
+        // -- the hour then aired nothing (Mon 2026-10-05).
+        $hourStart = CarbonImmutable::instance(min($expected, CarbonImmutable::now()))
             ->setTimezone($station->getTimezoneObject())
             ->startOfHour()
             ->getTimestamp();
@@ -348,6 +396,14 @@ final class LinearLogPlayout implements EventSubscriberInterface
             'planned_at' => $entry->planned_at,
             'text' => $entry->text,
         ]);
+
+        // The AutoDJ pickers record when a playlist last aired, and the
+        // once-per-hour / per-X-minutes rules read it. Lines aired from the log
+        // skipped that, so promos looked never-played and aired again and again.
+        if (null !== $entry->playlist) {
+            $entry->playlist->played_at = CarbonImmutable::instance($expected);
+            $this->em->persist($entry->playlist);
+        }
 
         return $this->store->toQueueRow($station, $entry, $expected);
     }

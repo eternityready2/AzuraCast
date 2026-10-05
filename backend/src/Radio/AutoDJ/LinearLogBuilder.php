@@ -970,7 +970,12 @@ final class LinearLogBuilder
      */
     private function persistProgrammeLogEntries(Station $station, array $entries): array
     {
-        // Remove stale programme log entries from previous builds.
+        // Remove stale programme log entries from previous builds. A programme
+        // whose window has already opened is on air, not a stale plan: its line
+        // stays "planned" until the stream's first title reaches song history,
+        // and a build in that time deleted it. The 07:00 Morning Show line went
+        // that way (first title 07:19), so the show was logged as a "Live: AI
+        // DJ" line at 09:00:36 instead (Mon 2026-10-05).
         $this->em->createQuery(
             <<<'DQL'
                 DELETE FROM App\Entity\StationLogEntry e
@@ -978,10 +983,12 @@ final class LinearLogBuilder
                 AND e.payload LIKE :marker
                 AND e.status = :planned
                 AND e.is_locked = false
+                AND e.planned_at > :now
             DQL
         )->setParameter('station', $station)
             ->setParameter('marker', '%scheduled_programme%')
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setParameter('now', time())
             ->execute();
 
         $maxSequence = (int)$this->em->createQuery(

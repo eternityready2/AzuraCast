@@ -8,6 +8,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\StationRepository;
 use App\Entity\Station;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogTiming;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
@@ -52,6 +53,7 @@ final class CheckLinearLogCommand extends CommandAbstract
         private readonly StationRepository $stationRepo,
         private readonly RigidScheduleWindowResolver $windowResolver,
         private readonly LinearLogTiming $timing,
+        private readonly AiNewsScheduleForecastService $newsForecast,
     ) {
         parent::__construct();
     }
@@ -163,6 +165,37 @@ final class CheckLinearLogCommand extends CommandAbstract
             [$station->id, $now - 7200, $now]
         );
         $cursor = max($now, $onAirEnd);
+
+        // Hour boundaries with an AI News bulletin after the ID, and how long
+        // recent bulletins ran (the same estimate the Top-of-Hour swap uses).
+        $newsAt = [];
+        foreach (
+            $this->newsForecast->getAiringTimes(
+                $station,
+                CarbonImmutable::createFromTimestamp($now)->toDateTimeImmutable(),
+                CarbonImmutable::createFromTimestamp($until)->toDateTimeImmutable(),
+            ) as $airsAt
+        ) {
+            $newsAt[(int)(round($airsAt->getTimestamp() / 3600) * 3600)] = true;
+        }
+        $newsSeconds = (int)ceil((float)($conn->fetchOne(
+            'SELECT AVG(d) FROM (
+                SELECT duration AS d FROM song_history
+                WHERE station_id = ? AND text = ? AND duration > 30
+                ORDER BY id DESC LIMIT 5
+            ) recent',
+            [$station->id, 'Eternity Ready - News Hour']
+        ) ?: 150.0));
+
+        $laneCovered = static function (int $from, int $to) use ($newsAt, $newsSeconds): int {
+            $covered = 0;
+            for ($hour = (int)(floor($from / 3600) * 3600); $hour <= $to + 3600; $hour += 3600) {
+                $laneStart = $hour - 1;
+                $laneEnd = $hour + self::TOP_OF_HOUR_ID_SECONDS + (isset($newsAt[$hour]) ? $newsSeconds : 0);
+                $covered += max(0, min($to, $laneEnd) - max($from, $laneStart));
+            }
+            return $covered;
+        };
         $previous = null;
         foreach ($open as $row) {
             $start = (int)$row['planned_at'];
@@ -174,13 +207,11 @@ final class CheckLinearLogCommand extends CommandAbstract
             }
             $seen[$key] = (int)$row['id'];
 
-            // The Top-of-Hour ID airs from its own lane, so it is not a log line.
-            $idEnd = (int)(ceil(($cursor + 1) / 3600) * 3600) + self::TOP_OF_HOUR_ID_SECONDS;
-            $allowed = ($cursor < $idEnd && $start >= $idEnd - self::TOP_OF_HOUR_ID_SECONDS - 1)
-                ? $maxGap + self::TOP_OF_HOUR_ID_SECONDS
-                : $maxGap;
-
-            if ($start - $cursor > $allowed) {
+            // The Top-of-Hour ID, and the AI News after it, air from their own
+            // lane, so they are not log lines. Only air outside that lane can be
+            // a hole: counting it as one flagged every news hour and every hour
+            // whose last song ran past :00.
+            if ($start - $cursor - $laneCovered($cursor, $start) > $maxGap) {
                 $holes[] = sprintf(
                     '%s to %s: %ds with no line (before "%s")',
                     $at($cursor),

@@ -29,6 +29,12 @@ final class Annotations implements EventSubscriberInterface
     use EntityManagerAwareTrait;
     use LoggerAwareTrait;
 
+    /** How far ahead a held row may be due and still count as the hour's opener. */
+    private const int HOUR_OPENER_WINDOW_MINUTES = 10;
+
+    /** Projected air time of the row last revalidated before send. */
+    private ?CarbonImmutable $lastExpectedPlayAt = null;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly CustomFieldRepository $customFieldRepo,
@@ -95,6 +101,7 @@ final class Annotations implements EventSubscriberInterface
             // handoff station-wide, not just Top-of-Hour stations, so a
             // failure here must never be able to take down normal playback.
             $heldBack = false;
+            $this->lastExpectedPlayAt = null;
             try {
                 $heldBack = $this->revalidateBeforeSend($station, $queueRow);
             } catch (\Throwable $e) {
@@ -113,7 +120,15 @@ final class Annotations implements EventSubscriberInterface
             // before the Top-of-Hour ID and be cut. It stays queued (unsent)
             // and opens the new hour; the gap before the ID is Liquidsoap's
             // to fill (tempo / one promo), never a song the ID cuts.
-            if ($heldBack && !$autoDjHeldByTopOfHour && $this->em->contains($queueRow)) {
+            // The lane-hold exemption is for the row that opens THIS hour. A row
+            // held because the NEXT hour's ID would cut it is not an opener:
+            // behind the 11:00 CMS show, "Almost Home" (due 11:59:39) was sent
+            // at 11:00:17 under the exemption, sat loaded for 59 minutes where
+            // the swap could not replace it, and the 11:59:59 ID cut it after
+            // 20s (Mon 2026-10-05).
+            $opensThisHour = null !== $this->lastExpectedPlayAt
+                && $this->lastExpectedPlayAt->lessThan(Time::nowUtc()->addMinutes(self::HOUR_OPENER_WINDOW_MINUTES));
+            if ($heldBack && !($autoDjHeldByTopOfHour && $opensThisHour) && $this->em->contains($queueRow)) {
                 $this->em->flush();
                 throw new RuntimeException(
                     'Held for the new hour: this item would start just before the Top-of-Hour ID and be cut.'
@@ -167,6 +182,8 @@ final class Annotations implements EventSubscriberInterface
                 $this->airedLength->lengthOf($aheadRow->media, $aheadRow->duration)
             );
         }
+
+        $this->lastExpectedPlayAt = $expectedPlayAt;
 
         $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable());
         $this->eventDispatcher->dispatch($event);
