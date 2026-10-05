@@ -93,26 +93,26 @@ final class FeedbackCommand extends AbstractCommand
             throw new RuntimeException('Media ID does not exist for station.');
         }
 
-        if (!$this->historyRepo->isDifferentFromCurrentSong($station, $media)) {
-            throw new RuntimeException('Song is not different from current song.');
-        }
+        $sq = null;
+
+        // Whether the queue row itself proves this is a genuinely fresh instance
+        // (not yet played), which settles the "is this really a new airing"
+        // question on its own -- the same-song guard below only needs to run
+        // when there is no such row to ask.
+        $isFreshQueueRow = false;
 
         if (!empty($payload['sq_id'])) {
             $sq = $this->em->find(StationQueue::class, $payload['sq_id']);
 
-            // A queue row airs exactly once. Liquidsoap replays the interrupted
-            // song's metadata when the Top-of-Hour lane hands the air back, which
-            // arrives here as a second feedback naming a row that already played
-            // -- and opened a duplicate history entry that pinned Now Playing to
-            // a show which had finished an hour earlier.
-            //
-            // A row is only ever is_played=1 because its own feedback was already
-            // processed, or because it was swept as skipped; NextSongCommand will
-            // not hand out a played row, so neither case can legitimately air now.
             if ($sq instanceof StationQueue && $sq->is_played) {
                 throw new RuntimeException(
                     sprintf('Queue row #%s already aired; ignoring replayed metadata.', $sq->id)
                 );
+            } elseif ($sq instanceof StationQueue) {
+                // Fresh unplayed row: real new airing (e.g. same song starting
+                // over after the TOH ID). Skip the same-song guard so a
+                // back-to-back repeat is not swallowed.
+                $isFreshQueueRow = true;
             }
         } else {
             $sq = $this->queueRepo->findRecentlyCuedSong($station, $media);
@@ -133,6 +133,10 @@ final class FeedbackCommand extends AbstractCommand
                 $this->em->persist($sq);
                 $this->em->flush();
             }
+        }
+
+        if (!$isFreshQueueRow && !$this->historyRepo->isDifferentFromCurrentSong($station, $media)) {
+            throw new RuntimeException('Song is not different from current song.');
         }
 
         if (null !== $sq) {
