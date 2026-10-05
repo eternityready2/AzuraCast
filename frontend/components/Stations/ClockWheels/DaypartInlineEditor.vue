@@ -226,91 +226,6 @@
                             </div>
                         </div>
 
-                        <details class="advanced">
-                            <summary class="h6 mb-0">
-                                {{ $gettext('Advanced: separation rules') }}
-                            </summary>
-                            <div class="pt-3">
-                                <div class="form-check mb-2">
-                                    <input
-                                        id="dp_sep_override"
-                                        v-model="form.separation_override_enabled"
-                                        class="form-check-input"
-                                        type="checkbox"
-                                    >
-                                    <label
-                                        class="form-check-label"
-                                        for="dp_sep_override"
-                                    >
-                                        {{ $gettext('Use one separation policy for every hour of this daypart') }}
-                                    </label>
-                                </div>
-                                <template v-if="form.separation_override_enabled">
-                                    <div class="form-check mb-3">
-                                        <input
-                                            id="dp_sep_enabled"
-                                            v-model="form.separation_enabled"
-                                            class="form-check-input"
-                                            type="checkbox"
-                                        >
-                                        <label
-                                            class="form-check-label"
-                                            for="dp_sep_enabled"
-                                        >
-                                            {{ $gettext('Enable separation rules') }}
-                                        </label>
-                                    </div>
-                                    <div
-                                        v-if="form.separation_enabled"
-                                        class="row g-3"
-                                    >
-                                        <div class="col-md-4">
-                                            <label
-                                                class="form-label"
-                                                for="dp_sep_artist"
-                                            >{{ $gettext('Artist separation (min)') }}</label>
-                                            <input
-                                                id="dp_sep_artist"
-                                                v-model.number="form.separation_artist_minutes"
-                                                type="number"
-                                                min="0"
-                                                class="form-control"
-                                            >
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label
-                                                class="form-label"
-                                                for="dp_sep_title"
-                                            >{{ $gettext('Title separation (min)') }}</label>
-                                            <input
-                                                id="dp_sep_title"
-                                                v-model.number="form.separation_title_minutes"
-                                                type="number"
-                                                min="0"
-                                                class="form-control"
-                                            >
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label
-                                                class="form-label"
-                                                for="dp_burn"
-                                            >{{ $gettext('Max plays / 24h') }}</label>
-                                            <input
-                                                id="dp_burn"
-                                                v-model.number="form.burn_rate_max_plays_24h"
-                                                type="number"
-                                                min="0"
-                                                class="form-control"
-                                                :placeholder="$gettext('Off')"
-                                            >
-                                        </div>
-                                    </div>
-                                </template>
-                                <p class="form-text mb-0">
-                                    {{ $gettext('Leave this off to use each hourly wheel\'s own separation settings.') }}
-                                </p>
-                            </div>
-                        </details>
                     </div>
                 </div>
             </div>
@@ -632,14 +547,5 @@ const doResync = async () => {
     height: 1.1rem;
     border-radius: .2rem;
     background: var(--bs-secondary-bg);
-}
-
-.advanced {
-    border-top: 1px solid var(--bs-border-color);
-    padding-top: 1rem;
-}
-
-.advanced summary {
-    cursor: pointer;
 }
 </style>

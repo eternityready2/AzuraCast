@@ -796,24 +796,14 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:clock-wheels:schedule');
 
                             $group->get(
-                                '/clock-wheels/program-grid',
-                                Controller\Api\Stations\ClockWheels\ProgramGridAction::class
-                            )->setName('api:stations:clock-wheels:program-grid');
+                                '/clock-wheels/slot-lengths',
+                                Controller\Api\Stations\ClockWheels\SlotLengthsAction::class
+                            )->setName('api:stations:clock-wheels:slot-lengths');
 
                             $group->get(
                                 '/clock-wheels/reconciliation-log',
                                 Controller\Api\Stations\ClockWheels\ReconciliationLogAction::class
                             )->setName('api:stations:clock-wheels:reconciliation-log');
-
-                            $group->get(
-                                '/clock-wheels/reconciliation-log/export',
-                                Controller\Api\Stations\ClockWheels\ReconciliationLogExportAction::class
-                            )->setName('api:stations:clock-wheels:reconciliation-log:export');
-
-                            $group->post(
-                                '/clock-wheels/generate',
-                                Controller\Api\Stations\ClockWheels\GenerateAction::class
-                            )->setName('api:stations:clock-wheels:generate');
 
                             $group->post(
                                 '/clock-wheels/import',
@@ -932,6 +922,11 @@ return static function (RouteCollectorProxy $group) {
                                         '/preview',
                                         Controller\Api\Stations\ClockWheels\PreviewAction::class
                                     )->setName('api:stations:clock-wheel:preview');
+
+                                    $group->get(
+                                        '/log',
+                                        Controller\Api\Stations\ClockWheels\WheelLogAction::class
+                                    )->setName('api:stations:clock-wheel:log');
 
                                     $group->get(
                                         '/analytics',
@@ -1139,6 +1134,11 @@ return static function (RouteCollectorProxy $group) {
                                 '/overview/dmca-compliance',
                                 Controller\Api\Stations\Reports\Overview\DmcaComplianceAction::class
                             )->setName('api:stations:reports:overview-dmca-compliance');
+
+                            $group->get(
+                                '/overview/log-compliance',
+                                Controller\Api\Stations\Reports\Overview\LogComplianceAction::class
+                            )->setName('api:stations:reports:overview-log-compliance');
 
                             $group->get(
                                 '/overview/sponsor-plays',

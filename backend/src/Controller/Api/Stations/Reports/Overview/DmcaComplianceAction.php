@@ -139,6 +139,16 @@ final class DmcaComplianceAction extends AbstractReportAction
             'total_plays_in_window' => count($history),
             'warnings'      => array_values($warnings),
             'warning_count' => count($warnings),
+            // Planned songs the air-time DMCA check refused and replaced in the
+            // last 14 days (written to the Linear Log as they happen).
+            'replacements'  => $this->em->getConnection()->fetchAllAssociative(
+                'SELECT COALESCE(aired_at, planned_at) AS at, text, note
+                FROM station_log_entries
+                WHERE station_id = ? AND note LIKE ? AND COALESCE(aired_at, planned_at) >= ?
+                ORDER BY at DESC
+                LIMIT 50',
+                [$station->id, '%failed the DMCA rules%', time() - 14 * 86400]
+            ),
         ]);
     }
 }

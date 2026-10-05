@@ -4,160 +4,39 @@
         size="lg"
         :title="modalTitle"
     >
-        <loading :loading="loading">
-            <p
-                v-if="preview?.hour_start"
-                class="text-muted small"
-            >
-                {{ $gettext('Projected hour') }}: {{ formatIsoAsDateTime(preview.hour_start) }}
-            </p>
-            <div
-                v-if="preview?.warnings?.length"
-                class="alert alert-warning py-2 small"
-            >
-                <ul class="mb-0 ps-3">
-                    <li
-                        v-for="(warn, i) in preview.warnings"
-                        :key="i"
-                    >
-                        {{ warn }}
-                    </li>
-                </ul>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-sm table-striped mb-0">
-                    <thead>
-                        <tr>
-                            <th>{{ $gettext('Position') }}</th>
-                            <th>{{ $gettext('Wall clock') }}</th>
-                            <th>{{ $gettext('Type') }}</th>
-                            <th>{{ $gettext('Projected track') }}</th>
-                            <th>{{ $gettext('Drift') }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="(row, idx) in preview?.items ?? []"
-                            :key="idx"
-                        >
-                            <td>{{ row.position_label }}</td>
-                            <td>
-                                <span v-if="row.projected_play_at">
-                                    {{ formatIsoAsTime(row.projected_play_at) }}
-                                </span>
-                                <span
-                                    v-else
-                                    class="text-muted"
-                                >—</span>
-                            </td>
-                            <td>{{ row.slot_type }}</td>
-                            <td>
-                                <template v-if="row.title">
-                                    <strong>{{ row.title }}</strong>
-                                    <span
-                                        v-if="row.artist"
-                                        class="text-muted"
-                                    > — {{ row.artist }}</span>
-                                </template>
-                                <span
-                                    v-else
-                                    class="text-muted fst-italic"
-                                >—</span>
-                                <ul
-                                    v-if="row.warnings?.length"
-                                    class="small text-warning mb-0 ps-3 mt-1"
-                                >
-                                    <li
-                                        v-for="(w, wi) in row.warnings"
-                                        :key="wi"
-                                    >
-                                        {{ w }}
-                                    </li>
-                                </ul>
-                            </td>
-                            <td>{{ row.drift_seconds }}s</td>
-                        </tr>
-                        <tr v-if="!preview?.items?.length && !loading">
-                            <td
-                                colspan="5"
-                                class="text-muted text-center"
-                            >
-                                {{ $gettext('No projected slots for this hour.') }}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <p class="small text-muted mt-2 mb-0">
-                {{
-                    $gettext(
-                        'Simulation only — does not queue tracks or write audit events. Shuffle order may differ on-air.'
-                    )
-                }}
-            </p>
-        </loading>
+        <wheel-log-panel
+            v-if="previewUrl"
+            :key="openCount"
+            :url="previewUrl"
+            mode="upcoming"
+        />
     </modal>
 </template>
 
 <script setup lang="ts">
 import {computed, ref, useTemplateRef} from 'vue';
 import Modal from '~/components/Common/Modal.vue';
-import Loading from '~/components/Common/Loading.vue';
+import WheelLogPanel from '~/components/Stations/ClockWheels/WheelLogPanel.vue';
 import {useTranslate} from '~/vendor/gettext';
-import {useAxios} from '~/vendor/axios.ts';
-import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter.ts';
-
-export interface ClockWheelPreviewItem {
-    position_seconds: number;
-    position_label: string;
-    projected_play_at: string | null;
-    slot_type: string;
-    title: string | null;
-    artist: string | null;
-    duration_seconds: number | null;
-    drift_seconds: number;
-    warnings: string[];
-}
-
-export interface ClockWheelPreviewResponse {
-    hour_start: string;
-    hour_start_timestamp: number;
-    items: ClockWheelPreviewItem[];
-    warnings: string[];
-}
 
 const {$gettext} = useTranslate();
-const previewUrl = ref('');
-const {axios} = useAxios();
-const {formatIsoAsDateTime, formatIsoAsTime} = useStationDateTimeFormatter();
 
 const $modal = useTemplateRef('$modal');
-const loading = ref(false);
 const wheelName = ref('');
-const preview = ref<ClockWheelPreviewResponse | null>(null);
+const previewUrl = ref('');
+const openCount = ref(0);
 
 const modalTitle = computed(() =>
     wheelName.value
-        ? $gettext('Next hour preview') + ': ' + wheelName.value
-        : $gettext('Next hour preview')
+        ? $gettext('Preview') + ': ' + wheelName.value
+        : $gettext('Preview')
 );
 
-const loadPreview = async () => {
-    loading.value = true;
-    try {
-        const {data} = await axios.get<ClockWheelPreviewResponse>(previewUrl.value);
-        preview.value = data;
-    } finally {
-        loading.value = false;
-    }
-};
-
-const open = async (name: string, url: string) => {
+const open = (name: string, url: string) => {
     wheelName.value = name;
     previewUrl.value = url;
-    preview.value = null;
+    openCount.value++;
     $modal.value?.show();
-    await loadPreview();
 };
 
 defineExpose({open});

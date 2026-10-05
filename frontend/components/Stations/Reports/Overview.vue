@@ -24,102 +24,106 @@
         </div>
 
         <div class="card-body">
-            <tabs destroy-on-hide>
+            <ul
+                class="nav nav-pills mb-3"
+                role="tablist"
+            >
+                <li class="nav-item">
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: group === 'audience'}"
+                        @click="group = 'audience'"
+                    >
+                        {{ $gettext('Audience') }}
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: group === 'programming'}"
+                        @click="group = 'programming'"
+                    >
+                        {{ $gettext('Programming') }}
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button
+                        type="button"
+                        class="nav-link"
+                        :class="{active: group === 'compliance'}"
+                        @click="group = 'compliance'"
+                    >
+                        {{ $gettext('Compliance') }}
+                    </button>
+                </li>
+            </ul>
+
+            <tabs
+                v-if="group === 'audience'"
+                destroy-on-hide
+            >
                 <tab :label="$gettext('Best & Worst')">
                     <best-and-worst-tab
                         :api-url="bestAndWorstUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Listeners By Time Period')">
                     <listeners-by-time-period-tab
                         :api-url="listenersByTimePeriodUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Listening Time')">
                     <listening-time-tab
                         :api-url="listeningTimeUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Heatmap')">
                     <heatmap-tab
                         :api-url="heatmapUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
-                <tab :label="$gettext('Clock Performance')">
-                    <clock-performance-tab
-                        :api-url="clockPerformanceUrl"
-                        :date-range="dateRange"
-                    />
-                </tab>
-
-                <tab :label="$gettext('Top of Hour')">
-                    <top-of-hour-performance-tab
-                        :api-url="topOfHourPerformanceUrl"
-                        :date-range="dateRange"
-                    />
-                </tab>
-
-                <tab :label="$gettext('Playlist Performance')">
-                    <playlist-performance-tab
-                        :api-url="playlistPerformanceUrl"
-                        :date-range="dateRange"
-                    />
-                </tab>
-
-                <tab :label="$gettext('Dropouts')">
-                    <dropout-tab
-                        :api-url="dropoutUrl"
-                        :date-range="dateRange"
-                    />
-                </tab>
-
                 <tab :label="$gettext('Listener Insights')">
                     <listener-insights-tab
                         :api-url="listenerInsightsUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Growth Trend')">
                     <growth-trend-tab
                         :api-url="growthTrendUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Retention')">
                     <retention-curve-tab
                         :api-url="retentionCurveUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab :label="$gettext('Daypart Audience')">
                     <daypart-audience-tab
                         :api-url="daypartAudienceUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
-                <tab :label="$gettext('Health')">
-                    <health-dashboard-tab :api-url="healthUrl" />
+                <tab :label="$gettext('Dropouts')">
+                    <dropout-tab
+                        :api-url="dropoutUrl"
+                        :date-range="dateRange"
+                    />
                 </tab>
-
                 <tab :label="$gettext('Streams')">
                     <streams-tab
                         :api-url="byStreamUrl"
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab
                     v-if="showFullAnalytics"
                     :label="$gettext('Clients')"
@@ -129,7 +133,6 @@
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab
                     v-if="showFullAnalytics"
                     :label="$gettext('Browsers')"
@@ -139,7 +142,6 @@
                         :date-range="dateRange"
                     />
                 </tab>
-
                 <tab
                     v-if="showFullAnalytics"
                     :label="$gettext('Countries')"
@@ -150,6 +152,52 @@
                     />
                 </tab>
             </tabs>
+
+            <tabs
+                v-if="group === 'programming'"
+                destroy-on-hide
+            >
+                <tab :label="$gettext('Clock Performance')">
+                    <clock-performance-tab
+                        :api-url="clockPerformanceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+                <tab :label="$gettext('Playlist Performance')">
+                    <playlist-performance-tab
+                        :api-url="playlistPerformanceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+                <tab :label="$gettext('Log Compliance')">
+                    <log-compliance-tab
+                        :api-url="logComplianceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+                <tab :label="$gettext('Health')">
+                    <health-dashboard-tab :api-url="healthUrl" />
+                </tab>
+            </tabs>
+
+            <tabs
+                v-if="group === 'compliance'"
+                destroy-on-hide
+            >
+                <tab :label="$gettext('Top of Hour')">
+                    <top-of-hour-performance-tab
+                        :api-url="topOfHourPerformanceUrl"
+                        :date-range="dateRange"
+                    />
+                </tab>
+                <tab :label="$gettext('DMCA')">
+                    <dmca-compliance-tab :api-url="dmcaComplianceUrl" />
+                </tab>
+                <tab :label="$gettext('Sponsor Plays')">
+                    <sponsor-plays-tab :api-url="sponsorPlaysUrl" />
+                </tab>
+            </tabs>
+
         </div>
     </section>
 </template>
@@ -173,6 +221,9 @@ import GrowthTrendTab from "~/components/Stations/Reports/Overview/GrowthTrendTa
 import RetentionCurveTab from "~/components/Stations/Reports/Overview/RetentionCurveTab.vue";
 import DaypartAudienceTab from "~/components/Stations/Reports/Overview/DaypartAudienceTab.vue";
 import HealthDashboardTab from "~/components/Stations/Reports/Overview/HealthDashboardTab.vue";
+import LogComplianceTab from "~/components/Stations/Reports/Overview/LogComplianceTab.vue";
+import DmcaComplianceTab from "~/components/Stations/Reports/Overview/DmcaComplianceTab.vue";
+import SponsorPlaysTab from "~/components/Stations/Reports/Overview/SponsorPlaysTab.vue";
 import {ref} from "vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -204,6 +255,13 @@ const growthTrendUrl = getStationApiUrl('/reports/overview/growth-trend');
 const retentionCurveUrl = getStationApiUrl('/reports/overview/retention-curve');
 const daypartAudienceUrl = getStationApiUrl('/reports/overview/daypart-audience');
 const healthUrl = getStationApiUrl('/reports/overview/health');
+const logComplianceUrl = getStationApiUrl('/reports/overview/log-compliance');
+const dmcaComplianceUrl = getStationApiUrl('/reports/overview/dmca-compliance');
+const sponsorPlaysUrl = getStationApiUrl('/reports/overview/sponsor-plays');
+
+// Tabs grouped the way broadcast reporting tools group them.
+type ReportGroup = 'audience' | 'programming' | 'compliance';
+const group = ref<ReportGroup>('audience');
 
 const stationData = useStationData();
 const {timezone} = toRefs(stationData);

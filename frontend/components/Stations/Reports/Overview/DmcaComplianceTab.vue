@@ -152,6 +152,37 @@
                     ✓ {{ $gettext('No songs are at or near DMCA limits in the current window.') }}
                 </p>
             </fieldset>
+
+            <fieldset class="mt-4">
+                <legend>
+                    {{ $gettext('Replaced at air time (last 14 days)') }}
+                </legend>
+                <p class="small text-muted">
+                    {{ $gettext('Planned Linear Log songs that would have broken the DMCA limits when their turn came, and what aired instead.') }}
+                </p>
+                <ul
+                    v-if="state.replacements?.length"
+                    class="list-group list-group-flush"
+                >
+                    <li
+                        v-for="row in state.replacements"
+                        :key="row.at + row.text"
+                        class="list-group-item px-0 small"
+                    >
+                        <strong>{{ formatTimestampAsDateTime(Number(row.at)) }}</strong>:
+                        {{ $gettext('aired') }} {{ row.text }}
+                        <div class="text-muted">
+                            {{ row.note }}
+                        </div>
+                    </li>
+                </ul>
+                <p
+                    v-else
+                    class="text-success mb-0"
+                >
+                    ✓ {{ $gettext('No DMCA replacements were needed.') }}
+                </p>
+            </fieldset>
         </div>
     </loading>
 </template>
@@ -160,6 +191,7 @@
 import { toRef } from 'vue';
 import { useAxios } from '~/vendor/axios';
 import Loading from '~/components/Common/Loading.vue';
+import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter.ts';
 import { useAsyncState } from '@vueuse/core';
 
 const props = defineProps<{
@@ -167,6 +199,7 @@ const props = defineProps<{
 }>();
 
 const { axios } = useAxios();
+const { formatTimestampAsDateTime } = useStationDateTimeFormatter();
 
 const { state, isLoading } = useAsyncState(
     () => axios.get(toRef(props, 'apiUrl').value).then(r => r.data),

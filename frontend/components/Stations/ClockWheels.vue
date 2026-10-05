@@ -5,6 +5,7 @@
         :mode="editor.kind"
         :create-url="editor.kind === 'template' ? templatesUrl : listUrl"
         :record-url="editor.url"
+        :initial-view="editor.initialView ?? 'edit'"
         @saved="onSaved"
         @cancel="editor = null"
     />
@@ -136,6 +137,14 @@
                                             @click="openEditor('wheel', wheel.links.self)"
                                         >
                                             {{ $gettext('Edit') }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary flex-fill"
+                                            :disabled="!(wheel.slots?.length)"
+                                            @click="openPreview(wheel)"
+                                        >
+                                            {{ $gettext('Preview') }}
                                         </button>
                                     </div>
                                 </div>
@@ -342,11 +351,14 @@
                 </tab>
             </tabs>
         </div>
+
+        <preview-modal ref="$previewModal" />
     </section>
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue';
+import {computed, onMounted, ref, useTemplateRef} from 'vue';
+import {useRoute} from 'vue-router';
 import {useAxios} from '~/vendor/axios';
 import {useTranslate} from '~/vendor/gettext';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
@@ -357,6 +369,7 @@ import Tab from '~/components/Common/Tab.vue';
 import WheelDial from '~/components/Stations/ClockWheels/WheelDial.vue';
 import WheelEditor from '~/components/Stations/ClockWheels/WheelEditor.vue';
 import DaypartInlineEditor from '~/components/Stations/ClockWheels/DaypartInlineEditor.vue';
+import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
 import IconIcAdd from '~icons/ic/baseline-add';
 import {getClockWheelContentDensity} from '~/functions/clockWheelPosition.ts';
 import {mapApiSlotToEditorRow} from '~/functions/clockWheelSlotEditor.ts';
@@ -399,6 +412,7 @@ type EditorState = {
     kind: 'wheel' | 'template' | 'daypart';
     url: string | null;
     presetTemplateId?: number | null;
+    initialView?: 'edit' | 'preview' | 'aired';
 };
 
 const {$gettext, $ngettext} = useTranslate();
@@ -438,7 +452,30 @@ const load = async () => {
     }
 };
 
-onMounted(load);
+// Reports link straight to a wheel: ?wheel=<id>&view=aired opens that wheel
+// on its How it aired tab.
+const route = useRoute();
+onMounted(async () => {
+    await load();
+    const wheelId = Number(route.query.wheel);
+    const target = wheels.value.find((w) => w.id === wheelId);
+    if (target) {
+        const view = route.query.view;
+        editor.value = {
+            kind: 'wheel',
+            url: target.links.self,
+            initialView: view === 'aired' || view === 'preview' ? view : 'edit',
+        };
+        editorKey.value += 1;
+    }
+});
+
+// What the system has scheduled for a saved wheel's next airing, from the
+// Linear Log.
+const $previewModal = useTemplateRef('$previewModal');
+const openPreview = (wheel: {name: string; links: {self: string}}) => {
+    void $previewModal.value?.open(wheel.name, wheel.links.self + '/log');
+};
 
 const openEditor = (kind: EditorState['kind'], url: string | null, presetTemplateId: number | null = null) => {
     editor.value = {kind, url, presetTemplateId};

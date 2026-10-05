@@ -49,6 +49,42 @@
                 {{ formatIsoAsDateTime(row.item.played_at) }}
             </template>
         </data-table>
+        <fieldset class="mt-4">
+            <legend>{{ $gettext('Promo & Ad Delivery') }}</legend>
+            <p class="mb-2">
+                {{ $gettext('Promos and ads aired') }}: <strong>{{ promoDelivery.aired }}</strong>
+                · {{ $gettext('Stacked breaks (3+ in a row)') }}:
+                <strong :class="{'text-warning': promoDelivery.stacks.length > 0}">{{ promoDelivery.stacks.length }}</strong>
+                · {{ $gettext('Cut by the Top-of-Hour ID') }}:
+                <strong :class="{'text-danger': promoDelivery.cut_at_id.length > 0}">{{ promoDelivery.cut_at_id.length }}</strong>
+            </p>
+            <ul
+                v-if="promoDelivery.stacks.length > 0"
+                class="list-group list-group-flush mb-3"
+            >
+                <li
+                    v-for="stack in promoDelivery.stacks"
+                    :key="stack.at"
+                    class="list-group-item px-0 small"
+                >
+                    <strong>{{ formatTimestampAsDateTime(stack.at) }}</strong>:
+                    {{ stack.count }} {{ $gettext('in a row') }} — {{ stack.items.join(' · ') }}
+                </li>
+            </ul>
+            <ul
+                v-if="promoDelivery.cut_at_id.length > 0"
+                class="list-group list-group-flush"
+            >
+                <li
+                    v-for="cut in promoDelivery.cut_at_id"
+                    :key="cut.at"
+                    class="list-group-item px-0 small text-danger"
+                >
+                    <strong>{{ formatTimestampAsDateTime(cut.at) }}</strong>:
+                    {{ cut.text }} — {{ $gettext('cut short by') }} {{ cut.cut_seconds }}s
+                </li>
+            </ul>
+        </fieldset>
     </loading>
 </template>
 
@@ -63,7 +99,7 @@ import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter
 import {useClientItemProvider} from '~/functions/dataTable/useClientItemProvider.ts';
 
 const {$gettext} = useTranslate();
-const {formatIsoAsDateTime} = useStationDateTimeFormatter();
+const {formatIsoAsDateTime, formatTimestampAsDateTime} = useStationDateTimeFormatter();
 
 const props = defineProps<{
     apiUrl: string;
@@ -73,8 +109,15 @@ const {axios} = useAxios();
 
 const {state, isLoading} = useAsyncState(
     () => axios.get(props.apiUrl).then((r) => r.data),
-    {sponsors: [], plays: []},
+    {sponsors: [], plays: [], promo_delivery: {aired: 0, stacks: [], cut_at_id: []}},
 );
+
+type PromoDelivery = {
+    aired: number,
+    stacks: Array<{at: number, count: number, items: string[]}>,
+    cut_at_id: Array<{at: number, text: string, cut_seconds: number}>,
+};
+const promoDelivery = computed<PromoDelivery>(() => state.value?.promo_delivery ?? {aired: 0, stacks: [], cut_at_id: []});
 
 const sponsors = computed(() => state.value?.sponsors ?? []);
 const plays = computed(() => state.value?.plays ?? []);
