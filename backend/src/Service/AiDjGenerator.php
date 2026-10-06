@@ -352,6 +352,11 @@ final class AiDjGenerator
         $modelPath = $voiceModelPath
             ?: (AiNewsGenerator::getAvailableVoiceModels()[0]['path'] ?? null);
 
+        if (null === $modelPath) {
+            $this->logger->error('Piper TTS failed: no Piper voice model is installed.');
+            return false;
+        }
+
         $piperArgs = [
             self::PIPER_BIN,
             '--model', $modelPath,
@@ -781,7 +786,8 @@ final class AiDjGenerator
         $reference = trim((string)preg_replace('/\s+/', ' ', $reference));
         if (
             !preg_match(
-                '/^(?:(I{1,3}|[1-3])(?:st|nd|rd)?\s+)?([A-Za-z][A-Za-z ]*?)\s+(\d+)(?::(\d+)(?:\s*[-\x{2013}]\s*(\d+))?)?$/u',
+                '/^(?:(I{1,3}|[1-3])(?:st|nd|rd)?\s+)?([A-Za-z][A-Za-z ]*?)\s+(\d+)'
+                . '(?::(\d+)(?:\s*[-\x{2013}]\s*(\d+))?)?$/u',
                 $reference,
                 $m
             )
@@ -789,7 +795,10 @@ final class AiDjGenerator
             return $reference;
         }
 
-        $ordinals = ['I' => 'First', 'II' => 'Second', 'III' => 'Third', '1' => 'First', '2' => 'Second', '3' => 'Third'];
+        $ordinals = [
+            'I' => 'First', 'II' => 'Second', 'III' => 'Third',
+            '1' => 'First', '2' => 'Second', '3' => 'Third',
+        ];
         $book = $m[2];
         if ('' !== $m[1]) {
             $book = $ordinals[$m[1]] . ' ' . $book;

@@ -102,9 +102,12 @@ final class IcecastConfigTest extends TestCase
             <<<'XML'
             <?xml version="1.0"?>
             <icestats><source mount="/radio.mp3"><listeners>3</listeners>
-            <listener id="10855"><id>10855</id><ip>172.127.140.205</ip><useragent>Chrome & Co</useragent><connected>1863</connected></listener>
-            <listener id="10856"><id>10856</id><ip>99.66.12.67</ip><useragent>VLC/3.0</useragent><connected>12</connected></listener>
-            <listener id="10857"><id>10857</id><ip>99.66.12.67</ip><useragent>VLC/3.0</useragent><connected>5</connected></listener>
+            <listener id="10855"><id>10855</id><ip>172.127.140.205</ip>
+            <useragent>Chrome & Co</useragent><connected>1863</connected></listener>
+            <listener id="10856"><id>10856</id><ip>99.66.12.67</ip>
+            <useragent>VLC/3.0</useragent><connected>12</connected></listener>
+            <listener id="10857"><id>10857</id><ip>99.66.12.67</ip>
+            <useragent>VLC/3.0</useragent><connected>5</connected></listener>
             </source></icestats>
             XML
         );
