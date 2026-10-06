@@ -334,6 +334,24 @@
                                     />
                                     + {{ opt.short }}
                                 </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    :disabled="playlistOptions.length === 0"
+                                    :title="playlistOptions.length === 0 ? $gettext('No playlists with songs yet') : ''"
+                                    @click="addPlaylistSlot(false)"
+                                >
+                                    + {{ $gettext('Playlist') }}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    :disabled="smartBlockOptions.length === 0"
+                                    :title="smartBlockOptions.length === 0 ? $gettext('No smart blocks yet') : ''"
+                                    @click="addPlaylistSlot(true)"
+                                >
+                                    + {{ $gettext('Smart block') }}
+                                </button>
                             </div>
                         </div>
 
@@ -361,34 +379,6 @@
                                         >
                                             <optgroup
                                                 v-for="grp in musicContentGroups"
-                                                :key="grp.label"
-                                                :label="grp.label"
-                                            >
-                                                <option
-                                                    v-for="opt in grp.options"
-                                                    :key="opt.key"
-                                                    :value="opt.key"
-                                                >
-                                                    {{ opt.label }}
-                                                </option>
-                                            </optgroup>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label
-                                            class="form-label small"
-                                            for="cw_build_playlist"
-                                        >{{ $gettext('From a playlist or smart block? (optional)') }}</label>
-                                        <select
-                                            id="cw_build_playlist"
-                                            v-model="builder.playlistKey"
-                                            class="form-select form-select-sm"
-                                        >
-                                            <option value="">
-                                                {{ $gettext('— Whole library') }}
-                                            </option>
-                                            <optgroup
-                                                v-for="grp in playlistGroups"
                                                 :key="grp.label"
                                                 :label="grp.label"
                                             >
@@ -570,7 +560,6 @@
                                         <th style="width: 1.5rem;" />
                                         <th>{{ $gettext('Position') }}</th>
                                         <th>{{ $gettext('Type / Category') }}</th>
-                                        <th>{{ $gettext('Playlist / Smart block') }}</th>
                                         <th>{{ $gettext('Algorithm') }}</th>
                                         <th>{{ $gettext('Max Sec') }}</th>
                                         <th class="text-end">
@@ -581,7 +570,7 @@
                                 <tbody ref="$tbody">
                                     <tr v-if="entries.length === 0">
                                         <td
-                                            colspan="7"
+                                            colspan="6"
                                             class="text-center text-muted py-4"
                                         >
                                             {{ $gettext('No slots yet. Use the buttons above to build your hour.') }}
@@ -612,6 +601,7 @@
                                         </td>
                                         <td style="min-width: 12rem;">
                                             <select
+                                                v-if="clockWheelSlotKind(entry, slotLengths) === 'content'"
                                                 :value="clockWheelContentKey(entry)"
                                                 class="form-select form-select-sm"
                                                 :aria-label="$gettext('Type / Category')"
@@ -631,31 +621,28 @@
                                                     </option>
                                                 </optgroup>
                                             </select>
-                                        </td>
-                                        <td style="min-width: 10rem;">
-                                            <select
-                                                :value="clockWheelPlaylistKey(entry)"
-                                                class="form-select form-select-sm"
-                                                :aria-label="$gettext('Playlist / Smart block')"
-                                                @change="onPlaylistChange(entry, $event)"
+                                            <div
+                                                v-else
+                                                class="input-group input-group-sm"
                                             >
-                                                <option value="">
-                                                    {{ $gettext('— Whole library') }}
-                                                </option>
-                                                <optgroup
-                                                    v-for="grp in playlistGroups"
-                                                    :key="grp.label"
-                                                    :label="grp.label"
+                                                <span class="input-group-text">
+                                                    {{ clockWheelSlotKind(entry, slotLengths) === 'smart_block' ? $gettext('Smart block') : $gettext('Playlist') }}
+                                                </span>
+                                                <select
+                                                    :value="clockWheelPlaylistKey(entry)"
+                                                    class="form-select"
+                                                    :aria-label="$gettext('Play from')"
+                                                    @change="onPlaylistChange(entry, $event)"
                                                 >
                                                     <option
-                                                        v-for="opt in grp.options"
+                                                        v-for="opt in (clockWheelSlotKind(entry, slotLengths) === 'smart_block' ? smartBlockOptions : playlistOptions)"
                                                         :key="opt.key"
                                                         :value="opt.key"
                                                     >
                                                         {{ opt.label }}
                                                     </option>
-                                                </optgroup>
-                                            </select>
+                                                </select>
+                                            </div>
                                         </td>
                                         <td style="min-width: 9rem;">
                                             <select
@@ -791,10 +778,11 @@ import {
     applyClockWheelContentKey,
     applyClockWheelPlaylistKey,
     buildClockWheelContentGroups,
-    buildClockWheelPlaylistGroups,
     clockWheelContentKey,
     clockWheelContentLabel,
     clockWheelPlaylistKey,
+    clockWheelPlaylistOptions,
+    clockWheelSlotKind,
 } from '~/functions/clockWheelContent.ts';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import {
@@ -937,16 +925,30 @@ const contentGroups = computed(() => buildClockWheelContentGroups(
     categoryOptions.value,
     $gettext,
 ));
-const playlistGroups = computed(() => buildClockWheelPlaylistGroups(slotLengths.value, $gettext));
-// The builder's music: the music types and categories only.
-const musicContentGroups = computed(() => contentGroups.value
-    .map((g) => ({...g, options: g.options.filter((o) => o.type === 'music')}))
-    .filter((g) => g.options.length > 0));
+// The builder's music: the music types and categories, or one playlist or smart block.
+const musicContentGroups = computed(() => [
+    ...contentGroups.value.map((g) => ({...g, options: g.options.filter((o) => o.type === 'music')})),
+    {label: $gettext('Playlist'), options: playlistOptions.value.filter((o) => o.type === 'music')},
+    {label: $gettext('Smart block'), options: smartBlockOptions.value},
+].filter((g) => g.options.length > 0));
 const onContentChange = (entry: ClockWheelSlotEditorRow, event: Event) => {
     applyClockWheelContentKey(entry, (event.target as HTMLSelectElement).value);
 };
 const onPlaylistChange = (entry: ClockWheelSlotEditorRow, event: Event) => {
     applyClockWheelPlaylistKey(entry, (event.target as HTMLSelectElement).value, slotLengths.value);
+};
+// "+ Playlist" / "+ Smart block" slots: the row's dropdown lists only that kind.
+const playlistOptions = computed(() => clockWheelPlaylistOptions(slotLengths.value, false));
+const smartBlockOptions = computed(() => clockWheelPlaylistOptions(slotLengths.value, true));
+const addPlaylistSlot = (smart: boolean) => {
+    const first = (smart ? smartBlockOptions : playlistOptions).value[0];
+    if (!first) {
+        return;
+    }
+    const row = addSlot(first.type);
+    if (row) {
+        applyClockWheelPlaylistKey(row, first.key, slotLengths.value);
+    }
 };
 
 // Fix my hour / Build one for me: a proposal the user reviews, then applies.
@@ -965,15 +967,18 @@ const runFix = () => {
 };
 
 const builderOpen = ref(false);
-const builder = ref({musicKey: 'type:music', playlistKey: '', promoBreaks: 2, promosPerBreak: 1, idAtTop: true});
+const builder = ref({musicKey: 'type:music', promoBreaks: 2, promosPerBreak: 1, idAtTop: true});
 const openBuilder = () => {
     proposal.value = null;
     builderOpen.value = true;
 };
 const runBuild = () => {
     const music = defaultClockWheelSlotEditorRow(0);
-    applyClockWheelContentKey(music, builder.value.musicKey);
-    applyClockWheelPlaylistKey(music, builder.value.playlistKey, slotLengths.value);
+    if (builder.value.musicKey.startsWith('pl:')) {
+        applyClockWheelPlaylistKey(music, builder.value.musicKey, slotLengths.value);
+    } else {
+        applyClockWheelContentKey(music, builder.value.musicKey);
+    }
     builderOpen.value = false;
     proposal.value = {
         title: entries.length > 0
@@ -998,7 +1003,9 @@ const applyProposal = () => {
     proposal.value = null;
     notifySuccess($gettext('Slots updated. Click Save Clock Wheel to keep them.'));
 };
-const rowHasWarning = (index: number) => timelineWarnings.value.some((w) => w.index === index);
+// Only timing clashes tint a row (the original look); length-fit warnings stay in the list above.
+const timingWarnings = computed(() => getClockWheelTimelineWarnings(entries, $gettext));
+const rowHasWarning = (index: number) => timingWarnings.value.some((w) => w.index === index);
 
 const formatPosition = formatClockWheelPosition;
 
@@ -1201,6 +1208,11 @@ const doDelete = async () => {
 
 .drag-handle {
     cursor: grab;
+}
+
+.playlist-chip .btn-close {
+    font-size: 0.5rem;
+    vertical-align: middle;
 }
 
 .slot-table tbody tr {

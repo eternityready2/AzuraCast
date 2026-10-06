@@ -3,12 +3,12 @@ import type {ClockWheelSlotLengths} from '~/functions/clockWheelHourFit.ts';
 import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
 
 /**
- * A wheel entry is set with two dropdowns:
- *  - "Type / Category": the type (with its description) or a music category,
- *    one choice instead of separate Type and Category fields that could
- *    contradict each other. Keys: "type:<type>", "cat:<categoryId>".
- *  - "Playlist / Smart block": optionally narrows that to one playlist or
- *    smart block. Key: "pl:<playlistId>", or "" for the whole library.
+ * A wheel entry is one of three kinds, each with its own dropdown:
+ *  - content: "Type / Category", the type (with its description) or a music
+ *    category, one choice instead of separate Type and Category fields that
+ *    could contradict each other. Keys: "type:<type>", "cat:<categoryId>".
+ *  - playlist / smart_block: added with "+ Playlist" / "+ Smart block"; the
+ *    dropdown lists only that kind. Key: "pl:<playlistId>".
  */
 export interface ClockWheelContentOption {
     key: string;
@@ -47,36 +47,36 @@ export function buildClockWheelContentGroups(
 }
 
 /** Playlist and smart block choices for the second dropdown. */
-export function buildClockWheelPlaylistGroups(
-    lengths: ClockWheelSlotLengths | null,
-    gettext: (msg: string) => string,
-): ClockWheelContentGroup[] {
-    const asType = (t: string): MediaTypeValue => (isMediaTypeValue(t) ? t : 'music');
-    const all = Object.entries(lengths?.playlists ?? {})
-        .map(([id, p]) => ({id, ...p}))
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-    const groups: ClockWheelContentGroup[] = [
-        {
-            label: gettext('Playlists'),
-            options: all.filter((p) => !p.is_smart_block && p.items > 0)
-                .map((p) => ({key: `pl:${p.id}`, label: p.name, type: asType(p.main_type)})),
-        },
-        {
-            label: gettext('Smart blocks'),
-            options: all.filter((p) => p.is_smart_block)
-                .map((p) => ({key: `pl:${p.id}`, label: p.name, type: 'music'})),
-        },
-    ];
-    return groups.filter((g) => g.options.length > 0);
-}
-
 export function clockWheelContentKey(row: Pick<ClockWheelSlotEditorRow, 'type' | 'category_id'>): string {
     return row.category_id ? `cat:${row.category_id}` : `type:${row.type}`;
 }
 
 export function clockWheelPlaylistKey(row: Pick<ClockWheelSlotEditorRow, 'playlist_id'>): string {
     return row.playlist_id ? `pl:${row.playlist_id}` : '';
+}
+
+export type ClockWheelSlotKind = 'content' | 'playlist' | 'smart_block';
+
+export function clockWheelSlotKind(
+    row: Pick<ClockWheelSlotEditorRow, 'playlist_id'>,
+    lengths: ClockWheelSlotLengths | null,
+): ClockWheelSlotKind {
+    if (!row.playlist_id) {
+        return 'content';
+    }
+    return lengths?.playlists[String(row.playlist_id)]?.is_smart_block ? 'smart_block' : 'playlist';
+}
+
+/** The playlists (with songs) or the smart blocks, for that kind of slot. */
+export function clockWheelPlaylistOptions(
+    lengths: ClockWheelSlotLengths | null,
+    smart: boolean,
+): ClockWheelContentOption[] {
+    const asType = (t: string): MediaTypeValue => (isMediaTypeValue(t) ? t : 'music');
+    return Object.entries(lengths?.playlists ?? {})
+        .filter(([, p]) => (smart ? p.is_smart_block : !p.is_smart_block && p.items > 0))
+        .map(([id, p]) => ({key: `pl:${id}`, label: p.name, type: smart ? 'music' : asType(p.main_type)}))
+        .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Applies a "Type / Category" choice; the playlist choice is left as it is. */
@@ -91,7 +91,7 @@ export function applyClockWheelContentKey(row: ClockWheelSlotEditorRow, key: str
     }
 }
 
-/** Applies a "Playlist / Smart block" choice ("" = whole library). */
+/** Sets a slot's playlist or smart block ("" = none). */
 export function applyClockWheelPlaylistKey(
     row: ClockWheelSlotEditorRow,
     key: string,
