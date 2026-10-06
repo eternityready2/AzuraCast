@@ -657,7 +657,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'short_liner');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_UPBEAT);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
     }
 
     /**
@@ -771,6 +771,52 @@ final class AiDjGenerator
     }
 
     /**
+     * Bible reference as the voice should say it: TTS reads "19:6" as
+     * "19 colon 6" and "II" as letters, so "II Kings 19:6" becomes
+     * "Second Kings, chapter 19, verse 6" and "Psalms 76:1" becomes
+     * "Psalm 76, verse 1". Anything it doesn't recognise is returned as is.
+     */
+    public static function spokenBibleReference(string $reference): string
+    {
+        $reference = trim((string)preg_replace('/\s+/', ' ', $reference));
+        if (
+            !preg_match(
+                '/^(?:(I{1,3}|[1-3])(?:st|nd|rd)?\s+)?([A-Za-z][A-Za-z ]*?)\s+(\d+)(?::(\d+)(?:\s*[-\x{2013}]\s*(\d+))?)?$/u',
+                $reference,
+                $m
+            )
+        ) {
+            return $reference;
+        }
+
+        $ordinals = ['I' => 'First', 'II' => 'Second', 'III' => 'Third', '1' => 'First', '2' => 'Second', '3' => 'Third'];
+        $book = $m[2];
+        if ('' !== $m[1]) {
+            $book = $ordinals[$m[1]] . ' ' . $book;
+        }
+        $book = (string)preg_replace('/^Revelation of John$/i', 'Revelation', $book);
+
+        $chapter = $m[3];
+        $verse = $m[4] ?? '';
+        $verseEnd = $m[5] ?? '';
+
+        // Psalms are numbered, not chaptered: "Psalm 23", "Psalm 76, verse 1".
+        if (preg_match('/^Psalms?$/i', $book)) {
+            $spoken = 'Psalm ' . $chapter;
+        } else {
+            $spoken = $book . ', chapter ' . $chapter;
+        }
+
+        if ('' === $verse) {
+            return $spoken;
+        }
+
+        return '' !== $verseEnd
+            ? sprintf('%s, verses %s through %s', $spoken, $verse, $verseEnd)
+            : sprintf('%s, verse %s', $spoken, $verse);
+    }
+
+    /**
      * Build spoken text for a content liner based on its type.
      */
     public function buildLinerText(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro = true): string
@@ -778,7 +824,7 @@ final class AiDjGenerator
         $djName = $this->getSpokenName($dj->getName());
         $stationName = $station->name;
         $text = $content->content;
-        $reference = $content->reference;
+        $reference = $content->reference ? self::spokenBibleReference($content->reference) : null;
 
         if (!$includeIntro) {
             // Intro-free variant for the second segment of a combo break: payload
