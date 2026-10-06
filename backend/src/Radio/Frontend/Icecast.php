@@ -12,9 +12,13 @@ use App\Radio\Enums\StreamFormats;
 use App\Service\Acme;
 use App\Utilities\Arrays;
 use App\Xml\Writer;
+use GuzzleHttp\Promise\Create;
+use GuzzleHttp\Promise\PromiseInterface;
 use GuzzleHttp\Promise\Utils;
 use GuzzleHttp\Psr7\Uri;
+use NowPlaying\Result\Listeners;
 use NowPlaying\Result\Result;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\UriInterface;
 use RuntimeException;
 use Supervisor\Exception\SupervisorException as SupervisorLibException;
@@ -68,9 +72,15 @@ class Icecast extends AbstractFrontend
                 $defaultMountId = $mount->id;
             }
 
+            // Listeners are read here rather than by the NowPlaying library,
+            // which only understands Icecast-KH's listener field names.
             $mountPromises[$mount->id] = $npAdapter->getNowPlayingAsync(
                 $mount->name,
-                $includeClients
+                false
+            )->then(
+                fn(Result $result) => $includeClients
+                    ? $this->attachListClients($result, $baseUrl, $feConfig->admin_pw, $mount->name)
+                    : $result
             )->then(
                 function (Result $result) use ($mount) {
                     if (!empty($result->clients)) {
@@ -107,6 +117,42 @@ class Icecast extends AbstractFrontend
         }
 
         return $defaultResult;
+    }
+
+    private function attachListClients(
+        Result $result,
+        UriInterface $baseUrl,
+        ?string $adminPassword,
+        string $mountName
+    ): PromiseInterface {
+        $adminPassword = trim($adminPassword ?? '');
+        if ('' === $adminPassword) {
+            return Create::promiseFor($result);
+        }
+
+        $uri = $baseUrl->withPath('/admin/listclients')
+            ->withQuery(http_build_query(['mount' => $mountName]));
+
+        return $this->httpClient->getAsync($uri, [
+            'auth' => ['admin', $adminPassword],
+            'timeout' => 5,
+            'http_errors' => false,
+        ])->then(
+            function (ResponseInterface $response) use ($result) {
+                if (200 !== $response->getStatusCode()) {
+                    return $result;
+                }
+
+                $clients = IcecastConfig::parseListClients((string)$response->getBody());
+                if (null !== $clients) {
+                    $result->clients = $clients;
+                    $result->listeners = new Listeners($result->listeners->total, count($clients));
+                }
+
+                return $result;
+            },
+            fn() => $result
+        );
     }
 
     public function getConfigurationPath(Station $station): string
