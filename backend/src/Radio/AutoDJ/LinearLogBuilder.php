@@ -571,7 +571,7 @@ final class LinearLogBuilder
 
             // Create log entries for scheduled_programme markers so operators
             // can hand-edit (drop / replace) them like any other log line.
-            $entries = $this->persistProgrammeLogEntries($station, $entries);
+            $entries = $this->persistProgrammeLogEntries($station, $entries, $projectionEndTs);
 
             // Standing operator rules police the plan the builder just wrote, so
             // a line that may not play at its planned time never reaches the log
@@ -1031,7 +1031,7 @@ final class LinearLogBuilder
      * @param list<array<string, mixed>> $entries
      * @return list<array<string, mixed>>
      */
-    private function persistProgrammeLogEntries(Station $station, array $entries): array
+    private function persistProgrammeLogEntries(Station $station, array $entries, int $until): array
     {
         // Remove stale programme log entries from previous builds. A programme
         // whose window has already opened is on air, not a stale plan: its line
@@ -1039,6 +1039,9 @@ final class LinearLogBuilder
         // and a build in that time deleted it. The 07:00 Morning Show line went
         // that way (first title 07:19), so the show was logged as a "Live: AI
         // DJ" line at 09:00:36 instead (Mon 2026-10-05).
+        // Only lines inside this build's own range are replaced: a shorter build
+        // than the daily one deleted the programme lines past its end and wrote
+        // none back (Fri 2026-10-09 07:00 Morning Show, gone after a 24h build).
         $this->em->createQuery(
             <<<'DQL'
                 DELETE FROM App\Entity\StationLogEntry e
@@ -1047,11 +1050,13 @@ final class LinearLogBuilder
                 AND e.status = :planned
                 AND e.is_locked = false
                 AND e.planned_at > :now
+                AND e.planned_at <= :until
             DQL
         )->setParameter('station', $station)
             ->setParameter('marker', '%scheduled_programme%')
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->setParameter('now', time())
+            ->setParameter('until', $until)
             ->execute();
 
         $maxSequence = (int)$this->em->createQuery(

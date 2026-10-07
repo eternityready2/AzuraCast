@@ -423,7 +423,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 $this->logger->notice(
                     'Top-of-Hour: filled the seconds before the ID with one short item '
                     . 'instead of a song the ID would cut.',
-                    $context + ['queue_id' => $row->id]
+                    $context + ['queue_id' => $row->id ?? null]
                 );
                 return;
             }
@@ -1692,7 +1692,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if (null !== $ahead && $this->isShortForm($ahead)) {
             $this->logger->notice(
                 'Top-of-Hour: no filler after a short item; short items are never stacked before the ID.',
-                ['queue_id' => $row->id, 'ahead_queue_id' => $ahead->id, 'start' => $start->toIso8601String()]
+                [
+                    'queue_id' => $row->id ?? null,
+                    'ahead_queue_id' => $ahead->id ?? null,
+                    'start' => $start->toIso8601String(),
+                ]
             );
             return null;
         }
@@ -1756,7 +1760,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if (null === $best) {
             $this->logger->notice(
                 'Top-of-Hour: no short item fits the seconds before the ID; the pick is held for the new hour.',
-                ['queue_id' => $row->id, 'start' => $start->toIso8601String(), 'room' => round($room, 2)]
+                ['queue_id' => $row->id ?? null, 'start' => $start->toIso8601String(), 'room' => round($room, 2)]
             );
             return null;
         }

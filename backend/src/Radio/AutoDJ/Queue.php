@@ -364,6 +364,38 @@ final class Queue
                     continue;
                 }
 
+                // Linear Log preview: check a fresh pick the way live playout does
+                // on the queue's next cycle, where it will really air. Recorded
+                // instead at the time it was picked, a song held to open the new
+                // hour was planned inside the old one (a Hymns song at 05:59:59
+                // that airs at 06:00:37, after Hymns' window), and the next build
+                // took it out of the log, leaving the hour opening on a hole.
+                if ($isPreview && 1 === count($nextSongs) && !$nextSongs[0]->sent_to_autodj) {
+                    $pick = $nextSongs[0];
+                    // Saved (in the preview's rolled-back transaction) as every
+                    // walked row is, so the checks below can read its id.
+                    $this->em->persist($pick);
+                    $this->em->flush();
+
+                    $revalidate = new RevalidateQueuedSong(
+                        $station,
+                        $pick,
+                        DateTimeImmutable::createFromInterface($expectedPlayTime),
+                    );
+                    $this->dispatcher->dispatch($revalidate);
+
+                    $opensAfter = $revalidate->getOpensAfter();
+                    if (null !== $opensAfter && $opensAfter > $expectedPlayTime) {
+                        $expectedPlayTime = CarbonImmutable::instance($opensAfter);
+                    }
+
+                    if (!$this->em->contains($pick)) {
+                        // It may not air where it really would; pick again there.
+                        $nextSongs = [];
+                        continue;
+                    }
+                }
+
                 if (!empty($nextSongs)) {
                     break;
                 }
