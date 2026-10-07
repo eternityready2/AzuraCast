@@ -12,6 +12,7 @@ use App\Radio\AutoDJ\AiNewsScheduleForecastService;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogTiming;
 use App\Radio\AutoDJ\RigidScheduleWindowResolver;
+use App\Radio\AutoDJ\StrictProgrammeClock;
 use App\Utilities\Types;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -49,11 +50,15 @@ final class CheckLinearLogCommand extends CommandAbstract
     /** Crossfades and write rounding. */
     private const int MAX_OVERLAP = 10;
 
+    /** Margin after the estimated end of the ID and news, which varies a little. */
+    private const int OPENS_AT_MARGIN_SECONDS = 38;
+
     public function __construct(
         private readonly StationRepository $stationRepo,
         private readonly RigidScheduleWindowResolver $windowResolver,
         private readonly LinearLogTiming $timing,
         private readonly AiNewsScheduleForecastService $newsForecast,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
         parent::__construct();
     }
@@ -349,9 +354,17 @@ final class CheckLinearLogCommand extends CommandAbstract
                 SQL,
                 [$station->id, $block['playlist_id'], $blockStart - 5, $blockStart + 3600]
             );
+            // A block opening on the hour starts once the Top-of-Hour ID, and
+            // in a News hour the bulletin, release the air: Faith Horizons
+            // (17:00, News hour) aired at 17:03:25 and was reported late.
+            $opensAt = $this->strictProgrammeClock
+                ->airFreeFrom($station, CarbonImmutable::createFromTimestamp($blockStart, 'UTC'))
+                ->getTimestamp();
+            $onTimeBy = max($blockStart + $tolerance, $opensAt + self::OPENS_AT_MARGIN_SECONDS);
+
             if (null === $firstAired || false === $firstAired) {
                 $hardStarts[] = sprintf('%s "%s": did not air in its first hour', $at($blockStart), $name);
-            } elseif ((int)$firstAired > $blockStart + $tolerance) {
+            } elseif ((int)$firstAired > $onTimeBy) {
                 $hardStarts[] = sprintf(
                     '%s "%s": started %ds late',
                     $at($blockStart),

@@ -699,19 +699,16 @@ LIQ;
         $startMinutes = $startHour * 60 + $startMin;
         $endMinutes = $endHour * 60 + $endMin;
 
-        $tzOffsetMinutes = (int)($timezone->getOffset(new \DateTimeImmutable('now', $timezone)) / 60);
-        $utcStart = ($startMinutes - $tzOffsetMinutes + 1440) % 1440;
-        $utcEnd   = ($endMinutes   - $tzOffsetMinutes + 1440) % 1440;
-
-        $comparison = ($utcStart <= $utcEnd)
-            ? "current >= {$utcStart} and current < {$utcEnd}"
-            : "current >= {$utcStart} or current < {$utcEnd}";
+        $comparison = ($startMinutes <= $endMinutes)
+            ? "current >= {$startMinutes} and current < {$endMinutes}"
+            : "current >= {$startMinutes} or current < {$endMinutes}";
+        $localOffset = self::buildLocalOffsetExpression($timezone);
 
         return <<<LIQ
 def is_within_active_hours() =
 {$dayGuard}
-  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
-  local_time = time()
+  # Station-local hour and minute (Liquidsoap time() is UTC).
+  local_time = time() + {$localOffset}
   hour = int_of_float(local_time / 3600.0) mod 24
   minute = int_of_float(local_time / 60.0) mod 60
   current = hour * 60 + minute
@@ -736,7 +733,7 @@ LIQ;
         }
 
         sort($days);
-        $tzOffsetSeconds = $timezone->getOffset(new \DateTimeImmutable('now', $timezone));
+        $localOffset = self::buildLocalOffsetExpression($timezone);
         $checks = implode(
             ' or ',
             array_map(static fn(int $day): string => "iso_weekday == {$day}", $days)
@@ -744,11 +741,39 @@ LIQ;
 
         // 1970-01-01 (epoch day 0) was a Thursday, ISO weekday 4.
         return <<<LIQ
-  local_day_epoch = time() + {$tzOffsetSeconds}.
+  local_day_epoch = time() + {$localOffset}
   epoch_days = int_of_float(local_day_epoch / 86400.0)
   iso_weekday = ((epoch_days + 3) mod 7) + 1
   is_active_day = {$checks}
 LIQ;
+    }
+
+    /**
+     * Liquidsoap expression for the station's UTC offset in seconds at time().
+     *
+     * The offset was fixed when the config was written, so after a daylight
+     * saving change the News hours and days ran an hour off until the next
+     * Liquidsoap restart (America/Chicago, 1 Nov 2026: 11:59-17:59 would have
+     * become 10:59-16:59). The offset changes written in for the next year
+     * switch by themselves; any restart writes a fresh year.
+     */
+    private static function buildLocalOffsetExpression(DateTimeZone $timezone): string
+    {
+        $now = new DateTimeImmutable('now', $timezone);
+        $expression = number_format($timezone->getOffset($now), 1, '.', '');
+
+        $transitions = $timezone->getTransitions($now->getTimestamp(), $now->getTimestamp() + 400 * 86400);
+        // The first entry is the state at the start of the range, not a change.
+        foreach (array_slice($transitions ?: [], 1) as $transition) {
+            $expression = sprintf(
+                '(if time() >= %d. then %s else %s end)',
+                $transition['ts'],
+                number_format((float)$transition['offset'], 1, '.', ''),
+                $expression
+            );
+        }
+
+        return $expression;
     }
 
     private static function buildAiNewsCronDays(array $activeDays): string

@@ -35,6 +35,7 @@ final class RigidScheduleForecastService
     public function __construct(
         private readonly RigidScheduleWindowResolver $windowResolver,
         private readonly Liquidsoap $liquidsoap,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
 
@@ -69,8 +70,24 @@ final class RigidScheduleForecastService
             return [];
         }
 
+        // A play-once show is done for this window once its pass has aired:
+        // the strict lane hands the air back instead of starting it over, and
+        // Playing Next kept naming Faith Horizons after it had finished
+        // (Wed 2026-10-07 17:36).
+        $playsOnce = null !== RigidScheduleWindowResolver::maxTracksPerWindow(
+            $window['playlist'],
+            $window['schedule'],
+        );
+        if ($playsOnce && $this->strictProgrammeClock->hasFinishedInOpenWindow($station, $window['playlist'])) {
+            return [];
+        }
+
         $remaining = $state['remaining'];
         if ([] === $remaining) {
+            if ($playsOnce) {
+                return [];
+            }
+
             // mode="normal" makes the next cycle deterministic. At the exact end
             // of a cycle, the first item of this cycle is genuinely what comes next.
             $remaining = $state['cycle'];
