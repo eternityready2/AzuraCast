@@ -33,7 +33,15 @@ final class RevalidateQueuedSong extends Event
         private readonly Station $station,
         private readonly StationQueue $queueRow,
         private readonly DateTimeImmutable $expectedPlayAt,
+        // The last check, as the row is handed to the backend: the start time
+        // comes from actual playback, and the choice is final once it returns.
+        private readonly bool $isHandOff = false,
     ) {
+    }
+
+    public function isHandOff(): bool
+    {
+        return $this->isHandOff;
     }
 
     public function getStation(): Station

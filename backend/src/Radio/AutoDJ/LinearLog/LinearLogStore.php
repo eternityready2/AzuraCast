@@ -129,14 +129,16 @@ final class LinearLogStore
     /**
      * Put every planned line into the (rolled-back) simulation queue, in log
      * order, after the live queue rows.
-     */
-    /**
+     *
      * @param list<int> $excludeIds lines a rebuild is re-planning; they must not
      *     seed the simulation, or the planner would simply keep them.
      * @param int|null $pinnedAfter on a rebuild, the end of the lock window: a
      *     locked line after it keeps its air time and is fitted around by
      *     applyPlan(). Seeded, it played straight after the lock window instead.
-     * @return list<int> the seeded log line ids
+     * @return array<int, int> planned air time of each seeded line other than a
+     *     scheduled programme, by log line id: the simulation must not play such
+     *     a line before it, nor after its hour has ended (see
+     *     {@see \App\Radio\AutoDJ\Queue::buildQueue()}).
      */
     public function seedQueue(Station $station, array $excludeIds = [], ?int $pinnedAfter = null): array
     {
@@ -169,7 +171,7 @@ final class LinearLogStore
             $cued = CarbonImmutable::parse((string)$lastCued, 'UTC')->max($cued)->addSecond();
         }
         $count = 0;
-        $ids = [];
+        $plannedAt = [];
         foreach ($planned as $entry) {
             if (null === $entry->media || isset($excluded[$entry->id])) {
                 continue;
@@ -177,7 +179,11 @@ final class LinearLogStore
             if (null !== $pinnedAfter && $entry->is_locked && $entry->planned_at > $pinnedAfter) {
                 continue;
             }
-            $ids[] = $entry->id;
+            // A scheduled programme keeps the air its window gives it; playout
+            // never drops one as a leftover while that window is open.
+            if (!$this->isScheduledProgramme($entry)) {
+                $plannedAt[$entry->id] = $entry->planned_at;
+            }
 
             $row = $this->toQueueRow($station, $entry, null);
             $row->timestamp_cued = $cued->addMilliseconds(++$count);
@@ -186,15 +192,19 @@ final class LinearLogStore
 
         $this->em->flush();
 
-        return $ids;
+        return $plannedAt;
     }
 
     /**
-     * Delete planned lines the planner could no longer fit. Locked lines stay.
+     * Drop planned lines the planner could no longer keep. Locked lines stay.
+     *
+     * Dropped, not deleted: a line that silently vanished left a hole with no
+     * record of why. The 7-9am Morning Show took every line after it on each
+     * build this way (2026-10-05 to 10-07), and nothing in the log said so.
      *
      * @param list<int> $ids
      */
-    public function removeUnplannable(Station $station, array $ids): int
+    public function dropUnplannable(Station $station, array $ids): int
     {
         if (empty($ids)) {
             return 0;
@@ -202,13 +212,16 @@ final class LinearLogStore
 
         return (int)$this->em->createQuery(
             <<<'DQL'
-                DELETE FROM App\Entity\StationLogEntry e
+                UPDATE App\Entity\StationLogEntry e
+                SET e.status = :dropped, e.note = :note
                 WHERE e.station = :station
                 AND e.id IN (:ids)
                 AND e.status = :planned
                 AND e.is_locked = 0
             DQL
-        )->setParameter('station', $station)
+        )->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
+            ->setParameter('note', 'Dropped: the planner could not keep it at its planned time')
+            ->setParameter('station', $station)
             ->setParameter('ids', $ids)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->execute();
@@ -697,7 +710,7 @@ final class LinearLogStore
         foreach (
             $conn->fetchAllAssociative(
                 'SELECT sq.log_entry_id, UNIX_TIMESTAMP(sq.timestamp_played) AS t,
-                        sq.text, sq.title, sq.artist, sq.duration,
+                        sq.text, sq.title, sq.artist, sq.duration, sq.song_id,
                         sq.playlist_id, sq.album, sp.name AS playlist_name
                 FROM station_queue sq
                 LEFT JOIN station_playlists sp ON sp.id = sq.playlist_id
@@ -711,17 +724,31 @@ final class LinearLogStore
             $queued[(int)$row['log_entry_id']] = $row;
         }
 
+        // The current hour's history plus the configured hours ahead.
+        [$from, $until] = self::window($station, $hours, $now);
+
         $ids = [];
         foreach ($entries as $entry) {
             if (!empty($entry['log_entry_id'])) {
                 $ids[] = (int)$entry['log_entry_id'];
             }
         }
+
+        // Every saved line is shown, not only the ones the last build wrote. The
+        // build's snapshot is a copy taken when it ran: a song the AutoDJ filled
+        // in live, or a line refilled after a drop, is in the log the moment it
+        // is written, and the page has to show it then, not at the next build.
+        foreach ($this->savedLinesSince($station, $ids, $from, $until) as $line) {
+            $entries[] = $this->mapEntry($line);
+            $ids[] = (int)$line->id;
+        }
+
         $saved = [];
         if ([] !== $ids) {
             foreach (
                 $conn->fetchAllAssociative(
-                    'SELECT id, status, aired_at, note, is_locked FROM station_log_entries WHERE id IN (?)',
+                    'SELECT id, status, aired_at, note, is_locked, title, artist, text, payload
+                    FROM station_log_entries WHERE id IN (?)',
                     [$ids],
                     [\Doctrine\DBAL\ArrayParameterType::INTEGER]
                 ) as $row
@@ -748,6 +775,18 @@ final class LinearLogStore
                 $entry['log_status'] = $saved[$id]['status'];
                 $entry['log_note'] = $saved[$id]['note'];
                 $entry['is_locked'] = (bool)$saved[$id]['is_locked'];
+                // The saved line names what it plays now: a hand replacement, or
+                // what the Top-of-Hour swap aired. The snapshot keeps the name
+                // from its build, so an aired replacement showed the old song.
+                if (null !== $saved[$id]['text'] && $saved[$id]['text'] !== ($entry['text'] ?? null)) {
+                    $entry['text'] = $saved[$id]['text'];
+                    $entry['title'] = $saved[$id]['title'];
+                    $entry['artist'] = $saved[$id]['artist'];
+                    $savedSongId = json_decode((string)$saved[$id]['payload'], true)['song_id'] ?? null;
+                    if (is_string($savedSongId) && '' !== $savedSongId) {
+                        $entry['song_id'] = $savedSongId;
+                    }
+                }
                 if (null !== $saved[$id]['aired_at']) {
                     $entry['aired_at'] = (int)$saved[$id]['aired_at'];
                     $entry['played_at'] = (int)$saved[$id]['aired_at'];
@@ -764,6 +803,10 @@ final class LinearLogStore
                     $entry['text'] = $live['text'];
                     $entry['title'] = $live['title'];
                     $entry['artist'] = $live['artist'];
+                    // ON AIR is matched by song id.
+                    if (null !== ($live['song_id'] ?? null)) {
+                        $entry['song_id'] = $live['song_id'];
+                    }
                     if (null !== $live['duration']) {
                         $entry['duration'] = max(1.0, (float)$live['duration']);
                     }
@@ -784,6 +827,8 @@ final class LinearLogStore
 
         usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
 
+        $entries = self::floatSoftLines(self::showAfterNews($entries), $now);
+
         // Schedule exclusivity (a live-queue fill-in leaking into a scheduled
         // playlist's window) is enforced by LinearLogRules::apply(), which runs
         // every minute against the authoritative Scheduler, drops the line with
@@ -793,9 +838,6 @@ final class LinearLogStore
         // queue-shifted played_at times, which could disagree with the saved log
         // and silently blank lines that were never actually dropped.)
 
-        // The current hour's history plus the configured hours ahead.
-        [$from, $until] = self::window($station, $hours, $now);
-
         return array_values(array_filter(
             $entries,
             static fn(array $e): bool => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
@@ -804,10 +846,178 @@ final class LinearLogStore
     }
 
     /**
+     * Saved lines airing in $from .. $until that are not among $knownIds.
+     *
+     * @param list<int> $knownIds
+     * @return list<StationLogEntry>
+     */
+    private function savedLinesSince(Station $station, array $knownIds, int $from, int $until): array
+    {
+        // Reach back far enough to catch a programme that began before the
+        // window and is still on air; the caller trims by end time.
+        $reachBack = 6 * 3600;
+
+        $qb = $this->em->createQueryBuilder()
+            ->select('e')
+            ->from(StationLogEntry::class, 'e')
+            ->where('e.station = :station')
+            ->andWhere('COALESCE(e.aired_at, e.planned_at) >= :from')
+            ->andWhere('COALESCE(e.aired_at, e.planned_at) <= :until')
+            ->setParameter('station', $station)
+            ->setParameter('from', $from - $reachBack)
+            ->setParameter('until', $until);
+
+        if ([] !== $knownIds) {
+            $qb->andWhere('e.id NOT IN (:known)')
+                ->setParameter('known', $knownIds);
+        }
+
+        /** @var list<StationLogEntry> */
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * A show due while the Station ID or a News bulletin airs is drawn starting
+     * when they are done. On air the ID and the bulletin always go first and a
+     * show scheduled at :00 waits for them -- Faith Horizons, Wed 2026-09-30: ID
+     * 16:59:59, News 17:00:36, show 17:03:25 -- while the plan pins the show to
+     * its schedule time, so the page drew it on top of them. The lines after the
+     * show follow it in {@see floatSoftLines()}. Display only: nothing here is
+     * saved, and playout never reads it.
+     *
+     * @param list<array<string, mixed>> $entries sorted by played_at
+     * @return list<array<string, mixed>> sorted by played_at
+     */
+    private static function showAfterNews(array $entries): array
+    {
+        $at = static fn(array $e): int => (int)($e['played_at'] ?? 0);
+
+        // In air order, so a show moved past the ID is then checked against the
+        // bulletin that follows it.
+        foreach ($entries as $marker) {
+            $source = $marker['source_type'] ?? null;
+            if ('ai_news' !== $source && 'top_of_hour_id' !== $source) {
+                continue;
+            }
+
+            $markerStart = $at($marker);
+            $markerEnd = $markerStart + (int)ceil((float)($marker['duration'] ?? 0));
+
+            foreach ($entries as $i => $entry) {
+                if (
+                    'scheduled_programme' === ($entry['source_type'] ?? null)
+                    && !isset($entry['aired_at'])
+                    && self::isAirable($entry)
+                    && $at($entry) >= $markerStart
+                    && $at($entry) < $markerEnd
+                ) {
+                    $entries[$i]['played_at'] = $markerEnd;
+                }
+            }
+        }
+
+        usort($entries, static fn(array $a, array $b): int => $at($a) <=> $at($b));
+
+        return $entries;
+    }
+
+    /**
+     * Soft lines float, hard events stay put -- how FM automation keeps a log's
+     * times true without rebuilding it. Playout takes the log's lines in order,
+     * each starting when the one before it ends, so a line that has not started
+     * yet is drawn starting when the line before it ends. Hard events keep their
+     * own time and start a new chain: what is already on air, and the timed
+     * events -- the Station ID, News, scheduled programmes and the build's other
+     * markers. When the air ran 7m51s ahead of the plan (2026-10-07 14:40:59)
+     * the next planned liner still showed its plan time of 14:48:50, and the
+     * empty time between read as a hole. A run that overruns the next hard event
+     * shows the overrun, which the Top-of-Hour swap settles on air. Display
+     * only: nothing here is saved, and playout never reads it.
+     *
+     * @param list<array<string, mixed>> $entries sorted by played_at
+     * @return list<array<string, mixed>> sorted by played_at
+     */
+    private static function floatSoftLines(array $entries, int $now): array
+    {
+        $end = static fn(array $e): int => (int)$e['played_at'] + (int)ceil((float)($e['duration'] ?? 0));
+
+        // A line planned at the same second as a hard event airs after it: the
+        // song held for the new hour is planned at the ID's 03:59:59 and opens
+        // the hour once the ID ends.
+        usort(
+            $entries,
+            static fn(array $a, array $b): int => [(int)($a['played_at'] ?? 0), self::isSoft($a, $now)]
+                <=> [(int)($b['played_at'] ?? 0), self::isSoft($b, $now)]
+        );
+
+        $cursor = null;
+        // Hard events can overlap (a bulletin drawn inside a show), so a chain
+        // restarts from the latest end among them, not the last one listed.
+        $hardEnd = null;
+        foreach ($entries as $i => $entry) {
+            if (!self::isAirable($entry)) {
+                continue;
+            }
+
+            if (self::isSoft($entry, $now)) {
+                if (null !== $cursor) {
+                    $entries[$i]['played_at'] = $cursor;
+                }
+                $cursor = $end($entries[$i]);
+                continue;
+            }
+
+            $hardEnd = max($hardEnd ?? PHP_INT_MIN, $end($entry));
+            $cursor = $hardEnd;
+        }
+
+        usort(
+            $entries,
+            static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0))
+        );
+
+        return $entries;
+    }
+
+    /**
+     * A line playout takes in turn that has not started yet: in the saved log,
+     * not on air, and not a timed event (a scheduled programme or a marker).
+     *
+     * @param array<string, mixed> $entry
+     */
+    private static function isSoft(array $entry, int $now): bool
+    {
+        if (
+            empty($entry['log_entry_id'])
+            || isset($entry['aired_at'])
+            || 'scheduled_programme' === ($entry['source_type'] ?? null)
+        ) {
+            return false;
+        }
+
+        return match ($entry['log_status'] ?? null) {
+            StationLogEntry::STATUS_PLANNED => true,
+            // In the live queue: soft until it starts.
+            StationLogEntry::STATUS_QUEUED => (int)($entry['played_at'] ?? 0) > $now,
+            default => false,
+        };
+    }
+
+    /** @param array<string, mixed> $entry */
+    private static function isAirable(array $entry): bool
+    {
+        return !in_array(
+            $entry['log_status'] ?? null,
+            [StationLogEntry::STATUS_DROPPED, StationLogEntry::STATUS_SWAPPED],
+            true
+        );
+    }
+
+    /**
      * How deep the log actually runs *from right now*: this is the one place
-     * anything that cares whether the log is "whole" has to ask, so the page,
-     * the hourly top-up, and the repair pass can never disagree about it the
-     * way the duration-sum ("program runtime") and the raw build snapshot did.
+     * anything that cares whether the log is "whole" has to ask, so the page and
+     * the station health check can never disagree about it the way the
+     * duration-sum ("program runtime") and the raw build snapshot did.
      *
      * Deliberately not the same window {@see liveEntries()} filters by --
      * that window starts at the top of the current hour so the page can show

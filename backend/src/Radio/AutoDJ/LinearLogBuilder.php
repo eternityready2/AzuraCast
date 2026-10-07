@@ -146,16 +146,44 @@ final class LinearLogBuilder
                 $isConflict = $e instanceof LinearLog\LinearLogPlanConflict;
                 $maxAttempts = $isConflict ? 3 : 2;
                 if ($attempt >= $maxAttempts || !($isConflict || self::isTransientTransactionError($e))) {
+                    // Failed only once there is no retry left: marked failed
+                    // before a retry that then succeeded, the page showed "build
+                    // failed" for a build that recovered 28s later (11:59
+                    // 2026-10-07).
+                    // The failed flush may have closed the EntityManager; reopen
+                    // it so recording the failure cannot replace the real error.
+                    $this->resetConnectionState();
+                    try {
+                        $this->snapshotStore->markFailed(
+                            $station,
+                            max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours)),
+                            self::describeFailure($e),
+                        );
+                    } catch (Throwable $markError) {
+                        $this->logger->error(
+                            'Linear Log: could not record the failed build.',
+                            ['station_id' => $stationId, 'error' => $markError->getMessage()]
+                        );
+                    }
                     throw $e;
                 }
 
-                // The preview runs inside one long transaction that writes to live queue
-                // rows. If MySQL aborts it (deadlock / lock wait timeout / lost connection),
-                // later savepoint statements fail with "SAVEPOINT DOCTRINE_n does not exist",
-                // which hides the real cause. Wait briefly and retry once from a clean state.
+                // The preview runs inside one long REPEATABLE READ transaction that
+                // writes to live queue and playlist rows. When live playout changes
+                // one of those rows first, MariaDB ends the whole transaction: a
+                // deadlock, or (with innodb_snapshot_isolation, on by default in
+                // 11.8) error 1020 "Record has changed since last read". Doctrine's
+                // savepoint rollback then fails with "SAVEPOINT DOCTRINE_n does not
+                // exist", which replaces the real cause. Wait briefly and retry
+                // once from a clean state.
                 $this->logger->warning(
                     'Linear Log build hit a transient error; retrying.',
-                    ['station_id' => $stationId, 'attempt' => $attempt, 'error' => $e->getMessage()]
+                    [
+                        'station_id' => $stationId,
+                        'attempt' => $attempt,
+                        'error' => $e->getMessage(),
+                        'cause' => self::describeFailure($e),
+                    ]
                 );
 
                 $this->resetConnectionState();
@@ -208,6 +236,7 @@ final class LinearLogBuilder
             if (
                 str_contains($message, 'SAVEPOINT')
                 || str_contains($message, 'Deadlock')
+                || str_contains($message, 'Record has changed since last read')
                 || str_contains($message, 'Lock wait timeout')
                 || str_contains($message, 'server has gone away')
                 || str_contains($message, 'Lost connection')
@@ -223,6 +252,29 @@ final class LinearLogBuilder
         return false;
     }
 
+    /**
+     * What the page says when a build fails. A transaction the database ended
+     * under the build reads as "SAVEPOINT DOCTRINE_2 does not exist", which
+     * names Doctrine's failed cleanup, not what happened.
+     */
+    private static function describeFailure(Throwable $e): string
+    {
+        for ($current = $e; null !== $current; $current = $current->getPrevious()) {
+            $message = $current->getMessage();
+            if (
+                str_contains($message, 'SAVEPOINT')
+                || str_contains($message, 'Deadlock')
+                || str_contains($message, 'Record has changed since last read')
+            ) {
+                return 'Live playout changed the queue or playlist rows this build was simulating, '
+                    . 'so the database stopped the build. The saved log is unchanged; '
+                    . 'the next build tries again. (' . $e->getMessage() . ')';
+            }
+        }
+
+        return $e->getMessage();
+    }
+
     /** @return array<string, mixed> */
     private function buildOnce(
         Station $station,
@@ -235,13 +287,12 @@ final class LinearLogBuilder
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
         $requestedLookaheadMinutes = $hours * 60;
         if ($throughTomorrow) {
-            // FM-style daily log: always reach the end of tomorrow (at most 48h),
-            // so the log never runs short before the next daily build.
-            $endOfTomorrow = \Carbon\CarbonImmutable::now($station->getTimezoneObject())->addDay()->endOfDay();
-            $requestedLookaheadMinutes = min(
-                48 * 60,
-                max($requestedLookaheadMinutes, (int)ceil(($endOfTomorrow->getTimestamp() - time()) / 60))
-            );
+            // FM-style daily log: a day until the next daily build, plus the
+            // configured horizon (at most 48h), so the log still holds that
+            // horizon just before the next daily build. Reaching only the end of
+            // tomorrow left 21h of a 24h log at 2:59am, which the hourly top-up
+            // used to cover.
+            $requestedLookaheadMinutes = min(48 * 60, (24 + $hours) * 60);
         }
         $lookaheadMinutes = $requestedLookaheadMinutes + self::SAFETY_RUNWAY_MINUTES;
         $maxTracks = max(1000, $lookaheadMinutes * 2);
@@ -296,7 +347,7 @@ final class LinearLogBuilder
             ? $this->logStore->unlockedPlanIds($station, $lockedUntil)
             : [];
         $logRows = [];
-        $seededIds = [];
+        $seededPlannedAt = [];
         $survivingIds = [];
 
         $this->snapshotStore->markBuilding($station, $hours);
@@ -311,7 +362,7 @@ final class LinearLogBuilder
             $connection->beginTransaction();
 
             if ($playout) {
-                $seededIds = $this->logStore->seedQueue(
+                $seededPlannedAt = $this->logStore->seedQueue(
                     $station,
                     $replacedPlanIds,
                     $rebuild ? $lockedUntil : null,
@@ -323,6 +374,7 @@ final class LinearLogBuilder
                 $lookaheadMinutes,
                 $maxTracks,
                 true,
+                $seededPlannedAt,
             );
 
             $rows = $this->queueRepo->getUnplayedQueue($station);
@@ -454,7 +506,8 @@ final class LinearLogBuilder
             // invisible in the log even though it airs every hour. Synthesize a
             // marker line for each boundary the ID owns so the log reflects what
             // is really on air across the hour change.
-            foreach ($this->buildTopOfHourIdMarkers($station, $projectionStartTs, $projectionEndTs) as $marker) {
+            $idMarkers = $this->buildTopOfHourIdMarkers($station, $projectionStartTs, $projectionEndTs);
+            foreach ($idMarkers as $marker) {
                 $entries[] = $marker;
                 $coverageEnd = max(
                     $coverageEnd,
@@ -466,7 +519,7 @@ final class LinearLogBuilder
             // pushed straight into its own lane after the Station ID. Without a
             // marker the log showed music running across an hour that really
             // opens with a bulletin.
-            foreach ($this->buildAiNewsMarkers($station, $projectionStartTs, $projectionEndTs) as $marker) {
+            foreach ($this->buildAiNewsMarkers($station, $projectionStartTs, $projectionEndTs, $idMarkers) as $marker) {
                 $entries[] = $marker;
                 $coverageEnd = max(
                     $coverageEnd,
@@ -479,10 +532,8 @@ final class LinearLogBuilder
                 static fn(array $a, array $b): int =>
                     ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
             );
-        } catch (Throwable $e) {
-            $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
-            throw $e;
         } finally {
+            // A failure is marked by buildWithRetry() once no retry is left.
             // Unguarded, a throwing rollBack() here replaces the real exception
             // and hides why the build failed. Unwind every level instead.
             while ($connection->isTransactionActive()) {
@@ -503,19 +554,16 @@ final class LinearLogBuilder
 
         $managedStation = $this->stationRepo->findByIdentifier((string)$stationId);
         if (!$managedStation instanceof Station) {
-            $error = 'Station could not be reloaded after Linear Log preview.';
-            $this->snapshotStore->markFailed($station, $hours, $error);
-            throw new RuntimeException($error);
+            throw new RuntimeException('Station could not be reloaded after Linear Log preview.');
         }
         $station = $managedStation;
 
         if ($playout) {
-            // Planned lines the simulation removed (e.g. re-timing moved a song
-            // out of its playlist's time slot) no longer play; drop them.
-            $this->logStore->removeUnplannable(
+            // Planned lines the simulation removed no longer play; drop them.
+            $this->logStore->dropUnplannable(
                 $station,
                 array_values(array_filter(
-                    $seededIds,
+                    array_keys($seededPlannedAt),
                     static fn(int $id): bool => !isset($survivingIds[$id]),
                 )),
             );
@@ -778,9 +826,15 @@ final class LinearLogBuilder
     /**
      * Marker lines for each AI News bulletin due to air in the range.
      *
+     * A bulletin due while a Station ID airs starts when the ID ends, as it does
+     * on air: ID 12:59:59 for 38s, News 13:00:36. The forecast gives the hour
+     * boundary, and a marker drawn there ran 36s early and ended while the
+     * bulletin was still on air.
+     *
+     * @param list<array<string, mixed>> $idMarkers from buildTopOfHourIdMarkers()
      * @return list<array<string, mixed>>
      */
-    private function buildAiNewsMarkers(Station $station, int $startTs, int $endTs): array
+    private function buildAiNewsMarkers(Station $station, int $startTs, int $endTs, array $idMarkers): array
     {
         $config = $station->backend_config;
         if (!$config->ai_news_enabled) {
@@ -802,12 +856,21 @@ final class LinearLogBuilder
                 continue;
             }
 
+            $startsAt = $airsAtTs;
+            foreach ($idMarkers as $id) {
+                $idEnd = (int)$id['played_at'] + (int)round((float)$id['duration']);
+                if ((int)$id['played_at'] <= $airsAtTs && $idEnd > $airsAtTs) {
+                    $startsAt = $idEnd;
+                    break;
+                }
+            }
+
             $markers[] = [
                 'id' => 'ai-news-' . $airsAtTs,
                 'queue_id' => 0,
                 'song_id' => '',
-                'played_at' => $airsAtTs,
-                'cued_at' => $airsAtTs,
+                'played_at' => $startsAt,
+                'cued_at' => $startsAt,
                 'duration' => $duration,
                 'title' => 'News Hour',
                 'artist' => 'Eternity Ready',

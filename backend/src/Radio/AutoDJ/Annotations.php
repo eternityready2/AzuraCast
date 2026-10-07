@@ -185,7 +185,7 @@ final class Annotations implements EventSubscriberInterface
 
         $this->lastExpectedPlayAt = $expectedPlayAt;
 
-        $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable());
+        $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable(), true);
         $this->eventDispatcher->dispatch($event);
 
         return $event->isHeldBack();

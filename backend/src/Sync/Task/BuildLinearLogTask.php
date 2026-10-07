@@ -6,7 +6,6 @@ namespace App\Sync\Task;
 
 use App\Entity\Station;
 use App\Message\BuildLinearLogMessage;
-use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\StationDiagnostics;
 use App\Utilities\Time;
@@ -19,7 +18,6 @@ final class BuildLinearLogTask extends AbstractTask
     public function __construct(
         private readonly MessageBus $messageBus,
         private readonly LinearLogSnapshotStore $snapshotStore,
-        private readonly LinearLogStore $logStore,
         private readonly StationDiagnostics $diagnostics,
     ) {
     }
@@ -29,46 +27,34 @@ final class BuildLinearLogTask extends AbstractTask
 
     public static function getSchedulePattern(): string
     {
-        // Hourly. run() does the full FM-style daily build at the station's own
-        // local 3am (checked here rather than in the pattern, which is evaluated
-        // in UTC and so cannot express a local hour across DST), and otherwise
-        // only tops the log up when it has decayed below the requested horizon.
+        // Hourly, so run() can find the station's own local 3am (the pattern is
+        // evaluated in UTC and cannot express a local hour across DST).
         return '7 * * * *';
     }
 
     /**
-     * The configured hours are a rolling minimum, not a per-build target: a log
-     * built only at 3am covers less and less as the day airs out of it, and a
-     * line dropped by a standing rule after the build leaves a hole a mere
-     * extend-build never notices. Measured the same way {@see LinearLogStore::
-     * measureCoverage()} measures it for the page, so this can never give a
-     * different answer than what an operator sees -- that disagreement, not a
-     * short build, was the actual cause of a log that read ~23h on 2026-10-01
-     * while its own snapshot showed 25h of saved lines.
+     * The log is built once a day, like an FM log. Between daily builds it only
+     * changes by an operator's edit or a schedule change, each of which re-plans
+     * on its own. The one other build is recovery: a station whose last build
+     * failed, or that has never been built, gets another attempt every hour
+     * until one succeeds, so a failed 3am build cannot leave it without a log.
+     *
+     * This used to rebuild whenever the log measured short of its horizon. The
+     * measure counted the air running ahead of the plan as a hole, so it
+     * rebuilt nearly every hour (2026-10-07), and every build re-planned the
+     * lines behind each programme.
      */
-    private function isShortOfHorizon(Station $station): bool
+    private function needsRecoveryBuild(Station $station): bool
     {
         $snapshot = $this->snapshotStore->get($station);
-        if (!in_array($snapshot['status'] ?? null, ['ready', 'failed'], true)) {
-            // A build is already queued or running; let it finish.
-            return false;
-        }
 
-        if (empty($snapshot['entries'])) {
-            return true;
-        }
-
-        $hours = max(1, min(48, $station->backend_config->linear_log_hours));
-
-        try {
-            $live = $this->logStore->liveEntries($station, $snapshot['entries'], $hours);
-            $coverage = $this->logStore->measureCoverage($station, $live, $hours);
-        } catch (Throwable) {
-            // Can't prove the log is whole; have the build pass settle it.
-            return true;
-        }
-
-        return !$coverage->satisfies($hours * 3600);
+        return match ($snapshot['status'] ?? null) {
+            'failed' => true,
+            'ready' => empty($snapshot['entries']),
+            // Queued or building: let it finish.
+            'queued', 'building' => false,
+            default => true,
+        };
     }
 
     public function run(bool $force = false): void
@@ -85,7 +71,7 @@ final class BuildLinearLogTask extends AbstractTask
             $isDailyBuild = self::BUILD_LOCAL_HOUR
                 === (int)Time::nowInTimezone($station->getTimezoneObject())->format('G');
 
-            if (!$force && !$isDailyBuild && !$this->isShortOfHorizon($station)) {
+            if (!$force && !$isDailyBuild && !$this->needsRecoveryBuild($station)) {
                 continue;
             }
 

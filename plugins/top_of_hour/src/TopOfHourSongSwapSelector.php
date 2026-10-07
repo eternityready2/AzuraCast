@@ -66,8 +66,9 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
     /**
      * A song due to start within this many seconds of the ID is never sent:
-     * it would only be cut. It waits and opens the new hour, and Liquidsoap's
-     * fit (tempo +/-3% and at most one promo, up to 45s) fills the gap.
+     * it would only be cut. One short item that ends on the ID takes the slot
+     * when one fits (findPreIdFiller(); Liquidsoap's fit inserts no promos, per
+     * Rule 5); otherwise the song waits and opens the new hour.
      */
     private const float HOLD_WINDOW_SECONDS = 45.0;
 
@@ -138,6 +139,22 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
      * feedback lags a track change by several seconds.
      */
     private const float HOLD_SLACK_SECONDS = 20.0;
+
+    /**
+     * How far past the ID an item may run and still count as ending on it --
+     * the same grace wouldBeCutByTopOfHourId() and Liquidsoap's early-window
+     * guard allow. Short-form items get no tempo fit, so they get no more.
+     */
+    private const float PRE_ID_CUT_GRACE_SECONDS = 1.0;
+
+    /**
+     * Below this, the gap before the ID is not worth a filler; the ID's early
+     * window takes it (the same 5s floor as the Liquidsoap fit's promo list).
+     */
+    private const float MIN_PRE_ID_FILL_SECONDS = 5.0;
+
+    /** Short-form media types: never music, never stacked before the ID. */
+    private const array SHORT_FORM_MEDIA_TYPES = ['promo', 'ad'];
 
     /** @var array<string, float> sorted playlist id list => shortest track length, per request. */
     private array $shortestTrackCache = [];
@@ -219,6 +236,38 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // 2026-09-24: every retry was dropped, and the new hour opened after
         // 5s of silence while a song was fetched and analysed).
         if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayTime()))) {
+            // Seconds no song can fill (behind a show that ends just before the
+            // ID) get one short item that ends on the ID instead, so the ID
+            // neither cuts a song nor starts early.
+            $start = CarbonImmutable::instance($event->getExpectedPlayTime());
+            $filler = $this->findPreIdFiller($station, $row, $start, false);
+            if (null !== $filler) {
+                [$spm, $fillerMedia, $context] = $filler;
+
+                $newRow = StationQueue::fromMedia($station, $fillerMedia);
+                $newRow->playlist = $spm->playlist;
+                // Keep the saved linear log's link, so the log shows the line as
+                // SWAPPED instead of dropped with an unlinked item in its place.
+                $newRow->log_entry_id = $row->log_entry_id;
+
+                $spm->played($start->getTimestamp());
+                $this->em->persist($spm);
+
+                if ($this->em->contains($row)) {
+                    $this->em->detach($row);
+                }
+
+                $this->em->persist($newRow);
+                $event->setNextSongs($newRow);
+
+                $this->logger->notice(
+                    'Top-of-Hour: filled the seconds before the ID with one short item '
+                    . 'instead of a song the ID would cut.',
+                    $context + ['original_media_id' => $row->media?->id]
+                );
+                return;
+            }
+
             $this->logger->notice(
                 'Top-of-Hour: pick is due inside the early-ID window; it is held and opens the new hour.',
                 ['media_id' => $row->media?->id, 'start' => $event->getExpectedPlayTime()->format(DATE_ATOM)]
@@ -256,6 +305,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 $this->em->detach($row);
             }
             $event->setNextSongs(null);
+            return;
+        }
+
+        // A line the operator placed or locked by hand is theirs: the swap
+        // re-planning it on air left the log naming one song and the air
+        // playing another.
+        if ($this->isPlacedByHand($row)) {
             return;
         }
 
@@ -339,13 +395,39 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return;
         }
 
-        if ($this->isSettlingAroundTopOfHour($station)) {
+        $expectedPlayAt = CarbonImmutable::instance($event->getExpectedPlayAt());
+        if ($this->mustWaitForSettle($station, $expectedPlayAt, $event->isHandOff())) {
             return;
         }
 
         // Would start just before the ID and be cut: not sent now; it opens
         // the new hour instead (the hand-off honours the hold).
         if ($this->wouldBeCutByTopOfHourId($station, $row, CarbonImmutable::instance($event->getExpectedPlayAt()))) {
+            // Seconds no song can fill get one short item that ends on the ID,
+            // swapped into this row in place; only if none fits is it held.
+            $start = CarbonImmutable::instance($event->getExpectedPlayAt());
+            $filler = $this->findPreIdFiller($station, $row, $start, $event->isHandOff());
+            if (null !== $filler) {
+                [$spm, $fillerMedia, $context] = $filler;
+
+                $spm->played($start->getTimestamp());
+                $this->em->persist($spm);
+
+                $row->setSong($fillerMedia);
+                $row->media = $fillerMedia;
+                $row->playlist = $spm->playlist;
+                $row->hour_boundary_enforce_cap = false;
+                $this->applyStretchTarget($row, $context);
+                $this->em->persist($row);
+
+                $this->logger->notice(
+                    'Top-of-Hour: filled the seconds before the ID with one short item '
+                    . 'instead of a song the ID would cut.',
+                    $context + ['queue_id' => $row->id]
+                );
+                return;
+            }
+
             $event->holdBack();
             $event->opensAfter(
                 $this->estimateTopOfHourRelease($station, CarbonImmutable::instance($event->getExpectedPlayAt()))
@@ -425,6 +507,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 ]
             );
             $this->em->remove($row);
+            return;
+        }
+
+        // The operator's hand-placed or locked line stays as they set it.
+        if ($this->isPlacedByHand($row)) {
             return;
         }
 
@@ -584,12 +671,15 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
             $fitLimit = $gap + $tolerance;
             $best = $this->findBestFitMedia($station, $playlists, $media->id, $start, $fitLimit);
+            // Liquidsoap's tempo fit never touches a promo or liner, so one may
+            // not run past the ID by more than the cut grace: the swap tolerance
+            // let a promo 5s too long through, and the ID cut its last 5s.
             $shortForm = $this->findBestFitMedia(
                 $station,
                 $this->getShortFormFallbackPlaylists($station),
                 $media->id,
                 $start,
-                $fitLimit,
+                min($fitLimit, $gap + self::PRE_ID_CUT_GRACE_SECONDS),
             );
             if (
                 null !== $shortForm
@@ -1531,6 +1621,220 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $idStart = 59 * 60 + $this->clock->getIdStartSecond($station);
 
         return $secondsIntoHour >= $idStart || $secondsIntoHour < self::SETTLE_SECONDS_AFTER_HOUR;
+    }
+
+    /**
+     * Whether a re-check of the slot due at $start waits out the settle window.
+     * The periodic queue re-check always waits: its times slide with the ID and
+     * news, and a choice made then would only be re-made minutes later (Rule 6).
+     * The hand-off is different. Liquidsoap takes the next track as soon as the
+     * one before it starts, and behind a show that starts at :00 that is inside
+     * this window, for a slot due at the NEXT ID. Skipped there, it was never
+     * checked at all: "The Gospel" was sent at 11:00:36 behind the 11:00
+     * Spotlight and the 11:59:59 ID cut it after 34s (2026-10-07), as it cut
+     * "Almost Home" on 2026-10-05. So at the hand-off only the slots that open
+     * the hour being settled wait.
+     */
+    private function mustWaitForSettle(Station $station, CarbonImmutable $start, bool $isHandOff): bool
+    {
+        if (!$this->isSettlingAroundTopOfHour($station)) {
+            return false;
+        }
+        if (!$isHandOff) {
+            return true;
+        }
+
+        $now = CarbonImmutable::now($station->getTimezoneObject());
+        $settlingHour = ($now->minute * 60 + $now->second) < self::SETTLE_SECONDS_AFTER_HOUR
+            ? $now->startOfHour()
+            : $now->startOfHour()->addHour();
+
+        return $start->lessThan($settlingHour->addSeconds(self::SETTLE_SECONDS_AFTER_HOUR));
+    }
+
+    /**
+     * One short item (promo, liner, imaging) for the seconds before the ID that
+     * no song can fill: the longest that still ends on the ID, so the ID neither
+     * cuts it nor starts early. A fresh item is preferred only when it lands
+     * within LANDED_TOLERANCE_SECONDS of the best fit; landing on the ID comes
+     * first. Never stacked after another short item, and never over a line the
+     * operator placed by hand.
+     *
+     * $startMayBeEarly: the hand-off (Annotations) projects the start with
+     * trimmed AutoCue lengths, and an item AutoCue never measured airs its whole
+     * file, up to AiredLength::UNKNOWN_TRIM_SECONDS later (the CMS Spotlight
+     * episode: no AutoCue, 3527.9s file, 3527-3528s on air). The queue
+     * projection uses full file lengths, so it needs no allowance.
+     *
+     * @return array{StationPlaylistMedia, StationMedia, array<string, mixed>}|null
+     */
+    private function findPreIdFiller(
+        Station $station,
+        StationQueue $row,
+        CarbonImmutable $start,
+        bool $startMayBeEarly,
+    ): ?array {
+        if ($this->isPlacedByHand($row)) {
+            return null;
+        }
+
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
+            return null;
+        }
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $gap = $this->secondsBetween($start, $target);
+        if ($gap < self::MIN_PRE_ID_FILL_SECONDS) {
+            return null;
+        }
+
+        $ahead = $this->findRowAhead($station, $row, $start);
+        if (null !== $ahead && $this->isShortForm($ahead)) {
+            $this->logger->notice(
+                'Top-of-Hour: no filler after a short item; short items are never stacked before the ID.',
+                ['queue_id' => $row->id, 'ahead_queue_id' => $ahead->id, 'start' => $start->toIso8601String()]
+            );
+            return null;
+        }
+
+        $allowance = 0.0;
+        if (
+            $startMayBeEarly
+            && null !== $ahead?->media
+            && !$this->airedLength->forMedia($ahead->media)['known']
+        ) {
+            $allowance = AiredLength::UNKNOWN_TRIM_SECONDS;
+        }
+
+        $room = $gap - $allowance;
+        if ($room < self::MIN_PRE_ID_FILL_SECONDS) {
+            return null;
+        }
+        $limit = $room + self::PRE_ID_CUT_GRACE_SECONDS;
+
+        $pool = $this->getShortFormFallbackPlaylists($station);
+        if ([] === $pool) {
+            return null;
+        }
+
+        $rows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT spm, m FROM App\Entity\StationPlaylistMedia spm
+                JOIN spm.media m
+                WHERE spm.playlist IN (:playlists)
+                AND m.length > 0
+                AND m.length <= :maxLength
+                AND m.type NOT IN (:idTypes)
+                ORDER BY m.length DESC, spm.last_played ASC, spm.id ASC
+            DQL
+        )->setParameter('playlists', $pool)
+            ->setParameter('maxLength', $limit + self::SQL_PREFILTER_SLACK_SECONDS)
+            ->setParameter('idTypes', StationMediaTypes::stationIdTypeValues())
+            ->setMaxResults(100)
+            ->getResult();
+
+        $recentSongIds = $this->getRecentlySelectedSongIds($station, $start);
+
+        $best = null;
+        $bestFresh = null;
+        foreach ($rows as $spm) {
+            if ($spm->media->id === $row->media?->id) {
+                continue;
+            }
+            $length = $this->landingLength($spm->media);
+            if ($length < self::MIN_PRE_ID_FILL_SECONDS || $length > $limit) {
+                continue;
+            }
+            if (null === $best || $length > $best[1]) {
+                $best = [$spm, $length];
+            }
+            if (!isset($recentSongIds[$spm->media->song_id]) && (null === $bestFresh || $length > $bestFresh[1])) {
+                $bestFresh = [$spm, $length];
+            }
+        }
+
+        if (null === $best) {
+            $this->logger->notice(
+                'Top-of-Hour: no short item fits the seconds before the ID; the pick is held for the new hour.',
+                ['queue_id' => $row->id, 'start' => $start->toIso8601String(), 'room' => round($room, 2)]
+            );
+            return null;
+        }
+
+        $isRepeat = true;
+        if (null !== $bestFresh && $best[1] - $bestFresh[1] <= self::LANDED_TOLERANCE_SECONDS) {
+            $best = $bestFresh;
+            $isRepeat = false;
+        }
+
+        [$spm, $length] = $best;
+
+        return [$spm, $spm->media, [
+            'slot_starts_at' => $start->toIso8601String(),
+            'id_deadline_at' => $target->toIso8601String(),
+            'seconds_to_fill' => round($room, 2),
+            'start_allowance' => $allowance,
+            'replacement_media_id' => $spm->media->id,
+            'replacement_aired_length' => round($length, 2),
+            'landing_error' => round($room - $length, 2),
+            'is_repeat_pick' => $isRepeat,
+        ]];
+    }
+
+    /**
+     * The queue row that airs immediately before the slot at $start: the newest
+     * row (played or not) that starts before it.
+     */
+    private function findRowAhead(Station $station, StationQueue $row, CarbonImmutable $start): ?StationQueue
+    {
+        $ahead = $this->em->createQuery(
+            <<<'DQL'
+                SELECT sq FROM App\Entity\StationQueue sq
+                WHERE sq.station = :station
+                AND sq.timestamp_played < :start
+                AND sq.timestamp_played >= :since
+                AND sq.top_of_hour_legal_id = 0
+                ORDER BY sq.timestamp_played DESC, sq.id DESC
+            DQL
+        )->setParameter('station', $station)
+            // Queue times are stored in UTC.
+            ->setParameter('start', $start->utc()->subSecond())
+            ->setParameter('since', $start->utc()->subHours(3))
+            ->setMaxResults(2)
+            ->getResult();
+
+        foreach ($ahead as $candidate) {
+            if ($candidate !== $row) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function isShortForm(StationQueue $row): bool
+    {
+        if (true === $row->playlist?->is_jingle) {
+            return true;
+        }
+
+        $type = $row->media?->type;
+
+        return StationMediaTypes::isStationId($type)
+            || in_array($type, self::SHORT_FORM_MEDIA_TYPES, true);
+    }
+
+    /** True when the row plays a linear-log line the operator placed or locked by hand. */
+    private function isPlacedByHand(StationQueue $row): bool
+    {
+        if (null === $row->log_entry_id) {
+            return false;
+        }
+
+        return (bool)$this->em->getConnection()->fetchOne(
+            'SELECT is_locked FROM station_log_entries WHERE id = ?',
+            [$row->log_entry_id]
+        );
     }
 
     private function getToleranceSeconds(Station $station): float

@@ -16,7 +16,7 @@ use App\Entity\StationMedia;
 final class AiredLength
 {
     /** Median file-length minus aired-length for tracks AutoCue has not analysed yet. */
-    private const float UNKNOWN_TRIM_SECONDS = 3.5;
+    public const float UNKNOWN_TRIM_SECONDS = 3.5;
 
     public function __construct(
         private readonly AutoCueCache $autoCueCache,

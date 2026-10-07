@@ -68,6 +68,10 @@ final class Queue
      *        `autodj_queue_lookahead_minutes`. Used by the linear-log builder to project
      *        a full day ahead on demand without changing the station's live setting.
      * @param int|null $maxTracksOverride Safety cap override to match a larger horizon.
+     * @param array<int, int> $plannedAtByLogEntry Linear Log preview only: the
+     *        saved log's air time for each line it seeded into the queue, by log
+     *        line id. A saved line is never projected earlier than that, and is
+     *        dropped once its hour has ended.
      * @return list<array{started_at:int, duration:int, reason:string}>
      */
     public function buildQueue(
@@ -75,6 +79,7 @@ final class Queue
         ?int $lookaheadMinutesOverride = null,
         ?int $maxTracksOverride = null,
         bool $isPreview = false,
+        array $plannedAtByLogEntry = [],
     ): array {
         $previewGaps = [];
         // Early-fail if the station is disabled.
@@ -141,9 +146,41 @@ final class Queue
         );
         $lastSongId = $recentPlayedMusic[0]['song_id'] ?? null;
         $queueLength = 0;
+        // When the row being walked is taken for air: playout fetches the next
+        // line as the one before it starts, so the first is taken now.
+        $takenAt = Time::nowUtc()->getTimestamp();
 
         foreach ($upcomingQueue as $queueRow) {
             if (!$queueRow->sent_to_autodj) {
+                // A saved log line airs no earlier than the log planned it. The
+                // seeded queue omits what owns the air between lines (a stream
+                // show, a strict programme), so projecting the lines back to back
+                // put everything after the 7-9am Morning Show at 07:00:37. Every
+                // check below then judged those lines inside the show's window
+                // and threw them out, and the build deleted them from the log.
+                $plannedAt = $plannedAtByLogEntry[$queueRow->log_entry_id ?? 0] ?? null;
+                if (null !== $plannedAt) {
+                    // Hit the post, as playout does (LinearLogPlayout::takeNext()):
+                    // a line not yet taken when its hour has ended is dropped and
+                    // the next hour opens on its own plan. Carried over instead,
+                    // each hour's overrun pushed every later hour back with it
+                    // (+3m at 12:00, +8m by 15:00 on Thu 2026-10-08). A song held
+                    // to open the next hour was taken before the hour ended, so it
+                    // stays, as it does on air.
+                    $plannedHourEnd = CarbonImmutable::createFromTimestamp($plannedAt, $station->getTimezoneObject())
+                        ->startOfHour()
+                        ->addHour()
+                        ->getTimestamp();
+                    if ($takenAt >= $plannedHourEnd) {
+                        $this->em->remove($queueRow);
+                        continue;
+                    }
+
+                    if ($plannedAt > $expectedPlayTime->getTimestamp()) {
+                        $expectedPlayTime = CarbonImmutable::createFromTimestamp($plannedAt, 'UTC');
+                    }
+                }
+
                 if (!$this->isQueueRowStillValid($queueRow, $expectedPlayTime)) {
                     $this->em->remove($queueRow);
                     continue;
@@ -243,6 +280,7 @@ final class Queue
             $queueRow->timestamp_played = $expectedPlayTime;
             $this->em->persist($queueRow);
 
+            $takenAt = $expectedPlayTime->getTimestamp();
             $expectedPlayTime = $nextExpectedPlayTime;
 
             $lastSongId = $queueRow->song_id;
