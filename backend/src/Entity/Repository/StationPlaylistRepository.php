@@ -139,6 +139,28 @@ final class StationPlaylistRepository extends AbstractStationBasedRepository
             ->setParameter('playlistGroup', $playlist);
     }
 
+    /**
+     * Reshuffles every playlist group's member rotation when the station
+     * restarts, like StationPlaylistMediaRepository::resetAllQueues() does for
+     * song playlists. queue_reset_at is kept for the same reason: a restart is
+     * not a pass through the group, and stamping it would make a "loop once"
+     * schedule window read as already played.
+     */
+    public function resetAllPlaylistGroupQueues(Station $station): void
+    {
+        foreach ($station->playlists as $playlist) {
+            if (PlaylistSources::Playlists !== $playlist->source || !$playlist->resetsQueueOnRestart()) {
+                continue;
+            }
+
+            $lastReset = $playlist->queue_reset_at;
+            $this->resetPlaylistGroupQueue($playlist);
+            $playlist->queue_reset_at = $lastReset;
+            $this->em->persist($playlist);
+        }
+        $this->em->flush();
+    }
+
     public function resetPlaylistGroupQueue(
         StationPlaylist $playlist,
         ?CarbonImmutable $now = null

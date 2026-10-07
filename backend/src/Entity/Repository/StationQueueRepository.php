@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity\Repository;
 
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Interfaces\SongInterface;
 use App\Entity\Station;
@@ -14,6 +15,7 @@ use App\Utilities\DateRange;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use DateTimeInterface;
 use Doctrine\ORM\QueryBuilder;
 
 /**
@@ -388,7 +390,7 @@ final class StationQueueRepository extends AbstractStationBasedRepository
         $timezone = $station->getTimezoneObject();
 
         foreach ($rows as $row) {
-            if (!$row['timestamp_played'] instanceof \DateTimeInterface) {
+            if (!$row['timestamp_played'] instanceof DateTimeInterface) {
                 continue;
             }
 
@@ -769,6 +771,64 @@ final class StationQueueRepository extends AbstractStationBasedRepository
             ->getSingleScalarResult();
 
         return $cuedCount > 0;
+    }
+
+    /**
+     * Whether any playlist inside a group (recursively) has unplayed media cued.
+     * Queue rows record the member playlist that supplied the song, never the
+     * group itself, so the plain per-playlist check always says "no" for a group.
+     */
+    public function hasCuedPlaylistGroupMedia(StationPlaylist $group): bool
+    {
+        return self::anyGroupMember(
+            $group,
+            fn(StationPlaylist $member): bool => $this->hasCuedPlaylistMedia($member)
+        );
+    }
+
+    /**
+     * Range-scoped form of hasCuedPlaylistGroupMedia(); see hasCuedPlaylistMediaInRange().
+     */
+    public function hasCuedPlaylistGroupMediaInRange(StationPlaylist $group, DateRange $dateRange): bool
+    {
+        return self::anyGroupMember(
+            $group,
+            fn(StationPlaylist $member): bool => $this->hasCuedPlaylistMediaInRange($member, $dateRange)
+        );
+    }
+
+    /**
+     * Walks a playlist group (and nested groups, once each) and returns true as
+     * soon as $songPlaylistCheck passes for one of its song playlists.
+     *
+     * @param callable(StationPlaylist): bool $songPlaylistCheck
+     * @param int[] $visitedIds
+     */
+    public static function anyGroupMember(
+        StationPlaylist $group,
+        callable $songPlaylistCheck,
+        array $visitedIds = []
+    ): bool {
+        if (in_array($group->id, $visitedIds, true)) {
+            return false;
+        }
+        $visitedIds[] = $group->id;
+
+        foreach ($group->playlists as $membership) {
+            $member = $membership->playlist;
+
+            $hasCued = match ($member->source) {
+                PlaylistSources::Playlists => self::anyGroupMember($member, $songPlaylistCheck, $visitedIds),
+                PlaylistSources::Songs => $songPlaylistCheck($member),
+                default => false,
+            };
+
+            if ($hasCued) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function getUnplayedBaseQuery(Station $station): QueryBuilder

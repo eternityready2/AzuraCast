@@ -143,6 +143,14 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set (bool|null $value) => Types::bool($value);
     }
 
+    #[OA\Property(
+        description: 'Reset the internal queue of sequential playlists when the station is restarted or its configuration is rewritten.',
+        example: false
+    )]
+    public bool $reset_sequential_queues_on_restart = false {
+        set (bool|null $value) => Types::bool($value);
+    }
+
     protected const int DEFAULT_QUEUE_LENGTH = 3;
 
     #[OA\Property]

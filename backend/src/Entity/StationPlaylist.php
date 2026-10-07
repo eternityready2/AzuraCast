@@ -332,6 +332,30 @@ final class StationPlaylist implements
     public bool $avoid_duplicates = true;
 
     #[
+        OA\Property(
+            description: "Don't reset this playlist's queue when the station is restarted or its configuration is rewritten.",
+            example: false
+        ),
+        ORM\Column
+    ]
+    public bool $preserve_queue_on_restart = false;
+
+    /**
+     * Whether a station restart or configuration rewrite should reset this
+     * playlist's queue (upstream parity: per-playlist opt-out, and sequential
+     * playlists only when the station setting asks for it).
+     */
+    public function resetsQueueOnRestart(): bool
+    {
+        if ($this->preserve_queue_on_restart) {
+            return false;
+        }
+
+        return PlaylistOrders::Sequential !== $this->order
+            || $this->station->backend_config->reset_sequential_queues_on_restart;
+    }
+
+    #[
         OA\Property(example: false),
         ORM\Column(options: ['default' => false])
     ]

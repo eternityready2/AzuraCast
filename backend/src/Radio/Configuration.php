@@ -8,6 +8,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Container\EnvironmentAwareTrait;
 use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationPlaylistMediaRepository;
+use App\Entity\Repository\StationPlaylistRepository;
 use App\Entity\Station;
 use App\Entity\StationPlaylist;
 use App\Exception;
@@ -41,6 +42,7 @@ final class Configuration
         private readonly Adapters $adapters,
         private readonly SupervisorInterface $supervisor,
         private readonly StationPlaylistMediaRepository $spmRepo,
+        private readonly StationPlaylistRepository $spRepo,
     ) {
     }
 
@@ -78,6 +80,7 @@ final class Configuration
         $this->em->flush();
 
         $this->spmRepo->resetAllQueues($station);
+        $this->spRepo->resetAllPlaylistGroupQueues($station);
     }
 
     /**
@@ -157,7 +160,7 @@ final class Configuration
                 'command' => $adapter->getCommand($station),
                 'directory' => $station->getRadioConfigDir(),
                 'environment' => self::buildEnvironment([
-                    'TZ' => $station->timezone ?? 'UTC',
+                    'TZ' => $station->timezone,
                     ...$adapter->getEnvironmentVariables($station),
                 ]),
                 'autostart' => 'false',

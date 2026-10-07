@@ -134,6 +134,7 @@ final class PlaylistConfigurationImporter
             $playlist->smart_block_type = $entry->smartBlockType;
             $playlist->smart_block_sort_order = $entry->smartBlockSortOrder;
             $playlist->smart_block_avoid_duplicates = $entry->smartBlockAvoidDuplicates;
+            $playlist->preserve_queue_on_restart = $entry->preserveQueueOnRestart;
 
             $this->em->persist($playlist);
             $summary->playlistsByRef[$entry->ref] = $playlist;

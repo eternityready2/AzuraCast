@@ -11,6 +11,8 @@ use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\Repository\StationPlaylistRepository;
 use App\Entity\Repository\StationQueueRepository;
+use App\Entity\Station;
+use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Entity\StationStreamer;
@@ -45,7 +47,7 @@ final class Scheduler
      * null if nothing starts within the next hour.
      */
     public function secondsUntilNextScheduledStart(
-        \App\Entity\Station $station,
+        Station $station,
         DateTimeImmutable $now,
     ): ?int {
         $tz = $station->getTimezoneObject();
@@ -190,7 +192,7 @@ final class Scheduler
      * already-open scheduled block behaves.
      */
     public function isScheduledBlockOpenAt(
-        \App\Entity\Station $station,
+        Station $station,
         DateTimeImmutable $at,
         int $lookaheadSeconds = 0
     ): bool {
@@ -247,7 +249,7 @@ final class Scheduler
      * flagged to interrupt other songs -- letting rotation music leak into them.
      */
     private function narrowestOpenScheduleSeconds(
-        \App\Entity\Station $station,
+        Station $station,
         DateTimeImmutable $at
     ): ?int {
         $tz = $station->getTimezoneObject();
@@ -281,7 +283,7 @@ final class Scheduler
         return $narrowest;
     }
 
-    private function canClockWheelOwnScheduledAir(\App\Entity\StationClockWheel $clockWheel): bool
+    private function canClockWheelOwnScheduledAir(StationClockWheel $clockWheel): bool
     {
         return $clockWheel->is_active
             && ($clockWheel->slots->count() > 0 || $clockWheel->inherits_template_slots);
@@ -293,7 +295,7 @@ final class Scheduler
      * member playlist the track happened to come from.
      */
     public function isClockWheelAllowedAt(
-        \App\Entity\StationClockWheel $clockWheel,
+        StationClockWheel $clockWheel,
         DateTimeImmutable $at
     ): bool {
         // A wheel with no schedule rows of its own is driven by something else
@@ -983,25 +985,39 @@ final class Scheduler
 
         $playlistPlayedAt = $playlist->played_at;
 
-        $isQueueEmpty = $this->spmRepo->isQueueEmpty($playlist);
+        // Playlist groups keep their rotation on the member rows, not on media
+        // rows, so they need the group helpers (the song helpers throw for them).
+        $isGroup = PlaylistSources::Playlists === $playlist->source;
+
+        $isQueueEmpty = $isGroup
+            ? $this->spRepo->isPlaylistGroupQueueEmpty($playlist)
+            : $this->spmRepo->isQueueEmpty($playlist);
 
         // Scoped to THIS occurrence. The station-wide question left a show whose
         // only episode was still cued for today unable to loop tomorrow: the
         // queue was empty and a cued row existed, so neither reset branch below
         // ran and the whole window was reported as an unfillable gap.
-        $hasCuedPlaylistMedia = $this->queueRepo->hasCuedPlaylistMediaInRange($playlist, $dateRange);
+        $hasCuedPlaylistMedia = $isGroup
+            ? $this->queueRepo->hasCuedPlaylistGroupMediaInRange($playlist, $dateRange)
+            : $this->queueRepo->hasCuedPlaylistMediaInRange($playlist, $dateRange);
 
         if (!$dateRange->contains($playlistPlayedAt)) {
             $this->logger->debug('Playlist was not played yet.');
 
-            $isQueueFilled = $this->spmRepo->isQueueCompletelyFilled($playlist);
+            $isQueueFilled = $isGroup
+                ? $this->spRepo->isPlaylistGroupQueueCompletelyFilled($playlist)
+                : $this->spmRepo->isQueueCompletelyFilled($playlist);
 
             if ((!$isQueueFilled || $isQueueEmpty) && !$hasCuedPlaylistMedia) {
                 $now = $dateRange->start->subSecond();
 
                 $this->logger->debug('Resetting playlist queue with now override', [$now]);
 
-                $this->spmRepo->resetQueue($playlist, $now);
+                if ($isGroup) {
+                    $this->spRepo->resetPlaylistGroupQueue($playlist, $now);
+                } else {
+                    $this->spmRepo->resetQueue($playlist, $now);
+                }
                 $isQueueEmpty = false;
             }
 
@@ -1020,7 +1036,11 @@ final class Scheduler
         if ($isQueueEmpty && !$hasCuedPlaylistMedia) {
             $this->logger->debug('Resetting playlist queue.');
 
-            $this->spmRepo->resetQueue($playlist);
+            if ($isGroup) {
+                $this->spRepo->resetPlaylistGroupQueue($playlist);
+            } else {
+                $this->spmRepo->resetQueue($playlist);
+            }
             $isQueueEmpty = false;
         }
 

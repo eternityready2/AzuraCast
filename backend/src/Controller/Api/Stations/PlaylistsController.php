@@ -245,7 +245,7 @@ final class PlaylistsController extends AbstractScheduledEntityController
                     'num_songs' => $playlist->media_items->count(),
                     'total_length' => array_sum(
                         $playlist->media_items->map(
-                            fn ($spm) => $spm->media?->length ?? 0
+                            fn ($spm) => $spm->media->length
                         )->toArray()
                     ),
                     'members' => $playlist->group_members->map(
@@ -270,7 +270,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
     protected function editRecord(?array $data, ?object $record = null, array $context = []): object
     {
         $record = parent::editRecord($data, $record, $context);
-        assert($record instanceof StationPlaylist);
 
         $record->syncReadOnlyForeignKeys();
 
@@ -323,6 +322,13 @@ final class PlaylistsController extends AbstractScheduledEntityController
         if (PlaylistSources::Playlists === $record->source) {
             $return['links']['members'] = $router->fromHere(
                 routeName: 'api:stations:playlist:members',
+                routeParams: ['id' => $record->id],
+                absolute: !$isInternal
+            );
+
+            // Reshuffle resets the group's member rotation (upstream parity).
+            $return['links']['reshuffle'] = $router->fromHere(
+                routeName: 'api:stations:playlist:reshuffle',
                 routeParams: ['id' => $record->id],
                 absolute: !$isInternal
             );

@@ -362,7 +362,7 @@ final class StationPlaylistMediaRepository extends Repository
         $now = Time::nowUtc();
 
         foreach ($station->playlists as $playlist) {
-            if (PlaylistSources::Songs !== $playlist->source) {
+            if (PlaylistSources::Songs !== $playlist->source || !$playlist->resetsQueueOnRestart()) {
                 continue;
             }
 

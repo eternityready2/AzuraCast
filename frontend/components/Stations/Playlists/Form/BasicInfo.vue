@@ -156,6 +156,15 @@
                             radio
                             :label="$gettext('Song Playback Order')"
                         />
+
+                        <form-group-checkbox
+                            v-if="form.order !== 'random'"
+                            id="form_edit_preserve_queue_on_restart"
+                            class="col-md-6"
+                            :field="r$.preserve_queue_on_restart"
+                            :label="$gettext('Keep Queue on Restart')"
+                            :description="$gettext('Enable this setting to prevent the playlists internal queue from being reset on station restarts or configuration rewrites.')"
+                        />
                     </div>
                 </div>
 
@@ -272,6 +281,15 @@
                     :field="r$.avoid_duplicates"
                     :label="$gettext('Avoid Duplicate Artists/Titles')"
                     :description="$gettext('Applies to all member playlists in this group unless a member overrides it.')"
+                />
+
+                <form-group-checkbox
+                    v-if="form.order !== 'random'"
+                    id="form_edit_preserve_queue_on_restart_group"
+                    class="col-md-6"
+                    :field="r$.preserve_queue_on_restart"
+                    :label="$gettext('Keep Queue on Restart')"
+                    :description="$gettext('Enable this setting to prevent the playlists internal queue from being reset on station restarts or configuration rewrites.')"
                 />
             </div>
 

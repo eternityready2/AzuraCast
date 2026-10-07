@@ -132,6 +132,7 @@ final class PlaylistConfigurationExporter
             smartBlockType: $playlist->smart_block_type,
             smartBlockSortOrder: $playlist->smart_block_sort_order,
             smartBlockAvoidDuplicates: $playlist->smart_block_avoid_duplicates,
+            preserveQueueOnRestart: $playlist->preserve_queue_on_restart,
         );
 
         $folderRefById = [];

@@ -150,6 +150,41 @@
                         <div class="text-muted mt-1">
                             {{ selectedPlaylist.description }}
                         </div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <span
+                                v-if="!selectedPlaylist.is_enabled"
+                                class="badge text-bg-danger"
+                            >
+                                {{ $gettext('Disabled') }}
+                            </span>
+                            <span
+                                v-if="selectedPlaylist.is_jingle"
+                                class="badge text-bg-primary"
+                            >
+                                {{ $gettext('Jingle Mode') }}
+                            </span>
+                            <span
+                                v-if="selectedPlaylist.order === PlaylistOrders.Sequential"
+                                class="badge text-bg-info"
+                            >
+                                {{ $gettext('Sequential') }}
+                            </span>
+                            <span
+                                v-if="selectedPlaylist.num_schedules > 0"
+                                class="badge text-bg-info"
+                            >
+                                {{ $gettext('Scheduled') }}
+                            </span>
+                            <span class="badge text-bg-secondary">
+                                {{ typeLabel(selectedPlaylist) }}
+                            </span>
+                            <span
+                                v-if="selectedPlaylist.include_in_on_demand"
+                                class="badge text-bg-info"
+                            >
+                                {{ $gettext('On-Demand') }}
+                            </span>
+                        </div>
                     </div>
 
                     <ul class="list-group list-group-flush h-100 shadow">
@@ -164,6 +199,17 @@
                             v-else-if="selectedPlaylist.source !== PlaylistSources.Playlists"
                             class="list-group-item p-5 text-center text-muted"
                         >
+                            <div
+                                v-if="selectedPlaylist.source === PlaylistSources.Songs"
+                                class="fs-5 mb-2"
+                            >
+                                <template v-if="selectedPlaylist.num_songs === 0">
+                                    {{ $gettext('No songs available') }}
+                                </template>
+                                <template v-else>
+                                    {{ $gettext('%{count} songs in this playlist.', {count: selectedPlaylist.num_songs}) }}
+                                </template>
+                            </div>
                             {{ $gettext('Select a Playlist Group to manage its member playlists.') }}
                         </li>
 
@@ -194,6 +240,42 @@
                                                     class="badge text-bg-danger ms-1"
                                                 >
                                                     {{ $gettext('Disabled') }}
+                                                </span>
+                                            </div>
+                                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                                <span
+                                                    v-if="member.source === PlaylistSources.Songs"
+                                                    class="badge bg-primary rounded-pill"
+                                                    :title="$gettext('%{count} songs in this playlist.', {count: member.num_songs})"
+                                                >
+                                                    {{ member.num_songs }}
+                                                </span>
+                                                <span
+                                                    v-if="member.is_jingle"
+                                                    class="badge text-bg-primary"
+                                                >
+                                                    {{ $gettext('Jingle Mode') }}
+                                                </span>
+                                                <span
+                                                    v-if="member.order === PlaylistOrders.Sequential"
+                                                    class="badge text-bg-info"
+                                                >
+                                                    {{ $gettext('Sequential') }}
+                                                </span>
+                                                <span
+                                                    v-if="member.num_schedules > 0"
+                                                    class="badge text-bg-info"
+                                                >
+                                                    {{ $gettext('Scheduled') }}
+                                                </span>
+                                                <span class="badge text-bg-secondary">
+                                                    {{ typeLabel(member) }}
+                                                </span>
+                                                <span
+                                                    v-if="member.include_in_on_demand"
+                                                    class="badge text-bg-info"
+                                                >
+                                                    {{ $gettext('On-Demand') }}
                                                 </span>
                                             </div>
                                         </div>
@@ -303,6 +385,7 @@ import {
     PlaylistGroupAllowedRequests,
     PlaylistOrders,
     PlaylistSources,
+    PlaylistTypes,
 } from "~/entities/ApiInterfaces.ts";
 import {useAxios} from "~/vendor/axios";
 import {useTranslate} from "~/vendor/gettext";
@@ -317,26 +400,37 @@ import IconIcHome from "~icons/ic/baseline-home";
 
 type PlaylistBreadcrumb = {id: number; name: string};
 
-type GroupMember = {
+type RotationDetails = {
+    type: PlaylistTypes;
+    rotation_weight: number;
+    play_per_songs: number;
+    play_per_minutes: number;
+    play_per_hour_minute: number;
+    is_jingle: boolean;
+    include_in_on_demand: boolean;
+    num_schedules: number;
+};
+
+type GroupMember = RotationDetails & {
     id: number;
     name: string;
     weight: number;
     consecutive_plays: number;
     play_full_cycle: boolean;
     allowed_requests: PlaylistGroupAllowedRequests;
-    source: PlaylistSources | string;
-    order: PlaylistOrders | string;
+    source: PlaylistSources;
+    order: PlaylistOrders;
     num_songs: number;
     is_enabled: boolean;
     playlists: GroupMember[];
 };
 
-type PlaylistRow = {
+type PlaylistRow = RotationDetails & {
     id: number;
     name: string;
     description: string | null;
-    source: PlaylistSources | string;
-    order: PlaylistOrders | string;
+    source: PlaylistSources;
+    order: PlaylistOrders;
     num_songs: number;
     is_enabled: boolean;
     playlists: GroupMember[];
@@ -373,11 +467,27 @@ watch(selectedPlaylist, (playlist) => {
         : [];
 });
 
+const rotationDetails = (row: Record<string, any>): RotationDetails => ({
+    type: (row.type ?? PlaylistTypes.Standard) as PlaylistTypes,
+    rotation_weight: Number(row.weight ?? 0),
+    play_per_songs: Number(row.play_per_songs ?? 0),
+    play_per_minutes: Number(row.play_per_minutes ?? 0),
+    play_per_hour_minute: Number(row.play_per_hour_minute ?? 0),
+    is_jingle: Boolean(row.is_jingle),
+    include_in_on_demand: Boolean(row.include_in_on_demand),
+    num_schedules: Array.isArray(row.schedule_items) ? row.schedule_items.length : 0,
+});
+
 const normalizeRow = (row: Record<string, any>): PlaylistRow => ({
     ...row,
+    id: Number(row.id),
+    name: String(row.name ?? ''),
     description: row.description ?? '',
+    source: row.source as PlaylistSources,
+    order: row.order as PlaylistOrders,
     num_songs: Number(row.num_songs ?? 0),
     is_enabled: Boolean(row.is_enabled),
+    ...rotationDetails(row),
     playlists: Array.isArray(row.playlists)
         ? row.playlists.map((member: Record<string, any>) => ({
             id: Number(member.id),
@@ -390,6 +500,7 @@ const normalizeRow = (row: Record<string, any>): PlaylistRow => ({
             order: PlaylistOrders.Shuffle,
             num_songs: 0,
             is_enabled: true,
+            ...rotationDetails({}),
             playlists: [],
         }))
         : [],
@@ -414,6 +525,14 @@ const buildTree = (raw: PlaylistRow[]): PlaylistRow[] => {
                         order: full.order,
                         num_songs: full.num_songs,
                         is_enabled: full.is_enabled,
+                        type: full.type,
+                        rotation_weight: full.rotation_weight,
+                        play_per_songs: full.play_per_songs,
+                        play_per_minutes: full.play_per_minutes,
+                        play_per_hour_minute: full.play_per_hour_minute,
+                        is_jingle: full.is_jingle,
+                        include_in_on_demand: full.include_in_on_demand,
+                        num_schedules: full.num_schedules,
                         playlists: full.playlists,
                     }
                     : member;
@@ -480,14 +599,14 @@ const enterPlaylistGroup = (playlist: PlaylistRow) => {
 };
 
 const isSelectable = (playlist: PlaylistRow) =>
-    [PlaylistSources.Songs, PlaylistSources.Playlists].includes(playlist.source as PlaylistSources);
+    [PlaylistSources.Songs, PlaylistSources.Playlists].includes(playlist.source);
 
 const isAssignable = (playlist: PlaylistRow) => {
     if (selectedPlaylist.value?.source !== PlaylistSources.Playlists) {
         return false;
     }
 
-    if (![PlaylistSources.Songs, PlaylistSources.Requests, PlaylistSources.Playlists].includes(playlist.source as PlaylistSources)) {
+    if (![PlaylistSources.Songs, PlaylistSources.Requests, PlaylistSources.Playlists].includes(playlist.source)) {
         return false;
     }
 
@@ -546,6 +665,14 @@ const doAssign = async (playlist: PlaylistRow) => {
         order: playlist.order,
         num_songs: playlist.num_songs,
         is_enabled: playlist.is_enabled,
+        type: playlist.type,
+        rotation_weight: playlist.rotation_weight,
+        play_per_songs: playlist.play_per_songs,
+        play_per_minutes: playlist.play_per_minutes,
+        play_per_hour_minute: playlist.play_per_hour_minute,
+        is_jingle: playlist.is_jingle,
+        include_in_on_demand: playlist.include_in_on_demand,
+        num_schedules: playlist.num_schedules,
         playlists: playlist.playlists,
     };
     await saveMembersForSelected([...playlistMembers.value, member]);
@@ -580,7 +707,7 @@ const isFullCyclePlayable = (member: GroupMember) =>
     member.source === PlaylistSources.Requests
     || (
         member.source === PlaylistSources.Songs
-        && [PlaylistOrders.Sequential, PlaylistOrders.Shuffle].includes(member.order as PlaylistOrders)
+        && [PlaylistOrders.Sequential, PlaylistOrders.Shuffle].includes(member.order)
     );
 
 const doUpdatePlayFullCycle = (index: number, value: boolean | null) => {
@@ -599,7 +726,7 @@ const getAllowedRequestsOptions = (member: GroupMember) => {
         [PlaylistGroupAllowedRequests.Any]: $gettext('Any (Default)'),
     };
 
-    if ([PlaylistSources.Songs, PlaylistSources.Playlists].includes(member.source as PlaylistSources)) {
+    if ([PlaylistSources.Songs, PlaylistSources.Playlists].includes(member.source)) {
         options[PlaylistGroupAllowedRequests.Playlist] = $gettext('Playlist Media Only');
     }
 
@@ -617,7 +744,22 @@ const doUpdateAllowedRequests = (index: number, value: string | null) => {
     void debouncedSaveMembers(updated);
 };
 
-const sourceLabel = (source: PlaylistSources | string) => {
+const typeLabel = (playlist: RotationDetails) => {
+    switch (playlist.type) {
+        case PlaylistTypes.Standard:
+            return `${$gettext('General Rotation')} (${playlist.rotation_weight})`;
+        case PlaylistTypes.OncePerXSongs:
+            return $gettext('Once per %{songs} Songs', {songs: playlist.play_per_songs});
+        case PlaylistTypes.OncePerXMinutes:
+            return $gettext('Once per %{minutes} Minutes', {minutes: playlist.play_per_minutes});
+        case PlaylistTypes.OncePerHour:
+            return $gettext('Once per Hour (at %{minute})', {minute: playlist.play_per_hour_minute});
+        default:
+            return $gettext('Custom');
+    }
+};
+
+const sourceLabel = (source: PlaylistSources) => {
     switch (source) {
         case PlaylistSources.Songs:
             return $gettext('Song-based');

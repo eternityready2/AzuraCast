@@ -9,15 +9,18 @@ use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\StorageLocationAdapters;
 use App\Entity\Enums\StorageLocationTypes;
 use App\Entity\Repository\StationPlaylistMediaRepository;
+use App\Entity\Repository\StationPlaylistSmartBlockCriteriaRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StorageLocation;
+use App\Radio\SmartBlock\SmartBlockSyncer;
 use Doctrine\ORM\EntityRepository;
 use Doctrine\ORM\Query;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Messenger\MessageBus;
 
 final class StationPlaylistMediaRepositoryTest extends TestCase
 {
@@ -51,7 +54,8 @@ final class StationPlaylistMediaRepositoryTest extends TestCase
         $em->expects(self::never())->method('persist');
 
         $repository = new StationPlaylistMediaRepository(
-            new StationQueueRepository()
+            new StationQueueRepository(),
+            $this->smartBlockSyncer($em)
         );
         $repository->setEntityManager($em);
 
@@ -74,7 +78,7 @@ final class StationPlaylistMediaRepositoryTest extends TestCase
         $objectRepository = $this->createStub(EntityRepository::class);
         $objectRepository->method('findOneBy')->willReturn(null);
 
-        $query = $this->createMock(Query::class);
+        $query = $this->createStub(Query::class);
         $query->method('setParameter')->willReturnSelf();
         $query->method('getSingleScalarResult')->willReturn(4);
 
@@ -89,7 +93,7 @@ final class StationPlaylistMediaRepositoryTest extends TestCase
                 $persisted = $entity;
             });
 
-        $repository = new StationPlaylistMediaRepository(new StationQueueRepository());
+        $repository = new StationPlaylistMediaRepository(new StationQueueRepository(), $this->smartBlockSyncer($em));
         $repository->setEntityManager($em);
 
         self::assertTrue($repository->addMediaToPlaylistIfMissing($media, $playlist));
@@ -98,5 +102,17 @@ final class StationPlaylistMediaRepositoryTest extends TestCase
         self::assertSame($playlist, $persisted->playlist);
         self::assertNull($persisted->folder);
         self::assertSame(5, $persisted->weight);
+    }
+
+    /**
+     * Neither test touches a smart block, so the syncer is never called.
+     */
+    private function smartBlockSyncer(ReloadableEntityManagerInterface $em): SmartBlockSyncer
+    {
+        return new SmartBlockSyncer(
+            new StationPlaylistSmartBlockCriteriaRepository(),
+            $em,
+            $this->createStub(MessageBus::class)
+        );
     }
 }

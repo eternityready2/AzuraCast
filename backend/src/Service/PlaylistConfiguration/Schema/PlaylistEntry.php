@@ -60,6 +60,7 @@ final class PlaylistEntry implements JsonSerializable
         public readonly SmartBlockType $smartBlockType = SmartBlockType::Dynamic,
         public readonly SmartBlockSortOrder $smartBlockSortOrder = SmartBlockSortOrder::Random,
         public readonly bool $smartBlockAvoidDuplicates = true,
+        public readonly bool $preserveQueueOnRestart = false,
         public array $folders = [],
         public array $media = [],
         public array $schedules = [],
@@ -112,6 +113,7 @@ final class PlaylistEntry implements JsonSerializable
             smartBlockSortOrder: SmartBlockSortOrder::tryFrom(Types::string($config['smart_block_sort_order'] ?? 'random'))
                 ?? SmartBlockSortOrder::Random,
             smartBlockAvoidDuplicates: Types::bool($config['smart_block_avoid_duplicates'] ?? true),
+            preserveQueueOnRestart: Types::bool($config['preserve_queue_on_restart'] ?? null),
             folders: array_map(
                 static fn(mixed $item): PlaylistFolderEntry => PlaylistFolderEntry::fromArray(Types::array($item)),
                 Types::array($data['folders'] ?? [])
@@ -173,6 +175,7 @@ final class PlaylistEntry implements JsonSerializable
                 'smart_block_type' => $this->smartBlockType->value,
                 'smart_block_sort_order' => $this->smartBlockSortOrder->value,
                 'smart_block_avoid_duplicates' => $this->smartBlockAvoidDuplicates,
+                'preserve_queue_on_restart' => $this->preserveQueueOnRestart,
             ],
             'folders' => $this->folders,
             'media' => $this->media,

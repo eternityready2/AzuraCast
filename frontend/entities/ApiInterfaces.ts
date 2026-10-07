@@ -2252,6 +2252,11 @@ export interface StationBackendConfiguration {
   record_streams_format?: string;
   record_streams_bitrate?: number;
   use_manual_autodj?: boolean;
+  /**
+   * Reset the internal queue of sequential playlists when the station is restarted or its configuration is rewritten.
+   * @example false
+   */
+  reset_sequential_queues_on_restart?: boolean;
   autodj_queue_length?: number;
   autodj_queue_lookahead_minutes?: number;
   linear_log_enabled?: boolean;
@@ -2482,6 +2487,11 @@ export type StationPlaylist = HasAutoIncrementId & {
   backend_options?: string[];
   /** @example true */
   avoid_duplicates?: boolean;
+  /**
+   * Don't reset this playlist's queue when the station is restarted or its configuration is rewritten.
+   * @example false
+   */
+  preserve_queue_on_restart?: boolean;
   smart_shuffle_distance?: number | null;
   /** Minimum days between repeats of the same track (positive rotation goal). */
   rotation_goal_days?: number | null;

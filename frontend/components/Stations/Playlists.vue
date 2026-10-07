@@ -223,6 +223,15 @@
                                     </button>
 
                                     <button
+                                        v-if="item.source === 'playlists' && item.order === 'sequential' && item.links.members"
+                                        type="button"
+                                        class="btn btn-sm btn-primary"
+                                        @click="doGroupReorder(item.links.members)"
+                                    >
+                                        {{ $gettext('Reorder') }}
+                                    </button>
+
+                                    <button
                                         v-if="item.source === 'playlists'"
                                         type="button"
                                         class="btn btn-sm btn-primary"
@@ -293,16 +302,17 @@
                                         {{ $gettext('Duplicate') }}
                                     </button>
 
-                                    <a
-                                        v-if="item.source !== 'playlists'"
-                                        v-for="format in ['pls', 'm3u']"
-                                        :key="format"
-                                        class="btn btn-sm btn-secondary"
-                                        :href="item.links.export[format]"
-                                        target="_blank"
-                                    >
-                                        {{ $gettext('Export %{format}', {format: format.toUpperCase()}) }}
-                                    </a>
+                                    <template v-if="item.source !== 'playlists'">
+                                        <a
+                                            v-for="format in ['pls', 'm3u']"
+                                            :key="format"
+                                            class="btn btn-sm btn-secondary"
+                                            :href="item.links.export[format]"
+                                            target="_blank"
+                                        >
+                                            {{ $gettext('Export %{format}', {format: format.toUpperCase()}) }}
+                                        </a>
+                                    </template>
 
                                     <a
                                         class="btn btn-sm btn-secondary"
@@ -323,6 +333,10 @@
     </section>
 
     <reorder-modal ref="$reorderModal" />
+    <playlist-group-reorder-modal
+        ref="$groupReorderModal"
+        @relist="() => relist()"
+    />
     <queue-modal ref="$queueModal" />
     <import-modal ref="$importModal" @relist="() => relist()" />
     <import-playlist-config-modal
@@ -354,6 +368,7 @@ import CloneModal from "~/components/Stations/Playlists/CloneModal.vue";
 import ImportModal from "~/components/Stations/Playlists/ImportModal.vue";
 import ImportPlaylistConfigModal from "~/components/Stations/Playlists/ImportPlaylistConfigModal.vue";
 import PlaylistGroupingTab from "~/components/Stations/Playlists/PlaylistGroupingTab.vue";
+import PlaylistGroupReorderModal from "~/components/Stations/Playlists/PlaylistGroupReorderModal.vue";
 import QueueModal from "~/components/Stations/Playlists/QueueModal.vue";
 import ReorderModal from "~/components/Stations/Playlists/ReorderModal.vue";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
@@ -416,6 +431,11 @@ const doEdit = (playlistId: number) => router.push({
 const $reorderModal = useTemplateRef('$reorderModal');
 const doReorder = (url: string) => {
     $reorderModal.value?.open(url);
+};
+
+const $groupReorderModal = useTemplateRef('$groupReorderModal');
+const doGroupReorder = (membersUrl: string) => {
+    void $groupReorderModal.value?.open(membersUrl);
 };
 
 const $queueModal = useTemplateRef('$queueModal');
