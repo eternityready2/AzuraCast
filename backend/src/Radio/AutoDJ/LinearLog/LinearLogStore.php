@@ -717,8 +717,11 @@ final class LinearLogStore
                 WHERE sq.station_id = ? AND sq.log_entry_id IS NOT NULL
                 AND (sq.is_played = 0
                      OR (sq.is_played = 1
-                         AND sq.timestamp_played >= FROM_UNIXTIME(?)))',
-                [$station->id, $recentCutoff]
+                         AND sq.timestamp_played >= FROM_UNIXTIME(?)
+                         AND sq.timestamp_played <= FROM_UNIXTIME(?)))',
+                // A "played" row timed in the future was cleared by a Liquidsoap
+                // restart, not aired (see ReconcileLinearLogTask).
+                [$station->id, $recentCutoff, $now + 30]
             ) as $row
         ) {
             $queued[(int)$row['log_entry_id']] = $row;
@@ -1003,14 +1006,15 @@ final class LinearLogStore
         };
     }
 
-    /** @param array<string, mixed> $entry */
+    /**
+     * A swapped line aired: the Top-of-Hour swap put another song in its slot
+     * and the line now carries that song. Only a dropped line never airs.
+     *
+     * @param array<string, mixed> $entry
+     */
     private static function isAirable(array $entry): bool
     {
-        return !in_array(
-            $entry['log_status'] ?? null,
-            [StationLogEntry::STATUS_DROPPED, StationLogEntry::STATUS_SWAPPED],
-            true
-        );
+        return StationLogEntry::STATUS_DROPPED !== ($entry['log_status'] ?? null);
     }
 
     /**
@@ -1045,7 +1049,7 @@ final class LinearLogStore
 
         $airable = array_filter(
             $liveEntries,
-            static fn(array $e): bool => !in_array($e['log_status'] ?? null, ['dropped', 'swapped'], true),
+            static fn(array $e): bool => self::isAirable($e),
         );
 
         $spans = array_map(

@@ -92,13 +92,23 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
             ]
         );
 
+        // The log line stays, marked dropped with the reason: deleted, it left
+        // a hole in the log with no trace of what was planned there.
         if (null !== $row->log_entry_id) {
             $entry = $this->em->find(StationLogEntry::class, $row->log_entry_id);
             if (
                 $entry instanceof StationLogEntry
                 && in_array($entry->status, [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED], true)
             ) {
-                $this->em->remove($entry);
+                $entry->status = StationLogEntry::STATUS_DROPPED;
+                $airsAtLocal = $airsAtImmutable->setTimezone($row->station->getTimezoneObject());
+                $entry->note = mb_substr(
+                    'Dropped: ' . $sourceName . ' may not play at ' . $airsAtLocal->format('g:i:s A'),
+                    0,
+                    255
+                );
+                $entry->queue_id = null;
+                $this->em->persist($entry);
             }
         }
 

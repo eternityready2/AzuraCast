@@ -9,6 +9,7 @@ use App\Entity\Enums\PlaylistSources;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Event\Radio\WriteLiquidsoapConfiguration;
+use App\Radio\AutoDJ\StrictProgrammeClock;
 use App\Radio\Backend\Liquidsoap\ConfigWriter;
 use App\Radio\Backend\Liquidsoap\PlaylistFileWriter;
 use App\Utilities\ScheduleRecurrence;
@@ -38,6 +39,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  */
 final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterface
 {
+    public function __construct(
+        private readonly StrictProgrammeClock $strictProgrammeClock,
+    ) {
+    }
+
     public static function getSubscribedEvents(): array
     {
         return [
@@ -86,19 +92,62 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
             $playlistId = isset($playlist->id) ? $playlist->id : spl_object_id($playlist);
             $playlistVarName = 'rigid_' . ConfigWriter::getPlaylistVariableName($playlist) . '_' . $playlistId;
 
-            if (!$this->writeDedicatedSource($event, $playlist, $playlistVarName)) {
+            // "Loop once" on the schedule: the show plays its content one time
+            // per window, then the window's tail goes to the AutoDJ. The native
+            // playlist looped regardless, so Faith Horizons (one 25-minute
+            // episode in a 17:00-17:40 window) started over at 17:28:27 and was
+            // cut by the window's end (Wed 2026-10-07).
+            $playOnce = PlaylistSources::Songs === $playlist->source;
+            foreach ($rigidSchedules as $scheduleItem) {
+                $playOnce = $playOnce && $scheduleItem->loop_once;
+            }
+
+            if ($playOnce) {
+                $finished = $this->strictProgrammeClock->hasFinishedInOpenWindow($station, $playlist);
+                $event->appendLines([
+                    '# True when Liquidsoap starts after the show already aired in this',
+                    '# window, so a restart does not play it a second time.',
+                    $playlistVarName . '_done = ref(' . ($finished ? 'true' : 'false') . ')',
+                ]);
+            }
+
+            if (!$this->writeDedicatedSource($event, $playlist, $playlistVarName, $playOnce)) {
                 continue;
             }
 
+            $doneVarName = $playlistVarName . '_done';
+
+            $windowPredicates = [];
             foreach ($rigidSchedules as $scheduleItem) {
-                $playTime = $this->getScheduledPlaylistPlayTime($event, $scheduleItem);
+                $windowPredicate = '(' . $this->getScheduledPlaylistPlayTime($event, $scheduleItem) . ')';
+                $windowPredicates[] = $windowPredicate;
+
                 // A scheduled programme waits while the Top-of-Hour ID/news owns
                 // the air; otherwise it runs silently under them and listeners
                 // join it minutes in. It starts from its top when they finish.
-                $playTime = '(' . $playTime . ') and not rigid_schedule_toh_lane_owns_air()';
+                $playTime = $windowPredicate . ' and not rigid_schedule_toh_lane_owns_air()';
+                if ($playOnce) {
+                    $playTime .= ' and not ' . $doneVarName . '()';
+                }
                 $rigidBranches[] = $playlist->backendPlaySingleTrack()
                     ? '(predicate.at_most(1, {' . $playTime . '}), ' . $playlistVarName . ')'
                     : '({ ' . $playTime . ' }, ' . $playlistVarName . ')';
+            }
+
+            if ($playOnce) {
+                // Rewound for the next window only once every window of the show
+                // has closed and its pass is used up (or it aired before a
+                // restart): rewound when the pass ends, it would be ready again
+                // inside the same window and start over.
+                $event->appendLines([
+                    'thread.run(every=30., fun () -> begin',
+                    '    if not (' . implode(' or ', $windowPredicates) . ')',
+                    '        and (' . $doneVarName . '() or not ' . $playlistVarName . '.is_ready()) then',
+                    '        ' . $doneVarName . ' := false',
+                    '        ' . $playlistVarName . '.reload()',
+                    '    end',
+                    'end)',
+                ]);
             }
         }
 
@@ -183,6 +232,7 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
         WriteLiquidsoapConfiguration $event,
         StationPlaylist $playlist,
         string $playlistVarName,
+        bool $playOnce,
     ): bool {
         if (PlaylistSources::Songs === $playlist->source) {
             $playlistFilePath = PlaylistFileWriter::getPlaylistFilePath($playlist);
@@ -199,8 +249,14 @@ final class RigidScheduleRuntimeConfiguration implements EventSubscriberInterfac
                 'mime_type="audio/x-mpegurl"',
                 'mode="normal"',
                 'reload_mode="watch"',
-                ConfigWriter::toRawString($playlistFilePath),
             ];
+            if ($playOnce) {
+                // Not on_done: Liquidsoap calls it once the last file is loaded,
+                // not when it has played, so a one-episode show read as finished
+                // before it aired.
+                $playlistParams[] = 'loop=false';
+            }
+            $playlistParams[] = ConfigWriter::toRawString($playlistFilePath);
 
             $event->appendLines([
                 '# Dedicated native source for a strict scheduled programme.',

@@ -284,8 +284,8 @@ export function useLinearLog() {
             let match: LinearLogItem | null = null;
             let bestDiff = 300;
             for (const item of allItems.value) {
-                const status = item.log_status;
-                if (status === "dropped" || status === "swapped") {
+                // A swapped line is the song that actually aired in its slot.
+                if (item.log_status === "dropped") {
                     continue;
                 }
                 if (item.song_id !== liveSongId.value) {
@@ -311,8 +311,7 @@ export function useLinearLog() {
         let best: LinearLogItem | null = null;
         let bestStart = -Infinity;
         for (const item of allItems.value) {
-            const status = item.log_status;
-            if (status === "dropped" || status === "swapped") {
+            if (item.log_status === "dropped") {
                 continue;
             }
             const start = item.aired_at ?? item.played_at;

@@ -60,6 +60,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly UserUrlFilter $userUrlFilter,
         private readonly Client $httpClient,
         private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
 
@@ -101,6 +102,13 @@ final class QueueBuilder implements EventSubscriberInterface
         $activePlaylistsByType = [];
         foreach ($station->playlists as $playlist) {
             /** @var StationPlaylist $playlist */
+            // Liquidsoap's strict lane plays this show from its own files. A copy
+            // picked here as well was queued on top of it (Faith Horizons, 17:02
+            // Wed 2026-10-07) and showed in the log as a second, misplaced line.
+            if ($this->strictProgrammeClock->isPlayedByStrictLane($playlist)) {
+                continue;
+            }
+
             if ($playlist->playlist_groups->count() > 0) {
                 if (
                     0 === $playlist->schedule_items->count()

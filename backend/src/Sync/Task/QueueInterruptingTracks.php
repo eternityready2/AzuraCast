@@ -10,6 +10,7 @@ use App\Radio\Adapters;
 use App\Radio\AutoDJ\Queue;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
+use App\Radio\AutoDJ\StrictProgrammeClock;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use DateTimeImmutable;
@@ -25,6 +26,7 @@ final class QueueInterruptingTracks extends AbstractTask
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly Scheduler $scheduler,
         private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
 
@@ -118,6 +120,11 @@ final class QueueInterruptingTracks extends AbstractTask
         $hasInterruptingPlaylist = false;
 
         foreach ($station->playlists as $playlist) {
+            // Played by Liquidsoap's strict lane, which takes the air itself.
+            if ($this->strictProgrammeClock->isPlayedByStrictLane($playlist)) {
+                continue;
+            }
+
             $isSponsorBehindPace = isset($sponsorPlaylistIdsBehindPace[$playlist->id]);
 
             if ($playlist->schedule_items->count() > 0) {

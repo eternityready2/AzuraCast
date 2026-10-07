@@ -11,6 +11,7 @@ use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\AutoDJ\LinearLogPreviewContext;
+use App\Radio\AutoDJ\StrictProgrammeClock;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeInterface;
@@ -41,6 +42,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
     public function __construct(
         private readonly LinearLogPreviewContext $previewContext,
         private readonly LinearLogStore $store,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
 
@@ -115,10 +117,12 @@ final class LinearLogPlayout implements EventSubscriberInterface
             <<<'DQL'
                 SELECT e.planned_at FROM App\Entity\StationLogEntry e
                 WHERE e.station = :station AND e.status = :planned
+                AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
                 ORDER BY e.planned_at ASC, e.sequence ASC
             DQL
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setParameter('strictLane', $this->strictLanePlaylistIds($station))
             ->setMaxResults(1)
             ->getOneOrNullResult();
 
@@ -315,6 +319,13 @@ final class LinearLogPlayout implements EventSubscriberInterface
             ->startOfHour()
             ->getTimestamp();
 
+        // Lines of a show the strict lane plays from its own files are neither
+        // queued nor dropped here: Liquidsoap airs the show, and the queue only
+        // carries what follows it. Taken, Faith Horizons' programme line (no
+        // file of its own) was dropped as a removed file, and the log moved
+        // straight on to the songs after the show (Wed 2026-10-07 17:00).
+        $strictLane = $this->strictLanePlaylistIds($station);
+
         $dropped = $this->em->createQuery(
             <<<'DQL'
                 UPDATE App\Entity\StationLogEntry e
@@ -323,8 +334,10 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 AND e.status = :planned
                 AND e.planned_at < :hourStart
                 AND (e.payload IS NULL OR e.payload NOT LIKE :programme OR e.planned_at + e.duration <= :now)
+                AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
             DQL
         )->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
+            ->setParameter('strictLane', $strictLane)
             ->setParameter('note', 'Dropped: its hour ran long')
             // A scheduled programme block is not a leftover while its window is
             // still open: the next music line can belong to the following hour
@@ -348,10 +361,12 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 <<<'DQL'
                     SELECT e FROM App\Entity\StationLogEntry e
                     WHERE e.station = :station AND e.status = :planned
+                    AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
                     ORDER BY e.planned_at ASC, e.sequence ASC
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+                ->setParameter('strictLane', $strictLane)
                 ->setMaxResults(1)
                 ->getOneOrNullResult();
 
@@ -384,6 +399,20 @@ final class LinearLogPlayout implements EventSubscriberInterface
         }
 
         return null;
+    }
+
+    /** @return non-empty-list<int> */
+    private function strictLanePlaylistIds(Station $station): array
+    {
+        $ids = [];
+        foreach ($station->playlists as $playlist) {
+            if ($this->strictProgrammeClock->isPlayedByStrictLane($playlist)) {
+                $ids[] = $playlist->id;
+            }
+        }
+
+        // NOT IN () is invalid SQL; 0 matches no playlist.
+        return [] === $ids ? [0] : $ids;
     }
 
     private function materialize(

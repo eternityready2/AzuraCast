@@ -17,6 +17,7 @@ use App\Entity\StationQueue;
 use App\Entity\StationRequest;
 use App\Event\Radio\AnnotateNextSong;
 use App\Event\Radio\RevalidateQueuedSong;
+use App\Radio\Backend\Liquidsoap\Command\NextSongHeldException;
 use App\Utilities\Time;
 use App\Utilities\Types;
 use Carbon\CarbonImmutable;
@@ -130,8 +131,8 @@ final class Annotations implements EventSubscriberInterface
                 && $this->lastExpectedPlayAt->lessThan(Time::nowUtc()->addMinutes(self::HOUR_OPENER_WINDOW_MINUTES));
             if ($heldBack && !($autoDjHeldByTopOfHour && $opensThisHour) && $this->em->contains($queueRow)) {
                 $this->em->flush();
-                throw new RuntimeException(
-                    'Held for the new hour: this item would start just before the Top-of-Hour ID and be cut.'
+                throw new NextSongHeldException(
+                    'Held: this item waits for what holds the air first (the Top-of-Hour ID, or a strict programme).'
                 );
             }
 
@@ -187,6 +188,16 @@ final class Annotations implements EventSubscriberInterface
 
         $event = new RevalidateQueuedSong($station, $queueRow, $expectedPlayAt->toDateTimeImmutable(), true);
         $this->eventDispatcher->dispatch($event);
+
+        // Where the row really starts once what holds the air first is done:
+        // only a row that opens within minutes may load under the ID. A row
+        // waiting for a strict programme (Faith Horizons, 25 minutes) is not an
+        // opener; loaded under the ID, the programme threw it away on taking
+        // the air.
+        $opensAfter = $event->getOpensAfter();
+        if (null !== $opensAfter && $opensAfter > $this->lastExpectedPlayAt) {
+            $this->lastExpectedPlayAt = CarbonImmutable::instance($opensAfter);
+        }
 
         return $event->isHeldBack();
     }

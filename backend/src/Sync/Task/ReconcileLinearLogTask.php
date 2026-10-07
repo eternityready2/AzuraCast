@@ -11,6 +11,7 @@ use App\Entity\StationQueue;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
+use App\Radio\AutoDJ\StrictProgrammeClock;
 use Carbon\CarbonImmutable;
 use Throwable;
 
@@ -36,11 +37,15 @@ final class ReconcileLinearLogTask extends AbstractTask
      * say 21:06 and 21:08).
      */
     private const int HEARD_AFTER_SECONDS = 120;
+
+    /** Clock slack before a "played" row's future air time proves it never aired. */
+    private const int FUTURE_PLAY_GRACE_SECONDS = 30;
     private const int HEARD_BEFORE_SECONDS = 600;
 
     public function __construct(
         private readonly LinearLogRules $rules,
         private readonly LinearLogStore $store,
+        private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
 
@@ -108,6 +113,21 @@ final class ReconcileLinearLogTask extends AbstractTask
                 ->setParameter('entryId', $entry->id)
                 ->setMaxResults(1)
                 ->getOneOrNullResult();
+
+            // A Liquidsoap restart clears the queue by marking its rows played,
+            // with their projected future air times still on them. A play cannot
+            // lie in the future: the row was removed before it aired. Waiting
+            // for that time to pass kept six such lines "queued" for up to an
+            // hour, and the page chained them ahead of the real queue, drawing
+            // songs inside Altered Stories (Wed 2026-10-07 18:00).
+            if (
+                $row instanceof StationQueue
+                && $row->is_played
+                && null !== $row->timestamp_played
+                && $row->timestamp_played->getTimestamp() > $now + self::FUTURE_PLAY_GRACE_SECONDS
+            ) {
+                $row = null;
+            }
 
             if (!$row instanceof StationQueue) {
                 // A live pick's line is written when the AutoDJ picks the song.
@@ -295,6 +315,15 @@ final class ReconcileLinearLogTask extends AbstractTask
             ->getResult();
 
         foreach ($lines as $line) {
+            if (
+                null !== $line->playlist
+                && $line->playlist->is_enabled
+                && $this->strictProgrammeClock->isPlayedByStrictLane($line->playlist)
+            ) {
+                $this->settleStrictProgramme($station, $line, $now);
+                continue;
+            }
+
             if (!$this->store->isScheduledProgramme($line) || true !== $line->playlist?->is_enabled) {
                 continue;
             }
@@ -319,6 +348,41 @@ final class ReconcileLinearLogTask extends AbstractTask
             }
             $this->em->persist($line);
         }
+    }
+
+    /**
+     * A show the strict lane plays from its own files has one line, its
+     * programme line, and never a queue row; the line is as-run when the show
+     * reaches song history. It starts after the Top-of-Hour ID and news when
+     * its window opens on the hour (Faith Horizons: line 17:00:00, on air
+     * 17:03:25), so its start is read from history, not assumed.
+     */
+    private function settleStrictProgramme(Station $station, StationLogEntry $line, int $now): void
+    {
+        $windowEnd = $line->planned_at + (int)ceil($line->duration);
+        $startedAt = $this->em->getConnection()->fetchOne(
+            'SELECT MIN(timestamp_start) FROM song_history
+            WHERE station_id = ? AND playlist_id = ?
+            AND timestamp_start >= ? AND timestamp_start < ?',
+            [
+                $station->id,
+                $line->playlist?->id,
+                gmdate('Y-m-d H:i:s', $line->planned_at - self::HEARD_AFTER_SECONDS),
+                gmdate('Y-m-d H:i:s', $windowEnd),
+            ]
+        );
+
+        if (is_string($startedAt) && '' !== $startedAt) {
+            $line->status = StationLogEntry::STATUS_AIRED;
+            $line->aired_at = CarbonImmutable::parse($startedAt, 'UTC')->getTimestamp();
+        } elseif ($now >= $windowEnd + self::HEARD_BEFORE_SECONDS) {
+            $line->status = StationLogEntry::STATUS_DROPPED;
+            $line->note = 'Dropped: the show did not reach the air in its window';
+        } else {
+            return;
+        }
+
+        $this->em->persist($line);
     }
 
     private function wasHeard(Station $station, int $mediaId, int $playedAt): bool
