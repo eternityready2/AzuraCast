@@ -826,6 +826,22 @@ final class AiDjGenerator
     }
 
     /**
+     * Scripture readings only, right before Piper: "1 Chronicles" -> "First
+     * Chronicles", and no comma before "and" / "verse", which Piper reads as a
+     * long pause. Nothing else in the text is changed.
+     */
+    public static function cleanScriptureForTts(string $text): string
+    {
+        $text = (string)preg_replace_callback(
+            '/\b([123])\s+(Samuel|Kings|Chronicles|Corinthians|Thessalonians|Timothy|Peter|John)\b/',
+            static fn(array $m): string => ['First', 'Second', 'Third'][(int)$m[1] - 1] . ' ' . $m[2],
+            $text
+        );
+
+        return (string)preg_replace('/,\s+(and|verse)\b/', ' $1', $text);
+    }
+
+    /**
      * Build spoken text for a content liner based on its type.
      */
     public function buildLinerText(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro = true): string
@@ -840,9 +856,9 @@ final class AiDjGenerator
             // only, with a light connector and no "This is <dj> on <station>" prefix,
             // so the DJ never re-introduces herself mid-conversation.
             return match ($content->type) {
-                AiDjContent::TYPE_BIBLE_VERSE => $reference
+                AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
                     ? sprintf("Here's a scripture from %s. %s. Let that truth settle in your heart today.", $reference, $text)
-                    : sprintf("%s. Stay blessed.", $text),
+                    : sprintf("%s. Stay blessed.", $text)),
                 AiDjContent::TYPE_JOKE => sprintf("Here's a little something to brighten your day. %s. Hope that put a smile on your face!", $text),
                 AiDjContent::TYPE_ENCOURAGEMENT => sprintf("%s. Remember, you are loved and you are not alone.", $text),
                 AiDjContent::TYPE_TESTIMONY => sprintf("%s. What an amazing testimony.", $text),
@@ -852,9 +868,9 @@ final class AiDjGenerator
         }
 
         return match ($content->type) {
-            AiDjContent::TYPE_BIBLE_VERSE => $reference
+            AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
                 ? sprintf("You're listening to %s with %s. I want to share a scripture with you from %s. %s. Let that truth settle in your heart today.", $stationName, $djName, $reference, $text)
-                : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text),
+                : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text)),
             AiDjContent::TYPE_JOKE => sprintf("Hey, it's %s here on %s, and I've got a little something to brighten your day. %s. Hope that put a smile on your face!", $djName, $stationName, $text),
             AiDjContent::TYPE_ENCOURAGEMENT => sprintf("This is %s on %s with some words of encouragement for you today. %s. Remember, you are loved and you are not alone.", $djName, $stationName, $text),
             AiDjContent::TYPE_INSPIRATION => sprintf("This is %s on %s, and I want to share something inspiring with you right now. %s.", $djName, $stationName, $text),
