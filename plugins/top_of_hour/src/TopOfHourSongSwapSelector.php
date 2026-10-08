@@ -1789,6 +1789,16 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
+        // The swap gets the gap first. Until the song before this slot is in the
+        // player, its length can still change and the gap with it. Staged an hour
+        // ahead, the spot stayed in the new hour's first row after the swap had
+        // landed that song on the ID, and aired at :00:37 in place of the hour's
+        // opener (18:00, 20:00 and 22:00, Wed 2026-10-07). The row is held as
+        // before until then; the hand-off still fills a gap that is really there.
+        if (null !== $ahead && !$ahead->sent_to_autodj) {
+            return null;
+        }
+
         $allowance = 0.0;
         if (
             $startMayBeEarly

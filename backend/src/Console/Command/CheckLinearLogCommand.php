@@ -148,7 +148,8 @@ final class CheckLinearLogCommand extends CommandAbstract
         /** @var list<array<string, mixed>> $open */
         $open = $conn->fetchAllAssociative(
             <<<'SQL'
-                SELECT e.id, e.planned_at, e.duration, e.title, e.media_id, e.playlist_id, e.payload,
+                SELECT e.id, e.status, e.planned_at, e.duration, e.title, e.media_id, e.playlist_id, e.payload,
+                    q.queued_at,
                     COALESCE(q.queued_at, e.planned_at) AS starts_at,
                     COALESCE(q.queued_duration, e.duration) AS runs_for
                 FROM station_log_entries e
@@ -225,8 +226,30 @@ final class CheckLinearLogCommand extends CommandAbstract
             static fn(array $a, array $b): int => [(int)$a['starts_at'], (int)$a['id']]
                 <=> [(int)$b['starts_at'], (int)$b['id']]
         );
+
+        // The rest of the hour the live queue is in follows the queue: playout
+        // takes those lines one after another from where the queue ends, as the
+        // page draws them, whatever times the plan gave them.
+        $queueEnd = 0;
+        foreach ($open as $row) {
+            if (null !== $row['queued_at']) {
+                $queueEnd = max($queueEnd, (int)$row['queued_at'] + (int)ceil((float)$row['runs_for']));
+            }
+        }
+        $queueHourEnd = $queueEnd > 0
+            ? CarbonImmutable::createFromTimestamp($queueEnd, $tz)->startOfHour()->addHour()->getTimestamp()
+            : 0;
+
         foreach ($airOrder as $row) {
             $start = (int)$row['starts_at'];
+            if (
+                'planned' === $row['status']
+                && !$isProgramme($row)
+                && $start < $queueHourEnd
+                && $cursor < $queueHourEnd
+            ) {
+                $start = $cursor;
+            }
             $end = $start + (int)ceil((float)$row['runs_for']);
 
             $key = (int)$row['planned_at'] . '|' . $row['title'];

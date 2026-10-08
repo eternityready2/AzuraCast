@@ -88,6 +88,9 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // edit or a missing file -- is refilled in the log now, not left
                 // as a hole the AutoDJ fills only when the queue reaches it.
                 $this->refill->refill($station);
+                // And an hour the queue is in that still ends short gets its
+                // last songs from the log.
+                $this->refill->topUp($station);
             } catch (Throwable $e) {
                 $this->logger->error('Linear Log reconciliation failed.', [
                     'station_id' => $station->id,

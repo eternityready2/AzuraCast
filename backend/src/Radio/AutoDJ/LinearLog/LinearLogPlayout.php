@@ -32,6 +32,9 @@ final class LinearLogPlayout implements EventSubscriberInterface
     use EntityManagerAwareTrait;
     use LoggerAwareTrait;
 
+    /** Shortest gap before the ID the Top-of-Hour filler will fill with a spot. */
+    private const int PRE_ID_SLIVER_SECONDS = 5;
+
     /** Last log line offered, to detect a validator rejecting it. */
     private ?int $offeredEntryId = null;
     private ?int $offeredAt = null;
@@ -84,12 +87,19 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
-     * End of the clock hour $expected falls in, in station time.
+     * End of the clock hour the slot at $expected airs in, in station time.
+     *
+     * A slot in the last seconds before the Top-of-Hour ID at :59:59 holds
+     * nothing: no spot is that short, so whatever is picked for it is held and
+     * opens the next hour. Counted in the hour that was ending, the log stood
+     * down for it and the AutoDJ's pick aired after the ID as an extra song
+     * ahead of the next hour's own first line (22:59:57, Wed 2026-10-07).
      */
     private static function hourEnd(Station $station, DateTimeInterface $expected): int
     {
         return CarbonImmutable::instance($expected)
             ->setTimezone($station->getTimezoneObject())
+            ->addSeconds(self::PRE_ID_SLIVER_SECONDS + 1)
             ->startOfHour()
             ->addHour()
             ->getTimestamp();

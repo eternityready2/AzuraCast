@@ -79,6 +79,15 @@ final class LinearLogRefill
     /** StationMedia::$type of an ordinary song. */
     private const string MUSIC_TYPE = 'music';
 
+    /** An hour whose lines end at least this far short of the ID has room for another song. */
+    private const int MIN_TOP_UP_SECONDS = 120;
+
+    /** About one song: a longer shortfall is filled a song at a time. */
+    private const float TYPICAL_SONG_SECONDS = 240.0;
+
+    /** More top-up lines than an hour can hold, so only a runaway stops here. */
+    private const int MAX_TOP_UPS_PER_HOUR = 20;
+
     /** Drop reasons that leave nothing to refill. */
     private const array NOT_REFILLED = [
         // The hour already ended or overran; its time has gone.
@@ -162,6 +171,137 @@ final class LinearLogRefill
         }
 
         return $done;
+    }
+
+    /**
+     * Add a song to the end of the hour the live queue is in when that hour's
+     * lines end short of the Top-of-Hour ID, as FM automation fills a short hour
+     * from the log instead of leaving it to whatever is picked at air time.
+     *
+     * An hour comes up short inside the queue's reach, where a dropped line can
+     * no longer be refilled in place: a repeat or a hand removal the queue
+     * closed up around, or the hour's first song given up to a pre-ID spot. The
+     * AutoDJ then picked the songs for the end of the hour as the queue got
+     * there (22:50 and 22:57, Wed 2026-10-07). Written here first, they are log
+     * lines: on the page an hour ahead, open to hand edits, from the playlist
+     * the AutoDJ would play then, checked against the log for repeats and never
+     * longer than the room before the ID.
+     *
+     * One line per pass; the next pass measures again. The last two minutes
+     * before the ID stay the Top-of-Hour swap's to fit. An hour that carries a
+     * stream or strict-lane programme is left alone.
+     *
+     * @return int lines added
+     */
+    public function topUp(Station $station): int
+    {
+        if (!self::isEnabled($station)) {
+            return 0;
+        }
+
+        // An earlier refill in this pass may have cleared the entity manager.
+        $stationId = $station->id;
+        $station = $this->em->find(Station::class, $stationId);
+        if (!$station instanceof Station) {
+            return 0;
+        }
+
+        $conn = $this->em->getConnection();
+
+        // Where the live queue ends: the next slot playout is asked to fill.
+        $queueEnd = max(time(), (int)ceil((float)$conn->fetchOne(
+            'SELECT MAX(UNIX_TIMESTAMP(timestamp_played) + duration) FROM station_queue
+            WHERE station_id = ? AND is_played = 0 AND top_of_hour_legal_id = 0',
+            [$stationId]
+        )));
+
+        $hourStart = CarbonImmutable::createFromTimestamp($queueEnd, $station->getTimezoneObject())
+            ->startOfHour()
+            ->getTimestamp();
+        $hourEnd = $hourStart + 3600;
+        $idAt = $hourEnd - 1;
+
+        $strictLane = [];
+        foreach ($station->playlists as $playlist) {
+            if ($this->strictProgrammeClock->isPlayedByStrictLane($playlist)) {
+                $strictLane[$playlist->id] = true;
+            }
+        }
+
+        // The hour's lines still to be queued air one after another from there.
+        $plannedSeconds = 0;
+        $lastPlannedAt = $hourStart;
+        foreach (
+            $conn->fetchAllAssociative(
+                'SELECT status, planned_at, duration, media_id, playlist_id FROM station_log_entries
+                WHERE station_id = ? AND status IN (?, ?) AND planned_at < ? AND planned_at + duration > ?',
+                [$stationId, StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED, $hourEnd, $hourStart]
+            ) as $line
+        ) {
+            if (null === $line['media_id'] || isset($strictLane[(int)$line['playlist_id']])) {
+                return 0;
+            }
+            if (StationLogEntry::STATUS_PLANNED === $line['status'] && (int)$line['planned_at'] >= $hourStart) {
+                $plannedSeconds += (int)ceil((float)$line['duration']);
+                $lastPlannedAt = max($lastPlannedAt, (int)$line['planned_at']);
+            }
+        }
+
+        $endsAt = $queueEnd + $plannedSeconds;
+        $shortBy = $idAt - $endsAt;
+        if ($shortBy < self::MIN_TOP_UP_SECONDS) {
+            return 0;
+        }
+
+        // A top-up line that was dropped means something takes lines out of this
+        // hour; adding more would only feed it.
+        $topUps = $conn->fetchAssociative(
+            'SELECT COUNT(*) AS total, COALESCE(SUM(status = ?), 0) AS dropped FROM station_log_entries
+            WHERE station_id = ? AND planned_at >= ? AND planned_at < ? AND payload LIKE ?',
+            [StationLogEntry::STATUS_DROPPED, $stationId, $hourStart, $hourEnd, '%"top_up":true%']
+        );
+        if (
+            false === $topUps
+            || (int)$topUps['dropped'] > 0
+            || (int)$topUps['total'] >= self::MAX_TOP_UPS_PER_HOUR
+        ) {
+            return 0;
+        }
+
+        $songs = max(1, (int)floor($shortBy / self::TYPICAL_SONG_SECONDS));
+        $pick = $this->pickReplacement(
+            $station,
+            CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable(),
+            $shortBy / $songs,
+            $shortBy + self::ID_GRACE_SECONDS,
+            null,
+            null
+        );
+        if (null === $pick) {
+            return 0;
+        }
+
+        [$media, $playlist] = $pick;
+
+        // After the hour's last planned line, so playout takes it last.
+        $plannedAt = min(max($endsAt, $lastPlannedAt + 1), $idAt - 1);
+        $newId = $this->writeLine(
+            $station,
+            $media,
+            $playlist,
+            $plannedAt,
+            'Filled: the hour was running short',
+            ['top_up' => true]
+        );
+
+        $this->logger->notice('Linear Log: topped up an hour that was running short.', [
+            'log_entry_id' => $newId,
+            'planned_at' => $plannedAt,
+            'short_by' => $shortBy,
+            'song' => $media->text,
+        ]);
+
+        return 1;
     }
 
     /**
@@ -279,7 +419,14 @@ final class LinearLogRefill
         }
 
         [$media, $pickPlaylist] = $pick;
-        $newId = $this->writeLine($station, $media, $pickPlaylist, $plannedAt, $id);
+        $newId = $this->writeLine(
+            $station,
+            $media,
+            $pickPlaylist,
+            $plannedAt,
+            'Refilled: replaces a dropped line',
+            ['refill_of' => $id]
+        );
 
         $delta = (int)round($media->getCalculatedLength() - $duration);
         if (0 !== $delta) {
@@ -532,12 +679,14 @@ final class LinearLogRefill
         return $overlap >= $duration / 2;
     }
 
+    /** @param array<string, mixed> $payload what the line is, beyond the song: refill_of or top_up */
     private function writeLine(
         Station $station,
         StationMedia $media,
         StationPlaylist $playlist,
         int $plannedAt,
-        int $refillOf,
+        string $note,
+        array $payload,
     ): int {
         $conn = $this->em->getConnection();
         $sequence = 1 + (int)$conn->fetchOne(
@@ -560,9 +709,9 @@ final class LinearLogRefill
                 'album' => $media->album,
                 'song_id' => $media->song_id,
                 'media_type' => $media->type,
-                'refill_of' => $refillOf,
+                ...$payload,
             ], JSON_THROW_ON_ERROR),
-            'note' => 'Refilled: replaces a dropped line',
+            'note' => $note,
             'is_locked' => 0,
             'created_at' => time(),
         ]);
