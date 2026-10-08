@@ -947,7 +947,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // only keeps complete sentences, so a truncated testimony or story can lose its
         // payoff mid-narrative. These content types still air in full as standalone liners;
         // combos are built from shorter content only.
-        $comboExcluded = [AiDjContent::TYPE_TESTIMONY, AiDjContent::TYPE_STORY];
+        // Bible verses too: 13,508 of 31,086 run past that budget, and a verse with no full
+        // stop inside it was dropped whole, leaving only "Here's a scripture from ..."
+        // (1 Kings 8:48, 2026-10-07).
+        $comboExcluded = [
+            AiDjContent::TYPE_TESTIMONY,
+            AiDjContent::TYPE_STORY,
+            AiDjContent::TYPE_BIBLE_VERSE,
+        ];
         $linerTypes = array_values(array_filter(
             $linerTypes,
             static fn(string $t): bool => !in_array($t, $comboExcluded, true) && $t !== $excludeType
