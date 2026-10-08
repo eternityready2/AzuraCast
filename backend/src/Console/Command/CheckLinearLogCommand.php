@@ -217,7 +217,15 @@ final class CheckLinearLogCommand extends CommandAbstract
             return $covered;
         };
         $previous = null;
-        foreach ($open as $row) {
+        // In the order the lines air: a song the AutoDJ added sits at the end
+        // of the queue, wherever the time it was picked for falls in the plan.
+        $airOrder = $open;
+        usort(
+            $airOrder,
+            static fn(array $a, array $b): int => [(int)$a['starts_at'], (int)$a['id']]
+                <=> [(int)$b['starts_at'], (int)$b['id']]
+        );
+        foreach ($airOrder as $row) {
             $start = (int)$row['starts_at'];
             $end = $start + (int)ceil((float)$row['runs_for']);
 

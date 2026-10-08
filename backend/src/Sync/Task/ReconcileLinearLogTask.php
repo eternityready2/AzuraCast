@@ -231,6 +231,10 @@ final class ReconcileLinearLogTask extends AbstractTask
                 $entry->title = $row->title;
                 $entry->artist = $row->artist;
                 $entry->text = $row->text;
+                // The line runs as long as the song that aired. Left at the
+                // planned song's length, a 6:36 swap-in logged as 5:45 ended
+                // 51s before the ID on the page and in the check.
+                $entry->duration = max(1.0, (float)($row->duration ?? $airedMedia->length));
                 // The ON AIR match is by payload.song_id, not by title/artist; left
                 // stale here it keeps pointing at the pre-swap song, so the Linear
                 // Log page can show a different song than what's actually airing.
