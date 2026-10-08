@@ -4,7 +4,7 @@
             <span v-if="group.isCurrent" class="badge text-bg-primary">{{ $gettext('NOW') }}</span>
             <strong>{{ group.label }}</strong>
             <span class="hour-summary">
-                {{ group.items.length }} {{ $gettext('items') }} / {{ group.totalDurationFormatted }}
+                {{ group.airableCount }} {{ $gettext('items') }} / {{ group.totalDurationFormatted }}
             </span>
             <span v-if="group.hasId" class="badge text-bg-danger ms-auto">{{ $gettext('Station ID') }}</span>
         </div>

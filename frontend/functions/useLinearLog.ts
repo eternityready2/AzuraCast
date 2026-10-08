@@ -107,7 +107,10 @@ export function useLinearLog() {
                 clearPoll();
             }
         } catch (error: unknown) {
-            clearPoll();
+            // Keep trying: one failed request (a restart, a network blip) used
+            // to stop the page updating until it was reloaded, and left it on
+            // "building" for good when it happened during a build.
+            schedulePoll(15000);
             buildError.value = errorMessage(error, $gettext("Unable to load the Linear Log."));
         } finally {
             initialLoading.value = false;
@@ -180,6 +183,7 @@ export function useLinearLog() {
                 dropped: number;
                 skipped_locked: number;
                 reasons: string[];
+                refilled?: number;
                 rebuilding: boolean;
             }>(rulesUrl.value, {});
 
@@ -191,6 +195,11 @@ export function useLinearLog() {
                     .replace("%{dropped}", String(data.dropped))
                     .replace("%{checked}", String(data.checked))
                     .replace("%{reasons}", data.reasons.join("; "));
+            }
+
+            if ((data.refilled ?? 0) > 0) {
+                ruleResult.value += " " + $gettext("%{refilled} refilled in place.")
+                    .replace("%{refilled}", String(data.refilled));
             }
 
             if (data.skipped_locked > 0) {
@@ -239,9 +248,15 @@ export function useLinearLog() {
         isEditing.value = true;
         buildError.value = "";
         try {
-            await axios.post(`${entriesUrl.value}/${entryId}/${edit}`, body);
-            status.value = "queued";
-            schedulePoll();
+            const {data} = await axios.post<{rebuilding?: boolean}>(`${entriesUrl.value}/${entryId}/${edit}`, body);
+            // Only a move, or replacing a line that is not queued yet, re-times
+            // the log in the background. Every other edit is already saved.
+            if (data.rebuilding) {
+                status.value = "queued";
+                schedulePoll();
+            } else {
+                await loadSnapshot(false);
+            }
             return true;
         } catch (error: unknown) {
             buildError.value = errorMessage(error, $gettext("Unable to change the log line."));

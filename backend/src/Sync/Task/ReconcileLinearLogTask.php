@@ -79,6 +79,11 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // Standing operator rules run on every pass, so a wrong line is
                 // taken out of the plan long before its air time.
                 $this->rules->apply($station);
+                // A repeat is taken out here only while its slot can still be
+                // refilled; otherwise QueuedRepeatGuard catches it at the queue.
+                if (LinearLogRefill::isEnabled($station)) {
+                    $this->rules->dropRepeats($station);
+                }
                 // Whatever was dropped -- by a rule, the schedule guard, a hand
                 // edit or a missing file -- is refilled in the log now, not left
                 // as a hole the AutoDJ fills only when the queue reaches it.

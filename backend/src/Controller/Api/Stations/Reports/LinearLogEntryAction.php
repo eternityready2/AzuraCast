@@ -97,7 +97,8 @@ final class LinearLogEntryAction
             $this->refresh($station);
         }
 
-        return $response->withJson(['success' => true]);
+        // The page shows its "building" state only when a build was queued.
+        return $response->withJson(['success' => true, 'rebuilding' => $needsRebuild]);
     }
 
     /**

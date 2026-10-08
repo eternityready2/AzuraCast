@@ -62,7 +62,7 @@ final class LinearLogRefill
      * At least this long is a programme: never refilled, never moved. The
      * station's shows run 25 minutes and up; live worship songs reach 11.
      */
-    private const float PROGRAMME_MIN_SECONDS = 1200.0;
+    public const float PROGRAMME_MIN_SECONDS = 1200.0;
 
     /** How far a replacement's length may differ from the dropped line's before it counts as a poor match. */
     private const float LENGTH_MATCH_SECONDS = 20.0;

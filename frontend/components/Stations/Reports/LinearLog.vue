@@ -144,6 +144,15 @@
                             >
                                 {{ filter.label }}
                             </button>
+                            <button
+                                type="button"
+                                class="btn btn-sm"
+                                :class="showDropped ? 'btn-dark' : 'btn-outline-secondary'"
+                                :title="$gettext('Lines taken out of the log, with the reason')"
+                                @click="showDropped = !showDropped"
+                            >
+                                {{ $gettext('Dropped') }}
+                            </button>
 
                             <div class="ms-md-auto d-flex gap-2 flex-wrap">
                                 <input
@@ -251,7 +260,7 @@
                     </div>
 
                     <div v-if="allItems.length" class="stats-bar">
-                        <span><strong>{{ filteredItems.length }}</strong> {{ $gettext('items') }}</span>
+                        <span><strong>{{ airableItems.length }}</strong> {{ $gettext('items') }}</span>
                         <span><strong>{{ totalDurationFormatted }}</strong> {{ $gettext('program runtime') }}</span>
                         <span><strong>{{ snapshotHours }}</strong> {{ $gettext('hour snapshot') }}</span>
                         <span v-if="zoneLabel">{{ $gettext('Station time') }} <strong>{{ zoneLabel }}</strong></span>
@@ -515,13 +524,14 @@ function resolveType(item: LinearLogItem): string {
     return item.media_type || "music";
 }
 
+// A dropped line stays in the log as a record of what was taken out and why
+// (see log_note). It is listed, struck through, unless the operator hides it.
+const showDropped = ref(true);
+
 const filteredItems = computed(() => {
     const query = searchQuery.value.trim().toLowerCase();
     return allItems.value.filter((item) => {
-        // A dropped line was rejected by an operator rule and kept only as an
-        // audit trail (see log_note); whatever refilled its slot is its own
-        // entry, so counting both here double-counts that time in the totals.
-        if (item.log_status === "dropped") return false;
+        if (item.log_status === "dropped" && !showDropped.value) return false;
         if (!activeTypes.value.includes(resolveType(item))) return false;
         if (!query) return true;
 
@@ -545,8 +555,12 @@ function secondsToHms(total: number): string {
     return hours > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`;
 }
 
+// What airs. A dropped line never does, and whatever refilled its slot is its
+// own line, so counting both would double-count that time in the totals.
+const airableItems = computed(() => filteredItems.value.filter((item) => item.log_status !== "dropped"));
+
 const totalDurationFormatted = computed(() => secondsToHms(
-    filteredItems.value.reduce((sum, item) => sum + (item.duration ?? 0), 0),
+    airableItems.value.reduce((sum, item) => sum + (item.duration ?? 0), 0),
 ));
 const gapCount = computed(() => gaps.value.length);
 const totalGapDuration = computed(() => secondsToHms(gaps.value.reduce((sum, gap) => sum + gap.duration, 0)));
@@ -606,14 +620,18 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 
     const currentHour = Math.floor(nowTs.value / 3600) * 3600;
     return [...groups.entries()].sort(([a], [b]) => a - b).map(([epochHour, items]) => {
-        const sorted = [...items].sort((a, b) => (a.played_at ?? 0) - (b.played_at ?? 0));
-        const total = sorted.reduce((sum, item) => sum + (item.duration ?? 0), 0);
+        // A dropped line is listed ahead of the line that took its slot.
+        const sorted = [...items].sort((a, b) => (a.played_at ?? 0) - (b.played_at ?? 0)
+            || Number(b.log_status === "dropped") - Number(a.log_status === "dropped"));
+        const airable = sorted.filter((item) => item.log_status !== "dropped");
+        const total = airable.reduce((sum, item) => sum + (item.duration ?? 0), 0);
 
         return {
             epochHour,
             label: formatDateTime(epochHour),
             isCurrent: epochHour === currentHour,
             items: sorted,
+            airableCount: airable.length,
             totalDurationFormatted: secondsToHms(total),
             hasId: sorted.some((item) => item.top_of_hour_legal_id || item.media_type === "id"),
         };

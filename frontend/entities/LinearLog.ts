@@ -75,6 +75,8 @@ export interface LinearLogHourGroup {
     label: string;
     isCurrent: boolean;
     items: LinearLogItem[];
+    // Lines that air: a dropped line is listed, but not counted or timed.
+    airableCount: number;
     totalDurationFormatted: string;
     hasId: boolean;
 }

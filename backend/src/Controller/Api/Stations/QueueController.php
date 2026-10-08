@@ -30,6 +30,7 @@ use App\Utilities\Time;
 use App\Utilities\Types;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\Serializer\Serializer;
@@ -466,7 +467,6 @@ final class QueueController extends AbstractStationApiCrudController
         ];
     }
 
-    /** @return array<string, mixed> */
     /** @return list<StationLogEntry> */
     private function getPlannedLogLines(Station $station, DateTimeImmutable $hourEnd): array
     {
@@ -591,6 +591,43 @@ final class QueueController extends AbstractStationApiCrudController
             ...get_object_vars($row),
             ...get_object_vars($apiResponse),
         ];
+    }
+
+    /**
+     * When the saved linear log controls playout, a queued song is a log line.
+     * Deleting only its queue row sent the line back to "planned" within a
+     * minute and playout queued the same song again. The line is dropped with
+     * the row, as Remove on the Linear Log tab does, and LinearLogRefill refills
+     * the slot.
+     *
+     * @param StationQueue $record
+     */
+    protected function deleteRecord(object $record): void
+    {
+        if (
+            null !== $record->log_entry_id
+            && !$record->is_played
+            && LinearLogPlayout::isPlayoutEnabled($record->station)
+        ) {
+            // Liquidsoap holds the file once it is sent; deleting the row then
+            // left the song to air anyway, and its line to be queued a second time.
+            if ($record->sent_to_autodj) {
+                throw new InvalidArgumentException(
+                    'This item is already loaded in the on-air player and plays as planned. '
+                    . 'It can no longer be removed.'
+                );
+            }
+
+            $entry = $this->em->find(StationLogEntry::class, $record->log_entry_id);
+            if ($entry instanceof StationLogEntry && $entry->isOpen()) {
+                $entry->status = StationLogEntry::STATUS_DROPPED;
+                $entry->note = 'Dropped: removed by hand';
+                $entry->queue_id = null;
+                $this->em->persist($entry);
+            }
+        }
+
+        parent::deleteRecord($record);
     }
 
     public function clearAction(

@@ -139,16 +139,31 @@ final class CheckLinearLogCommand extends CommandAbstract
 
         $conn = $this->em->getConnection();
 
+        // A line in the live queue starts when the queue has it and runs as
+        // long as its queue row, not as the plan had it: the air runs ahead of
+        // the plan as an hour goes on, and measured from the plan, the 36s it
+        // was ahead at 21:44 read as a hole before the next song. The row is
+        // also what airs when the Top-of-Hour swap changed the song (Wed
+        // 2026-10-07).
         /** @var list<array<string, mixed>> $open */
         $open = $conn->fetchAllAssociative(
             <<<'SQL'
-                SELECT e.id, e.planned_at, e.duration, e.title, e.media_id, e.playlist_id, e.payload
+                SELECT e.id, e.planned_at, e.duration, e.title, e.media_id, e.playlist_id, e.payload,
+                    COALESCE(q.queued_at, e.planned_at) AS starts_at,
+                    COALESCE(q.queued_duration, e.duration) AS runs_for
                 FROM station_log_entries e
+                LEFT JOIN (
+                    SELECT sq.log_entry_id, UNIX_TIMESTAMP(sq.timestamp_played) AS queued_at,
+                        sq.duration AS queued_duration
+                    FROM station_queue sq
+                    WHERE sq.station_id = ? AND sq.is_played = 0 AND sq.autodj_custom_uri IS NULL
+                    AND sq.log_entry_id IS NOT NULL
+                ) q ON q.log_entry_id = e.id AND e.status = 'queued'
                 WHERE e.station_id = ? AND e.status IN ('planned', 'queued')
                 AND e.planned_at + e.duration > ? AND e.planned_at < ?
                 ORDER BY e.planned_at ASC, e.id ASC
             SQL,
-            [$station->id, $now, $until]
+            [$station->id, $station->id, $now, $until]
         );
 
         $isProgramme = static fn(array $row): bool => str_contains((string)($row['payload'] ?? ''), 'scheduled_programme');
@@ -203,10 +218,10 @@ final class CheckLinearLogCommand extends CommandAbstract
         };
         $previous = null;
         foreach ($open as $row) {
-            $start = (int)$row['planned_at'];
-            $end = $start + (int)ceil((float)$row['duration']);
+            $start = (int)$row['starts_at'];
+            $end = $start + (int)ceil((float)$row['runs_for']);
 
-            $key = $start . '|' . $row['title'];
+            $key = (int)$row['planned_at'] . '|' . $row['title'];
             if (isset($seen[$key])) {
                 $duplicates[] = sprintf('%s "%s" (lines %d and %d)', $at($start), $row['title'], $seen[$key], $row['id']);
             }

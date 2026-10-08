@@ -113,6 +113,14 @@ final class LinearLogPlayout implements EventSubscriberInterface
      */
     private function hasLineForHour(Station $station, DateTimeInterface $expected): bool
     {
+        $nextPlannedAt = $this->nextPlannedAt($station);
+
+        return null !== $nextPlannedAt && $nextPlannedAt < self::hourEnd($station, $expected);
+    }
+
+    /** Planned air time of the line playout takes next, or null when none is planned. */
+    private function nextPlannedAt(Station $station): ?int
+    {
         $plannedAt = $this->em->createQuery(
             <<<'DQL'
                 SELECT e.planned_at FROM App\Entity\StationLogEntry e
@@ -126,7 +134,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
             ->setMaxResults(1)
             ->getOneOrNullResult();
 
-        return is_array($plannedAt) && (int)$plannedAt['planned_at'] < self::hourEnd($station, $expected);
+        return is_array($plannedAt) ? (int)$plannedAt['planned_at'] : null;
     }
 
     public function supplyFromLog(BuildQueue $event): void
@@ -189,7 +197,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
         unset($this->replacementFor[$at]);
 
         if (null === $entryId) {
-            $this->writeLiveLine($event->getStation(), $row, $at);
+            $this->writeLiveLine($event, $row);
             return;
         }
 
@@ -268,11 +276,40 @@ final class LinearLogPlayout implements EventSubscriberInterface
      * and showed as a hole (Brandon Heath, queued for 15:02:55 on Mon
      * 2026-10-05). Written with plain SQL so no other pending change is flushed
      * mid-build; ReconcileLinearLogTask then settles it like any queued line.
+     *
+     * The note says why the log had no line for the slot, so a hole in the plan
+     * reads differently from an hour whose own lines ran out before the ID.
      */
-    private function writeLiveLine(Station $station, StationQueue $row, int $at): void
+    private function writeLiveLine(BuildQueue $event, StationQueue $row): void
     {
         if (null === $row->media || $row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
             return;
+        }
+
+        $station = $event->getStation();
+        $expected = $event->getExpectedPlayTime();
+        $at = $expected->getTimestamp();
+
+        if (null !== $row->request) {
+            $note = 'Live: listener request';
+        } else {
+            $nextPlannedAt = $this->nextPlannedAt($station);
+            $reason = match (true) {
+                $event->isInterrupting() => 'an interrupting playlist took the slot',
+                null === $nextPlannedAt => 'the log has no planned lines',
+                $nextPlannedAt >= self::hourEnd($station, $expected) => "this hour's log lines ran out",
+                default => 'no log line was ready',
+            };
+            $note = 'Live: picked by AutoDJ (' . $reason . ')';
+
+            $this->logger->notice('Linear Log: the AutoDJ picked a song the log did not plan.', [
+                'reason' => $reason,
+                'airs_at' => $expected->format(DATE_ATOM),
+                'next_planned_at' => null === $nextPlannedAt
+                    ? null
+                    : $expected->setTimestamp($nextPlannedAt)->format(DATE_ATOM),
+                'song' => $row->text,
+            ]);
         }
 
         $conn = $this->em->getConnection();
@@ -293,9 +330,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
             'title' => null !== $row->title ? mb_substr($row->title, 0, 255) : null,
             'artist' => null !== $row->artist ? mb_substr($row->artist, 0, 255) : null,
             'payload' => json_encode(LinearLogStore::payloadForQueueRow($row), JSON_THROW_ON_ERROR),
-            'note' => null !== $row->request
-                ? 'Live: listener request'
-                : 'Live: picked by AutoDJ (no log line was ready)',
+            'note' => $note,
             'is_locked' => 0,
             'created_at' => time(),
         ]);

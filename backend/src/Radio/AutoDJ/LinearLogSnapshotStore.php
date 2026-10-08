@@ -13,6 +13,13 @@ final class LinearLogSnapshotStore
 {
     private const int CACHE_TTL = 172800;
 
+    /**
+     * A build queued or started this long ago that never reported back is not
+     * running any more. A build takes under a minute and waits at most 20
+     * minutes for another one to finish.
+     */
+    private const int STALE_BUILD_SECONDS = 1800;
+
     public function __construct(
         private readonly CacheInterface $cache,
         private readonly EntityManagerInterface $em,
@@ -26,10 +33,10 @@ final class LinearLogSnapshotStore
     {
         $snapshot = $this->cache->get($this->getKey($station));
         if (is_array($snapshot)) {
-            return [
+            return $this->settleStaleBuild([
                 ...$this->emptySnapshot($station),
                 ...$snapshot,
-            ];
+            ]);
         }
 
         $persistent = $this->loadPersistent($station);
@@ -43,6 +50,36 @@ final class LinearLogSnapshotStore
         }
 
         return $this->emptySnapshot($station);
+    }
+
+    /**
+     * A build whose worker was restarted under it (a deploy), or whose request
+     * was lost, never marks itself finished or failed. Left "queued" or
+     * "building", the page kept its spinner and held every edit button
+     * disabled until the next daily build. It is reported as the failed build
+     * it is, which also lets the hourly check start a new one.
+     *
+     * @param array<string, mixed> $snapshot
+     * @return array<string, mixed>
+     */
+    private function settleStaleBuild(array $snapshot): array
+    {
+        $since = match ($snapshot['status']) {
+            'queued' => $snapshot['requested_at'],
+            'building' => $snapshot['started_at'],
+            default => null,
+        };
+
+        if (null === $since || time() - (int)$since < self::STALE_BUILD_SECONDS) {
+            return $snapshot;
+        }
+
+        $snapshot['status'] = 'failed';
+        $snapshot['failed_at'] = (int)$since + self::STALE_BUILD_SECONDS;
+        $snapshot['error'] = 'The build did not finish: its background worker was restarted or the request '
+            . 'was lost. The saved log still drives playout; the next hourly check builds again.';
+
+        return $snapshot;
     }
 
     public function markQueued(Station $station, int $hours): void
