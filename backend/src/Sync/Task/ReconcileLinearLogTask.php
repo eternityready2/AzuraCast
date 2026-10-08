@@ -9,6 +9,7 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
+use App\Radio\AutoDJ\LinearLog\LinearLogRefill;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\StrictProgrammeClock;
@@ -28,6 +29,8 @@ final class ReconcileLinearLogTask extends AbstractTask
 {
     private const string NO_AUDIO_NOTE = 'Dropped: no audio from the stream during its window';
 
+    private const string REOFFERED_NOTE = 'Re-offered: handed to Liquidsoap but never aired';
+
     /**
      * How far song history may sit from a queue row's played time and still
      * be that play. Liquidsoap reports a track as it starts, so after it is
@@ -44,6 +47,7 @@ final class ReconcileLinearLogTask extends AbstractTask
 
     public function __construct(
         private readonly LinearLogRules $rules,
+        private readonly LinearLogRefill $refill,
         private readonly LinearLogStore $store,
         private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
@@ -75,6 +79,10 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // Standing operator rules run on every pass, so a wrong line is
                 // taken out of the plan long before its air time.
                 $this->rules->apply($station);
+                // Whatever was dropped -- by a rule, the schedule guard, a hand
+                // edit or a missing file -- is refilled in the log now, not left
+                // as a hole the AutoDJ fills only when the queue reaches it.
+                $this->refill->refill($station);
             } catch (Throwable $e) {
                 $this->logger->error('Linear Log reconciliation failed.', [
                     'station_id' => $station->id,
@@ -170,6 +178,24 @@ final class ReconcileLinearLogTask extends AbstractTask
             if (null !== $row->media && !$this->wasHeard($station, $row->media->id, $playedAt)) {
                 if ($now < $playedAt + self::HEARD_AFTER_SECONDS) {
                     // Liquidsoap's report may still be on its way.
+                    $this->em->persist($entry);
+                    continue;
+                }
+
+                // Handed to Liquidsoap and lost before it aired (a restart, or the
+                // Top-of-Hour ID discarding a prefetched item): the line is still
+                // the log's, so it goes back to playout while its hour runs, as FM
+                // automation keeps an unplayed event. Once only, and only if the
+                // song has not aired since, so a late start is never replayed.
+                $reoffered = null !== $entry->note && str_starts_with($entry->note, self::REOFFERED_NOTE);
+                if (
+                    !$reoffered
+                    && $entry->planned_at >= $hourStart
+                    && !$this->airedSince($station, $row->media->id, $playedAt - self::HEARD_BEFORE_SECONDS)
+                ) {
+                    $entry->status = StationLogEntry::STATUS_PLANNED;
+                    $entry->queue_id = null;
+                    $entry->note = self::REOFFERED_NOTE;
                     $this->em->persist($entry);
                     continue;
                 }
@@ -383,6 +409,17 @@ final class ReconcileLinearLogTask extends AbstractTask
         }
 
         $this->em->persist($line);
+    }
+
+    /** True when the song has started on air at any time since $since. */
+    private function airedSince(Station $station, int $mediaId, int $since): bool
+    {
+        return false !== $this->em->getConnection()->fetchOne(
+            'SELECT 1 FROM song_history
+            WHERE station_id = ? AND media_id = ? AND timestamp_start >= ?
+            LIMIT 1',
+            [$station->id, $mediaId, gmdate('Y-m-d H:i:s', $since)]
+        );
     }
 
     private function wasHeard(Station $station, int $mediaId, int $playedAt): bool

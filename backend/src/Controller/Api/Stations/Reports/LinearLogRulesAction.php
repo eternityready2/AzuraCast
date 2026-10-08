@@ -6,17 +6,13 @@ namespace App\Controller\Api\Stations\Reports;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
-use App\Entity\Station;
 use App\Http\Response;
 use App\Http\ServerRequest;
-use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
+use App\Radio\AutoDJ\LinearLog\LinearLogRefill;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
-use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
-use Symfony\Component\Messenger\MessageBus;
-use Throwable;
 
 /**
  * Run the operator override rules against the saved log on demand, so the human
@@ -28,8 +24,7 @@ final class LinearLogRulesAction implements SingleActionInterface
 
     public function __construct(
         private readonly LinearLogRules $rules,
-        private readonly LinearLogSnapshotStore $snapshotStore,
-        private readonly MessageBus $messageBus,
+        private readonly LinearLogRefill $refill,
     ) {
     }
 
@@ -46,11 +41,10 @@ final class LinearLogRulesAction implements SingleActionInterface
 
         $result = $this->rules->apply($station);
 
-        // Re-plan so the holes the rules made are filled and every later line is
-        // re-timed against them.
-        if ($result['dropped'] > 0 && $station->backend_config->linear_log_rule_refill_dropped) {
-            $this->refresh($station);
-        }
+        // Refill the slots the rules emptied, each in place with a song of about
+        // the same length. A full rebuild used to run here, re-planning every
+        // unlocked hour past the lock window for a handful of dropped lines.
+        $refilled = $result['dropped'] > 0 ? $this->refill->refill($station) : 0;
 
         return $response->withJson([
             'success' => true,
@@ -58,18 +52,8 @@ final class LinearLogRulesAction implements SingleActionInterface
             'dropped' => $result['dropped'],
             'skipped_locked' => $result['skipped_locked'],
             'reasons' => $result['reasons'],
-            'rebuilding' => $result['dropped'] > 0 && $station->backend_config->linear_log_rule_refill_dropped,
+            'refilled' => $refilled,
+            'rebuilding' => false,
         ]);
-    }
-
-    private function refresh(Station $station): void
-    {
-        $hours = $station->backend_config->linear_log_hours;
-        $this->snapshotStore->markQueued($station, $hours);
-        try {
-            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, true, false));
-        } catch (Throwable $e) {
-            $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
-        }
     }
 }

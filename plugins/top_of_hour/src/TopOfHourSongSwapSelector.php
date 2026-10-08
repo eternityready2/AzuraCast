@@ -153,6 +153,16 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
      */
     private const float MIN_PRE_ID_FILL_SECONDS = 5.0;
 
+    /**
+     * Most of a final song the pre-fade may take at the ID. Past this the song
+     * is replaced by one that ends cleanly, or dropped (the "drop if more than
+     * 30s would be cut" default chosen for the Linear Log plan, 2026-09-24).
+     */
+    private const float MAX_PRE_FADE_CUT_SECONDS = 30.0;
+
+    /** A queued item at least this long is a programme, never pre-ID filler material. */
+    private const float PROGRAMME_MIN_SECONDS = 1200.0;
+
     /** Short-form media types: never music, never stacked before the ID. */
     private const array SHORT_FORM_MEDIA_TYPES = ['promo', 'ad'];
 
@@ -767,6 +777,14 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             $start,
         );
 
+        if (null === $stretchReplacement && -$remainder > self::MAX_PRE_FADE_CUT_SECONDS) {
+            // The pre-fade would take more than a song's outro: The Old Made New
+            // aired 45s of 223s at 12:59am Wed 2026-10-07. Treat it like the
+            // too-little-left case above: the longest item that ends before the
+            // ID, or no item at all, so the ID never cuts a song.
+            return $this->fitBeforeIdOrDrop($station, $playlists, $media, $start, $gap, $tolerance, $context);
+        }
+
         if (null === $stretchReplacement) {
             $this->logger->warning(
                 'Top-of-Hour swap: NO song in the library lands on the ID, even with stretch/squeeze; '
@@ -791,6 +809,68 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         );
 
         return [$spm, $replacementMedia, $stretchContext];
+    }
+
+    /**
+     * The final slot's pick would lose more than MAX_PRE_FADE_CUT_SECONDS to the
+     * ID and nothing lands on it: take the longest song, else one short item,
+     * that ends before the ID. Whatever is left before the ID is a short gap the
+     * next slot or the Liquidsoap fit closes. If nothing fits at all, drop the
+     * slot, as the too-little-left case does.
+     *
+     * @param list<StationPlaylist> $playlists
+     * @param array<string, mixed> $context
+     * @return array{StationPlaylistMedia, StationMedia, array<string, mixed>}|false
+     */
+    private function fitBeforeIdOrDrop(
+        Station $station,
+        array $playlists,
+        StationMedia $media,
+        CarbonImmutable $start,
+        float $gap,
+        float $tolerance,
+        array $context,
+    ): array|false {
+        $best = $this->findBestFitMedia($station, $playlists, $media->id, $start, $gap + $tolerance);
+        if (null === $best) {
+            $best = $this->findBestFitMedia(
+                $station,
+                $this->getShortFormFallbackPlaylists($station),
+                $media->id,
+                $start,
+                $gap + self::PRE_ID_CUT_GRACE_SECONDS,
+            );
+        }
+
+        if (null === $best) {
+            $this->logger->notice(
+                'Top-of-Hour swap: the pick would lose more than '
+                . (int)self::MAX_PRE_FADE_CUT_SECONDS . 's to the ID and nothing ends before it; '
+                . 'dropping this slot so nothing is cut.',
+                $context
+            );
+            return false;
+        }
+
+        [$spm, $replacementMedia, $isRepeat] = $best;
+        $bestLength = $this->landingLength($replacementMedia);
+
+        $this->logger->notice(
+            'Top-of-Hour swap: the pick would lose more than '
+            . (int)self::MAX_PRE_FADE_CUT_SECONDS . 's to the ID; '
+            . 'using the longest item that ends cleanly before it.',
+            $context + [
+                'replacement_media_id' => $replacementMedia->id,
+                'replacement_aired_length' => round($bestLength, 2),
+                'landing_error' => round($gap - $bestLength, 2),
+                'is_repeat_pick' => $isRepeat,
+            ]
+        );
+
+        return [$spm, $replacementMedia, $context + [
+            'is_repeat_pick' => $isRepeat,
+            'landing_error' => round($gap - $bestLength, 2),
+        ]];
     }
 
     /**
@@ -1678,6 +1758,14 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
+        // Only a song that would air before the ID is replaced. A programme that
+        // opens the new hour waits for the ID instead: swapped for a spot, Altered
+        // Stories left the queue at 6:55pm Wed 2026-10-07, and every song planned
+        // after the show was then judged inside the show's window and dropped.
+        if (!$this->mayAirBeforeId($row, $start)) {
+            return null;
+        }
+
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return null;
@@ -1826,6 +1914,28 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
         return StationMediaTypes::isStationId($type)
             || in_array($type, self::SHORT_FORM_MEDIA_TYPES, true);
+    }
+
+    /**
+     * True when the row is an ordinary song its playlist may air in the seconds
+     * before the ID. A long-form programme, or anything from a block that only
+     * opens with the new hour, is never the item the ID would cut: it is held
+     * until the ID/news hands the air back.
+     */
+    private function mayAirBeforeId(StationQueue $row, CarbonImmutable $start): bool
+    {
+        if (!$this->isOrdinaryMusicRow($row)) {
+            return false;
+        }
+
+        if (($row->media?->getCalculatedLength() ?? 0.0) >= self::PROGRAMME_MIN_SECONDS) {
+            return false;
+        }
+
+        $playlist = $row->playlist;
+
+        return !$playlist instanceof StationPlaylist
+            || $this->scheduler->isPlaylistAllowedAt($playlist, $start->toDateTimeImmutable());
     }
 
     /** True when the row plays a linear-log line the operator placed or locked by hand. */

@@ -148,7 +148,15 @@ final class LinearLogEntryAction
                 if (null !== $queueRow) {
                     $this->em->remove($queueRow);
                 }
-                $this->em->remove($entry);
+                // Kept as a dropped line, so the log shows what was planned and
+                // that it was taken out by hand; deleted, it left an unexplained
+                // hole. LinearLogRefill puts a song of about the same length in
+                // the slot within a minute, so nothing else in the log moves and
+                // no rebuild runs.
+                $entry->status = StationLogEntry::STATUS_DROPPED;
+                $entry->note = 'Dropped: removed by hand';
+                $entry->queue_id = null;
+                $needsRebuild = false;
                 break;
 
             case 'replace':
@@ -203,9 +211,7 @@ final class LinearLogEntryAction
         }
 
         // Changes are only saved for entities passed to persist().
-        if ('remove' !== $edit) {
-            $this->em->persist($entry);
-        }
+        $this->em->persist($entry);
 
         return $needsRebuild;
     }
