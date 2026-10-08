@@ -842,6 +842,17 @@ final class AiDjGenerator
     }
 
     /**
+     * True when a liner's whole spoken text fits one segment of a combo break,
+     * so generateComboBreak() airs it without cutting it.
+     */
+    public function fitsComboSegment(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro): bool
+    {
+        $text = trim($this->buildLinerText($dj, $content, $station, $includeIntro));
+
+        return mb_strlen($text) <= self::COMBO_SEGMENT_CHARS;
+    }
+
+    /**
      * Build spoken text for a content liner based on its type.
      */
     public function buildLinerText(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro = true): string

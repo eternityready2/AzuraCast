@@ -27,9 +27,19 @@ final class AiDjContentSelector
     ) {
     }
 
-    public function selectContent(int $djId, string $contentType, int $stationId): ?AiDjContent
-    {
+    /**
+     * @param (callable(AiDjContent): bool)|null $accept when given, only content it accepts is picked
+     */
+    public function selectContent(
+        int $djId,
+        string $contentType,
+        int $stationId,
+        ?callable $accept = null,
+    ): ?AiDjContent {
         $allContent = $this->getAvailableContent($stationId, $contentType);
+        if (null !== $accept) {
+            $allContent = array_filter($allContent, $accept);
+        }
         if ($allContent === []) {
             return null;
         }

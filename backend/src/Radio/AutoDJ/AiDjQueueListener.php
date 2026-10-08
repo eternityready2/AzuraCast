@@ -938,23 +938,23 @@ final class AiDjQueueListener implements EventSubscriberInterface
     /**
      * Pick one enabled liner content item, optionally excluding a type so the two
      * halves of a combo are different categories. Returns null if none available.
+     *
+     * $withIntro: whether the segment may carry the station intro, which makes its
+     * spoken text longer.
      */
-    private function selectLinerContent(AiDj $dj, Station $station, ?string $excludeType): ?AiDjContent
-    {
+    private function selectLinerContent(
+        AiDj $dj,
+        Station $station,
+        ?string $excludeType,
+        bool $withIntro,
+    ): ?AiDjContent {
         $linerTypes = $this->getLinerTypes($station);
         // Keep long, self-contained content out of combos. Testimonies and stories average
         // well over the per-segment budget (COMBO_SEGMENT_CHARS = 230), and truncateForTts
         // only keeps complete sentences, so a truncated testimony or story can lose its
         // payoff mid-narrative. These content types still air in full as standalone liners;
         // combos are built from shorter content only.
-        // Bible verses too: 13,508 of 31,086 run past that budget, and a verse with no full
-        // stop inside it was dropped whole, leaving only "Here's a scripture from ..."
-        // (1 Kings 8:48, 2026-10-07).
-        $comboExcluded = [
-            AiDjContent::TYPE_TESTIMONY,
-            AiDjContent::TYPE_STORY,
-            AiDjContent::TYPE_BIBLE_VERSE,
-        ];
+        $comboExcluded = [AiDjContent::TYPE_TESTIMONY, AiDjContent::TYPE_STORY];
         $linerTypes = array_values(array_filter(
             $linerTypes,
             static fn(string $t): bool => !in_array($t, $comboExcluded, true) && $t !== $excludeType
@@ -963,7 +963,22 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return null;
         }
         $type = $linerTypes[array_rand($linerTypes)];
-        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
+
+        // A Bible verse is read whole or not at all. 13,508 of 31,086 run past the
+        // segment budget, and one with no full stop inside it was dropped entirely,
+        // leaving only "Here's a scripture from ..." (1 Kings 8:48, 2026-10-07). A combo
+        // takes only a verse whose whole spoken text fits; the longer ones air as
+        // standalone liners. Scripture stays in combos, where most of it airs.
+        $accept = AiDjContent::TYPE_BIBLE_VERSE === $type
+            ? fn(AiDjContent $content): bool => $this->generator->fitsComboSegment(
+                $dj,
+                $content,
+                $station,
+                $withIntro
+            )
+            : null;
+
+        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id, $accept);
     }
 
     /**
@@ -1014,7 +1029,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // behind it. Artist history stays a full standalone break (pushArtistHistoryClip)
             // where it airs untruncated with the real facts intact.
             if ($introText === null) {
-                $c1 = $this->selectLinerContent($dj, $station, null);
+                $c1 = $this->selectLinerContent($dj, $station, null, true);
                 if ($c1 === null) {
                     $this->pushContentLiner($dj, $station, $backend);
                     return;
@@ -1031,7 +1046,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
             // Segment 2: a DIFFERENT liner type, rendered intro-free. If none is
             // available the combo degrades to a valid single-segment clip.
-            $c2 = $this->selectLinerContent($dj, $station, $usedType);
+            $c2 = $this->selectLinerContent($dj, $station, $usedType, false);
             $payloadText = $c2 !== null ? $this->generator->buildLinerText($dj, $c2, $station, false) : '';
             $segment2Title = $c2 !== null ? $this->getLinerTitle($c2->type) : null;
             $title = $segment2Title !== null && $segment2Title !== $segment1Title
