@@ -45,6 +45,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
     ];
 
     /**
+     * Content too long for a combo break, which airs only as a standalone liner.
+     * A combo cuts each half to complete sentences within its budget, so a
+     * testimony or story would lose its ending there.
+     */
+    private const array STANDALONE_ONLY_TYPES = [
+        AiDjContent::TYPE_TESTIMONY,
+        AiDjContent::TYPE_STORY,
+    ];
+
+    /**
      * Minimum seconds the current song must have LEFT for a post-song clip to be
      * trusted to air right after it (station crossfade prefetch window ~2s + safety
      * margin). Below this, the DJ names NO specific song (plays a liner) so she can
@@ -378,8 +388,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // Announce only the song that just played, one song per break for a clean,
             // natural flow. Never pass a "next" song, so the DJ never chains several
             // song names together in a single break.
-            if ($roll <= 45) {
+            if ($roll <= 40) {
                 $this->pushPostSongClip($dj, $curArtist, $curTitle, null, null, $station, $backend);
+            } elseif ($roll <= 45) {
+                // A testimony or a story. They air only as standalone liners, and the
+                // short liners added on 2026-09-24 took their share from that slot
+                // (35 of every 100 of these breaks down to 25), which cut them by about
+                // a third. These 5 give it back. They come from the song mention, the
+                // most frequent break by far (about 28 a day), so no library content
+                // and no short liner airs less.
+                $this->pushContentLiner($dj, $station, $backend, self::STANDALONE_ONLY_TYPES);
             } elseif ($roll <= 60) {
                 // A short fun fact about the artist that just played. Fetched
                 // safely (short timeout + cache); falls back to a content liner
@@ -651,6 +669,24 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ));
 
         return $types !== [] ? $types : self::LINER_TYPES;
+    }
+
+    /**
+     * The station's liner types, narrowed to $onlyTypes when it has any of them.
+     *
+     * @param string[]|null $onlyTypes
+     * @return non-empty-array<int, string>
+     */
+    private function linerTypesAmong(Station $station, ?array $onlyTypes): array
+    {
+        $linerTypes = $this->getLinerTypes($station);
+        if (null === $onlyTypes) {
+            return $linerTypes;
+        }
+
+        $narrowed = array_values(array_intersect($linerTypes, $onlyTypes));
+
+        return [] !== $narrowed ? $narrowed : $linerTypes;
     }
 
     /**
@@ -954,10 +990,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // only keeps complete sentences, so a truncated testimony or story can lose its
         // payoff mid-narrative. These content types still air in full as standalone liners;
         // combos are built from shorter content only.
-        $comboExcluded = [AiDjContent::TYPE_TESTIMONY, AiDjContent::TYPE_STORY];
         $linerTypes = array_values(array_filter(
             $linerTypes,
-            static fn(string $t): bool => !in_array($t, $comboExcluded, true) && $t !== $excludeType
+            static fn(string $t): bool => !in_array($t, self::STANDALONE_ONLY_TYPES, true) && $t !== $excludeType
         ));
         if ($linerTypes === []) {
             return null;
@@ -1122,13 +1157,17 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
+    /**
+     * @param string[]|null $onlyTypes pick from these content types when the station has any of them
+     */
     private function pushContentLiner(
         AiDj $dj,
         Station $station,
-        Liquidsoap $backend
+        Liquidsoap $backend,
+        ?array $onlyTypes = null,
     ): void {
         try {
-            $linerTypes = $this->getLinerTypes($station);
+            $linerTypes = $this->linerTypesAmong($station, $onlyTypes);
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
