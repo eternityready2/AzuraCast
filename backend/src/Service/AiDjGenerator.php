@@ -163,7 +163,7 @@ final class AiDjGenerator
         // 29 seconds into the music; 6 seconds had him talking too soon). It
         // closes with the music carrying on after the sign-off.
         if (in_array(AiDj::BED_SHIFT_INTRO, $enabled, true)) {
-            return ['path' => $path, 'lead_in' => 22.0, 'tail' => 4.0, 'from_start' => true, 'min_voice' => 0.0];
+            return ['path' => $path, 'lead_in' => 22.0, 'tail' => 8.0, 'from_start' => true, 'min_voice' => 0.0];
         }
         if (in_array(AiDj::BED_SHIFT_OUTRO, $enabled, true)) {
             return ['path' => $path, 'lead_in' => 22.0, 'tail' => 8.0, 'from_start' => false, 'min_voice' => 0.0];
@@ -173,7 +173,7 @@ final class AiDjGenerator
         return [
             'path' => $path,
             'lead_in' => 12.0,
-            'tail' => 3.5,
+            'tail' => 5.0,
             'from_start' => false,
             'min_voice' => self::BED_MIN_VOICE_SECONDS,
         ];
