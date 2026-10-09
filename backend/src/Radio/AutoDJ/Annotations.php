@@ -83,6 +83,7 @@ final class Annotations implements EventSubscriberInterface
             throw new RuntimeException('Queue is empty!');
         }
 
+        $startsAt = null;
         if ($asAutoDj) {
             // Last chance to catch drift before this row is irreversible.
             // postAnnotation() below marks it "sent" the moment this method
@@ -143,15 +144,30 @@ final class Annotations implements EventSubscriberInterface
                 $this->em->flush();
                 throw new RuntimeException('Queued row was dropped at the final check before sending.');
             }
+
+            // The check above worked out when this row starts from what really
+            // airs ahead of it, and everything that times the row while it is
+            // annotated goes by that. A row loaded under the ID lane starts when
+            // the lane lets go, which is only an estimate, so that one is timed
+            // as before.
+            if (!$heldBack && !$autoDjHeldByTopOfHour) {
+                $startsAt = $this->lastExpectedPlayAt;
+            }
         }
 
         $event = AnnotateNextSong::fromStationQueue($queueRow, $asAutoDj);
+        if (null !== $startsAt) {
+            $event->setExpectedPlayAt($startsAt->toDateTimeImmutable());
+        }
         $this->eventDispatcher->dispatch($event);
 
         return $event->buildAnnotations();
     }
 
-    /** @return bool true when a plugin held the row back from being sent now */
+    /**
+     * @return bool true when a plugin held the row back from being sent now
+     * @phpstan-impure
+     */
     private function revalidateBeforeSend(Station $station, StationQueue $queueRow): bool
     {
         $currentSong = $station->current_song;

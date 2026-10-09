@@ -10,6 +10,7 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\StationRequest;
 use App\Radio\Backend\Liquidsoap\ConfigWriter;
+use DateTimeImmutable;
 use RuntimeException;
 use Symfony\Contracts\EventDispatcher\Event;
 
@@ -52,6 +53,9 @@ final class AnnotateNextSong extends Event
 
     /** @var array Custom annotations that should be sent along with the AutoDJ response. */
     private array $annotations = [];
+
+    /** When this row starts, as the hand-off worked it out from what really airs ahead of it. */
+    private ?DateTimeImmutable $expectedPlayAt = null;
 
     public function __construct(
         private readonly Station $station,
@@ -114,6 +118,21 @@ final class AnnotateNextSong extends Event
     public function isAsAutoDj(): bool
     {
         return $this->asAutoDj;
+    }
+
+    /**
+     * Set at the hand-off for a row that airs straight after what is ahead of
+     * it: the start measured there (aired lengths, not file lengths) is the one
+     * every timing decision made while annotating the row goes by.
+     */
+    public function setExpectedPlayAt(DateTimeImmutable $expectedPlayAt): void
+    {
+        $this->expectedPlayAt = $expectedPlayAt;
+    }
+
+    public function getExpectedPlayAt(): ?DateTimeImmutable
+    {
+        return $this->expectedPlayAt;
     }
 
     /**

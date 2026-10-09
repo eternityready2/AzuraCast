@@ -128,6 +128,16 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     /** Largest error Liquidsoap's fit can absorb by tempo (3%, see TopOfHourRuntimeConfiguration). */
     private const float FIT_TEMPO_FRACTION = 0.03;
 
+    /** Liquidsoap's fit only touches songs longer than this (TopOfHourRuntimeConfiguration: full > 60.0). */
+    private const float FIT_MIN_SONG_SECONDS = 60.0;
+
+    /**
+     * A song that starts this close to the ID must finish before it. The hold
+     * window covers the last 45s; from there to here a song the ID would cut
+     * is replaced by something that ends before the ID (fitLateStartBeforeId()).
+     */
+    private const float LATE_START_SECONDS = 120.0;
+
     /** Score penalty for a candidate whose aired length is only estimated (no AutoCue yet). */
     private const float UNKNOWN_LENGTH_PENALTY = 8.0;
 
@@ -526,6 +536,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
 
         $replacement = $this->evaluateFinalSlot($station, $playlist, $media, $start);
+
+        // The swap found nothing to land on the ID and leaves the pick. Sent as
+        // it is in the last two minutes, the ID would cut it.
+        if (null === $replacement && $this->startsLateAndWouldBeCut($station, $media, $start)) {
+            $replacement = $this->fitLateStartBeforeId($station, $row, $playlist, $media, $start);
+        }
+
         if (null === $replacement) {
             return;
         }
@@ -644,6 +661,23 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         // track either crosses the deadline or leaves behind a remainder too
         // short for another whole song to occupy.
         $remainder = $gap - $originalLanding;
+
+        // The shortest file says a song COULD follow, not that one of the right
+        // length exists. With nothing to land in what this pick leaves, this
+        // pick is the last one, and is swapped for a song that ends on the ID.
+        if ($remainder > $minGap && !$this->leftoverCanBeFilled($station, $playlists, $remainder, $minGap, $media, $start)) {
+            $this->logger->notice(
+                'Top-of-Hour swap: no song lands in the seconds this pick would leave before the ID; '
+                . 'treating it as the final slot.',
+                [
+                    'media_id' => $media->id,
+                    'remainder' => round($remainder, 2),
+                    'min_gap' => round($minGap, 2),
+                ]
+            );
+            $minGap = $remainder;
+        }
+
         if ($remainder > $minGap) {
             $this->logger->notice(
                 'Top-of-Hour swap: evaluateFinalSlot bailed -- not yet the final slot '
@@ -871,6 +905,151 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             'is_repeat_pick' => $isRepeat,
             'landing_error' => round($gap - $bestLength, 2),
         ]];
+    }
+
+    /**
+     * Whether a song exists for the seconds a pick would leave before the ID.
+     * getMinFillableGap() answers with the shortest file in the playlists, and
+     * one 40s hymn ("Doxology") then makes every leftover over 45s look
+     * fillable in the overnight hymn hours: a 59s hymn was sent with 55s to go
+     * and an 82s one with 52s, and the ID cut both (Tue 2026-09-29). A leftover
+     * long enough for two songs is left to them; under that, only a song that
+     * lands on the ID within the tempo fit counts.
+     *
+     * @param list<StationPlaylist> $playlists
+     */
+    private function leftoverCanBeFilled(
+        Station $station,
+        array $playlists,
+        float $leftover,
+        float $minGap,
+        StationMedia $pick,
+        CarbonImmutable $start,
+    ): bool {
+        if ($leftover >= 2.0 * $minGap) {
+            return true;
+        }
+
+        return null !== $this->findLibraryMatch(
+            $station,
+            $playlists,
+            $leftover,
+            max(self::LANDED_TOLERANCE_SECONDS, $leftover * self::FIT_TEMPO_FRACTION),
+            $pick->id,
+            $start->addMilliseconds((int)round($this->landingLength($pick) * 1000)),
+        );
+    }
+
+    /**
+     * True when $media, starting at $start, begins in the last two minutes
+     * before the ID and cannot end on it: it runs past the ID by more than the
+     * cut grace, even after Liquidsoap's tempo fit (songs over a minute long, at
+     * most FIT_TEMPO_FRACTION faster).
+     */
+    private function startsLateAndWouldBeCut(Station $station, StationMedia $media, CarbonImmutable $start): bool
+    {
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
+            return false;
+        }
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+
+        $gap = $this->secondsBetween($start, $target);
+        if ($gap <= 0.0 || $gap > self::LATE_START_SECONDS) {
+            return false;
+        }
+
+        $length = $this->landingLength($media);
+        if ('music' === $media->type && $length > self::FIT_MIN_SONG_SECONDS) {
+            $length /= 1.0 + self::FIT_TEMPO_FRACTION;
+        }
+
+        return $length > $gap + self::PRE_ID_CUT_GRACE_SECONDS;
+    }
+
+    /**
+     * For a pick that starts in the last two minutes and would be cut, with no
+     * song in the library to land on the ID in its place: the longest song that
+     * ends before the ID, else one short item. A short item is the last thing
+     * before the ID (they are never stacked), so it is only used when the ID's
+     * early window covers what it leaves; nothing may follow it. Null leaves the
+     * pick as it was.
+     *
+     * @return array{StationPlaylistMedia, StationMedia, array<string, mixed>}|null
+     */
+    private function fitLateStartBeforeId(
+        Station $station,
+        StationQueue $row,
+        StationPlaylist $playlist,
+        StationMedia $media,
+        CarbonImmutable $start,
+    ): ?array {
+        $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
+        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $gap = $this->secondsBetween($start, $target);
+        $limit = $gap + self::PRE_ID_CUT_GRACE_SECONDS;
+
+        $best = $this->findBestFitMedia(
+            $station,
+            $this->getEligiblePlaylists($station, $start, $playlist),
+            $media->id,
+            $start,
+            $limit,
+        );
+
+        if (null === $best) {
+            $ahead = $this->findRowAhead($station, $row, $start);
+            if (null === $ahead || !$this->isShortForm($ahead)) {
+                $best = $this->findBestFitMedia(
+                    $station,
+                    $this->getShortFormFallbackPlaylists($station),
+                    $media->id,
+                    $start,
+                    $limit,
+                );
+            }
+            if (
+                null !== $best
+                && $gap - $this->landingLength($best[1]) > TopOfHourRuntimeConfiguration::EARLY_ID_WINDOW_SECONDS
+            ) {
+                $best = null;
+            }
+        }
+
+        $context = [
+            'queue_id' => $row->id ?? null,
+            'slot_starts_at' => $start->toIso8601String(),
+            'id_deadline_at' => $target->toIso8601String(),
+            'seconds_to_fill' => round($gap, 2),
+            'original_media_id' => $media->id,
+            'original_aired_length' => round($this->landingLength($media), 2),
+        ];
+
+        if (null === $best) {
+            $this->logger->warning(
+                'Top-of-Hour: the pick starts in the last two minutes and the ID would cut it, '
+                . 'but nothing ends before the ID in its place; the pick stays.',
+                $context
+            );
+            return null;
+        }
+
+        [$spm, $replacementMedia, $isRepeat] = $best;
+        $bestLength = $this->landingLength($replacementMedia);
+        $context += [
+            'replacement_media_id' => $replacementMedia->id,
+            'replacement_aired_length' => round($bestLength, 2),
+            'landing_error' => round($gap - $bestLength, 2),
+            'is_repeat_pick' => $isRepeat,
+        ];
+
+        $this->logger->notice(
+            'Top-of-Hour: the pick starts in the last two minutes and the ID would cut it; '
+            . 'using the longest item that ends before the ID instead.',
+            $context
+        );
+
+        return [$spm, $replacementMedia, $context];
     }
 
     /**
@@ -1232,6 +1411,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             }
             $candidateMedia = $spm->media;
             if ($candidateMedia->id === $excludeMediaId) {
+                continue;
+            }
+            // In a rotation playlist only music is a song. A show's playlist is
+            // in rotation while the show airs, and its 23s closing clip came out
+            // as "the longest song that fits" after Mad Christian Radio (replay
+            // of 2:57pm Sat 2026-10-03).
+            if (true !== $spm->playlist->is_jingle && 'music' !== $candidateMedia->type) {
                 continue;
             }
             $length = $this->landingLength($candidateMedia);
