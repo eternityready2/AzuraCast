@@ -29,6 +29,7 @@ use App\Radio\AutoDJ\LinearLog\LinearLogTiming;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Service\AirCheckFrontendConnectivityProbe;
 use App\Service\GuzzleFactory;
+use App\Sync\Task\BuildLinearLogTask;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\RequestOptions;
 use InvalidArgumentException;
@@ -420,6 +421,9 @@ final class FeatureSuiteController
             // An enabled log always drives playout (no separate switch).
             'playout_enabled' => $station->backend_config->linear_log_enabled,
             'configured_hours' => $hours,
+            'next_build_at' => $station->backend_config->linear_log_enabled
+                ? BuildLinearLogTask::nextDailyBuildAt($station)
+                : null,
             'ai_dj_projection' => 'shifts_only',
             'coverage' => null === $coverage ? null : [
                 'continuous_seconds' => $coverage->continuousSeconds(),

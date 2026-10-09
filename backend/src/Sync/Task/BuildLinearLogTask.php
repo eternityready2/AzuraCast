@@ -25,11 +25,23 @@ final class BuildLinearLogTask extends AbstractTask
     /** Station-local hour of the daily build (FM-style early-morning log). */
     private const int BUILD_LOCAL_HOUR = 3;
 
+    /** Minute of the hour the task runs at; see getSchedulePattern(). */
+    private const int BUILD_MINUTE = 7;
+
     public static function getSchedulePattern(): string
     {
         // Hourly, so run() can find the station's own local 3am (the pattern is
         // evaluated in UTC and cannot express a local hour across DST).
-        return '7 * * * *';
+        return self::BUILD_MINUTE . ' * * * *';
+    }
+
+    /** When the next daily build is due for this station (unix seconds), for the log page. */
+    public static function nextDailyBuildAt(Station $station): int
+    {
+        $now = Time::nowInTimezone($station->getTimezoneObject());
+        $next = $now->setTime(self::BUILD_LOCAL_HOUR, self::BUILD_MINUTE);
+
+        return ($next->getTimestamp() <= $now->getTimestamp() ? $next->addDay() : $next)->getTimestamp();
     }
 
     /**

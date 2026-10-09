@@ -81,6 +81,7 @@ export interface LinearLogResponse {
     hours: number;
     configured_hours: number;
     built_at: number | null;
+    next_build_at?: number | null;
     coverage_start: number | null;
     coverage_end: number | null;
     entries: LinearLogItem[];

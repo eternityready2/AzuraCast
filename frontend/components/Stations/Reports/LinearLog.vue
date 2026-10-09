@@ -157,7 +157,7 @@
                             <button
                                 type="button"
                                 class="btn btn-sm"
-                                :class="showDropped ? 'btn-dark' : 'btn-outline-secondary'"
+                                :class="showDropped ? 'btn-dark filter-on-dark' : 'btn-outline-secondary'"
                                 :title="$gettext('Lines taken out of the log, with the reason')"
                                 @click="showDropped = !showDropped"
                             >
@@ -209,7 +209,6 @@
                                     type="checkbox"
                                     role="switch"
                                     :checked="rules.linear_log_rule_enforce_windows"
-                                    :disabled="isApplyingRules"
                                     @change="setRule('linear_log_rule_enforce_windows', ($event.target as HTMLInputElement).checked)"
                                 >
                                 <label class="form-check-label" for="linear_log_rule_enforce_windows">
@@ -224,7 +223,6 @@
                                     type="checkbox"
                                     role="switch"
                                     :checked="rules.linear_log_rule_drop_outside_window"
-                                    :disabled="isApplyingRules"
                                     @change="setRule('linear_log_rule_drop_outside_window', ($event.target as HTMLInputElement).checked)"
                                 >
                                 <label class="form-check-label" for="linear_log_rule_drop_outside_window">
@@ -239,7 +237,6 @@
                                     type="checkbox"
                                     role="switch"
                                     :checked="rules.linear_log_rule_refill_dropped"
-                                    :disabled="isApplyingRules"
                                     @change="setRule('linear_log_rule_refill_dropped', ($event.target as HTMLInputElement).checked)"
                                 >
                                 <label class="form-check-label" for="linear_log_rule_refill_dropped">
@@ -247,25 +244,10 @@
                                 </label>
                             </div>
 
-                            <button
-                                type="button"
-                                class="btn btn-outline-primary btn-sm fw-semibold ms-md-auto"
-                                :disabled="isApplyingRules || isBuilding || !featureEnabled"
-                                @click="applyRules"
-                            >
-                                <span
-                                    v-if="isApplyingRules"
-                                    class="spinner-border spinner-border-sm me-1"
-                                    role="status"
-                                    aria-hidden="true"
-                                />
-                                {{ $gettext('Apply rules to the log now') }}
-                            </button>
                         </div>
 
                         <div class="small mt-2 text-body-secondary">
-                            {{ $gettext('Rules run on every build and every minute, and never touch a line you locked by hand.') }}
-                            <span v-if="ruleResult" class="fw-semibold text-body">{{ ruleResult }}</span>
+                            {{ $gettext('These rules run by themselves on every build and every minute, and never touch a line you locked by hand.') }}
                         </div>
 
                         <div class="d-flex flex-wrap align-items-center gap-2 mt-2 block-lock">
@@ -317,6 +299,9 @@
                         <span v-if="zoneLabel">{{ $gettext('Station time') }} <strong>{{ zoneLabel }}</strong></span>
                         <span v-if="builtAt">
                             {{ $gettext('Built') }} <strong>{{ formatDateTime(builtAt) }}</strong>
+                        </span>
+                        <span v-if="nextBuildAt">
+                            {{ $gettext('Next build') }} <strong>{{ formatDateTime(nextBuildAt) }}</strong>
                         </span>
                         <span v-if="coverageEnd">
                             {{ $gettext('Coverage through') }} <strong>{{ formatDateTime(coverageEnd) }}</strong>
@@ -460,6 +445,7 @@ const {
     hoursAhead,
     snapshotHours,
     builtAt,
+    nextBuildAt,
     coverageStart,
     coverageEnd,
     allItems,
@@ -476,9 +462,6 @@ const {
     editEntry,
     rules,
     setRule,
-    applyRules,
-    isApplyingRules,
-    ruleResult,
     searchMedia,
 } = useLinearLog();
 
@@ -587,7 +570,7 @@ const typeFilters = [
     {key: "promo", label: $gettext("Promo"), activeClass: "btn-info"},
     {key: "jingle", label: $gettext("Jingle"), activeClass: "btn-secondary"},
     {key: "podcast", label: $gettext("Podcast"), activeClass: "btn-primary"},
-    {key: "stream", label: $gettext("Stream"), activeClass: "btn-dark"},
+    {key: "stream", label: $gettext("Stream"), activeClass: "btn-dark filter-on-dark"},
     {key: "request", label: $gettext("Request"), activeClass: "btn-outline-primary"},
     {key: "clock_wheel", label: $gettext("Clock Wheel"), activeClass: "btn-primary"},
 ];
@@ -753,6 +736,7 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 .next-up-badge{display:inline-block;padding:.15rem .5rem;border-radius:.25rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color);border:1px solid var(--bs-border-color);font-weight:700;font-size:.72rem;letter-spacing:.04em;margin-right:.4rem}
 @keyframes on-air-flash{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion: reduce){.on-air-badge{animation:none}}
+.filter-on-dark{border:1px solid var(--bs-secondary-color);box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
 .log-alert{padding:.6rem 1rem;font-size:.86rem}
 .block-lock select{width:auto;max-width:11rem}
 .coverage-warning{padding:.6rem 1rem;border-bottom:1px solid var(--bs-warning-border-subtle);background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.82rem}

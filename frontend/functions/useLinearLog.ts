@@ -38,7 +38,6 @@ export function useLinearLog() {
     const settingsUrl = getStationApiUrl("/reports/linear-log/settings");
     const mediaUrl = getStationApiUrl("/reports/linear-log/media");
     const entriesUrl = getStationApiUrl("/reports/linear-log/entries");
-    const rulesUrl = getStationApiUrl("/reports/linear-log/rules/apply");
 
     const initialLoading = ref(true);
     const buildError = ref("");
@@ -48,6 +47,7 @@ export function useLinearLog() {
     const hoursAhead = ref(24);
     const snapshotHours = ref(24);
     const builtAt = ref<number | null>(null);
+    const nextBuildAt = ref<number | null>(null);
     const coverageStart = ref<number | null>(null);
     const coverageEnd = ref<number | null>(null);
     const allItems = ref<LinearLogItem[]>([]);
@@ -87,6 +87,7 @@ export function useLinearLog() {
             playoutEnabled.value = data.playout_enabled ?? false;
             snapshotHours.value = data.hours || data.configured_hours || 24;
             builtAt.value = data.built_at;
+            nextBuildAt.value = data.next_build_at ?? null;
             coverageStart.value = data.coverage_start;
             coverageEnd.value = data.coverage_end;
             allItems.value = data.entries ?? [];
@@ -146,7 +147,6 @@ export function useLinearLog() {
         linear_log_rule_refill_dropped: true,
     });
     const rulesLoaded = ref(false);
-    const ruleResult = ref("");
 
     async function loadRules(): Promise<void> {
         try {
@@ -170,56 +170,6 @@ export function useLinearLog() {
         } catch (error: unknown) {
             rules.value = {...rules.value, [key]: previous};
             buildError.value = errorMessage(error, $gettext("Unable to save the log rule."));
-        }
-    }
-
-    const isApplyingRules = ref(false);
-
-    /** Run the rules against the saved log now and report what they corrected. */
-    async function applyRules(): Promise<void> {
-        isApplyingRules.value = true;
-        buildError.value = "";
-        ruleResult.value = "";
-        try {
-            const {data} = await axios.post<{
-                checked: number;
-                dropped: number;
-                skipped_locked: number;
-                reasons: string[];
-                refilled?: number;
-                rebuilding: boolean;
-            }>(rulesUrl.value, {});
-
-            if (data.dropped === 0) {
-                ruleResult.value = $gettext("Checked %{count} planned lines; nothing broke the rules.")
-                    .replace("%{count}", String(data.checked));
-            } else {
-                ruleResult.value = $gettext("Took %{dropped} of %{checked} lines out of the plan: %{reasons}")
-                    .replace("%{dropped}", String(data.dropped))
-                    .replace("%{checked}", String(data.checked))
-                    .replace("%{reasons}", data.reasons.join("; "));
-            }
-
-            if ((data.refilled ?? 0) > 0) {
-                ruleResult.value += " " + $gettext("%{refilled} refilled in place.")
-                    .replace("%{refilled}", String(data.refilled));
-            }
-
-            if (data.skipped_locked > 0) {
-                ruleResult.value += " " + $gettext("%{locked} locked lines were left as you set them.")
-                    .replace("%{locked}", String(data.skipped_locked));
-            }
-
-            if (data.rebuilding) {
-                status.value = "queued";
-                schedulePoll();
-            } else {
-                await loadSnapshot(false);
-            }
-        } catch (error: unknown) {
-            buildError.value = errorMessage(error, $gettext("Unable to apply the log rules."));
-        } finally {
-            isApplyingRules.value = false;
         }
     }
 
@@ -364,6 +314,7 @@ export function useLinearLog() {
         hoursAhead,
         snapshotHours,
         builtAt,
+        nextBuildAt,
         coverageStart,
         coverageEnd,
         allItems,
@@ -383,8 +334,5 @@ export function useLinearLog() {
         rules,
         rulesLoaded,
         setRule,
-        applyRules,
-        isApplyingRules,
-        ruleResult,
     };
 }
