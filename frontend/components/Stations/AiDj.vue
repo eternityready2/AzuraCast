@@ -398,7 +398,7 @@
                                 </select>
                                 <div class="form-text">
                                     <template v-if="recordingsAvailable > 0">
-                                        {{ recordingsAvailable }} {{ $gettext('recordings on the server. One is picked at random and plays in place of an AI break, never in place of a song announcement.') }}
+                                        {{ recordingsAvailable }} {{ $gettext('recordings on the server. One is picked at random and plays as an extra break, so no AI break is lost; it takes the place of about one song.') }}
                                     </template>
                                     <template v-else>
                                         {{ $gettext('No recordings of this DJ are on the server.') }}

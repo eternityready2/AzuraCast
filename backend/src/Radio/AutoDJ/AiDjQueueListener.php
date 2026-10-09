@@ -341,6 +341,18 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         $cadenceKey = 'ai_dj_talk_cadence_' . $station->id . '_' . $dj->getId();
         $cadenceCredit = (float)($this->cache->get($cadenceKey) ?? 0.0) + $frequency;
+
+        // One of the DJ's own recorded breaks, when one is due, airs here as an
+        // extra: it is never in place of an AI break. It spends none of the talk
+        // credit, and the boundary after it (recording into song, where no AI
+        // break may air) is credited now, so the shift has as many AI breaks as
+        // it would without the recording. The time comes from the music.
+        if ($this->pushRecordedBreak($dj, $station, $backend, $now, $directAirTime)) {
+            $this->cache->set($cadenceKey, $cadenceCredit + $frequency, self::TALK_CADENCE_TTL_SECONDS);
+            $this->trackCurrentSong($station);
+            return;
+        }
+
         if ($cadenceCredit < 1.0) {
             $this->cache->set($cadenceKey, $cadenceCredit, self::TALK_CADENCE_TTL_SECONDS);
             $this->logger->debug('AI DJ: Skipped by talk cadence.', [
@@ -384,25 +396,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $roll = mt_rand(1, 100);
         $wantCombo = (mt_rand(1, 100) <= self::COMBO_PROBABILITY_PCT);
 
-        // Whether a combo opens by naming the song that just played. Decided here
-        // rather than inside pushComboClip so the choice below knows what kind of
-        // break this one is.
-        $comboNamesSong = 1 === mt_rand(0, 1);
-
-        // One of the DJ's own recorded breaks, when one is due, airs in place of
-        // this AI break. Never in place of a break that names the song that just
-        // played: that is the one thing a recording cannot do.
-        $namesSong = $curArtist !== null && $curArtist !== '' && ($wantCombo ? $comboNamesSong : $roll <= 40);
-        if (!$namesSong && $this->pushRecordedBreak($dj, $station, $backend, $now, $directAirTime)) {
-            $this->trackCurrentSong($station);
-            return;
-        }
-
         if ($wantCombo) {
             // Occasionally chain TWO segments into ONE clip so the DJ sounds like
             // she's having a short conversation (single self-intro, no double
             // introduction). Fails open to the single-segment paths on any error.
-            $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend, $comboNamesSong);
+            $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend);
         } elseif ($curArtist !== null && $curArtist !== '') {
             // Announce only the song that just played, one song per break for a clean,
             // natural flow. Never pass a "next" song, so the DJ never chains several
@@ -1047,8 +1045,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?string $curArtist,
         ?string $curTitle,
         Station $station,
-        Liquidsoap $backend,
-        bool $nameSong,
+        Liquidsoap $backend
     ): void {
         $enqueued = false;
         try {
@@ -1059,7 +1056,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
             // Segment 1, option A: post-song mention (respect the "don't name the
             // same song twice" guard — same cache key as pushPostSongClip).
-            if ($haveSong && $nameSong) {
+            if ($haveSong && mt_rand(0, 1) === 1) {
                 $namedKey = 'ai_dj_last_named_' . $station->id;
                 $songKey = strtolower(trim($curArtist . ' - ' . ($curTitle ?? '')));
                 if ($this->cache->get($namedKey) !== $songKey) {
@@ -1221,11 +1218,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
     }
 
     /**
-     * Queue one of the DJ's own recordings in place of an AI break. It runs for
+     * Queue one of the DJ's own recordings as an extra break. It runs for
      * minutes, not seconds, so unlike an AI break it has to be OVER before the
      * hour's speech cutoff. When none is short enough for the time left, or the
-     * boundary it would air at is not certain, the AI break plays and the
-     * recording waits for a later break.
+     * boundary it would air at is not certain, nothing is queued here and the
+     * recording waits for a later boundary.
      *
      * @return bool whether a recording was queued
      */

@@ -9,7 +9,8 @@ use DateTimeImmutable;
 use Throwable;
 
 /**
- * A DJ's own recorded breaks: now and then one airs in place of an AI break.
+ * A DJ's own recorded breaks: now and then one airs as an extra break, beside
+ * the AI breaks and never in place of one.
  *
  * The files sit on the uploads volume, one folder per DJ, already levelled to
  * the AI voice's loudness, beside an index of their lengths and a note of what
@@ -24,8 +25,8 @@ final class AiDjRecordings
 {
     public const string DIRECTORY = '/var/azuracast/storage/uploads/ai_dj/recordings';
 
-    /** Longer than this is a programme, not a break: never picked. */
-    private const float MAX_SECONDS = 330.0;
+    /** Longer than this costs the hour more than one song: never picked. */
+    private const float MAX_SECONDS = 210.0;
 
     /** The hour's recordings share the minutes between these two evenly. */
     private const int FIRST_MINUTE = 4;
@@ -44,7 +45,7 @@ final class AiDjRecordings
     }
 
     /**
-     * True when the break airing at $airsAt (station time) may be a recording:
+     * True when a recording may air at $airsAt (station time):
      * the DJ has them switched on, this clock hour has not had its share, the
      * last one was not just now, and the hour's next turn has opened.
      */
