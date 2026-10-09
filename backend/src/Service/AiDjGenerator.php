@@ -158,20 +158,22 @@ final class AiDjGenerator
             return null;
         }
 
-        // The shift opens on the top of the piece with a longer lead-in, and
+        // The shift opens on the top of the piece and lets it play before the
+        // first word, the way the DJ's own recorded shows did (he came in 22 to
+        // 29 seconds into the music; 6 seconds had him talking too soon). It
         // closes with the music carrying on after the sign-off.
         if (in_array(AiDj::BED_SHIFT_INTRO, $enabled, true)) {
-            return ['path' => $path, 'lead_in' => 6.0, 'tail' => 4.0, 'from_start' => true, 'min_voice' => 0.0];
+            return ['path' => $path, 'lead_in' => 22.0, 'tail' => 6.0, 'from_start' => true, 'min_voice' => 0.0];
         }
         if (in_array(AiDj::BED_SHIFT_OUTRO, $enabled, true)) {
-            return ['path' => $path, 'lead_in' => 4.0, 'tail' => 8.0, 'from_start' => false, 'min_voice' => 0.0];
+            return ['path' => $path, 'lead_in' => 6.0, 'tail' => 10.0, 'from_start' => false, 'min_voice' => 0.0];
         }
 
         // Anywhere else the music must not outlast the talking.
         return [
             'path' => $path,
-            'lead_in' => 3.5,
-            'tail' => 3.5,
+            'lead_in' => 6.0,
+            'tail' => 5.0,
             'from_start' => false,
             'min_voice' => self::BED_MIN_VOICE_SECONDS,
         ];
