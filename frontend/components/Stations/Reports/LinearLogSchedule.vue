@@ -6,7 +6,19 @@
             <span class="hour-summary">
                 {{ group.airableCount }} {{ $gettext('items') }} / {{ group.totalDurationFormatted }}
             </span>
-            <span v-if="group.hasId" class="badge text-bg-danger ms-auto">{{ $gettext('Station ID') }}</span>
+            <button
+                v-if="group.lockableIds.length"
+                type="button"
+                class="btn btn-outline-secondary btn-sm hour-lock ms-auto"
+                :title="group.allLocked ? $gettext('Unlock every line in this hour') : $gettext('Lock every line in this hour')"
+                :disabled="busy"
+                @click="emit('lock-lines', group.lockableIds, !group.allLocked)"
+            >{{ group.allLocked ? $gettext('Unlock hour') : $gettext('Lock hour') }}</button>
+            <span
+                v-if="group.hasId"
+                class="badge text-bg-danger"
+                :class="{'ms-auto': !group.lockableIds.length}"
+            >{{ $gettext('Station ID') }}</span>
         </div>
 
         <div class="table-responsive">
@@ -41,6 +53,12 @@
                                         <div v-if="item.artist" class="small track-artist">{{ item.artist }}</div>
                                         <div v-if="item.album" class="small text-body-secondary">{{ item.album }}</div>
                                         <div v-if="item.log_note" class="small log-note">{{ item.log_note }}</div>
+                                        <div
+                                            v-for="handEdit in item.hand_edits ?? []"
+                                            :key="`${handEdit.edit}-${handEdit.at}`"
+                                            class="small log-note hand-edit"
+                                            :class="{'hand-edit-undone': handEdit.undone}"
+                                        >{{ handEditLabel(handEdit) }}</div>
                                     </template>
                                 </div>
                             </div>
@@ -125,7 +143,23 @@
                                     :disabled="busy"
                                     @click="emit('edit', item, 'remove')"
                                 >&times;</button>
+                                <button
+                                    v-if="item.can_undo"
+                                    type="button"
+                                    class="btn btn-outline-primary"
+                                    :title="$gettext('Put this line back as it was before it was replaced')"
+                                    :disabled="busy"
+                                    @click="emit('edit', item, 'undo')"
+                                >{{ $gettext('Undo') }}</button>
                             </div>
+                            <button
+                                v-else-if="item.can_undo && item.log_entry_id"
+                                type="button"
+                                class="btn btn-outline-primary btn-sm"
+                                :title="$gettext('Put this line back in the log')"
+                                :disabled="busy"
+                                @click="emit('edit', item, 'undo')"
+                            >{{ $gettext('Undo') }}</button>
                         </td>
 
                         <td v-if="visibleColumns.includes('duration')" class="duration-cell pe-3">
@@ -139,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import type {LinearLogHourGroup, LinearLogItem} from "~/entities/LinearLog";
+import type {LinearLogHandEdit, LinearLogHourGroup, LinearLogItem} from "~/entities/LinearLog";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
 
@@ -154,6 +188,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "edit", item: LinearLogItem, edit: string): void;
     (e: "replace", item: LinearLogItem): void;
+    (e: "lock-lines", entryIds: number[], lock: boolean): void;
 }>();
 
 // Only saved lines that have not been handed to AutoDJ yet can change.
@@ -191,6 +226,27 @@ function logMarker(item: LinearLogItem): {label: string, cls: string} | null {
         default:
             return null;
     }
+}
+
+// "Replaced by hand 9:41:07 PM (was: Artist - Title)"
+function handEditLabel(handEdit: LinearLogHandEdit): string {
+    const labels: Record<string, string> = {
+        lock: $gettext("Locked by hand"),
+        unlock: $gettext("Unlocked by hand"),
+        up: $gettext("Moved up by hand"),
+        down: $gettext("Moved down by hand"),
+        remove: $gettext("Removed by hand"),
+        replace: $gettext("Replaced by hand"),
+        undo: $gettext("Put back by hand"),
+    };
+    let label = `${labels[handEdit.edit] ?? $gettext("Edited by hand")} ${formatTime(handEdit.at)}`;
+    if (handEdit.was && ["replace", "undo"].includes(handEdit.edit)) {
+        label += ` (${$gettext("was")}: ${handEdit.was})`;
+    }
+    if (handEdit.undone) {
+        label += ` - ${$gettext("undone")}`;
+    }
+    return label;
 }
 
 function statusLabel(item: LinearLogItem): string {
@@ -321,10 +377,14 @@ function formatStretch(ratio: number): string {
 .swapped-marker{background:var(--bs-warning);color:#000}
 .dropped-marker{background:var(--bs-dark)}
 .log-note{color:var(--bs-secondary-color)}
+.hand-edit{font-style:italic}
+.hand-edit-undone{text-decoration:line-through}
+.hour-lock{padding:.05rem .45rem;font-size:.72rem}
 .edit-cell{width:1%;white-space:nowrap}
 .status-cell{width:95px;font-size:.76rem}
 .queue-row.log-done td{opacity:.72}
 .queue-row.log-dropped td{opacity:.55;text-decoration:line-through}
+.queue-row.log-dropped td.edit-cell{opacity:1}
 .live-marker{background:var(--bs-secondary)}
 @media(max-width:767px){.rules-cell{min-width:160px}}
 </style>

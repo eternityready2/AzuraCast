@@ -6,6 +6,8 @@ namespace App\Controller\Api\Stations\Reports;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Entity\Station;
+use App\Entity\StationClockWheel;
+use App\Entity\StationLogEdit;
 use App\Entity\StationLogEntry;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
@@ -13,6 +15,7 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\AiredLength;
+use App\Radio\AutoDJ\LinearLog\LinearLogHandEdits;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
@@ -30,6 +33,10 @@ use Throwable;
  * replace a line that has not aired. A queued line is replaced inside its own
  * queue slot; a planned line is re-timed by a background build afterwards. A
  * line whose track Liquidsoap has already loaded can no longer change.
+ *
+ * Every edit is written to the line's history (LinearLogHandEdits) with what
+ * the line was before; "undo" puts a removed or replaced line back from it.
+ * "lock-lines" and "unlock-lines" lock a whole hour or block in one go.
  */
 final class LinearLogEntryAction
 {
@@ -38,11 +45,15 @@ final class LinearLogEntryAction
     /** How far past the ID a hand pick may run: the Top-of-Hour cut grace. */
     private const float ID_CUT_GRACE_SECONDS = 1.0;
 
+    /** Most lines one block lock takes: a full day of short songs, with room. */
+    private const int MAX_BLOCK_LINES = 1000;
+
     public function __construct(
         private readonly MessageBus $messageBus,
         private readonly LinearLogSnapshotStore $snapshotStore,
         private readonly TopOfHourClock $topOfHourClock,
         private readonly AiredLength $airedLength,
+        private readonly LinearLogHandEdits $handEdits,
     ) {
     }
 
@@ -58,16 +69,23 @@ final class LinearLogEntryAction
         if (!$entry instanceof StationLogEntry || $entry->station->id !== $station->id) {
             throw new InvalidArgumentException('Log line not found.');
         }
+        $edit = $params['edit'] ?? '';
+        $data = (array)$request->getParsedBody();
+
+        // Undo starts from a line that was removed (dropped), and a whole-hour
+        // lock names its own lines; both make their own checks.
+        $isUndo = StationLogEdit::EDIT_UNDO === $edit;
+        $isBlockLock = in_array($edit, ['lock-lines', 'unlock-lines'], true);
+
         // A line that has aired is history and never changes. A queued line can
         // still be pulled or swapped, the way an operator kills the next item on
         // FM automation, until Liquidsoap has loaded its track (see below). Only
         // re-ordering needs the line to still be unqueued, since moving a row the
         // queue already holds would not change what plays next.
-        if (!$entry->isOpen()) {
+        if (!$isUndo && !$isBlockLock && !$entry->isOpen()) {
             throw new InvalidArgumentException('This line has already aired and can no longer be changed.');
         }
 
-        $edit = $params['edit'] ?? '';
         $isQueued = StationLogEntry::STATUS_QUEUED === $entry->status;
         if ($isQueued && in_array($edit, ['up', 'down'], true)) {
             throw new InvalidArgumentException(
@@ -75,15 +93,17 @@ final class LinearLogEntryAction
             );
         }
 
-        $data = (array)$request->getParsedBody();
-
         // One short transaction holding the queue row, so Liquidsoap cannot load
         // it between the check below and the edit. Not wrapInTransaction(): it
         // closes the EntityManager on any exception, refusals included.
         $conn = $this->em->getConnection();
         $conn->beginTransaction();
         try {
-            $needsRebuild = $this->applyEdit($station, $entry, $edit, $data);
+            $needsRebuild = match (true) {
+                $isUndo => $this->undo($station, $entry),
+                $isBlockLock => $this->lockLines($station, 'lock-lines' === $edit, $data),
+                default => $this->applyEdit($station, $entry, $edit, $data),
+            };
             $this->em->flush();
             $conn->commit();
         } catch (Throwable $e) {
@@ -126,6 +146,7 @@ final class LinearLogEntryAction
         }
 
         $needsRebuild = true;
+        $before = $this->handEdits->snapshot($entry, $queueRow);
 
         switch ($edit) {
             // A lock changes no timing, and the page reads it from the saved
@@ -155,7 +176,7 @@ final class LinearLogEntryAction
                 // the slot within a minute, so nothing else in the log moves and
                 // no rebuild runs.
                 $entry->status = StationLogEntry::STATUS_DROPPED;
-                $entry->note = 'Dropped: removed by hand';
+                $entry->note = LinearLogHandEdits::REMOVED_NOTE;
                 $entry->queue_id = null;
                 $needsRebuild = false;
                 break;
@@ -213,8 +234,204 @@ final class LinearLogEntryAction
 
         // Changes are only saved for entities passed to persist().
         $this->em->persist($entry);
+        $this->handEdits->record($entry, $edit, $before);
 
         return $needsRebuild;
+    }
+
+    /**
+     * Put a line back as it was before it was removed or replaced by hand.
+     *
+     * @return bool whether the log needs a background re-time afterwards
+     */
+    private function undo(Station $station, StationLogEntry $entry): bool
+    {
+        $last = $this->handEdits->lastUndoable($entry);
+        if (null === $last) {
+            throw new InvalidArgumentException('Nothing was removed or replaced on this line, so there is nothing to undo.');
+        }
+
+        $queueRow = $this->findQueueRow($station, $entry);
+        $now = $this->handEdits->snapshot($entry, $queueRow);
+        $before = $last->before_state;
+
+        $needsRebuild = StationLogEdit::EDIT_REMOVE === $last->edit
+            ? $this->putBackRemoved($station, $entry, $before)
+            : $this->putBackReplaced($station, $entry, $queueRow, $before);
+
+        $last->undone_at = time();
+        $this->em->persist($last);
+        $this->em->persist($entry);
+        $this->handEdits->record($entry, StationLogEdit::EDIT_UNDO, $now);
+
+        return $needsRebuild;
+    }
+
+    /** @param array<string, mixed> $before */
+    private function putBackRemoved(Station $station, StationLogEntry $entry, array $before): bool
+    {
+        if (
+            StationLogEntry::STATUS_DROPPED !== $entry->status
+            || LinearLogHandEdits::REMOVED_NOTE !== $entry->note
+        ) {
+            throw new InvalidArgumentException('This line has changed since it was removed and can no longer be put back.');
+        }
+
+        // Playout drops a line still unplayed when its hour ends, so a line
+        // put back after that would only be dropped again.
+        $hourEnd = CarbonImmutable::createFromTimestamp($entry->planned_at, $station->getTimezoneObject())
+            ->startOfHour()
+            ->addHour()
+            ->getTimestamp();
+        if ($hourEnd <= time()) {
+            throw new InvalidArgumentException('The hour this line was planned for has ended; it can no longer be put back.');
+        }
+
+        // The refill may have written a song into the slot since. That song
+        // gives the slot back, unless it is already in the player.
+        $refillId = (int)($entry->payload['refilled_by'] ?? 0);
+        $refill = $refillId > 0 ? $this->em->find(StationLogEntry::class, $refillId) : null;
+        if ($refill instanceof StationLogEntry && StationLogEntry::STATUS_DROPPED !== $refill->status) {
+            if (!$refill->isOpen()) {
+                throw new InvalidArgumentException('The song that took this line\'s place has already aired.');
+            }
+
+            $refillRow = $this->findQueueRow($station, $refill);
+            if (null !== $refillRow && $refillRow->sent_to_autodj) {
+                throw new InvalidArgumentException(sprintf(
+                    'The song that took this line\'s place is already loaded in the on-air player and plays at %s. '
+                    . 'The line can no longer be put back.',
+                    $this->stationTime($station, $refillRow->timestamp_played)
+                ));
+            }
+            if (null !== $refillRow) {
+                $this->em->remove($refillRow);
+            }
+
+            $refill->status = StationLogEntry::STATUS_DROPPED;
+            $refill->note = 'Dropped: the line it replaced was put back by hand';
+            $refill->queue_id = null;
+            $this->em->persist($refill);
+        }
+
+        // Its queue row went with the removal, so it is a planned line again:
+        // playout takes it at its turn. The refill's markers go with the old
+        // payload, so the line counts as never dropped.
+        $entry->status = StationLogEntry::STATUS_PLANNED;
+        $entry->queue_id = null;
+        $entry->note = $before['note'] ?? null;
+        $entry->payload = $before['payload'] ?? null;
+        $entry->is_locked = (bool)($before['is_locked'] ?? false);
+
+        return false;
+    }
+
+    /** @param array<string, mixed> $before */
+    private function putBackReplaced(
+        Station $station,
+        StationLogEntry $entry,
+        ?StationQueue $queueRow,
+        array $before,
+    ): bool {
+        if (!$entry->isOpen()) {
+            throw new InvalidArgumentException('This line has already aired and can no longer be changed.');
+        }
+        if (null !== $queueRow && $queueRow->sent_to_autodj) {
+            throw new InvalidArgumentException(sprintf(
+                'This line is already loaded in the on-air player and plays at %s as it is. '
+                . 'The replacement can no longer be undone.',
+                $this->stationTime($station, $queueRow->timestamp_played)
+            ));
+        }
+
+        $media = $this->em->find(StationMedia::class, (int)($before['media_id'] ?? 0));
+        if (
+            !$media instanceof StationMedia
+            || $media->storage_location->id !== $station->media_storage_location->id
+        ) {
+            throw new InvalidArgumentException('The song this line had before is no longer in the library.');
+        }
+
+        $entry->media = $media;
+        $entry->title = $before['title'] ?? $media->title;
+        $entry->artist = $before['artist'] ?? $media->artist;
+        $entry->text = $before['text'] ?? mb_substr((string)$media->text, 0, 255);
+        $entry->duration = (float)($before['duration'] ?? max(1.0, $media->getCalculatedLength()));
+        $entry->payload = $before['payload'] ?? null;
+        $entry->note = $before['note'] ?? null;
+        $entry->is_locked = (bool)($before['is_locked'] ?? false);
+
+        if (null === $queueRow) {
+            // Not queued: it is part of the plan again, re-timed like the
+            // replacement was.
+            $entry->status = StationLogEntry::STATUS_PLANNED;
+            $entry->queue_id = null;
+
+            return true;
+        }
+
+        // Back into its own queue slot, with the settings the replacement cleared.
+        $this->replaceQueuedSong($queueRow, $media);
+        $queue = is_array($before['queue'] ?? null) ? $before['queue'] : [];
+        $queueRow->autodj_custom_uri = $queue['autodj_custom_uri'] ?? null;
+        $queueRow->clock_wheel = !empty($queue['clock_wheel_id'])
+            ? $this->em->find(StationClockWheel::class, (int)$queue['clock_wheel_id'])
+            : null;
+        $queueRow->clock_wheel_max_play_seconds = $queue['clock_wheel_max_play_seconds'] ?? null;
+        $queueRow->clock_wheel_schedule_mode = $queue['clock_wheel_schedule_mode'] ?? null;
+        $queueRow->clock_wheel_enforce_cap = (bool)($queue['clock_wheel_enforce_cap'] ?? false);
+        $queueRow->clock_wheel_stretch_ratio = $queue['clock_wheel_stretch_ratio'] ?? null;
+        $queueRow->clock_wheel_legal_id_substitute = (bool)($queue['clock_wheel_legal_id_substitute'] ?? false);
+        $queueRow->hour_boundary_enforce_cap = (bool)($queue['hour_boundary_enforce_cap'] ?? false);
+        $queueRow->hour_boundary_max_play_seconds = $queue['hour_boundary_max_play_seconds'] ?? null;
+        $entry->queue_id = $queueRow->id;
+
+        return false;
+    }
+
+    /**
+     * Lock or unlock every line the page names: a whole hour, or a block of
+     * hours. Lines that have aired since the page loaded are skipped.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function lockLines(Station $station, bool $lock, array $data): bool
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map(intval(...), (array)($data['entry_ids'] ?? [])),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ([] === $ids) {
+            throw new InvalidArgumentException('No log lines were given to lock.');
+        }
+        if (count($ids) > self::MAX_BLOCK_LINES) {
+            throw new InvalidArgumentException('That is too many lines to lock at once; lock a shorter block.');
+        }
+
+        /** @var StationLogEntry[] $lines */
+        $lines = $this->em->createQuery(
+            <<<'DQL'
+                SELECT e FROM App\Entity\StationLogEntry e
+                WHERE e.station = :station AND e.id IN (:ids) AND e.status IN (:open)
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('ids', $ids)
+            ->setParameter('open', [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED])
+            ->getResult();
+
+        foreach ($lines as $line) {
+            if ($line->is_locked === $lock) {
+                continue;
+            }
+
+            $before = $this->handEdits->snapshot($line, null);
+            $line->is_locked = $lock;
+            $this->em->persist($line);
+            $this->handEdits->record($line, $lock ? StationLogEdit::EDIT_LOCK : StationLogEdit::EDIT_UNLOCK, $before);
+        }
+
+        // A lock changes no timing.
+        return false;
     }
 
     /**

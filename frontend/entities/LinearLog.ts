@@ -38,6 +38,25 @@ export interface LinearLogItem {
     is_locked?: boolean;
     timing?: 'hard' | 'soft';
     timing_reason?: string | null;
+    // Hand edits on this line, newest first, and whether Undo can still put it back.
+    hand_edits?: LinearLogHandEdit[];
+    can_undo?: boolean;
+}
+
+export interface LinearLogHandEdit {
+    edit: "lock" | "unlock" | "up" | "down" | "remove" | "replace" | "undo";
+    at: number;
+    // What the line was before the edit, where that says something.
+    was: string | null;
+    undone: boolean;
+}
+
+export interface LinearLogAlert {
+    type: "hole" | "short_hour" | "autodj";
+    level: "danger" | "warning";
+    at: number;
+    seconds: number;
+    message: string;
 }
 
 export interface LinearLogGap {
@@ -67,6 +86,7 @@ export interface LinearLogResponse {
     entries: LinearLogItem[];
     gaps: LinearLogGap[];
     ai_dj_shifts: LinearLogAiDjShift[];
+    alerts?: LinearLogAlert[];
     error: string | null;
 }
 
@@ -79,6 +99,9 @@ export interface LinearLogHourGroup {
     airableCount: number;
     totalDurationFormatted: string;
     hasId: boolean;
+    // Saved lines in this hour that can still be locked, and whether all of them are.
+    lockableIds: number[];
+    allLocked: boolean;
 }
 
 export interface LinearLogMediaOption {

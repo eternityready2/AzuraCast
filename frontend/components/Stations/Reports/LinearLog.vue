@@ -131,6 +131,16 @@
                         </div>
                     </div>
 
+                    <div
+                        v-for="alert in alerts"
+                        :key="`${alert.type}-${alert.at}`"
+                        class="alert rounded-0 border-start-0 border-end-0 mb-0 log-alert"
+                        :class="alert.level === 'danger' ? 'alert-danger' : 'alert-warning'"
+                    >
+                        <span class="fw-semibold">{{ alertLabel(alert) }}</span>
+                        {{ alert.message }}
+                    </div>
+
                     <div class="filter-bar">
                         <div class="d-flex flex-wrap align-items-center gap-2">
                             <span class="filter-label">{{ $gettext('Show') }}</span>
@@ -257,6 +267,47 @@
                             {{ $gettext('Rules run on every build and every minute, and never touch a line you locked by hand.') }}
                             <span v-if="ruleResult" class="fw-semibold text-body">{{ ruleResult }}</span>
                         </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-2 block-lock">
+                            <span class="filter-label">{{ $gettext('Lock a block') }}</span>
+                            <select
+                                v-model="blockFrom"
+                                class="form-select form-select-sm"
+                                :aria-label="$gettext('From hour')"
+                            >
+                                <option :value="null">{{ $gettext('From hour') }}</option>
+                                <option v-for="group in hourGroups" :key="group.epochHour" :value="group.epochHour">
+                                    {{ group.label }}
+                                </option>
+                            </select>
+                            <span class="small text-body-secondary">{{ $gettext('through') }}</span>
+                            <select
+                                v-model="blockThrough"
+                                class="form-select form-select-sm"
+                                :aria-label="$gettext('Through hour')"
+                            >
+                                <option :value="null">{{ $gettext('Through hour') }}</option>
+                                <option v-for="group in hourGroups" :key="group.epochHour" :value="group.epochHour">
+                                    {{ group.label }}
+                                </option>
+                            </select>
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary btn-sm"
+                                :disabled="isEditing || isBuilding || blockFrom === null || blockThrough === null"
+                                @click="lockBlock(true)"
+                            >
+                                {{ $gettext('Lock') }}
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-outline-secondary btn-sm"
+                                :disabled="isEditing || isBuilding || blockFrom === null || blockThrough === null"
+                                @click="lockBlock(false)"
+                            >
+                                {{ $gettext('Unlock') }}
+                            </button>
+                        </div>
                     </div>
 
                     <div v-if="allItems.length" class="stats-bar">
@@ -320,6 +371,7 @@
                         :busy="isEditing || isBuilding"
                         @edit="onEdit"
                         @replace="openReplace"
+                        @lock-lines="onLockLines"
                     />
 
                     <div
@@ -391,7 +443,7 @@ import LinearLogSchedule from "~/components/Stations/Reports/LinearLogSchedule.v
 import LinearLogQueueTab from "~/components/Stations/Reports/LinearLogQueueTab.vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
-import type {LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
+import type {LinearLogAlert, LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
@@ -412,6 +464,7 @@ const {
     coverageEnd,
     allItems,
     gaps,
+    alerts,
     aiDjShifts,
     nowTs,
     onAirItem,
@@ -433,6 +486,37 @@ async function onEdit(item: LinearLogItem, edit: string): Promise<void> {
     if (!item.log_entry_id) return;
     if (edit === "remove" && !window.confirm($gettext("Remove this line from the log?"))) return;
     await editEntry(item.log_entry_id, edit);
+}
+
+// A whole hour, or a block of hours, in one go.
+async function onLockLines(entryIds: number[], lock: boolean): Promise<void> {
+    if (entryIds.length === 0) return;
+    await editEntry(entryIds[0], lock ? "lock-lines" : "unlock-lines", {entry_ids: entryIds});
+}
+
+const blockFrom = ref<number | null>(null);
+const blockThrough = ref<number | null>(null);
+
+function blockLineIds(): number[] {
+    if (blockFrom.value === null || blockThrough.value === null) return [];
+    const from = Math.min(blockFrom.value, blockThrough.value);
+    const through = Math.max(blockFrom.value, blockThrough.value);
+    return hourGroups.value
+        .filter((group) => group.epochHour >= from && group.epochHour <= through)
+        .flatMap((group) => group.lockableIds);
+}
+
+async function lockBlock(lock: boolean): Promise<void> {
+    await onLockLines(blockLineIds(), lock);
+}
+
+function alertLabel(alert: LinearLogAlert): string {
+    const labels: Record<string, string> = {
+        hole: $gettext("Hole in the log:"),
+        short_hour: $gettext("Short hour:"),
+        autodj: $gettext("AutoDJ stepped in:"),
+    };
+    return labels[alert.type] ?? "";
 }
 
 const replaceItem = ref<LinearLogItem | null>(null);
@@ -625,6 +709,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
             || Number(b.log_status === "dropped") - Number(a.log_status === "dropped"));
         const airable = sorted.filter((item) => item.log_status !== "dropped");
         const total = airable.reduce((sum, item) => sum + (item.duration ?? 0), 0);
+        const lockable = sorted.filter((item) => !!item.log_entry_id
+            && ["planned", "queued"].includes(item.log_status ?? ""));
 
         return {
             epochHour,
@@ -634,6 +720,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
             airableCount: airable.length,
             totalDurationFormatted: secondsToHms(total),
             hasId: sorted.some((item) => item.top_of_hour_legal_id || item.media_type === "id"),
+            lockableIds: lockable.map((item) => item.log_entry_id as number),
+            allLocked: lockable.length > 0 && lockable.every((item) => item.is_locked),
         };
     });
 });
@@ -665,6 +753,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 .next-up-badge{display:inline-block;padding:.15rem .5rem;border-radius:.25rem;background:var(--bs-secondary-bg);color:var(--bs-secondary-color);border:1px solid var(--bs-border-color);font-weight:700;font-size:.72rem;letter-spacing:.04em;margin-right:.4rem}
 @keyframes on-air-flash{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion: reduce){.on-air-badge{animation:none}}
+.log-alert{padding:.6rem 1rem;font-size:.86rem}
+.block-lock select{width:auto;max-width:11rem}
 .coverage-warning{padding:.6rem 1rem;border-bottom:1px solid var(--bs-warning-border-subtle);background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.82rem}
 .loading-state,.empty-state{padding:4rem 1.5rem;text-align:center}
 .empty-state p{max-width:760px;margin:.5rem auto 0;color:var(--bs-secondary-color)}

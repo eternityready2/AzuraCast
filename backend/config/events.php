@@ -113,6 +113,10 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
     );
     $dispatcher->addCallableListener(
         Event\GetNotifications::class,
+        App\Notification\Check\LinearLogCheck::class
+    );
+    $dispatcher->addCallableListener(
+        Event\GetNotifications::class,
         App\Notification\Check\ProfilerAdvisorCheck::class
     );
     $dispatcher->addCallableListener(

@@ -22,6 +22,8 @@ use App\Radio\Adapters;
 use App\Radio\Backend\Liquidsoap\ConfigWriter as LiquidsoapConfigWriter;
 use App\Radio\Configuration;
 use App\Radio\Frontend\Icecast;
+use App\Radio\AutoDJ\LinearLog\LinearLogAlerts;
+use App\Radio\AutoDJ\LinearLog\LinearLogHandEdits;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\LinearLog\LinearLogTiming;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
@@ -46,6 +48,8 @@ final class FeatureSuiteController
         private readonly LinearLogSnapshotStore $linearLogSnapshotStore,
         private readonly LinearLogStore $linearLogStore,
         private readonly LinearLogTiming $linearLogTiming,
+        private readonly LinearLogHandEdits $linearLogHandEdits,
+        private readonly LinearLogAlerts $linearLogAlerts,
         private readonly MessageBus $messageBus,
         private readonly Configuration $configuration,
         private readonly CacheInterface $cache,
@@ -378,6 +382,7 @@ final class FeatureSuiteController
         $snapshot = $this->linearLogSnapshotStore->get($station);
         $hours = $station->backend_config->linear_log_hours;
         $coverage = null;
+        $alerts = [];
 
         // Live times, like an FM automation log: re-timed from what is actually
         // playing on every load instead of waiting for the next rebuild.
@@ -398,6 +403,12 @@ final class FeatureSuiteController
 
                 // FM-style hard/soft timing for the HARD marker on the page.
                 $snapshot['entries'] = $this->linearLogTiming->tagEntries($station, $snapshot['entries']);
+
+                // Each line's hand edits (what it was before, and whether Undo
+                // can still put it back), and what the operator must be told:
+                // a hole, a short hour, songs the AutoDJ had to pick itself.
+                $snapshot['entries'] = $this->linearLogHandEdits->tagEntries($station, $snapshot['entries']);
+                $alerts = $this->linearLogAlerts->forStation($station, $coverage);
             } catch (Throwable $e) {
                 // Fall back to the snapshot's own times; no coverage claim.
             }
@@ -416,6 +427,7 @@ final class FeatureSuiteController
                 'satisfied' => $coverage->satisfies($hours * 3600),
                 'holes' => array_values($coverage->holes),
             ],
+            'alerts' => $alerts,
         ]);
     }
 

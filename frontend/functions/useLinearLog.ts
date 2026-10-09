@@ -4,6 +4,7 @@ import useNowPlaying from "~/functions/useNowPlaying.ts";
 import {useStationData} from "~/functions/useStationQuery.ts";
 import type {
     LinearLogAiDjShift,
+    LinearLogAlert,
     LinearLogGap,
     LinearLogItem,
     LinearLogMediaOption,
@@ -51,6 +52,7 @@ export function useLinearLog() {
     const coverageEnd = ref<number | null>(null);
     const allItems = ref<LinearLogItem[]>([]);
     const gaps = ref<LinearLogGap[]>([]);
+    const alerts = ref<LinearLogAlert[]>([]);
     const aiDjShifts = ref<LinearLogAiDjShift[]>([]);
     const nowTs = ref(Math.floor(Date.now() / 1000));
 
@@ -89,6 +91,7 @@ export function useLinearLog() {
             coverageEnd.value = data.coverage_end;
             allItems.value = data.entries ?? [];
             gaps.value = data.gaps ?? [];
+            alerts.value = data.alerts ?? [];
             aiDjShifts.value = data.ai_dj_shifts ?? [];
             buildError.value = data.error ?? "";
             nowTs.value = Math.floor(Date.now() / 1000);
@@ -241,7 +244,8 @@ export function useLinearLog() {
         }
     }
 
-    // Hand edits on a planned log line (lock, unlock, up, down, remove, replace).
+    // Hand edits on a planned log line (lock, unlock, up, down, remove, replace,
+    // undo), and lock-lines / unlock-lines for a whole hour or block.
     const isEditing = ref(false);
 
     async function editEntry(entryId: number, edit: string, body: Record<string, unknown> = {}): Promise<boolean> {
@@ -364,6 +368,7 @@ export function useLinearLog() {
         coverageEnd,
         allItems,
         gaps,
+        alerts,
         aiDjShifts,
         nowTs,
         onAirItem,
