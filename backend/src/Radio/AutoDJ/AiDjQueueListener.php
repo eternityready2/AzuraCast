@@ -20,6 +20,7 @@ use App\Entity\AiDjContent;
 use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
 use Psr\SimpleCache\CacheInterface;
@@ -84,6 +85,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
     /** Keep cadence credit through a full shift, but let it naturally reset overnight. */
     private const int TALK_CADENCE_TTL_SECONDS = 12 * 3600;
 
+    /** A recorded break must be over this long before the hour's speech cutoff. */
+    private const int RECORDING_END_MARGIN_SECONDS = 10;
+
     public function __construct(
         private readonly AiDjScheduler $scheduler,
         private readonly AiDjGenerator $generator,
@@ -94,6 +98,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly StationQueueRepository $stationQueueRepo,
         private readonly AiDjArtistHistoryService $artistHistoryService,
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
+        private readonly AiDjRecordings $recordings,
     ) {
     }
 
@@ -379,11 +384,25 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $roll = mt_rand(1, 100);
         $wantCombo = (mt_rand(1, 100) <= self::COMBO_PROBABILITY_PCT);
 
+        // Whether a combo opens by naming the song that just played. Decided here
+        // rather than inside pushComboClip so the choice below knows what kind of
+        // break this one is.
+        $comboNamesSong = 1 === mt_rand(0, 1);
+
+        // One of the DJ's own recorded breaks, when one is due, airs in place of
+        // this AI break. Never in place of a break that names the song that just
+        // played: that is the one thing a recording cannot do.
+        $namesSong = $curArtist !== null && $curArtist !== '' && ($wantCombo ? $comboNamesSong : $roll <= 40);
+        if (!$namesSong && $this->pushRecordedBreak($dj, $station, $backend, $now, $directAirTime)) {
+            $this->trackCurrentSong($station);
+            return;
+        }
+
         if ($wantCombo) {
             // Occasionally chain TWO segments into ONE clip so the DJ sounds like
             // she's having a short conversation (single self-intro, no double
             // introduction). Fails open to the single-segment paths on any error.
-            $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend);
+            $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend, $comboNamesSong);
         } elseif ($curArtist !== null && $curArtist !== '') {
             // Announce only the song that just played, one song per break for a clean,
             // natural flow. Never pass a "next" song, so the DJ never chains several
@@ -1028,7 +1047,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?string $curArtist,
         ?string $curTitle,
         Station $station,
-        Liquidsoap $backend
+        Liquidsoap $backend,
+        bool $nameSong,
     ): void {
         $enqueued = false;
         try {
@@ -1039,7 +1059,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
             // Segment 1, option A: post-song mention (respect the "don't name the
             // same song twice" guard — same cache key as pushPostSongClip).
-            if ($haveSong && mt_rand(0, 1) === 1) {
+            if ($haveSong && $nameSong) {
                 $namedKey = 'ai_dj_last_named_' . $station->id;
                 $songKey = strtolower(trim($curArtist . ' - ' . ($curTitle ?? '')));
                 if ($this->cache->get($namedKey) !== $songKey) {
@@ -1198,6 +1218,88 @@ final class AiDjQueueListener implements EventSubscriberInterface
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to push content liner: %s', $e->getMessage()));
         }
+    }
+
+    /**
+     * Queue one of the DJ's own recordings in place of an AI break. It runs for
+     * minutes, not seconds, so unlike an AI break it has to be OVER before the
+     * hour's speech cutoff. When none is short enough for the time left, or the
+     * boundary it would air at is not certain, the AI break plays and the
+     * recording waits for a later break.
+     *
+     * @return bool whether a recording was queued
+     */
+    private function pushRecordedBreak(
+        AiDj $dj,
+        Station $station,
+        Liquidsoap $backend,
+        DateTimeImmutable $now,
+        DateTimeImmutable $directAirTime,
+    ): bool {
+        try {
+            $airsAt = $directAirTime->setTimezone($station->getTimezoneObject());
+            if (!$this->recordings->isDue($dj, $airsAt)) {
+                return false;
+            }
+
+            // The fit below is measured from the end of the song on air. Inside
+            // the prefetch window, or with no known end, the clip can air one
+            // whole song later than that, so the fit would mean nothing.
+            $untilBoundary = $airsAt->getTimestamp() - $now->getTimestamp();
+            if ($untilBoundary <= self::NAME_SAFE_MIN_REMAINING_SECONDS) {
+                return false;
+            }
+
+            $room = $this->roomForRecordedBreak($station, $airsAt);
+            $recording = $this->recordings->pick($dj, (float)$room);
+            if (null === $recording) {
+                $this->logger->debug('AI DJ: No recorded break fits in the time left.', ['room' => $room]);
+                return false;
+            }
+
+            $title = 'Recorded Break';
+            $track = sprintf(
+                'annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",'
+                . 'liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s',
+                $title,
+                $dj->getName(),
+                $recording['path']
+            );
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+            $this->createQueueEntry($station, $dj->getName(), $recording['path'], $title);
+            $this->recordings->markQueued($dj, $recording['name'], $airsAt);
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued a recorded break for DJ "%s" (%s, %ds)',
+                $dj->getName(),
+                $recording['name'],
+                (int)round($recording['seconds'])
+            ));
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to queue a recorded break: %s', $e->getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Seconds a recording airing at $airsAt may run: up to the hour's speech
+     * cutoff, or the next news window if that opens first.
+     */
+    private function roomForRecordedBreak(Station $station, DateTimeImmutable $airsAt): int
+    {
+        $minute = (int)$airsAt->format('i');
+        $endsBy = AiDjTalkRules::speechCutoffSecondsIntoHour($station);
+
+        for ($next = $minute + 1; $next * 60 < $endsBy; $next++) {
+            if ($this->isNearNewsBulletin($station, $next)) {
+                $endsBy = $next * 60;
+                break;
+            }
+        }
+
+        return $endsBy - ($minute * 60 + (int)$airsAt->format('s')) - self::RECORDING_END_MARGIN_SECONDS;
     }
 
     /**

@@ -96,6 +96,10 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $background_audio_path = null;
 
+    /** The DJ's own recorded breaks played in place of an AI break, per clock hour; 0 is off. */
+    #[ORM\Column(type: 'smallint', options: ['default' => 0])]
+    private int $recordings_per_hour = 0;
+
     /**
      * Which breaks get the music bed (BED_* keys); null means the defaults.
      *
@@ -232,6 +236,16 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
         $this->use_background_audio = $useBackgroundAudio;
     }
 
+    public function getRecordingsPerHour(): int
+    {
+        return $this->recordings_per_hour;
+    }
+
+    public function setRecordingsPerHour(int $perHour): void
+    {
+        $this->recordings_per_hour = max(0, min(4, $perHour));
+    }
+
     public function getBackgroundAudioPath(): ?string
     {
         return $this->background_audio_path;
@@ -320,6 +334,7 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
                 ? basename($this->background_audio_path)
                 : null,
             'background_audio_breaks' => $this->getBackgroundAudioBreaks(),
+            'recordings_per_hour' => $this->recordings_per_hour,
             'schedules' => array_map(
                 static fn(AiDjSchedule $schedule): array => $schedule->api(),
                 $this->schedules->toArray()

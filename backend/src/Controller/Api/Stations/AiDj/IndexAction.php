@@ -10,6 +10,7 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
@@ -34,6 +35,7 @@ final class IndexAction implements SingleActionInterface
     public function __construct(
         private readonly AiDjRepository $aiDjRepository,
         private readonly AiDjScheduler $scheduler,
+        private readonly AiDjRecordings $recordings,
     ) {
     }
 
@@ -45,8 +47,12 @@ final class IndexAction implements SingleActionInterface
         $station = $request->getStation();
         $djList = $this->aiDjRepository->findByStation($station->id);
 
+        // With how many of the DJ's own recordings are on the server, for the editor.
         $result = array_map(
-            static fn(\App\Entity\AiDj $dj): array => $dj->api(),
+            fn(\App\Entity\AiDj $dj): array => [
+                ...$dj->api(),
+                'recordings_available' => $this->recordings->available($dj),
+            ],
             $djList
         );
 

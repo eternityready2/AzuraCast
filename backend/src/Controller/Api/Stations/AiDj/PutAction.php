@@ -91,6 +91,9 @@ final class PutAction implements SingleActionInterface
         if (array_key_exists('use_background_audio', $body)) {
             $dj->setUseBackgroundAudio((bool)$body['use_background_audio']);
         }
+        if (isset($body['recordings_per_hour'])) {
+            $dj->setRecordingsPerHour((int)$body['recordings_per_hour']);
+        }
         if (array_key_exists('background_audio_breaks', $body)) {
             $dj->setBackgroundAudioBreaks(
                 is_array($body['background_audio_breaks'])

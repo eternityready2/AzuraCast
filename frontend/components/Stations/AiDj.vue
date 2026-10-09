@@ -379,6 +379,34 @@
                             </div>
 
                             <h4 class="ai-dj-form-section">
+                                {{ $gettext('Real Recordings') }}
+                            </h4>
+
+                            <div class="mb-3">
+                                <label class="form-label" for="dj_recordings_per_hour">
+                                    {{ $gettext('Play this DJ\'s own recordings') }}
+                                </label>
+                                <select
+                                    id="dj_recordings_per_hour"
+                                    v-model.number="form.recordings_per_hour"
+                                    class="form-select"
+                                    :disabled="recordingsAvailable === 0"
+                                >
+                                    <option :value="0">{{ $gettext('Off') }}</option>
+                                    <option :value="1">{{ $gettext('About one an hour') }}</option>
+                                    <option :value="2">{{ $gettext('About two an hour') }}</option>
+                                </select>
+                                <div class="form-text">
+                                    <template v-if="recordingsAvailable > 0">
+                                        {{ recordingsAvailable }} {{ $gettext('recordings on the server. One is picked at random and plays in place of an AI break, never in place of a song announcement.') }}
+                                    </template>
+                                    <template v-else>
+                                        {{ $gettext('No recordings of this DJ are on the server.') }}
+                                    </template>
+                                </div>
+                            </div>
+
+                            <h4 class="ai-dj-form-section">
                                 {{ $gettext('Shift Announcements') }}
                             </h4>
 
@@ -627,6 +655,8 @@ interface AiDj {
     use_background_audio: boolean;
     background_audio_file?: string | null;
     background_audio_breaks?: string[];
+    recordings_per_hour?: number;
+    recordings_available?: number;
     schedules?: AiDjSchedule[];
 }
 
@@ -640,6 +670,7 @@ interface AiDjForm {
     voice_speed: number;
     use_background_audio: boolean;
     background_audio_breaks: string[];
+    recordings_per_hour: number;
 }
 
 interface VoiceOption {
@@ -685,7 +716,11 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     voice_speed: 1.0,
     use_background_audio: false,
     background_audio_breaks: [...defaultBedBreaks],
+    recordings_per_hour: 0,
 }));
+
+// How many of the DJ's own recordings are on the server; they are loaded there, not uploaded here.
+const recordingsAvailable = computed(() => editingDj.value?.recordings_available ?? 0);
 
 // The music file picked in the editor; sent with the DJ when it is saved.
 const bedUpload = ref<{name: string, data: string} | null>(null);
@@ -848,6 +883,7 @@ const openEdit = (dj: AiDj): void => {
         voice_speed: dj.voice_speed ?? 1.0,
         use_background_audio: dj.use_background_audio ?? false,
         background_audio_breaks: [...(dj.background_audio_breaks ?? defaultBedBreaks)],
+        recordings_per_hour: dj.recordings_per_hour ?? 0,
     };
     bedUpload.value = null;
     bedRemove.value = false;
