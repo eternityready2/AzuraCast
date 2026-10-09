@@ -166,13 +166,13 @@ final class AiDjGenerator
             return ['path' => $path, 'lead_in' => 22.0, 'tail' => 6.0, 'from_start' => true, 'min_voice' => 0.0];
         }
         if (in_array(AiDj::BED_SHIFT_OUTRO, $enabled, true)) {
-            return ['path' => $path, 'lead_in' => 6.0, 'tail' => 10.0, 'from_start' => false, 'min_voice' => 0.0];
+            return ['path' => $path, 'lead_in' => 12.0, 'tail' => 10.0, 'from_start' => false, 'min_voice' => 0.0];
         }
 
         // Anywhere else the music must not outlast the talking.
         return [
             'path' => $path,
-            'lead_in' => 6.0,
+            'lead_in' => 10.0,
             'tail' => 5.0,
             'from_start' => false,
             'min_voice' => self::BED_MIN_VOICE_SECONDS,
