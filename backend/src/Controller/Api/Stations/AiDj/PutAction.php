@@ -12,6 +12,7 @@ use App\Exception\ValidationException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Service\AiDjMusicBed;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
@@ -45,6 +46,7 @@ final class PutAction implements SingleActionInterface
     public function __construct(
         private readonly AiDjRepository $aiDjRepository,
         private readonly ValidatorInterface $validator,
+        private readonly AiDjMusicBed $musicBed,
     ) {
     }
 
@@ -88,6 +90,20 @@ final class PutAction implements SingleActionInterface
         }
         if (array_key_exists('use_background_audio', $body)) {
             $dj->setUseBackgroundAudio((bool)$body['use_background_audio']);
+        }
+        if (array_key_exists('background_audio_breaks', $body)) {
+            $dj->setBackgroundAudioBreaks(
+                is_array($body['background_audio_breaks'])
+                    ? array_map(strval(...), $body['background_audio_breaks'])
+                    : null
+            );
+        }
+        // The music bed itself: a new file from the page, or the one there taken off.
+        $upload = $body['background_audio_upload'] ?? null;
+        if (is_array($upload) && isset($upload['name'], $upload['data'])) {
+            $this->musicBed->store($dj, (string)$upload['name'], (string)$upload['data']);
+        } elseif (!empty($body['background_audio_remove'])) {
+            $this->musicBed->remove($dj);
         }
 
         $errors = $this->validator->validate($dj);

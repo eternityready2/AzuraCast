@@ -947,7 +947,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $dj->getVoiceModelPath(),
                 $outputPath,
                 $dj->getVoiceSpeed(),
-                $dj->useBackgroundAudio(),
+                $this->generator->usesSyntheticPad($dj),
                 AiDjGenerator::MOOD_WARM
             );
 
@@ -1095,6 +1095,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $station,
                 $usedType !== null ? AiDjGenerator::moodForContentType($usedType) : AiDjGenerator::MOOD_WARM,
                 $c2 !== null ? AiDjGenerator::moodForContentType($c2->type) : null,
+                array_values(array_filter([$usedType, $c2?->type])),
             );
             if (null === $clipPath) {
                 $this->pushContentLiner($dj, $station, $backend);

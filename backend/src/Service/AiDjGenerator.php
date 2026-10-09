@@ -28,6 +28,15 @@ final class AiDjGenerator
     private const string KOKORO_PREFIX = 'kokoro:';
     private const int MAX_TTS_CHARS = 500; // Max characters for TTS to prevent timeouts
 
+    /** A break shorter than this gets no music bed: the music would run longer than the talk. */
+    private const float BED_MIN_VOICE_SECONDS = 8.0;
+
+    /** Bed level under the voice, against its level in the lead-in and tail (about -16 dB). */
+    private const float BED_DUCK_GAIN = 0.15;
+
+    /** Loudness the bed is brought to before the levels are set, so a quiet passage still reads as music. */
+    private const float BED_LUFS = -18.0;
+
     // Per-segment character budget for a two-part combo break. 2*230 + a joining
     // space = 461 < MAX_TTS_CHARS (500), so a combined clip never hits the cap.
     private const int COMBO_SEGMENT_CHARS = 230;
@@ -125,7 +134,55 @@ final class AiDjGenerator
         private readonly AiDjCleanup $cleanup,
         private readonly AiDjContentRepository $contentRepo,
         private readonly CacheInterface $cache,
+        private readonly AiDjMusicBed $musicBed,
     ) {
+    }
+
+    /**
+     * The DJ's music bed for one kind of break, or null when that break is
+     * spoken dry: the bed is off, no file is uploaded, or the break is not one
+     * the DJ's settings name. $break is an AiDj::BED_* key or a content type.
+     *
+     * @param list<string|null> $breaks Any of them enabled is enough (a combo has two halves).
+     * @return array{path: string, lead_in: float, tail: float, from_start: bool, min_voice: float}|null
+     */
+    private function bedFor(AiDj $dj, array $breaks): ?array
+    {
+        $path = $dj->getBackgroundAudioPath();
+        if (!$dj->useBackgroundAudio() || null === $path || !is_file($path)) {
+            return null;
+        }
+
+        $enabled = array_intersect($dj->getBackgroundAudioBreaks(), $breaks);
+        if ([] === $enabled) {
+            return null;
+        }
+
+        // The shift opens on the top of the piece with a longer lead-in, and
+        // closes with the music carrying on after the sign-off.
+        if (in_array(AiDj::BED_SHIFT_INTRO, $enabled, true)) {
+            return ['path' => $path, 'lead_in' => 6.0, 'tail' => 4.0, 'from_start' => true, 'min_voice' => 0.0];
+        }
+        if (in_array(AiDj::BED_SHIFT_OUTRO, $enabled, true)) {
+            return ['path' => $path, 'lead_in' => 4.0, 'tail' => 8.0, 'from_start' => false, 'min_voice' => 0.0];
+        }
+
+        // Anywhere else the music must not outlast the talking.
+        return [
+            'path' => $path,
+            'lead_in' => 3.5,
+            'tail' => 3.5,
+            'from_start' => false,
+            'min_voice' => self::BED_MIN_VOICE_SECONDS,
+        ];
+    }
+
+    /** The old synthetic pad: still what a DJ with the bed on and no file uploaded gets. */
+    public function usesSyntheticPad(AiDj $dj): bool
+    {
+        $path = $dj->getBackgroundAudioPath();
+
+        return $dj->useBackgroundAudio() && (null === $path || !is_file($path));
     }
 
     /**
@@ -200,7 +257,9 @@ final class AiDjGenerator
     /**
      * Generate TTS audio from text using Piper or Kokoro, depending on the voice model.
      * $mood (MOOD_*) picks the delivery on a Piper mood voice; other voices ignore it.
+     * $bed (see bedFor()) puts the DJ's music around and under the voice.
      *
+     * @param array{path: string, lead_in: float, tail: float, from_start: bool, min_voice: float}|null $bed
      * @return string|null MP3 path on success, null on failure/timeout
      */
 
@@ -210,7 +269,8 @@ final class AiDjGenerator
         string $outputPath,
         float $voiceSpeed = 1.0,
         bool $useBackgroundAudio = false,
-        ?string $mood = null
+        ?string $mood = null,
+        ?array $bed = null,
     ): ?string {
         $tempDir = dirname($outputPath);
 
@@ -230,7 +290,9 @@ final class AiDjGenerator
             $result = $this->generateWithPiper($text, $voiceModelPath, $outputPath, $tempDir, $voiceSpeed, $mood);
         }
 
-        if ($result !== null && $useBackgroundAudio) {
+        if ($result !== null && null !== $bed) {
+            $result = $this->mixWithMusicBed($result, $bed);
+        } elseif ($result !== null && $useBackgroundAudio) {
             $result = $this->mixWithBackgroundAudio($result, $tempDir);
         }
 
@@ -470,7 +532,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'song_intro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [AiDj::BED_SONG_TALK]));
     }
 
     /**
@@ -503,7 +565,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'post_song');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [AiDj::BED_SONG_TALK]));
     }
 
     /**
@@ -575,7 +637,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'shift_outro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [AiDj::BED_SHIFT_OUTRO]));
     }
 
     /**
@@ -606,7 +668,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'shift_intro');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [AiDj::BED_SHIFT_INTRO]));
     }
 
     /**
@@ -627,7 +689,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'liner');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::moodForContentType($content->type));
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::moodForContentType($content->type), $this->bedFor($dj, [$content->type]));
     }
 
     /**
@@ -662,7 +724,7 @@ final class AiDjGenerator
 
         $outputPath = $this->buildClipOutputPath($station, 'short_liner');
 
-        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), self::MOOD_WARM);
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [AiDj::BED_SHORT_LINER]));
     }
 
     /**
@@ -674,6 +736,8 @@ final class AiDjGenerator
      * On a Piper mood voice whose two segments want different moods (song
      * commentary warm, then a joke amused), each segment is rendered in its own
      * mood and the two wavs are joined with a short breath before encoding.
+     *
+     * @param list<string> $contentTypes What the two halves are, for the music bed.
      */
     public function generateComboBreak(
         AiDj $dj,
@@ -682,7 +746,12 @@ final class AiDjGenerator
         Station $station,
         ?string $introMood = null,
         ?string $payloadMood = null,
+        array $contentTypes = [],
     ): ?string {
+        // $contentTypes: what the two halves are, for the music bed; a half
+        // that talks about the song counts as song talk.
+        $bed = $this->bedFor($dj, [] === $contentTypes ? [AiDj::BED_SONG_TALK] : $contentTypes);
+
         if ($this->isOverDiskQuota($station, logWarning: false)) {
             return null;
         }
@@ -705,7 +774,11 @@ final class AiDjGenerator
         if ($payload !== '') {
             $result = $this->renderTwoPieceCombo($dj, $intro, $introMood, $payload, $payloadMood, $outputPath);
             if ($result !== null) {
-                return $dj->useBackgroundAudio()
+                if (null !== $bed) {
+                    return $this->mixWithMusicBed($result, $bed);
+                }
+
+                return $this->usesSyntheticPad($dj)
                     ? $this->mixWithBackgroundAudio($result, dirname($outputPath))
                     : $result;
             }
@@ -713,7 +786,7 @@ final class AiDjGenerator
         }
 
         $combined = $payload === '' ? $intro : $intro . ' ' . $payload;
-        return $this->generateAudio($combined, $voice, $outputPath, $dj->getVoiceSpeed(), $dj->useBackgroundAudio(), $introMood);
+        return $this->generateAudio($combined, $voice, $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), $introMood, $bed);
     }
 
     private function renderTwoPieceCombo(
@@ -1073,6 +1146,96 @@ final class AiDjGenerator
         }
 
         return 'the show';
+    }
+
+    /**
+     * Put the DJ's uploaded music under a voice clip the way a jock talks over
+     * a bed: the music plays alone for the lead-in, drops under the voice just
+     * before it starts, comes back up when the talking ends, and fades out.
+     * The clip gets longer by the lead-in and the tail. Any failure leaves the
+     * dry voice clip, so a break is never lost to the bed.
+     *
+     * @param array{path: string, lead_in: float, tail: float, from_start: bool, min_voice: float} $bed
+     */
+    private function mixWithMusicBed(string $voicePath, array $bed): string
+    {
+        $mixedPath = dirname($voicePath) . '/bed_' . uniqid() . '.mp3';
+
+        try {
+            $voice = $this->musicBed->duration($voicePath);
+            $bedLength = $this->musicBed->duration($bed['path']);
+            if ($voice <= 0.0 || $bedLength <= 0.0 || $voice < $bed['min_voice']) {
+                return $voicePath;
+            }
+
+            $lead = $bed['lead_in'];
+            $total = $lead + $voice + $bed['tail'];
+            // Somewhere new in the piece each time, except where the break opens it.
+            $room = $bedLength - $total - 1.0;
+            $offset = ($bed['from_start'] || $room <= 0.0) ? 0.0 : (float)random_int(0, (int)floor($room));
+
+            // Down over 0.8s as the voice comes in, back up over 1.5s after it.
+            $downFrom = max(0.0, $lead - 0.8);
+            $upFrom = $lead + $voice;
+            $upTo = $upFrom + 1.5;
+            $fadeOut = min(3.0, $bed['tail']);
+            $gain = sprintf(
+                "if(lt(t,%1\$.2f),1,if(lt(t,%2\$.2f),1-(1-%5\$.2f)*(t-%1\$.2f)/%6\$.2f,"
+                . "if(lt(t,%3\$.2f),%5\$.2f,if(lt(t,%4\$.2f),%5\$.2f+(1-%5\$.2f)*(t-%3\$.2f)/1.5,1))))",
+                $downFrom,
+                $lead,
+                $upFrom,
+                $upTo,
+                self::BED_DUCK_GAIN,
+                max(0.01, $lead - $downFrom)
+            );
+
+            $filterGraph = sprintf(
+                '[1:a]atrim=0:%1$.2f,loudnorm=I=%2$.1f:TP=-2:LRA=7,aresample=44100,aformat=channel_layouts=stereo,'
+                . "volume='%3\$s':eval=frame,afade=t=in:st=0:d=1,afade=t=out:st=%4\$.2f:d=%5\$.2f[bed];"
+                // Mono voice to both sides at full level; the default upmix drops it 3 dB.
+                . '[0:a]aresample=44100,aformat=channel_layouts=mono,pan=stereo|c0=c0|c1=c0,adelay=%6$d:all=1[voice];'
+                . '[voice][bed]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=disabled[out]',
+                $total,
+                self::BED_LUFS,
+                $gain,
+                $total - $fadeOut,
+                $fadeOut,
+                (int)round($lead * 1000)
+            );
+
+            $ffmpeg = new Process([
+                self::FFMPEG_BIN, '-y',
+                '-i', $voicePath,
+                '-stream_loop', '-1', '-ss', sprintf('%.2f', $offset), '-i', $bed['path'],
+                '-filter_complex', $filterGraph,
+                '-map', '[out]', '-vn',
+                '-t', sprintf('%.2f', $total),
+                '-ac', '2', '-c:a', 'libmp3lame', '-b:a', '192k',
+                $mixedPath,
+            ]);
+            $ffmpeg->setTimeout(40);
+            $ffmpeg->run();
+
+            if (!$ffmpeg->isSuccessful() || !is_file($mixedPath)) {
+                $this->logger->warning(sprintf(
+                    'AI DJ music bed mix failed; the break airs without it: %s',
+                    mb_substr($ffmpeg->getErrorOutput(), -400)
+                ));
+                @unlink($mixedPath);
+                return $voicePath;
+            }
+
+            if (!@rename($mixedPath, $voicePath)) {
+                @unlink($mixedPath);
+            }
+
+            return $voicePath;
+        } catch (Throwable $e) {
+            $this->logger->warning(sprintf('AI DJ music bed error; the break airs without it: %s', $e->getMessage()));
+            @unlink($mixedPath);
+            return $voicePath;
+        }
     }
 
     /**

@@ -303,7 +303,78 @@
                                     {{ $gettext('Background Audio') }}
                                 </label>
                                 <div class="form-text">
-                                    {{ $gettext('Adds a soft ambient music bed underneath DJ voice clips. Great for overnight shifts.') }}
+                                    {{ $gettext('Plays music with this DJ: a few seconds on its own before the DJ talks, softly underneath while the DJ talks, and a few seconds after.') }}
+                                </div>
+                            </div>
+
+                            <div v-if="form.use_background_audio" class="mb-3 ps-1">
+                                <label class="form-label" for="dj_background_audio_file">
+                                    {{ $gettext('Music') }}
+                                </label>
+                                <div v-if="!editingDj" class="form-text mt-0">
+                                    {{ $gettext('Save this DJ first, then edit it to add the music.') }}
+                                </div>
+                                <template v-else>
+                                    <div class="small mb-2">
+                                        <template v-if="bedUpload">
+                                            {{ $gettext('To be uploaded when you save:') }}
+                                            <strong>{{ bedUpload.name }}</strong>
+                                        </template>
+                                        <template v-else-if="currentBedFile && !bedRemove">
+                                            {{ $gettext('Now playing under this DJ:') }}
+                                            <strong>{{ currentBedFile }}</strong>
+                                            <button
+                                                type="button"
+                                                class="btn btn-link btn-sm p-0 ms-2 text-danger"
+                                                @click="bedRemove = true"
+                                            >
+                                                {{ $gettext('Remove') }}
+                                            </button>
+                                        </template>
+                                        <template v-else>
+                                            {{ $gettext('No music added yet. Until you add some, a soft synthetic pad plays under every break.') }}
+                                        </template>
+                                    </div>
+                                    <input
+                                        id="dj_background_audio_file"
+                                        type="file"
+                                        class="form-control"
+                                        accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.flac,.wav"
+                                        @change="onBedFileChosen"
+                                    >
+                                    <div class="form-text">
+                                        {{ $gettext('One audio file, up to 30 MB. It replaces the music this DJ has now.') }}
+                                    </div>
+                                </template>
+
+                                <label class="form-label mt-3 mb-1">
+                                    {{ $gettext('Play the music on') }}
+                                </label>
+                                <div class="row g-1">
+                                    <div
+                                        v-for="option in bedBreakOptions"
+                                        :key="option.key"
+                                        class="col-sm-6"
+                                    >
+                                        <div class="form-check">
+                                            <input
+                                                :id="`dj_bed_break_${option.key}`"
+                                                v-model="form.background_audio_breaks"
+                                                type="checkbox"
+                                                class="form-check-input"
+                                                :value="option.key"
+                                            >
+                                            <label
+                                                class="form-check-label"
+                                                :for="`dj_bed_break_${option.key}`"
+                                            >
+                                                {{ option.label }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-text">
+                                    {{ $gettext('A break shorter than 8 seconds is always spoken without music.') }}
                                 </div>
                             </div>
 
@@ -554,6 +625,8 @@ interface AiDj {
     talk_frequency: number;
     voice_speed: number;
     use_background_audio: boolean;
+    background_audio_file?: string | null;
+    background_audio_breaks?: string[];
     schedules?: AiDjSchedule[];
 }
 
@@ -566,6 +639,7 @@ interface AiDjForm {
     talk_frequency: number;
     voice_speed: number;
     use_background_audio: boolean;
+    background_audio_breaks: string[];
 }
 
 interface VoiceOption {
@@ -582,6 +656,9 @@ const listUrl = getStationApiUrl('/ai-dj');
 
 const djUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}`);
 const djTestUrl = (id: number) => getStationApiUrl(`/ai-dj/${id}/test`);
+
+// What a new DJ's music plays on: the shift's start and end, and the longer talk breaks.
+const defaultBedBreaks = ['shift_intro', 'shift_outro', 'bible_verse', 'encouragement', 'inspiration', 'testimony', 'story'];
 
 const defaultIntroTemplate = 'This is {{dj_name}} on {{station_name}}';
 const defaultOutroTemplate = 'This has been {{dj_name}} on {{station_name}}. Thanks for listening!';
@@ -607,7 +684,49 @@ const {record: form, reset: resetForm} = useResettableRef<AiDjForm>(() => ({
     talk_frequency: 0.5,
     voice_speed: 1.0,
     use_background_audio: false,
+    background_audio_breaks: [...defaultBedBreaks],
 }));
+
+// The music file picked in the editor; sent with the DJ when it is saved.
+const bedUpload = ref<{name: string, data: string} | null>(null);
+const bedRemove = ref(false);
+const currentBedFile = computed(() => editingDj.value?.background_audio_file ?? null);
+
+const bedBreakOptions = computed(() => [
+    {key: 'shift_intro', label: $gettext('Start of the shift')},
+    {key: 'shift_outro', label: $gettext('End of the shift')},
+    {key: 'bible_verse', label: $gettext('Bible verses')},
+    {key: 'encouragement', label: $gettext('Encouragement')},
+    {key: 'inspiration', label: $gettext('Inspiration')},
+    {key: 'testimony', label: $gettext('Testimonies')},
+    {key: 'story', label: $gettext('Stories')},
+    {key: 'joke', label: $gettext('Jokes')},
+    {key: 'song_talk', label: $gettext('Talk about the songs')},
+    {key: 'short_liner', label: $gettext('Short liners')},
+]);
+
+const onBedFileChosen = (event: Event): void => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) {
+        bedUpload.value = null;
+        return;
+    }
+    if (file.size > 30 * 1024 * 1024) {
+        notifyError($gettext('That file is larger than 30 MB.'));
+        input.value = '';
+        bedUpload.value = null;
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        bedUpload.value = {name: file.name, data: typeof reader.result === 'string' ? reader.result : ''};
+        bedRemove.value = false;
+    };
+    reader.onerror = () => notifyError($gettext('The file could not be read.'));
+    reader.readAsDataURL(file);
+};
 
 const {r$: v$} = useAppRegle(form, {}, {});
 
@@ -728,7 +847,10 @@ const openEdit = (dj: AiDj): void => {
         talk_frequency: dj.talk_frequency ?? 0.5,
         voice_speed: dj.voice_speed ?? 1.0,
         use_background_audio: dj.use_background_audio ?? false,
+        background_audio_breaks: [...(dj.background_audio_breaks ?? defaultBedBreaks)],
     };
+    bedUpload.value = null;
+    bedRemove.value = false;
     editorOpen.value = true;
     deleteTarget.value = null;
 };
@@ -736,6 +858,8 @@ const openEdit = (dj: AiDj): void => {
 const closeEditor = (): void => {
     editorOpen.value = false;
     editingDj.value = null;
+    bedUpload.value = null;
+    bedRemove.value = false;
     resetForm();
 };
 
@@ -743,7 +867,11 @@ const saveForm = async (): Promise<void> => {
     isSaving.value = true;
     try {
         if (editingDj.value) {
-            await axios.put(djUrl(editingDj.value.id).value, form.value);
+            await axios.put(djUrl(editingDj.value.id).value, {
+                ...form.value,
+                ...(bedUpload.value ? {background_audio_upload: bedUpload.value} : {}),
+                ...(bedRemove.value && !bedUpload.value ? {background_audio_remove: true} : {}),
+            });
             notifySuccess($gettext('DJ updated.'));
         } else {
             await axios.post(listUrl.value, form.value);
@@ -751,8 +879,10 @@ const saveForm = async (): Promise<void> => {
         }
         closeEditor();
         await loadDjs();
-    } catch {
-        notifyError($gettext('Failed to save DJ.'));
+    } catch (error: unknown) {
+        // The server says why a music file was refused (too large, not audio).
+        const reason = (error as {response?: {data?: {message?: string}}})?.response?.data?.message;
+        notifyError(reason || $gettext('Failed to save DJ.'));
     } finally {
         isSaving.value = false;
     }

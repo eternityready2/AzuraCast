@@ -18,6 +18,36 @@ use Symfony\Component\Validator\Constraints as Assert;
 ]
 final class AiDj implements Stringable, IdentifiableEntityInterface
 {
+    // Breaks a music bed can play under. The content ones are AiDjContent types.
+    public const string BED_SHIFT_INTRO = 'shift_intro';
+    public const string BED_SHIFT_OUTRO = 'shift_outro';
+    public const string BED_SONG_TALK = 'song_talk';
+    public const string BED_SHORT_LINER = 'short_liner';
+
+    public const array BED_BREAKS = [
+        self::BED_SHIFT_INTRO,
+        self::BED_SHIFT_OUTRO,
+        AiDjContent::TYPE_BIBLE_VERSE,
+        AiDjContent::TYPE_ENCOURAGEMENT,
+        AiDjContent::TYPE_INSPIRATION,
+        AiDjContent::TYPE_TESTIMONY,
+        AiDjContent::TYPE_STORY,
+        AiDjContent::TYPE_JOKE,
+        self::BED_SONG_TALK,
+        self::BED_SHORT_LINER,
+    ];
+
+    /** The start and end of the shift, and the breaks where the DJ talks for a while. */
+    public const array BED_DEFAULT_BREAKS = [
+        self::BED_SHIFT_INTRO,
+        self::BED_SHIFT_OUTRO,
+        AiDjContent::TYPE_BIBLE_VERSE,
+        AiDjContent::TYPE_ENCOURAGEMENT,
+        AiDjContent::TYPE_INSPIRATION,
+        AiDjContent::TYPE_TESTIMONY,
+        AiDjContent::TYPE_STORY,
+    ];
+
     use Traits\HasAutoIncrementId;
     use Traits\TruncateStrings;
 
@@ -61,6 +91,18 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
     /** When true, a soft ambient music bed is mixed under the DJ's voice clips. */
     #[ORM\Column(options: ['default' => false])]
     private bool $use_background_audio = false;
+
+    /** The music bed uploaded for this DJ (absolute path), or null for none. */
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $background_audio_path = null;
+
+    /**
+     * Which breaks get the music bed (BED_* keys); null means the defaults.
+     *
+     * @var list<string>|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $background_audio_breaks = null;
 
     /** @var Collection<int, AiDjSchedule> */
     #[
@@ -190,6 +232,30 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
         $this->use_background_audio = $useBackgroundAudio;
     }
 
+    public function getBackgroundAudioPath(): ?string
+    {
+        return $this->background_audio_path;
+    }
+
+    public function setBackgroundAudioPath(?string $path): void
+    {
+        $this->background_audio_path = $path;
+    }
+
+    /** @return list<string> */
+    public function getBackgroundAudioBreaks(): array
+    {
+        return $this->background_audio_breaks ?? self::BED_DEFAULT_BREAKS;
+    }
+
+    /** @param list<string>|null $breaks */
+    public function setBackgroundAudioBreaks(?array $breaks): void
+    {
+        $this->background_audio_breaks = null === $breaks
+            ? null
+            : array_values(array_intersect(self::BED_BREAKS, $breaks));
+    }
+
     /** @return Collection<int, AiDjSchedule> */
     public function getSchedules(): Collection
     {
@@ -250,6 +316,10 @@ final class AiDj implements Stringable, IdentifiableEntityInterface
             'talk_frequency' => $this->talk_frequency,
             'voice_speed' => $this->voice_speed,
             'use_background_audio' => $this->use_background_audio,
+            'background_audio_file' => null !== $this->background_audio_path
+                ? basename($this->background_audio_path)
+                : null,
+            'background_audio_breaks' => $this->getBackgroundAudioBreaks(),
             'schedules' => array_map(
                 static fn(AiDjSchedule $schedule): array => $schedule->api(),
                 $this->schedules->toArray()

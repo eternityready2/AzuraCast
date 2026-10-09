@@ -63,6 +63,13 @@ final class PostAction implements SingleActionInterface
         if (array_key_exists('use_background_audio', $body)) {
             $dj->setUseBackgroundAudio((bool)$body['use_background_audio']);
         }
+        if (array_key_exists('background_audio_breaks', $body)) {
+            $dj->setBackgroundAudioBreaks(
+                is_array($body['background_audio_breaks'])
+                    ? array_map(strval(...), $body['background_audio_breaks'])
+                    : null
+            );
+        }
 
         $errors = $this->validator->validate($dj);
         if (count($errors) > 0) {
