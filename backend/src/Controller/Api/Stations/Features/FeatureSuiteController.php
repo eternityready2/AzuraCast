@@ -16,6 +16,7 @@ use App\Exception\SupervisorException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Media\MediaProcessor;
+use App\Media\MetadataLookup;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AbstractLocalAdapter;
 use App\Radio\Adapters;
@@ -31,6 +32,7 @@ use App\Service\AirCheckFrontendConnectivityProbe;
 use App\Service\GuzzleFactory;
 use App\Sync\Task\BuildLinearLogTask;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use GuzzleHttp\RequestOptions;
 use InvalidArgumentException;
 use Psr\Http\Message\ResponseInterface;
@@ -55,6 +57,7 @@ final class FeatureSuiteController
         private readonly Configuration $configuration,
         private readonly CacheInterface $cache,
         private readonly AirCheckFrontendConnectivityProbe $frontendConnectivityProbe,
+        private readonly MetadataLookup $metadataLookup,
     ) {
     }
 
@@ -757,6 +760,243 @@ final class FeatureSuiteController
             $contentType,
             'cadence-report.' . $extension
         );
+    }
+
+    /**
+     * ASCAP's Music Use Report for a non-interactive (radio-style) service, in
+     * the layout of its published Form 1 for audio-only services: one line per
+     * song per day, tab or pipe delimited, with the field lengths the form gives.
+     */
+    public function ascapReportAction(ServerRequest $request, Response $response): ResponseInterface
+    {
+        [$start, $end] = $this->getReportDates($request);
+        $station = $request->getStation();
+        $tz = $station->getTimezoneObject();
+        $saved = $this->metadataLookup->savedDetails($station->media_storage_location);
+        $countPlays = 'plays' === $request->getParam('count');
+
+        /** @var array<string, array{play: array<string, mixed>, date: string, count: int}> $songDays */
+        $songDays = [];
+        foreach ($this->musicPlays($station, $start, $end) as $play) {
+            $date = CarbonImmutable::instance($play['timestamp_start'])->setTimezone($tz)->format('mdY');
+            $key = $play['media_id'] . '|' . $date;
+
+            $songDays[$key] ??= ['play' => $play, 'date' => $date, 'count' => 0];
+            $songDays[$key]['count'] += $countPlays ? 1 : (int)($play['unique_listeners'] ?? 0);
+        }
+
+        $delimiter = 'pipe' === $request->getParam('format') ? '|' : "\t";
+        $field = static fn(mixed $value, int $length): string => mb_substr(
+            trim((string)preg_replace('/[\t\r\n|]+/', ' ', (string)($value ?? ''))),
+            0,
+            $length
+        );
+
+        $lines = [];
+        if ('0' !== (string)($request->getParam('header') ?? '1')) {
+            $lines[] = implode($delimiter, [
+                'Service Name',
+                'Service URL',
+                'Song Title',
+                'Product Name',
+                'Writer/Composer Name',
+                'Artist/Performer Name',
+                'Song Identifier',
+                'ISRC',
+                'ISWC',
+                'Usage Type',
+                'Performance Type',
+                'Performance Date',
+                'Performance Duration',
+                'Number of Performances',
+            ]);
+        }
+
+        foreach ($songDays as $songDay) {
+            // A song nobody was listening to was not performed to anyone.
+            if (0 === $songDay['count']) {
+                continue;
+            }
+
+            $play = $songDay['play'];
+            $details = $saved[(int)$play['media_id']] ?? [];
+            $seconds = (int)round((float)($play['length'] ?? 0));
+
+            $lines[] = implode($delimiter, [
+                $field($station->name, 90),
+                $field($station->url, 90),
+                $field($play['title'], 90),
+                // Product Name is for commercials only.
+                '',
+                $field($details[MetadataLookup::FIELD_WRITERS] ?? '', 90),
+                $field($play['artist'], 90),
+                $field($play['unique_id'], 250),
+                $field(preg_replace('/[^A-Za-z0-9]/', '', (string)($play['isrc'] ?? '')), 12),
+                $field(preg_replace('/[^A-Za-z0-9]/', '', (string)($details[MetadataLookup::FIELD_ISWC] ?? '')), 11),
+                // F is a feature performance, NI a non-interactive one.
+                'F',
+                'NI',
+                $songDay['date'],
+                sprintf('%02d%02d', min(99, intdiv($seconds, 60)), $seconds % 60),
+                (string)min($songDay['count'], 99999999),
+            ]);
+        }
+
+        return $response->renderStringAsFile(
+            implode("\r\n", $lines) . "\r\n",
+            'text/plain',
+            'ascap-music-use-report.txt'
+        );
+    }
+
+    /**
+     * BMI's Music Use Report for a web service, with the details its licence
+     * names for each work (title, writer, artist, label, identifiers, length,
+     * type of use, times transmitted), and the streaming hours its yearly
+     * report asks for.
+     */
+    public function bmiReportAction(ServerRequest $request, Response $response): ResponseInterface
+    {
+        [$start, $end] = $this->getReportDates($request);
+        $station = $request->getStation();
+        $tz = $station->getTimezoneObject();
+        $plays = $this->musicPlays($station, $start, $end);
+
+        if ('hours' === $request->getParam('schedule')) {
+            return $response->renderStringAsFile(
+                $this->csv([
+                    ['Metric', 'Value'],
+                    ['Service name', $station->name],
+                    ['Period start', $start->setTimezone($tz)->format('Y-m-d')],
+                    ['Period end', $end->setTimezone($tz)->format('Y-m-d')],
+                    [
+                        'Total streaming hours (listener hours)',
+                        number_format($this->listenerSeconds($station, $start, $end) / 3600, 2, '.', ''),
+                    ],
+                    ['Songs played', (string)count($plays)],
+                    [
+                        'Listener performances',
+                        (string)array_sum(array_map(
+                            static fn(array $play): int => (int)($play['unique_listeners'] ?? 0),
+                            $plays
+                        )),
+                    ],
+                ]),
+                'text/csv',
+                'bmi-streaming-hours.csv'
+            );
+        }
+
+        $saved = $this->metadataLookup->savedDetails($station->media_storage_location);
+
+        /** @var array<int, array{play: array<string, mixed>, plays: int, listeners: int}> $songs */
+        $songs = [];
+        foreach ($plays as $play) {
+            $id = (int)$play['media_id'];
+
+            $songs[$id] ??= ['play' => $play, 'plays' => 0, 'listeners' => 0];
+            $songs[$id]['plays']++;
+            $songs[$id]['listeners'] += (int)($play['unique_listeners'] ?? 0);
+        }
+
+        $csv = [[
+            'Title',
+            'Composer/Writer',
+            'Artist',
+            'Record Label',
+            'ISRC',
+            'ISWC',
+            'Length',
+            'Type of Use',
+            'Streamed or Downloaded',
+            'Times Transmitted',
+            'Listener Performances',
+        ]];
+
+        foreach ($songs as $id => $song) {
+            $play = $song['play'];
+            $details = $saved[$id] ?? [];
+            $seconds = (int)round((float)($play['length'] ?? 0));
+
+            $csv[] = [
+                (string)($play['title'] ?? ''),
+                (string)($details[MetadataLookup::FIELD_WRITERS] ?? ''),
+                (string)($play['artist'] ?? ''),
+                (string)($details[MetadataLookup::FIELD_LABEL] ?? ''),
+                (string)($play['isrc'] ?? ''),
+                (string)($details[MetadataLookup::FIELD_ISWC] ?? ''),
+                sprintf('%d:%02d', intdiv($seconds, 60), $seconds % 60),
+                'Feature',
+                'Streamed',
+                (string)$song['plays'],
+                (string)$song['listeners'],
+            ];
+        }
+
+        $tabbed = 'txt' === strtolower((string)($request->getParam('format') ?? 'csv'));
+
+        return $response->renderStringAsFile(
+            $this->csv($csv, $tabbed ? "\t" : ','),
+            $tabbed ? 'text/plain' : 'text/csv',
+            'bmi-music-use-report.' . ($tabbed ? 'txt' : 'csv')
+        );
+    }
+
+    /**
+     * Every play of a file typed Music in a period, oldest first. Songwriter
+     * royalties are owed on songs: shows, station IDs, promos and AI DJ breaks
+     * are not listed.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function musicPlays(Station $station, CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        /** @var list<array<string, mixed>> $plays */
+        $plays = $this->em->createQuery(
+            <<<'DQL'
+                SELECT m.id AS media_id, m.unique_id, m.title, m.artist, m.isrc, m.length,
+                    h.timestamp_start, h.unique_listeners
+                FROM App\Entity\SongHistory h
+                JOIN h.media m
+                WHERE h.station = :station
+                AND h.timestamp_start BETWEEN :start AND :end
+                AND h.is_visible = true
+                AND m.type = 'music'
+                ORDER BY h.timestamp_start ASC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('start', $start)
+            ->setParameter('end', $end)
+            ->getArrayResult();
+
+        return $plays;
+    }
+
+    /** Seconds of listening inside a period, summed over every listener session. */
+    private function listenerSeconds(Station $station, CarbonImmutable $start, CarbonImmutable $end): int
+    {
+        /** @var list<array{timestamp_start: DateTimeInterface, timestamp_end: DateTimeInterface|null}> $sessions */
+        $sessions = $this->em->createQuery(
+            <<<'DQL'
+                SELECT l.timestamp_start, l.timestamp_end
+                FROM App\Entity\Listener l
+                WHERE l.station = :station
+                AND l.timestamp_start <= :end
+                AND (l.timestamp_end IS NULL OR l.timestamp_end >= :start)
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('start', $start)
+            ->setParameter('end', $end)
+            ->getArrayResult();
+
+        $seconds = 0;
+        foreach ($sessions as $session) {
+            $from = max($start->getTimestamp(), $session['timestamp_start']->getTimestamp());
+            $until = min($end->getTimestamp(), ($session['timestamp_end'] ?? $end)->getTimestamp());
+            $seconds += max(0, $until - $from);
+        }
+
+        return $seconds;
     }
 
     /** @return array{0: CarbonImmutable,1: CarbonImmutable} */

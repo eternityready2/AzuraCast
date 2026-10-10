@@ -9,6 +9,7 @@ use App\Controller\SingleActionInterface;
 use App\Entity\Song;
 use App\Http\Response;
 use App\Http\ServerRequest;
+use App\Media\MetadataLookup;
 use App\OpenApi;
 use App\Service\MusicBrainz;
 use App\Utilities\Types;
@@ -70,7 +71,8 @@ final class SoundExchangeAction implements SingleActionInterface
     use EntityManagerAwareTrait;
 
     public function __construct(
-        private readonly MusicBrainz $musicBrainz
+        private readonly MusicBrainz $musicBrainz,
+        private readonly MetadataLookup $metadataLookup
     ) {
     }
 
@@ -145,6 +147,10 @@ final class SoundExchangeAction implements SingleActionInterface
 
         $mediaById = array_column($allMedia, null, 'id');
 
+        // The label saved on each track: a row with no ISRC is identified by
+        // its album title and marketing label instead.
+        $savedDetails = $this->metadataLookup->savedDetails($station->media_storage_location);
+
         $historyRows = $this->em->createQuery(
             <<<'DQL'
                 SELECT sh.song_id AS song_id, sh.text, sh.artist, sh.album, sh.title, 
@@ -201,7 +207,7 @@ final class SoundExchangeAction implements SingleActionInterface
                 $songRow['title'] ?? '',
                 $songRow['isrc'] ?? '',
                 $songRow['album'] ?? '',
-                '',
+                $savedDetails[(int)($historyRow['media_id'] ?? 0)][MetadataLookup::FIELD_LABEL] ?? '',
                 $historyRow['unique_listeners'],
             ];
         }

@@ -101,6 +101,53 @@
                             </label>
                         </div>
                     </div>
+
+                    <div v-if="formatOptions.length > 0" class="col-12">
+                        <label class="form-label d-block">{{ $gettext('File Format') }}</label>
+                        <div class="format-options">
+                            <label
+                                v-for="option in formatOptions"
+                                :key="option.value"
+                                class="format-option"
+                                :class="{'is-active': option.value === format}"
+                            >
+                                <input v-model="format" class="form-check-input" type="radio" :value="option.value">
+                                <span>
+                                    <strong>{{ option.label }}</strong>
+                                    <small>{{ option.help }}</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div v-if="countOptions.length > 0" class="col-12">
+                        <label class="form-label d-block">{{ $gettext('Number of Performances Counts') }}</label>
+                        <div class="format-options">
+                            <label
+                                v-for="option in countOptions"
+                                :key="option.value"
+                                class="format-option"
+                                :class="{'is-active': option.value === count}"
+                            >
+                                <input v-model="count" class="form-check-input" type="radio" :value="option.value">
+                                <span>
+                                    <strong>{{ option.label }}</strong>
+                                    <small>{{ option.help }}</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div v-if="showHeaderOption" class="col-12">
+                        <label class="playlist-option">
+                            <input
+                                v-model="includeHeader"
+                                class="form-check-input"
+                                type="checkbox"
+                            >
+                            <span>{{ $gettext('Start the file with a line naming the columns') }}</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="generate-footer">
@@ -140,8 +187,14 @@ type DownloadButton = {
     param?: string
 };
 
+type ReportOption = {
+    value: string,
+    label: string,
+    help: string
+};
+
 const props = withDefaults(defineProps<{
-    kind: "ppca" | "ppl" | "cadence",
+    kind: "ppca" | "ppl" | "cadence" | "ascap" | "bmi",
     title: string,
     subtitle: string,
     aboutTitle: string,
@@ -155,6 +208,10 @@ const props = withDefaults(defineProps<{
     playlistLabel?: string,
     playlistHelp?: string,
     showRevenue?: boolean,
+    // Choices this report offers; the first of each is the one picked to begin with.
+    formatOptions?: ReportOption[],
+    countOptions?: ReportOption[],
+    showHeaderOption?: boolean,
 }>(), {
     buttonLabel: "",
     buttons: () => [],
@@ -164,6 +221,9 @@ const props = withDefaults(defineProps<{
     playlistLabel: "Music Playlists",
     playlistHelp: "",
     showRevenue: false,
+    formatOptions: () => [],
+    countOptions: () => [],
+    showHeaderOption: false,
 });
 
 const {$gettext} = useTranslate();
@@ -171,7 +231,8 @@ const {getStationApiUrl} = useApiRouter();
 
 const today = new Date();
 const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
-const defaultStart = "cadence" === props.kind
+// These are reported by the quarter.
+const defaultStart = ["cadence", "ascap", "bmi"].includes(props.kind)
     ? new Date(today.getFullYear(), quarterStartMonth, 1)
     : new Date(today.getFullYear(), today.getMonth(), 1);
 
@@ -184,7 +245,9 @@ const toDateInput = (date: Date) => {
 
 const startDate = ref(toDateInput(defaultStart));
 const endDate = ref(toDateInput(today));
-const format = ref<"csv" | "txt">("csv");
+const format = ref<string>(props.formatOptions[0]?.value ?? "csv");
+const count = ref<string>(props.countOptions[0]?.value ?? "");
+const includeHeader = ref(true);
 const revenue = ref("0");
 const includeDefaultPlaylist = ref(true);
 const apiUrl = getStationApiUrl(`/reports/${props.kind}`);
@@ -204,8 +267,16 @@ const download = (reportType?: string) => {
     url.searchParams.set("start_date", startDate.value);
     url.searchParams.set("end_date", endDate.value);
 
-    if ("cadence" === props.kind) {
+    if ("cadence" === props.kind || props.formatOptions.length > 0) {
         url.searchParams.set("format", format.value);
+    }
+
+    if (props.countOptions.length > 0) {
+        url.searchParams.set("count", count.value);
+    }
+
+    if (props.showHeaderOption) {
+        url.searchParams.set("header", includeHeader.value ? "1" : "0");
     }
 
     if (reportType) {

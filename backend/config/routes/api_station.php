@@ -1031,6 +1031,16 @@ return static function (RouteCollectorProxy $group) {
                     )->add(new Middleware\Permissions(StationPermissions::Reports, true));
 
                     $group->get(
+                        '/reports/ascap',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':ascapReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/bmi',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':bmiReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
                         '/reports/linear-log',
                         Controller\Api\Stations\Features\FeatureSuiteController::class . ':linearLogStatusAction'
                     )->add(new Middleware\Permissions(StationPermissions::Reports, true));

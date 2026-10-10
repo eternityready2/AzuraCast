@@ -53,6 +53,8 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'reports/ppca', component: () => import('~/components/Stations/Reports/PPCA.vue'), name: 'stations:reports:ppca'},
                 {path: 'reports/ppl', component: () => import('~/components/Stations/Reports/PPL.vue'), name: 'stations:reports:ppl'},
                 {path: 'reports/cadence', component: () => import('~/components/Stations/Reports/Cadence.vue'), name: 'stations:reports:cadence'},
+                {path: 'reports/ascap', component: () => import('~/components/Stations/Reports/ASCAP.vue'), name: 'stations:reports:ascap'},
+                {path: 'reports/bmi', component: () => import('~/components/Stations/Reports/BMI.vue'), name: 'stations:reports:bmi'},
                 {path: 'reports/requests', component: () => import('~/components/Stations/Reports/Requests.vue'), name: 'stations:reports:requests'},
                 {path: 'restart', component: () => import('~/components/Stations/Restart.vue'), name: 'stations:restart:index'},
                 {path: 'settings', component: () => import('~/components/Stations/Settings.vue'), name: 'stations:settings:index'},

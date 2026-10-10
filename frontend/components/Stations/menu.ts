@@ -328,6 +328,20 @@ export function useStationsMenu() {
                     }
                 },
                 {
+                    key: 'reports_ascap',
+                    label: $gettext('ASCAP Report'),
+                    url: {
+                        name: 'stations:reports:ascap'
+                    }
+                },
+                {
+                    key: 'reports_bmi',
+                    label: $gettext('BMI Report'),
+                    url: {
+                        name: 'stations:reports:bmi'
+                    }
+                },
+                {
                     key: 'reports_ppca',
                     label: $gettext('PPCA Report'),
                     url: {
