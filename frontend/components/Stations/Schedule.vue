@@ -41,18 +41,6 @@
                     <button
                         type="button"
                         class="nav-link"
-                        :class="{active: activeTab === 'live'}"
-                        role="tab"
-                        :aria-selected="activeTab === 'live'"
-                        @click="activeTab = 'live'"
-                    >
-                        {{ $gettext('Live Clock Wheel') }}
-                    </button>
-                </div>
-                <div class="nav-item" role="presentation">
-                    <button
-                        type="button"
-                        class="nav-link"
                         :class="{active: activeTab === 'holidays'}"
                         role="tab"
                         :aria-selected="activeTab === 'holidays'"
@@ -435,11 +423,6 @@
             </transition>
         </Teleport>
 
-            <clock-wheel-live-tab
-                v-show="activeTab === 'live'"
-                :active="activeTab === 'live'"
-            />
-
             <holiday-overrides-tab
                 v-show="activeTab === 'holidays'"
                 :list-url="holidayOverridesUrl"
@@ -470,7 +453,6 @@
 
 <script setup lang="ts">
 import ScheduleCalendar from "~/components/Stations/Common/ScheduleCalendar.vue";
-import ClockWheelLiveTab from "~/components/Stations/Schedule/ClockWheelLiveTab.vue";
 import HolidayOverridesTab from "~/components/Stations/Schedule/HolidayOverridesTab.vue";
 import EditModal from "~/components/Stations/Playlists/EditModal.vue";
 import ClockWheelEditModal from "~/components/Stations/ClockWheels/EditModal.vue";
@@ -494,7 +476,7 @@ import IconIcAdd from "~icons/ic/baseline-add";
 const {$gettext} = useTranslate();
 const {getStationApiUrl} = useApiRouter();
 
-const activeTab = ref<'calendar' | 'live' | 'holidays'>('calendar');
+const activeTab = ref<'calendar' | 'holidays'>('calendar');
 const sidebarVisible = ref<boolean>(false);
 const hasConflicts = ref<boolean>(false);
 
