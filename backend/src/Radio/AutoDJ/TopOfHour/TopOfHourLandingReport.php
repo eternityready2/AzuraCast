@@ -168,6 +168,16 @@ final class TopOfHourLandingReport
             }
 
             $c['id_hours']++;
+            $day = new DateTimeImmutable('@' . (int)(round($target / 3600) * 3600 - 3600))
+                ->setTimezone($tz)
+                ->format('Y-m-d');
+            $byDay[$day] ??= [
+                'date' => $day,
+                'music_hours' => 0,
+                'clean_count' => 0,
+                'id_early_count' => 0,
+                'id_late_count' => 0,
+            ];
             $failure = [
                 'kind' => null,
                 'seconds' => 0.0,
@@ -207,10 +217,6 @@ final class TopOfHourLandingReport
                 $byHour[$hour]['music_hours']++;
                 $byHour[$hour]['missed'] += $isClean ? 0 : 1;
 
-                $day = new DateTimeImmutable('@' . (int)(round($target / 3600) * 3600 - 3600))
-                    ->setTimezone($tz)
-                    ->format('Y-m-d');
-                $byDay[$day] ??= ['date' => $day, 'music_hours' => 0, 'clean_count' => 0];
                 $byDay[$day]['music_hours']++;
                 $byDay[$day]['clean_count'] += $isClean ? 1 : 0;
 
@@ -235,6 +241,7 @@ final class TopOfHourLandingReport
             if (abs($offset) >= self::MISS_SECONDS) {
                 $failure['id_offset_seconds'] = round($offset, 1);
                 $c[$offset < 0 ? 'id_early' : 'id_late']++;
+                $byDay[$day][$offset < 0 ? 'id_early_count' : 'id_late_count']++;
                 $c['id_early_show'] += $offset < 0 && null === $landing ? 1 : 0;
             }
 

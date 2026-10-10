@@ -489,7 +489,7 @@
 
                     <div v-if="activeTab === 'performance'">
                         <template v-if="compliance">
-                            <h3 class="h6 mb-3">{{ $gettext('7-Day Compliance') }}</h3>
+                            <h3 class="h6 mb-3">{{ $gettext('ID On Time (last 7 days)') }}</h3>
                             <div class="row g-2 mb-4">
                                 <div class="col-6 col-md-3">
                                     <div class="border rounded p-2 text-center h-100">
@@ -497,24 +497,30 @@
                                             {{ compliance.compliance_percent ?? '—' }}<span v-if="compliance.compliance_percent != null" class="fs-6">%</span>
                                         </div>
                                         <div class="small text-secondary">{{ $gettext('On time') }}</div>
+                                        <div class="small text-secondary">
+                                            {{ $gettext('Within %{seconds}s of its set time', {seconds: String(compliance.tolerance_seconds)}) }}
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="col-6 col-md-3">
                                     <div class="border rounded p-2 text-center h-100">
                                         <div class="fs-4 fw-semibold">{{ compliance.on_time_count ?? 0 }}</div>
-                                        <div class="small text-secondary">{{ $gettext('Compliant hours') }}</div>
+                                        <div class="small text-secondary">{{ $gettext('Hours on time') }}</div>
                                     </div>
                                 </div>
                                 <div class="col-6 col-md-3">
                                     <div class="border rounded p-2 text-center h-100">
                                         <div class="fs-4 fw-semibold text-warning">{{ compliance.late_count ?? 0 }}</div>
-                                        <div class="small text-secondary">{{ $gettext('Late / missed') }}</div>
+                                        <div class="small text-secondary">{{ $gettext('Hours off time') }}</div>
                                     </div>
                                 </div>
                                 <div class="col-6 col-md-3">
                                     <div class="border rounded p-2 text-center h-100">
-                                        <div class="fs-4 fw-semibold text-secondary">{{ compliance.fallback_count ?? 0 }}</div>
-                                        <div class="small text-secondary">{{ $gettext('Fallback events') }}</div>
+                                        <div class="fs-4 fw-semibold" :class="lastOffTime ? 'text-warning' : 'text-success'">
+                                            {{ lastOffTime ? lastOffTime.day : $gettext('None') }}
+                                        </div>
+                                        <div class="small text-secondary">{{ $gettext('Last ID off time') }}</div>
+                                        <div v-if="lastOffTime" class="small text-secondary">{{ lastOffTime.detail }}</div>
                                     </div>
                                 </div>
                             </div>
@@ -562,7 +568,7 @@ const {getStationApiUrl} = useApiRouter();
 const {notifySuccess, notifyError} = useNotify();
 const {$gettext} = useTranslate();
 const {showAlert} = useDialog();
-const {formatIsoAsTime} = useStationDateTimeFormatter();
+const {formatIsoAsTime, formatIsoAsDateTime} = useStationDateTimeFormatter();
 
 const apiUrl = getStationApiUrl('/top-of-hour');
 const landingUrl = getStationApiUrl('/top-of-hour/landing');
@@ -649,6 +655,25 @@ const loadSettings = async () => {
         isLoading.value = false;
     }
 };
+
+// The most recent ID in the last 7 days that aired outside the tolerance, if any.
+const lastOffTime = computed(() => {
+    const event = compliance.value?.late_events?.[0];
+    if (!event) {
+        return null;
+    }
+
+    const at = event.actual_play_at ?? event.expected_play_at;
+    const drift = event.drift_seconds ?? 0;
+    const values = {time: formatIsoAsTime(at), seconds: String(Math.abs(drift))};
+
+    return {
+        day: formatIsoAsDateTime(at, {month: 'short', day: 'numeric'}),
+        detail: drift < 0
+            ? $gettext('%{time}, %{seconds}s early', values)
+            : $gettext('%{time}, %{seconds}s late', values),
+    };
+});
 
 // Turning the swap off changes how nearly every hour ends, so it asks first.
 const onSwapToggle = async (enabled: boolean | null) => {

@@ -1,7 +1,7 @@
 <template>
     <div>
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-            <h3 class="h6 mb-0">{{ $gettext('Landing the Hour: Results') }}</h3>
+            <h3 class="h6 mb-0">{{ $gettext('How Each Hour Ended') }}</h3>
             <div class="d-flex align-items-center gap-2">
                 <select
                     v-if="!dateRange"
@@ -75,7 +75,7 @@
                 </div>
 
                 <div class="small text-secondary mt-2">
-                    {{ $gettext('"Before the ID" and "How it landed" count the hours where a song or promo led into the ID; %{shows} show or feed hours in this period are left out. Green is %{target}% or better.', {shows: String(report.show_hours), target: String(report.target_percent)}) }}
+                    {{ $gettext('Hours that led into the ID with a show or feed are not counted (%{shows} in this period). Green means %{target}% or better.', {shows: String(report.show_hours), target: String(report.target_percent)}) }}
                 </div>
 
                 <div class="row gx-4 gy-0">
@@ -105,20 +105,21 @@
                                 {{ day.clean_percent ?? '—' }}<template v-if="day.clean_percent != null">%</template>
                                 <span class="text-secondary">({{ day.clean_count }}/{{ day.music_hours }})</span>
                             </span>
+                            <span class="landing-day-note text-nowrap text-warning">{{ dayNote(day) }}</span>
                         </div>
                         <div class="small text-secondary mt-2">
-                            {{ $gettext('Music hours each day that ended cleanly before the ID.') }}
+                            {{ $gettext('Share of music hours that ended cleanly before the ID, per day.') }}
                         </div>
                     </div>
                     <div v-if="report.worst_hours.length > 0" class="col-12 col-xl-5">
-                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Hours That Miss Most') }}</h4>
+                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Times of Day With the Most Problems') }}</h4>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle mb-0 w-auto">
                                 <thead>
                                     <tr>
-                                        <th>{{ $gettext('Clock hour') }}</th>
-                                        <th class="text-end">{{ $gettext('Missed') }}</th>
-                                        <th class="text-end">{{ $gettext('Out of') }}</th>
+                                        <th>{{ $gettext('Time of day') }}</th>
+                                        <th class="text-end">{{ $gettext('Problem hours') }}</th>
+                                        <th class="text-end">{{ $gettext('Hours counted') }}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -137,7 +138,7 @@
                 </div>
 
                 <h4 class="h6 mt-4 mb-2">
-                    {{ $gettext('Failures') }}
+                    {{ $gettext('Hours With a Problem') }}
                     <span class="text-secondary fw-normal">({{ report.failures.length }})</span>
                 </h4>
                 <div v-if="report.failures.length === 0" class="small text-secondary">
@@ -149,7 +150,7 @@
                             <tr>
                                 <th>{{ $gettext('ID aired') }}</th>
                                 <th>{{ $gettext('What happened') }}</th>
-                                <th>{{ $gettext('Before the ID') }}</th>
+                                <th>{{ $gettext('What played before the ID') }}</th>
                                 <th />
                             </tr>
                         </thead>
@@ -175,7 +176,7 @@
                                             class="btn btn-sm btn-link p-0"
                                             @click="openFailure = (openFailure === failure.id_at) ? null : failure.id_at"
                                         >
-                                            {{ openFailure === failure.id_at ? $gettext('Hide') : $gettext('What aired') }}
+                                            {{ openFailure === failure.id_at ? $gettext('Hide') : $gettext('Show what aired') }}
                                         </button>
                                     </td>
                                 </tr>
@@ -199,7 +200,7 @@
                 </div>
 
                 <div class="small text-secondary mt-2">
-                    {{ $gettext('Worked out from the play history each time this loads. No extra log is stored.') }}
+                    {{ $gettext('Calculated from your play history. Nothing extra is stored.') }}
                 </div>
             </template>
         </loading>
@@ -210,7 +211,7 @@
 import Loading from '~/components/Common/Loading.vue';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import type {DateRange} from '~/components/Stations/Reports/Overview/CommonMetricsView.vue';
-import type {TopOfHourLanding, TopOfHourLandingFailure} from '~/entities/TopOfHour.ts';
+import type {TopOfHourLanding, TopOfHourLandingDay, TopOfHourLandingFailure} from '~/entities/TopOfHour.ts';
 import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter.ts';
 import {useAxios} from '~/vendor/axios.ts';
 import {useTranslate} from '~/vendor/gettext';
@@ -296,6 +297,18 @@ const dayLabel = (date: string): string => DateTime.fromISO(date).toLocaleString
     {weekday: 'short', month: 'short', day: 'numeric'}
 );
 
+// Blank on a normal day; names the ID problem on a day that had one.
+const dayNote = (day: TopOfHourLandingDay): string => {
+    const notes: string[] = [];
+    if (day.id_early_count > 0) {
+        notes.push($gettext('Early IDs: %{count}', {count: String(day.id_early_count)}));
+    }
+    if (day.id_late_count > 0) {
+        notes.push($gettext('Late IDs: %{count}', {count: String(day.id_late_count)}));
+    }
+    return notes.join(', ');
+};
+
 const barTone = (percent: number | null, target: number): string => {
     if (percent === null) return 'bg-secondary';
     if (percent >= target) return 'bg-success';
@@ -361,7 +374,7 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     tone: 'text-success',
                 },
                 {
-                    label: $gettext('Ended early (gap)'),
+                    label: $gettext('Ended too soon (silence)'),
                     percent: r.early_percent,
                     detail: ofHours(r.early_count, r.music_hours),
                     tone: badTone(r.early_count),
@@ -369,22 +382,22 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
             ],
         },
         {
-            title: $gettext('How it landed'),
+            title: $gettext('How the last song was fitted'),
             boxes: [
                 {
-                    label: $gettext('Swap landed cleanly'),
+                    label: $gettext('Swap worked'),
                     percent: r.swap_clean_percent,
                     detail: $gettext(
-                        '%{count} of %{total} hours the swap picked the last song',
+                        '%{count} of %{total} hours where the swap chose the last song',
                         {count: String(r.swap_clean_count), total: String(r.swap_hours)}
                     ),
                     tone: goodTone(r.swap_clean_percent, r.target_percent),
                 },
                 {
-                    label: $gettext('Stretch or squeeze landed cleanly'),
+                    label: $gettext('Speed change worked'),
                     percent: r.tempo_clean_percent,
                     detail: $gettext(
-                        '%{count} of %{total} hours that needed it',
+                        '%{count} of %{total} hours where the song was sped up or slowed down',
                         {count: String(r.tempo_clean_count), total: String(r.tempo_hours)}
                     ),
                     tone: goodTone(r.tempo_clean_percent, r.target_percent),
@@ -433,13 +446,13 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     value: r.id_average_offset_seconds === null ? null : String(r.id_average_offset_seconds),
                     unit: 's',
                     detail: $gettext(
-                        'On average, from its set time. Furthest: %{worst}s',
+                        'Average distance from its set time. Furthest: %{worst}s',
                         {worst: String(r.id_worst_offset_seconds)}
                     ),
                     tone: secondsTone(r.id_average_offset_seconds),
                 },
                 {
-                    label: $gettext('Started under the ID'),
+                    label: $gettext('Next song started during the ID'),
                     percent: r.under_id_percent,
                     detail: ofHours(r.under_id_count, r.after_id_hours),
                     tone: badTone(r.under_id_count),
@@ -455,19 +468,19 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     value: r.after_id_average_gap_seconds === null ? null : String(r.after_id_average_gap_seconds),
                     unit: 's',
                     detail: $gettext(
-                        'On average, before the next item starts. Longest: %{worst}s',
+                        'Average wait before the next item starts. Longest: %{worst}s',
                         {worst: String(r.after_id_worst_gap_seconds)}
                     ),
                     tone: secondsTone(r.after_id_average_gap_seconds),
                 },
                 {
-                    label: $gettext('Came back after being cut'),
+                    label: $gettext('Cut song came back after the ID'),
                     percent: r.resumed_after_cut_percent,
                     detail: ofHours(r.resumed_after_cut_count, r.music_hours),
                     tone: badTone(r.resumed_after_cut_count),
                 },
                 {
-                    label: $gettext('Played twice in full'),
+                    label: $gettext('Same song played again after the ID'),
                     percent: r.replayed_percent,
                     detail: ofHours(r.replayed_count, r.music_hours),
                     tone: 'text-secondary',
@@ -519,9 +532,9 @@ const failureLines = (failure: TopOfHourLandingFailure): string[] => {
     }
 
     if (failure.resumed === 'after_cut') {
-        lines.push($gettext('Came back on air after the ID'));
+        lines.push($gettext('The cut song came back on air after the ID'));
     } else if (failure.resumed === 'replayed') {
-        lines.push($gettext('Played again in full after the ID'));
+        lines.push($gettext('The same song played again after the ID'));
     }
 
     if (failure.id_offset_seconds < 0) {
@@ -591,5 +604,9 @@ const downloadCsv = () => {
 .landing-day-value {
     width: 7.5rem;
     text-align: right;
+}
+
+.landing-day-note {
+    width: 7rem;
 }
 </style>

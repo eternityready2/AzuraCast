@@ -5,6 +5,12 @@ export interface TopOfHourCompliance {
     late_count: number;
     compliance_percent: number | null;
     fallback_count: number;
+    /** IDs that aired outside the tolerance, most recent first. */
+    late_events?: {
+        expected_play_at: string;
+        actual_play_at: string | null;
+        drift_seconds: number | null;
+    }[];
 }
 
 export interface TopOfHourLandingAired {
@@ -43,6 +49,8 @@ export interface TopOfHourLandingDay {
     music_hours: number;
     clean_count: number;
     clean_percent: number | null;
+    id_early_count: number;
+    id_late_count: number;
 }
 
 export interface TopOfHourLanding {
