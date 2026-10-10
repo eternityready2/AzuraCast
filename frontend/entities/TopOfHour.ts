@@ -7,6 +7,29 @@ export interface TopOfHourCompliance {
     fallback_count: number;
 }
 
+export interface TopOfHourLandingFailure {
+    id_at: string;
+    title: string;
+    kind: 'cut_short' | 'cut_late_start' | 'cut_too_long' | 'ended_early' | null;
+    seconds: number;
+    resumed: boolean;
+}
+
+export interface TopOfHourLanding {
+    days: number;
+    music_hours: number;
+    show_hours: number;
+    clean_count: number;
+    clean_percent: number | null;
+    cut_count: number;
+    cut_percent: number | null;
+    early_count: number;
+    early_percent: number | null;
+    resumed_count: number;
+    resumed_percent: number | null;
+    failures: TopOfHourLandingFailure[];
+}
+
 export interface TopOfHourMediaSummary {
     id: number;
     title: string | null;

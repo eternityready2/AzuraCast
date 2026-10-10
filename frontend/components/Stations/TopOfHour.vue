@@ -325,6 +325,89 @@
                                     </div>
                                 </div>
                             </template>
+
+                            <template v-if="landing">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mt-4 mb-3">
+                                    <h3 class="h6 mb-0">{{ $gettext('Landing Before the ID') }}</h3>
+                                    <select
+                                        v-model.number="landingDays"
+                                        class="form-select form-select-sm w-auto"
+                                        :aria-label="$gettext('Period')"
+                                        :disabled="isLandingLoading"
+                                        @change="loadLanding"
+                                    >
+                                        <option
+                                            v-for="option in landingDayOptions"
+                                            :key="option.value"
+                                            :value="option.value"
+                                        >
+                                            {{ option.text }}
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="fs-4 fw-semibold text-success">
+                                                {{ landing.clean_percent ?? '—' }}<span v-if="landing.clean_percent != null" class="fs-6">%</span>
+                                            </div>
+                                            <div class="small text-secondary">{{ $gettext('Ended cleanly') }}</div>
+                                            <div class="small text-secondary">{{ landingCountLabel(landing.clean_count) }}</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="fs-4 fw-semibold text-warning">
+                                                {{ landing.cut_percent ?? '—' }}<span v-if="landing.cut_percent != null" class="fs-6">%</span>
+                                            </div>
+                                            <div class="small text-secondary">{{ $gettext('Cut or faded') }}</div>
+                                            <div class="small text-secondary">{{ landingCountLabel(landing.cut_count) }}</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="fs-4 fw-semibold text-warning">
+                                                {{ landing.resumed_percent ?? '—' }}<span v-if="landing.resumed_percent != null" class="fs-6">%</span>
+                                            </div>
+                                            <div class="small text-secondary">{{ $gettext('Resumed after ID') }}</div>
+                                            <div class="small text-secondary">{{ landingCountLabel(landing.resumed_count) }}</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="border rounded p-2 text-center h-100">
+                                            <div class="fs-4 fw-semibold text-secondary">
+                                                {{ landing.early_percent ?? '—' }}<span v-if="landing.early_percent != null" class="fs-6">%</span>
+                                            </div>
+                                            <div class="small text-secondary">{{ $gettext('Ended early (gap)') }}</div>
+                                            <div class="small text-secondary">{{ landingCountLabel(landing.early_count) }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="small text-secondary mt-2">
+                                    {{ $gettext('Counts the hours where a song or promo led into the ID. Show and feed hours (%{shows} in this period) are left out.', {shows: String(landing.show_hours)}) }}
+                                </div>
+
+                                <h4 class="h6 mt-3 mb-2">{{ $gettext('Failures') }}</h4>
+                                <div v-if="landing.failures.length === 0" class="small text-secondary">
+                                    {{ $gettext('None in this period.') }}
+                                </div>
+                                <ul v-else class="list-unstyled small mb-0 landing-failures">
+                                    <li
+                                        v-for="failure in landing.failures"
+                                        :key="failure.id_at"
+                                        class="border-top py-1"
+                                    >
+                                        <div class="fw-semibold">
+                                            {{ formatIsoAsDateTime(failure.id_at) }}
+                                        </div>
+                                        <div>{{ landingFailureLabel(failure) }}</div>
+                                        <div class="text-secondary text-truncate">{{ failure.title }}</div>
+                                    </li>
+                                </ul>
+                                <div class="small text-secondary mt-2">
+                                    {{ $gettext('Worked out from the play history each time the page loads. No extra log is stored, and the list never goes back more than 30 days.') }}
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -349,6 +432,8 @@ import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import type {
     TopOfHourCompliance,
     TopOfHourForm,
+    TopOfHourLanding,
+    TopOfHourLandingFailure,
     TopOfHourNextPlan,
     TopOfHourSettings,
     TopOfHourStagingStatus,
@@ -356,12 +441,14 @@ import type {
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter.ts';
 import {useAxios} from '~/vendor/axios.ts';
+import {useTranslate} from '~/vendor/gettext';
 import {computed, onMounted, ref} from 'vue';
 
 const {axios} = useAxios();
 const {getStationApiUrl} = useApiRouter();
 const {notifySuccess, notifyError} = useNotify();
-const {formatIsoAsTime} = useStationDateTimeFormatter();
+const {formatIsoAsTime, formatIsoAsDateTime} = useStationDateTimeFormatter();
+const {$gettext} = useTranslate();
 
 const apiUrl = getStationApiUrl('/top-of-hour');
 const isLoading = ref(true);
@@ -371,6 +458,18 @@ const compliance = ref<TopOfHourCompliance | null>(null);
 const nextPlan = ref<TopOfHourNextPlan | null>(null);
 const configuredStartLabel = ref(':59:00');
 const staging = ref<TopOfHourStagingStatus>({is_staged: false, queue_id: null});
+
+const landingUrl = getStationApiUrl('/top-of-hour/landing');
+const landing = ref<TopOfHourLanding | null>(null);
+const landingDays = ref(7);
+const isLandingLoading = ref(false);
+const landingDayOptions = [
+    {value: 1, text: $gettext('Last 24 hours')},
+    {value: 3, text: $gettext('Last 3 days')},
+    {value: 7, text: $gettext('Last 7 days')},
+    {value: 14, text: $gettext('Last 14 days')},
+    {value: 30, text: $gettext('Last 30 days')},
+];
 
 const form = ref<TopOfHourForm>({
     top_of_hour_id_enabled: false,
@@ -437,6 +536,49 @@ const loadSettings = async () => {
     }
 };
 
+const loadLanding = async () => {
+    isLandingLoading.value = true;
+    try {
+        const {data} = await axios.get<TopOfHourLanding>(landingUrl.value, {params: {days: landingDays.value}});
+        landing.value = data;
+    } catch {
+        notifyError();
+    } finally {
+        isLandingLoading.value = false;
+    }
+};
+
+const landingCountLabel = (count: number): string => $gettext(
+    '%{count} of %{total} hours',
+    {count: String(count), total: String(landing.value?.music_hours ?? 0)}
+);
+
+const landingFailureLabel = (failure: TopOfHourLandingFailure): string => {
+    const seconds = String(Math.round(failure.seconds));
+    const parts: string[] = [];
+
+    switch (failure.kind) {
+        case 'cut_short':
+            parts.push($gettext('Cut short: %{seconds}s trimmed off the ending', {seconds}));
+            break;
+        case 'cut_late_start':
+            parts.push($gettext('Cut by the ID: started too close to it, %{seconds}s lost', {seconds}));
+            break;
+        case 'cut_too_long':
+            parts.push($gettext('Cut by the ID: %{seconds}s lost', {seconds}));
+            break;
+        case 'ended_early':
+            parts.push($gettext('Ended %{seconds}s early, leaving a gap before the ID', {seconds}));
+            break;
+    }
+
+    if (failure.resumed) {
+        parts.push($gettext('Played again after the ID'));
+    }
+
+    return parts.join('. ');
+};
+
 const saveChanges = async () => {
     isSaving.value = true;
     try {
@@ -450,5 +592,15 @@ const saveChanges = async () => {
     }
 };
 
-onMounted(loadSettings);
+onMounted(() => {
+    void loadSettings();
+    void loadLanding();
+});
 </script>
+
+<style scoped>
+.landing-failures {
+    max-height: 20rem;
+    overflow-y: auto;
+}
+</style>

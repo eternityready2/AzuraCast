@@ -1533,6 +1533,11 @@ return static function (RouteCollectorProxy $group) {
                                 '',
                                 Controller\Api\Stations\TopOfHour\PutAction::class
                             );
+
+                            $group->get(
+                                '/landing',
+                                Controller\Api\Stations\TopOfHour\LandingReportAction::class
+                            )->setName('api:stations:top-of-hour:landing');
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
