@@ -66,6 +66,9 @@ final class TopOfHourLandingReport
 
     private const int CUT_SONGS_LISTED = 3;
 
+    /** One cut is chance; a song is only listed once the ID has cut it this often. */
+    private const int CUT_SONGS_MIN_CUTS = 2;
+
     private const array SONG_OR_SPOT_TYPES = [
         ClockWheelSlotTypes::Music->value,
         ClockWheelSlotTypes::Promo->value,
@@ -300,6 +303,7 @@ final class TopOfHourLandingReport
         );
 
         ksort($byDay);
+        $cutSongs = array_filter($cutSongs, static fn(int $cuts): bool => $cuts >= self::CUT_SONGS_MIN_CUTS);
         arsort($cutSongs);
         $cutSongList = [];
         foreach (array_slice($cutSongs, 0, self::CUT_SONGS_LISTED, true) as $cutTitle => $cutCount) {

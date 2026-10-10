@@ -350,16 +350,21 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     tone: badTone(r.cut_count),
                 },
                 {
+                    label: $gettext('Songs cut most'),
+                    percent: null,
+                    value: r.cut_songs.length > 0 ? null : '0',
+                    unit: '',
+                    list: r.cut_songs.map((song) => ({text: song.title, count: song.count})),
+                    detail: r.cut_songs.length > 0
+                        ? $gettext('Cut or faded by the ID more than once')
+                        : $gettext('No song was cut more than once'),
+                    tone: 'text-success',
+                },
+                {
                     label: $gettext('Ended early (gap)'),
                     percent: r.early_percent,
                     detail: ofHours(r.early_count, r.music_hours),
                     tone: badTone(r.early_count),
-                },
-                {
-                    label: $gettext('Promos back to back'),
-                    percent: r.promo_stack_percent,
-                    detail: ofHours(r.promo_stack_count, r.id_hours),
-                    tone: badTone(r.promo_stack_count),
                 },
             ],
         },
@@ -385,23 +390,18 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     tone: goodTone(r.tempo_clean_percent, r.target_percent),
                 },
                 {
+                    label: $gettext('Promos back to back'),
+                    percent: r.promo_stack_percent,
+                    detail: ofHours(r.promo_stack_count, r.id_hours),
+                    tone: badTone(r.promo_stack_count),
+                },
+                {
                     label: $gettext('Clean hours in a row'),
                     percent: null,
                     value: String(r.streak_current),
                     unit: '',
                     detail: $gettext('Right now. Best in this period: %{best}', {best: String(r.streak_best)}),
                     tone: r.streak_current > 0 ? 'text-success' : 'text-warning',
-                },
-                {
-                    label: $gettext('Songs cut most'),
-                    percent: null,
-                    value: r.cut_songs.length > 0 ? null : '0',
-                    unit: '',
-                    list: r.cut_songs.map((song) => ({text: song.title, count: song.count})),
-                    detail: r.cut_songs.length > 0
-                        ? $gettext('Cut or faded by the ID most often')
-                        : $gettext('No song was cut in this period'),
-                    tone: 'text-success',
                 },
             ],
         },
