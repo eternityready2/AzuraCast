@@ -31,64 +31,110 @@
 
         <loading :loading="isLoading && !report">
             <template v-if="report">
-                <template
-                    v-for="group in groups"
-                    :key="group.title"
-                >
-                    <div class="text-uppercase text-secondary small fw-semibold mt-3 mb-2">
-                        {{ group.title }}
-                    </div>
-                    <div class="row g-2">
-                        <div
-                            v-for="box in group.boxes"
-                            :key="box.label"
-                            class="col-6 col-md-4 col-xl-3"
-                        >
-                            <div class="border rounded p-2 text-center h-100">
-                                <div class="fs-4 fw-semibold" :class="box.tone">
-                                    {{ box.percent ?? '—' }}<span v-if="box.percent != null" class="fs-6">%</span>
-                                    <span
-                                        v-if="box.trend"
-                                        class="fs-6 ms-1"
-                                        :class="box.trend.tone"
-                                        :title="box.trend.title"
-                                    >{{ box.trend.text }}</span>
+                <div class="row gx-3 gy-0">
+                    <div
+                        v-for="group in groups"
+                        :key="group.title"
+                        :class="groupClass(group.boxes.length)"
+                    >
+                        <div class="text-uppercase text-secondary small fw-semibold mt-3 mb-2">
+                            {{ group.title }}
+                        </div>
+                        <div class="row g-2">
+                            <div
+                                v-for="box in group.boxes"
+                                :key="box.label"
+                                :class="boxClass(group.boxes.length)"
+                            >
+                                <div class="border rounded p-2 text-center h-100">
+                                    <div v-if="box.list && box.list.length > 0" class="small text-start mb-1">
+                                        <div
+                                            v-for="item in box.list"
+                                            :key="item.text"
+                                            class="d-flex gap-2"
+                                        >
+                                            <span class="fw-semibold text-warning text-nowrap">{{ item.count }}×</span>
+                                            <span class="text-truncate" :title="item.text">{{ item.text }}</span>
+                                        </div>
+                                    </div>
+                                    <div v-else class="fs-4 fw-semibold" :class="box.tone">
+                                        {{ boxValue(box) ?? '—' }}<span v-if="boxValue(box) != null" class="fs-6">{{ box.unit ?? '%' }}</span>
+                                        <span
+                                            v-if="box.trend"
+                                            class="fs-6 ms-1"
+                                            :class="box.trend.tone"
+                                            :title="box.trend.title"
+                                        >{{ box.trend.text }}</span>
+                                    </div>
+                                    <div class="small">{{ box.label }}</div>
+                                    <div class="small text-secondary">{{ box.detail }}</div>
                                 </div>
-                                <div class="small">{{ box.label }}</div>
-                                <div class="small text-secondary">{{ box.detail }}</div>
                             </div>
                         </div>
                     </div>
-                </template>
+                </div>
 
                 <div class="small text-secondary mt-2">
                     {{ $gettext('"Before the ID" and "How it landed" count the hours where a song or promo led into the ID; %{shows} show or feed hours in this period are left out. Green is %{target}% or better.', {shows: String(report.show_hours), target: String(report.target_percent)}) }}
                 </div>
 
-                <template v-if="report.worst_hours.length > 0">
-                    <h4 class="h6 mt-4 mb-2">{{ $gettext('Hours That Miss Most') }}</h4>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle mb-0 w-auto">
-                            <thead>
-                                <tr>
-                                    <th>{{ $gettext('Clock hour') }}</th>
-                                    <th class="text-end">{{ $gettext('Missed') }}</th>
-                                    <th class="text-end">{{ $gettext('Out of') }}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="hour in report.worst_hours"
-                                    :key="hour.hour"
-                                >
-                                    <td>{{ hourLabel(hour.hour) }}</td>
-                                    <td class="text-end fw-semibold text-warning">{{ hour.missed }}</td>
-                                    <td class="text-end">{{ hour.music_hours }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                <div class="row gx-4 gy-0">
+                    <div v-if="report.daily.length > 0" class="col-12 col-xl-7">
+                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Day by Day') }}</h4>
+                        <div
+                            v-for="day in report.daily"
+                            :key="day.date"
+                            class="d-flex align-items-center gap-2 mb-1 small"
+                        >
+                            <span class="landing-day text-nowrap">{{ dayLabel(day.date) }}</span>
+                            <div
+                                class="progress flex-fill landing-day-bar"
+                                role="progressbar"
+                                :aria-label="dayLabel(day.date)"
+                                :aria-valuenow="day.clean_percent ?? 0"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                            >
+                                <div
+                                    class="progress-bar"
+                                    :class="barTone(day.clean_percent, report.target_percent)"
+                                    :style="{width: `${day.clean_percent ?? 0}%`}"
+                                />
+                            </div>
+                            <span class="landing-day-value text-nowrap">
+                                {{ day.clean_percent ?? '—' }}<template v-if="day.clean_percent != null">%</template>
+                                <span class="text-secondary">({{ day.clean_count }}/{{ day.music_hours }})</span>
+                            </span>
+                        </div>
+                        <div class="small text-secondary mt-2">
+                            {{ $gettext('Music hours each day that ended cleanly before the ID.') }}
+                        </div>
                     </div>
-                </template>
+                    <div v-if="report.worst_hours.length > 0" class="col-12 col-xl-5">
+                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Hours That Miss Most') }}</h4>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0 w-auto">
+                                <thead>
+                                    <tr>
+                                        <th>{{ $gettext('Clock hour') }}</th>
+                                        <th class="text-end">{{ $gettext('Missed') }}</th>
+                                        <th class="text-end">{{ $gettext('Out of') }}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="hour in report.worst_hours"
+                                        :key="hour.hour"
+                                    >
+                                        <td>{{ hourLabel(hour.hour) }}</td>
+                                        <td class="text-end fw-semibold text-warning">{{ hour.missed }}</td>
+                                        <td class="text-end">{{ hour.music_hours }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
 
                 <h4 class="h6 mt-4 mb-2">
                     {{ $gettext('Failures') }}
@@ -174,6 +220,11 @@ import {computed, ref, watch} from 'vue';
 interface LandingBox {
     label: string;
     percent: number | null;
+    /** For a box that is not a percentage: the number to show and its unit. */
+    value?: string | null;
+    unit?: string;
+    /** For a box that lists a few items instead of one number. */
+    list?: {text: string, count: number}[];
     detail: string;
     tone: string;
     trend?: {text: string, tone: string, title: string};
@@ -237,8 +288,33 @@ const goodTone = (percent: number | null, target: number): string => {
     return percent >= target - 10 ? 'text-warning' : 'text-danger';
 };
 
+const boxValue = (box: LandingBox): string | number | null => (box.unit !== undefined)
+    ? (box.value ?? null)
+    : box.percent;
+
+const dayLabel = (date: string): string => DateTime.fromISO(date).toLocaleString(
+    {weekday: 'short', month: 'short', day: 'numeric'}
+);
+
+const barTone = (percent: number | null, target: number): string => {
+    if (percent === null) return 'bg-secondary';
+    if (percent >= target) return 'bg-success';
+    return percent >= target - 10 ? 'bg-warning' : 'bg-danger';
+};
+
+// Seconds that should stay small: green under the two-second miss line.
+const secondsTone = (seconds: number | null): string => {
+    if (seconds === null) return 'text-secondary';
+    return seconds < 2 ? 'text-success' : 'text-warning';
+};
+
 // Should be zero.
 const badTone = (count: number): string => (count > 0) ? 'text-warning' : 'text-success';
+
+// Short groups share a row instead of each leaving half of one empty: a group
+// is as wide as its boxes need, and every box keeps the same width.
+const groupClass = (boxCount: number): string => `col-12 col-xl-${Math.min(12, boxCount * 3)}`;
+const boxClass = (boxCount: number): string => `col-6 col-md-4 col-xl-${Math.max(3, Math.floor(12 / Math.min(4, boxCount)))}`;
 
 const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
     const r = report.value;
@@ -308,6 +384,25 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     ),
                     tone: goodTone(r.tempo_clean_percent, r.target_percent),
                 },
+                {
+                    label: $gettext('Clean hours in a row'),
+                    percent: null,
+                    value: String(r.streak_current),
+                    unit: '',
+                    detail: $gettext('Right now. Best in this period: %{best}', {best: String(r.streak_best)}),
+                    tone: r.streak_current > 0 ? 'text-success' : 'text-warning',
+                },
+                {
+                    label: $gettext('Songs cut most'),
+                    percent: null,
+                    value: r.cut_songs.length > 0 ? null : '0',
+                    unit: '',
+                    list: r.cut_songs.map((song) => ({text: song.title, count: song.count})),
+                    detail: r.cut_songs.length > 0
+                        ? $gettext('Cut or faded by the ID most often')
+                        : $gettext('No song was cut in this period'),
+                    tone: 'text-success',
+                },
             ],
         },
         {
@@ -332,11 +427,39 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     detail: ofHours(r.id_late_count, r.id_hours),
                     tone: badTone(r.id_late_count),
                 },
+                {
+                    label: $gettext('How far off the ID started'),
+                    percent: null,
+                    value: r.id_average_offset_seconds === null ? null : String(r.id_average_offset_seconds),
+                    unit: 's',
+                    detail: $gettext(
+                        'On average, from its set time. Furthest: %{worst}s',
+                        {worst: String(r.id_worst_offset_seconds)}
+                    ),
+                    tone: secondsTone(r.id_average_offset_seconds),
+                },
+                {
+                    label: $gettext('Started under the ID'),
+                    percent: r.under_id_percent,
+                    detail: ofHours(r.under_id_count, r.after_id_hours),
+                    tone: badTone(r.under_id_count),
+                },
             ],
         },
         {
             title: $gettext('After the ID'),
             boxes: [
+                {
+                    label: $gettext('Gap after the ID'),
+                    percent: null,
+                    value: r.after_id_average_gap_seconds === null ? null : String(r.after_id_average_gap_seconds),
+                    unit: 's',
+                    detail: $gettext(
+                        'On average, before the next item starts. Longest: %{worst}s',
+                        {worst: String(r.after_id_worst_gap_seconds)}
+                    ),
+                    tone: secondsTone(r.after_id_average_gap_seconds),
+                },
                 {
                     label: $gettext('Came back after being cut'),
                     percent: r.resumed_after_cut_percent,
@@ -354,12 +477,6 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     percent: r.late_start_percent,
                     detail: ofHours(r.late_start_count, r.after_id_hours),
                     tone: badTone(r.late_start_count),
-                },
-                {
-                    label: $gettext('Started under the ID'),
-                    percent: r.under_id_percent,
-                    detail: ofHours(r.under_id_count, r.after_id_hours),
-                    tone: badTone(r.under_id_count),
                 },
             ],
         },
@@ -461,5 +578,18 @@ const downloadCsv = () => {
 .landing-failures {
     max-height: 32rem;
     overflow-y: auto;
+}
+
+.landing-day {
+    width: 6.5rem;
+}
+
+.landing-day-bar {
+    height: 0.9rem;
+}
+
+.landing-day-value {
+    width: 7.5rem;
+    text-align: right;
 }
 </style>

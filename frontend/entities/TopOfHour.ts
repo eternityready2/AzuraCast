@@ -33,6 +33,18 @@ export interface TopOfHourLandingWorstHour {
     missed: number;
 }
 
+export interface TopOfHourLandingCutSong {
+    title: string;
+    count: number;
+}
+
+export interface TopOfHourLandingDay {
+    date: string;
+    music_hours: number;
+    clean_count: number;
+    clean_percent: number | null;
+}
+
 export interface TopOfHourLanding {
     start: string;
     end: string;
@@ -71,6 +83,15 @@ export interface TopOfHourLanding {
     under_id_percent: number | null;
     promo_stack_count: number;
     promo_stack_percent: number | null;
+    streak_current: number;
+    streak_best: number;
+    id_average_offset_seconds: number | null;
+    id_worst_offset_seconds: number;
+    after_id_gap_hours: number;
+    after_id_average_gap_seconds: number | null;
+    after_id_worst_gap_seconds: number;
+    cut_songs: TopOfHourLandingCutSong[];
+    daily: TopOfHourLandingDay[];
     worst_hours: TopOfHourLandingWorstHour[];
     failures: TopOfHourLandingFailure[];
 }

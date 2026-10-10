@@ -64,6 +64,8 @@ final class TopOfHourLandingReport
 
     private const int WORST_HOURS_LISTED = 6;
 
+    private const int CUT_SONGS_LISTED = 3;
+
     private const array SONG_OR_SPOT_TYPES = [
         ClockWheelSlotTypes::Music->value,
         ClockWheelSlotTypes::Promo->value,
@@ -120,7 +122,17 @@ final class TopOfHourLandingReport
             'after', 'late_start', 'under_id', 'promo_stack', 'previous_music', 'previous_clean',
         ], 0);
         $byHour = [];
+        $byDay = [];
+        $cutSongs = [];
         $failures = [];
+        // Clean hours in a row, how far IDs sat from their set time, and the gap after them.
+        $streak = 0;
+        $bestStreak = 0;
+        $offsetTotal = 0.0;
+        $offsetWorst = 0.0;
+        $gapHours = 0;
+        $gapTotal = 0.0;
+        $gapWorst = 0.0;
 
         for ($i = 1, $n = count($rows); $i < $n; $i++) {
             $id = $rows[$i];
@@ -192,6 +204,21 @@ final class TopOfHourLandingReport
                 $byHour[$hour]['music_hours']++;
                 $byHour[$hour]['missed'] += $isClean ? 0 : 1;
 
+                $day = new DateTimeImmutable('@' . (int)(round($target / 3600) * 3600 - 3600))
+                    ->setTimezone($tz)
+                    ->format('Y-m-d');
+                $byDay[$day] ??= ['date' => $day, 'music_hours' => 0, 'clean_count' => 0];
+                $byDay[$day]['music_hours']++;
+                $byDay[$day]['clean_count'] += $isClean ? 1 : 0;
+
+                $streak = $isClean ? $streak + 1 : 0;
+                $bestStreak = max($bestStreak, $streak);
+
+                if (!$isClean && 'ended_early' !== $landing['kind']) {
+                    $cutTitle = $this->titleOf($before);
+                    $cutSongs[$cutTitle] = ($cutSongs[$cutTitle] ?? 0) + 1;
+                }
+
                 if ($this->cameBackAfterId($rows, $i, (int)$before['media_id'])) {
                     $wasCut = !$isClean && 'ended_early' !== $landing['kind'];
                     $failure['resumed'] = $wasCut ? 'after_cut' : 'replayed';
@@ -200,6 +227,8 @@ final class TopOfHourLandingReport
             }
 
             $offset = $idAt - $target;
+            $offsetTotal += abs($offset);
+            $offsetWorst = max($offsetWorst, abs($offset));
             if (abs($offset) >= self::MISS_SECONDS) {
                 $failure['id_offset_seconds'] = round($offset, 1);
                 $c[$offset < 0 ? 'id_early' : 'id_late']++;
@@ -211,6 +240,12 @@ final class TopOfHourLandingReport
             if (null !== $after && null !== $idLength && !StationMediaTypes::isStationId($after['media_type'])) {
                 $c['after']++;
                 $gap = (float)$after['ts'] - ($idAt + $idLength);
+
+                if (null !== $after['media_id'] && $gap <= self::AFTER_ID_MAX_GAP_SECONDS) {
+                    $gapHours++;
+                    $gapTotal += max(0.0, $gap);
+                    $gapWorst = max($gapWorst, $gap);
+                }
 
                 if ($gap <= -self::MISS_SECONDS) {
                     $failure['under_id'] = true;
@@ -264,6 +299,13 @@ final class TopOfHourLandingReport
             self::WORST_HOURS_LISTED
         );
 
+        ksort($byDay);
+        arsort($cutSongs);
+        $cutSongList = [];
+        foreach (array_slice($cutSongs, 0, self::CUT_SONGS_LISTED, true) as $cutTitle => $cutCount) {
+            $cutSongList[] = ['title' => (string)$cutTitle, 'count' => $cutCount];
+        }
+
         return [
             'start' => $this->iso($from, $tz),
             'end' => $this->iso($to, $tz),
@@ -301,6 +343,20 @@ final class TopOfHourLandingReport
             'under_id_percent' => $percent($c['under_id'], $c['after']),
             'promo_stack_count' => $c['promo_stack'],
             'promo_stack_percent' => $percent($c['promo_stack'], $c['id_hours']),
+            'streak_current' => $streak,
+            'streak_best' => $bestStreak,
+            'id_average_offset_seconds' => $c['id_hours'] > 0 ? round($offsetTotal / $c['id_hours'], 1) : null,
+            'id_worst_offset_seconds' => round($offsetWorst, 1),
+            'after_id_gap_hours' => $gapHours,
+            'after_id_average_gap_seconds' => $gapHours > 0 ? round($gapTotal / $gapHours, 1) : null,
+            'after_id_worst_gap_seconds' => round($gapWorst, 1),
+            'cut_songs' => $cutSongList,
+            'daily' => array_map(
+                static fn(array $day): array => $day + [
+                    'clean_percent' => $percent($day['clean_count'], $day['music_hours']),
+                ],
+                array_values($byDay)
+            ),
             'worst_hours' => $worstHours,
             'failures' => array_reverse($failures),
         ];
