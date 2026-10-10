@@ -28,9 +28,6 @@ final class StationBackendConfiguration extends AbstractArrayEntity
     public function __construct(array $data = [])
     {
         $legacyPlayoutMap = [
-            'top_of_hour_hard_trigger_enabled' => 'playout_hard_clock_enabled',
-            'top_of_hour_hard_trigger_seconds' => 'playout_hard_clock_trigger_seconds',
-            'top_of_hour_hard_trigger_fade' => 'playout_hard_clock_fade_seconds',
             'top_of_hour_duck_enabled' => 'playout_smart_duck_enabled',
             'top_of_hour_duck_attenuation' => 'playout_smart_duck_attenuation',
             'top_of_hour_duck_delay' => 'playout_smart_duck_delay',
@@ -49,6 +46,17 @@ final class StationBackendConfiguration extends AbstractArrayEntity
             $data['top_of_hour_finish_buffer_seconds'],
             $data['top_of_hour_pre_id_fade'],
             $data['top_of_hour_pre_id_fade_seconds'],
+        );
+
+        // The hard-clock trigger left the playout engine with the retired TOH
+        // takeover path; drop its saved values under both their old and new names.
+        unset(
+            $data['top_of_hour_hard_trigger_enabled'],
+            $data['top_of_hour_hard_trigger_seconds'],
+            $data['top_of_hour_hard_trigger_fade'],
+            $data['playout_hard_clock_enabled'],
+            $data['playout_hard_clock_trigger_seconds'],
+            $data['playout_hard_clock_fade_seconds'],
         );
 
         parent::__construct($data);
@@ -230,33 +238,8 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         }
     }
 
-    // Generic rigid-clock playout controls. These are deliberately independent
-    // from the Top-of-Hour Station ID feature and remain useful when TOH is off.
-    #[OA\Property]
-    public bool $playout_hard_clock_enabled = false {
-        set(bool|string|null $value) => Types::bool($value, false, true);
-    }
-
-    protected const float DEFAULT_HARD_CLOCK_TRIGGER_SECONDS = 3.0;
-
-    #[OA\Property]
-    public float $playout_hard_clock_trigger_seconds = self::DEFAULT_HARD_CLOCK_TRIGGER_SECONDS {
-        set(float|int|string|null $value) {
-            $floatVal = Types::float($value, self::DEFAULT_HARD_CLOCK_TRIGGER_SECONDS);
-            $this->playout_hard_clock_trigger_seconds = max(1.0, min($floatVal, 30.0));
-        }
-    }
-
-    protected const float DEFAULT_HARD_CLOCK_FADE_SECONDS = 3.0;
-
-    #[OA\Property]
-    public float $playout_hard_clock_fade_seconds = self::DEFAULT_HARD_CLOCK_FADE_SECONDS {
-        set(float|int|string|null $value) {
-            $floatVal = Types::float($value, self::DEFAULT_HARD_CLOCK_FADE_SECONDS);
-            $this->playout_hard_clock_fade_seconds = max(0.0, min($floatVal, 10.0));
-        }
-    }
-
+    // Generic playout controls. These are deliberately independent from the
+    // Top-of-Hour Station ID feature and remain useful when TOH is off.
     #[OA\Property]
     public bool $playout_stretch_squeeze_enabled = true {
         set(bool|string|null $value) => Types::bool($value, true, true);

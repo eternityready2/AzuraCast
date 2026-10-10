@@ -315,21 +315,16 @@ final readonly class StationDiagnosticsDashboardView
         $config = $station->backend_config;
         $raw = $config->toArray(true) ?? [];
 
-        $hardClock = $config->top_of_hour_hard_trigger_enabled;
         $stretch = (bool)($raw['playout_stretch_squeeze_enabled'] ?? true);
         $stretchMax = (float)($raw['playout_stretch_squeeze_max_percent'] ?? 5.0);
-        $smartDuck = $config->top_of_hour_duck_enabled;
-        $enabledCount = (int)$hardClock + (int)$stretch + (int)$smartDuck;
+        $smartDuck = $config->playout_smart_duck_enabled;
+        $enabledCount = (int)$stretch + (int)$smartDuck;
 
-        $feature['metric'] = sprintf('%d/3 enabled', $enabledCount);
+        $feature['metric'] = sprintf('%d/2 enabled', $enabledCount);
         $feature['headline'] = $enabledCount > 0
             ? __('Advanced playout controls configured')
             : __('Advanced playout controls are inactive');
         $feature['details'] = [
-            [
-                'label' => __('Hard Clock'),
-                'value' => $hardClock ? __('Enabled') : __('Disabled'),
-            ],
             [
                 'label' => __('Stretch / Squeeze'),
                 'value' => $stretch
