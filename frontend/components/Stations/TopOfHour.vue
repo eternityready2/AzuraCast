@@ -51,6 +51,14 @@
                     </nav>
 
                     <div v-show="activeTab === 'settings'">
+                        <form-group id="top_of_hour_id_enabled" class="mb-4 toh-row">
+                            <template #label>{{ $gettext('Enable automatic Top-of-Hour Station ID') }}</template>
+                            <form-checkbox id="top_of_hour_id_enabled" v-model="form.top_of_hour_id_enabled" />
+                            <template #description>
+                                {{ $gettext('When disabled, the entire automatic :59 takeover is bypassed.') }}
+                            </template>
+                        </form-group>
+
                         <div class="row g-3 mb-4">
                             <div class="col-12 col-xl-7">
                                 <div class="border rounded h-100 p-3">
@@ -113,6 +121,35 @@
                                             {{ $gettext('No eligible Station ID is available for the next hour. Add an ID file with a valid duration within the configured maximum.') }}
                                         </p>
                                     </template>
+
+                                    <hr class="my-3">
+                                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                                        <div>
+                                            <span>{{ $gettext('Station ID files') }}</span>
+                                            <span class="fs-5 fw-semibold ms-2">{{ idMediaCount }}</span>
+                                            <div class="small text-secondary">
+                                                {{ $gettext('Only files tagged as ID are eligible.') }}
+                                            </div>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <router-link class="btn btn-sm btn-outline-secondary" :to="{name: 'stations:files:index'}">
+                                                {{ $gettext('Manage ID files') }}
+                                            </router-link>
+                                            <button type="button" class="btn btn-sm btn-outline-primary" @click="showIdUpload = !showIdUpload">
+                                                {{ $gettext('Upload an ID') }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div v-if="showIdUpload" class="mt-3">
+                                        <flow-upload
+                                            :target-url="idUploadUrl"
+                                            :valid-mime-types="['audio/*']"
+                                            @success="onIdUploaded"
+                                        />
+                                        <div class="small text-secondary mt-2">
+                                            {{ $gettext('The file goes into the "Station IDs" folder in Media and is tagged as an ID. You can change its type later on the Media page.') }}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -153,17 +190,9 @@
                             <div class="col-12 col-xl-7">
                                 <h3 class="h6 mb-3">{{ $gettext('Station ID Control') }}</h3>
 
-                                <form-group id="top_of_hour_id_enabled" class="mb-3">
-                                    <template #label>{{ $gettext('Enable automatic Top-of-Hour Station ID') }}</template>
-                                    <form-checkbox id="top_of_hour_id_enabled" v-model="form.top_of_hour_id_enabled" />
-                                    <template #description>
-                                        {{ $gettext('When disabled, the entire automatic :59 takeover is bypassed.') }}
-                                    </template>
-                                </form-group>
-
-                                <form-group id="top_of_hour_id_start_second" class="mb-3">
+                                <form-group id="top_of_hour_id_start_second" class="mb-3 toh-row">
                                     <template #label>{{ $gettext('ID start time') }}</template>
-                                    <div class="input-group">
+                                    <div class="input-group toh-input">
                                         <span class="input-group-text">:</span>
                                         <input
                                             id="top_of_hour_id_start_minute"
@@ -186,17 +215,13 @@
                                         >
                                     </div>
                                     <template #description>
-                                        {{ $gettext('Choose the minute and second within the hour when the ID starts. Current setting: %{time}.', {time: configuredStartLabel}) }}
-                                        {{ $gettext('The default of :59:00 lands the ID in the final minute before :00; moving it earlier gives more room before the next hour.') }}
-                                        <template v-if="nextPlan">
-                                            {{ $gettext(' For the selected ID, :59:%{second} would be the latest whole-second start that should finish before :00 at the default minute.', {second: padSecond(nextPlan.recommended_start_second)}) }}
-                                        </template>
+                                        {{ $gettext('When the ID starts each hour: :00:00, or :45:00 to :59:59. Current setting: %{time}.', {time: configuredStartLabel}) }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_id_fade_seconds" class="mb-3">
+                                <form-group id="top_of_hour_id_fade_seconds" class="mb-3 toh-row">
                                     <template #label>{{ $gettext('Slow fade before ID') }}</template>
-                                    <div class="input-group">
+                                    <div class="input-group toh-input">
                                         <input
                                             id="top_of_hour_id_fade_seconds"
                                             v-model.number="form.top_of_hour_id_fade_seconds"
@@ -209,23 +234,103 @@
                                         <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('If audio is still on air, it is faded to silence during this period immediately before the ID deadline.') }}
+                                        {{ $gettext('Fade length if audio is still on air right before the ID.') }}
                                     </template>
                                 </form-group>
 
-                                <h3 class="h6 mt-4 mb-3">{{ $gettext('Landing the Hour') }}</h3>
-
-                                <form-group id="top_of_hour_swap_enabled" class="mb-3">
-                                    <template #label>{{ $gettext('Swap the last song of the hour to land on the ID') }}</template>
-                                    <form-checkbox id="top_of_hour_swap_enabled" v-model="form.top_of_hour_swap_enabled" />
+                                <form-group id="top_of_hour_lookahead_minutes" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Staging lookahead') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_lookahead_minutes"
+                                            v-model.number="form.top_of_hour_lookahead_minutes"
+                                            type="number"
+                                            class="form-control"
+                                            min="1"
+                                            max="60"
+                                        >
+                                        <span class="input-group-text">{{ $gettext('minutes') }}</span>
+                                    </div>
                                     <template #description>
-                                        {{ $gettext('The AutoDJ replaces the final music slot with a track from the same playlist whose natural length ends at the ID deadline. The fade above becomes a rare fallback used only when no match exists.') }}
+                                        {{ $gettext('How far ahead the ID is lined up in the playout engine.') }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_swap_tolerance_seconds" class="mb-3">
+                                <form-group id="top_of_hour_id_max_seconds" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Maximum Station ID length') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_id_max_seconds"
+                                            v-model.number="form.top_of_hour_id_max_seconds"
+                                            type="number"
+                                            class="form-control"
+                                            min="15"
+                                            max="60"
+                                        >
+                                        <span class="input-group-text">{{ $gettext('seconds') }}</span>
+                                    </div>
+                                    <template #description>
+                                        {{ $gettext('Only files tagged as ID and no longer than this are eligible.') }}
+                                    </template>
+                                </form-group>
+
+                                <form-group id="top_of_hour_compliance_tolerance_seconds" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Compliance reporting tolerance') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_compliance_tolerance_seconds"
+                                            v-model.number="form.top_of_hour_compliance_tolerance_seconds"
+                                            type="number"
+                                            class="form-control"
+                                            min="1"
+                                            max="60"
+                                        >
+                                        <span class="input-group-text">{{ $gettext('seconds') }}</span>
+                                    </div>
+                                    <template #description>
+                                        {{ $gettext('For reporting only. It does not change when the ID plays.') }}
+                                    </template>
+                                </form-group>
+
+                                <h3 class="h6 mt-4 mb-3">{{ $gettext('Tempo fit') }}</h3>
+
+                                <form-group id="top_of_hour_fit_tempo" class="mb-0 toh-row">
+                                    <template #label>{{ $gettext('Last-song tempo fit') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_fit_tempo"
+                                            type="number"
+                                            class="form-control"
+                                            value="3"
+                                            disabled
+                                        >
+                                        <span class="input-group-text">%</span>
+                                    </div>
+                                    <template #description>
+                                        {{ $gettext('Fixed. The last song before the ID may be tempo-fitted by up to 3% in total so it ends on the ID start.') }}
+                                    </template>
+                                </form-group>
+                            </div>
+
+                            <div class="col-12 col-xl-5 toh-divider">
+
+                                <h3 class="h6 mb-3">{{ $gettext('Landing the Hour') }}</h3>
+
+                                <form-group id="top_of_hour_swap_enabled" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Swap the last song of the hour to land on the ID') }}</template>
+                                    <form-checkbox
+                                        id="top_of_hour_swap_enabled"
+                                        :model-value="form.top_of_hour_swap_enabled"
+                                        @update:model-value="onSwapToggle"
+                                    />
+                                    <template #description>
+                                        {{ $gettext('Replaces the last song with one that ends on the ID start. The fade becomes a rare fallback.') }}
+                                    </template>
+                                </form-group>
+
+                                <form-group id="top_of_hour_swap_tolerance_seconds" class="mb-3 toh-row">
                                     <template #label>{{ $gettext('Landing tolerance') }}</template>
-                                    <div class="input-group">
+                                    <div class="input-group toh-input">
                                         <input
                                             id="top_of_hour_swap_tolerance_seconds"
                                             v-model.number="form.top_of_hour_swap_tolerance_seconds"
@@ -238,13 +343,13 @@
                                         <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('How far a track may miss the deadline and still count as a clean landing. Tighter is more accurate but finds fewer matches; widen it on a small library.') }}
+                                        {{ $gettext('How far a song may miss the ID start and still count as landed.') }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_swap_min_gap_seconds" class="mb-3">
+                                <form-group id="top_of_hour_swap_min_gap_seconds" class="mb-3 toh-row">
                                     <template #label>{{ $gettext('Minimum swap gap') }}</template>
-                                    <div class="input-group">
+                                    <div class="input-group toh-input">
                                         <input
                                             id="top_of_hour_swap_min_gap_seconds"
                                             v-model.number="form.top_of_hour_swap_min_gap_seconds"
@@ -257,93 +362,127 @@
                                         <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('If less than this much of the hour remains, no song is substituted and the fade fallback is used instead. This prevents very short stub tracks being scheduled just before the ID.') }}
+                                        {{ $gettext('With less than this left before the ID, no song is swapped in and the fade is used.') }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_fit_tempo" class="mb-3">
-                                    <template #label>{{ $gettext('Last-song tempo fit') }}</template>
-                                    <div class="input-group">
+                                <form-group id="top_of_hour_swap_final_approach" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Final approach') }}</template>
+                                    <div class="input-group toh-input">
                                         <input
-                                            id="top_of_hour_fit_tempo"
+                                            id="top_of_hour_swap_final_approach"
                                             type="number"
                                             class="form-control"
-                                            value="3"
+                                            value="12"
                                             disabled
-                                        >
-                                        <span class="input-group-text">%</span>
-                                    </div>
-                                    <template #description>
-                                        {{ $gettext('Shown for reference; it cannot be changed here. When the last song before the ID starts, its tempo may be adjusted by up to 3% in total, including any stretch or squeeze, so it ends on the ID start time.') }}
-                                    </template>
-                                </form-group>
-
-                                <form-group id="top_of_hour_lookahead_minutes" class="mb-3">
-                                    <template #label>{{ $gettext('Staging lookahead') }}</template>
-                                    <div class="input-group">
-                                        <input
-                                            id="top_of_hour_lookahead_minutes"
-                                            v-model.number="form.top_of_hour_lookahead_minutes"
-                                            type="number"
-                                            class="form-control"
-                                            min="1"
-                                            max="60"
                                         >
                                         <span class="input-group-text">{{ $gettext('minutes') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('The selected ID is resolved and staged this far ahead so Liquidsoap already has it before the exact wall-clock deadline.') }}
+                                        {{ $gettext('Fixed. Songs go to the playout engine one at a time in this last stretch.') }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_id_max_seconds" class="mb-3">
-                                    <template #label>{{ $gettext('Maximum Station ID length') }}</template>
-                                    <div class="input-group">
+                                <form-group id="top_of_hour_swap_late_start" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Late start window') }}</template>
+                                    <div class="input-group toh-input">
                                         <input
-                                            id="top_of_hour_id_max_seconds"
-                                            v-model.number="form.top_of_hour_id_max_seconds"
+                                            id="top_of_hour_swap_late_start"
                                             type="number"
                                             class="form-control"
-                                            min="15"
-                                            max="60"
+                                            value="2"
+                                            disabled
+                                        >
+                                        <span class="input-group-text">{{ $gettext('minutes') }}</span>
+                                    </div>
+                                    <template #description>
+                                        {{ $gettext('Fixed. A song starting this close that the ID would cut is replaced.') }}
+                                    </template>
+                                </form-group>
+
+                                <form-group id="top_of_hour_swap_hold_window" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Hold window') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_swap_hold_window"
+                                            type="number"
+                                            class="form-control"
+                                            value="45"
+                                            disabled
                                         >
                                         <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('Only files tagged as ID and within this maximum are eligible. Promos and commercials are never substituted.') }}
+                                        {{ $gettext('Fixed. A song starting this close that cannot finish opens the new hour instead.') }}
                                     </template>
                                 </form-group>
 
-                                <form-group id="top_of_hour_compliance_tolerance_seconds" class="mb-0">
-                                    <template #label>{{ $gettext('Compliance reporting tolerance') }}</template>
-                                    <div class="input-group">
+                                <form-group id="top_of_hour_swap_max_cut" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Largest cut allowed') }}</template>
+                                    <div class="input-group toh-input">
                                         <input
-                                            id="top_of_hour_compliance_tolerance_seconds"
-                                            v-model.number="form.top_of_hour_compliance_tolerance_seconds"
+                                            id="top_of_hour_swap_max_cut"
                                             type="number"
                                             class="form-control"
-                                            min="1"
-                                            max="60"
+                                            value="30"
+                                            disabled
                                         >
                                         <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
                                     <template #description>
-                                        {{ $gettext('Reporting tolerance only. It does not change the wall-clock deadline or let an ID delay a rigid :00 program.') }}
+                                        {{ $gettext('Fixed. A song that would lose more than this to the ID is replaced or dropped.') }}
                                     </template>
                                 </form-group>
-                            </div>
 
-                            <div class="col-12 col-xl-5">
-                                <h3 class="h6 mb-3">{{ $gettext('Readiness') }}</h3>
-                                <div class="border rounded p-3 mb-3">
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <span>{{ $gettext('Station ID files') }}</span>
-                                        <span class="fs-5 fw-semibold">{{ idMediaCount }}</span>
+                                <form-group id="top_of_hour_swap_settle" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Settle time after the hour') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_swap_settle"
+                                            type="number"
+                                            class="form-control"
+                                            value="6"
+                                            disabled
+                                        >
+                                        <span class="input-group-text">{{ $gettext('minutes') }}</span>
                                     </div>
-                                    <div class="small text-secondary mt-1">
-                                        {{ $gettext('Only files tagged as ID are eligible.') }}
+                                    <template #description>
+                                        {{ $gettext('Fixed. Nothing is swapped for this long after :00.') }}
+                                    </template>
+                                </form-group>
+
+                                <form-group id="top_of_hour_swap_landed" class="mb-3 toh-row">
+                                    <template #label>{{ $gettext('Already landed') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_swap_landed"
+                                            type="number"
+                                            class="form-control"
+                                            value="2"
+                                            disabled
+                                        >
+                                        <span class="input-group-text">{{ $gettext('seconds') }}</span>
                                     </div>
-                                </div>
+                                    <template #description>
+                                        {{ $gettext('Fixed. Ending this close to the ID start needs no swap.') }}
+                                    </template>
+                                </form-group>
+
+                                <form-group id="top_of_hour_swap_pool" class="mb-0 toh-row">
+                                    <template #label>{{ $gettext('Songs to rotate between') }}</template>
+                                    <div class="input-group toh-input">
+                                        <input
+                                            id="top_of_hour_swap_pool"
+                                            type="number"
+                                            class="form-control"
+                                            value="5"
+                                            disabled
+                                        >
+                                    </div>
+                                    <template #description>
+                                        {{ $gettext('Fixed. Number of equally good songs the swap rotates between.') }}
+                                    </template>
+                                </form-group>
                             </div>
                         </div>
                     </div>
@@ -401,7 +540,9 @@ import InfoCard from '~/components/Common/InfoCard.vue';
 import Loading from '~/components/Common/Loading.vue';
 import FormGroup from '~/components/Form/FormGroup.vue';
 import FormCheckbox from '~/components/Form/FormCheckbox.vue';
+import FlowUpload from '~/components/Common/FlowUpload.vue';
 import LandingPanel from '~/components/Stations/TopOfHour/LandingPanel.vue';
+import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import type {
     TopOfHourCompliance,
@@ -413,15 +554,29 @@ import type {
 import {useApiRouter} from '~/functions/useApiRouter.ts';
 import useStationDateTimeFormatter from '~/functions/useStationDateTimeFormatter.ts';
 import {useAxios} from '~/vendor/axios.ts';
+import {useTranslate} from '~/vendor/gettext.ts';
 import {computed, onMounted, ref} from 'vue';
 
 const {axios} = useAxios();
 const {getStationApiUrl} = useApiRouter();
 const {notifySuccess, notifyError} = useNotify();
+const {$gettext} = useTranslate();
+const {showAlert} = useDialog();
 const {formatIsoAsTime} = useStationDateTimeFormatter();
 
 const apiUrl = getStationApiUrl('/top-of-hour');
 const landingUrl = getStationApiUrl('/top-of-hour/landing');
+
+// An ID uploaded here lands in one Media folder and is tagged as an ID straight away.
+const idUploadDirectory = 'Station IDs';
+const filesUploadUrl = getStationApiUrl('/files/upload');
+const filesBatchUrl = getStationApiUrl('/files/batch');
+const showIdUpload = ref(false);
+const idUploadUrl = computed(() => {
+    const url = new URL(filesUploadUrl.value, document.location.href);
+    url.searchParams.set('currentDirectory', idUploadDirectory);
+    return url.toString();
+});
 const activeTab = ref<'settings' | 'performance'>('settings');
 const isLoading = ref(true);
 const isSaving = ref(false);
@@ -466,7 +621,6 @@ const nextModeTitle = computed(() => {
 
 const formatClock = (value: string): string => formatIsoAsTime(value);
 const formatDuration = (seconds: number): string => `${seconds.toFixed(1)}s`;
-const padSecond = (second: number): string => String(second).padStart(2, '0');
 
 const loadSettings = async () => {
     isLoading.value = true;
@@ -496,6 +650,40 @@ const loadSettings = async () => {
     }
 };
 
+// Turning the swap off changes how nearly every hour ends, so it asks first.
+const onSwapToggle = async (enabled: boolean | null) => {
+    form.value.top_of_hour_swap_enabled = !!enabled;
+    if (enabled) {
+        return;
+    }
+
+    const {value} = await showAlert({
+        title: $gettext('Turn off the swap? Songs will be faded at the ID instead of landing on it.'),
+        confirmButtonText: $gettext('Turn Off'),
+        confirmButtonClass: 'btn-warning',
+        focusCancel: true,
+    });
+    if (!value) {
+        form.value.top_of_hour_swap_enabled = true;
+    }
+};
+
+const onIdUploaded = async (file: {name: string}) => {
+    try {
+        await axios.put(filesBatchUrl.value, {
+            do: 'classify',
+            current_directory: idUploadDirectory,
+            files: [`${idUploadDirectory}/${file.name}`],
+            dirs: [],
+            media_type: 'id',
+        });
+        notifySuccess($gettext('Station ID uploaded and tagged as an ID.'));
+        await loadSettings();
+    } catch {
+        notifyError($gettext('The file uploaded, but it could not be tagged as an ID. Set its type on the Media page.'));
+    }
+};
+
 const saveChanges = async () => {
     isSaving.value = true;
     try {
@@ -511,3 +699,22 @@ const saveChanges = async () => {
 
 onMounted(loadSettings);
 </script>
+
+<style scoped>
+/* Number boxes stay compact and their one-line explanation sits under them. */
+.toh-input {
+    max-width: 12rem;
+}
+
+.toh-row :deep(.form-text) {
+    max-width: 30rem;
+}
+
+/* A plain line between the two settings columns once they sit side by side. */
+@media (min-width: 1200px) {
+    .toh-divider {
+        border-left: 1px solid var(--bs-border-color);
+        padding-left: 1.5rem;
+    }
+}
+</style>
