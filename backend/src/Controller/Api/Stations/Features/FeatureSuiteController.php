@@ -384,6 +384,7 @@ final class FeatureSuiteController
         $hours = $station->backend_config->linear_log_hours;
         $coverage = null;
         $alerts = [];
+        $gapsAhead = [];
 
         // Live times, like an FM automation log: re-timed from what is actually
         // playing on every load instead of waiting for the next rebuild.
@@ -410,6 +411,7 @@ final class FeatureSuiteController
                 // a hole, a short hour, songs the AutoDJ had to pick itself.
                 $snapshot['entries'] = $this->linearLogHandEdits->tagEntries($station, $snapshot['entries']);
                 $alerts = $this->linearLogAlerts->forStation($station, $coverage);
+                $gapsAhead = $this->linearLogAlerts->gapsAhead($station, $coverage);
             } catch (Throwable $e) {
                 // Fall back to the snapshot's own times; no coverage claim.
             }
@@ -432,6 +434,7 @@ final class FeatureSuiteController
                 'holes' => array_values($coverage->holes),
             ],
             'alerts' => $alerts,
+            'gaps_ahead' => $gapsAhead,
         ]);
     }
 

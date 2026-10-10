@@ -122,7 +122,10 @@
                         </span>
                     </div>
 
-                    <div v-if="gapCount > 0" class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0">
+                    <div
+                        v-if="gapCount > 0 && gapsAhead.length === 0"
+                        class="alert alert-warning rounded-0 border-start-0 border-end-0 mb-0"
+                    >
                         <div class="fw-semibold">
                             {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
                         </div>
@@ -132,7 +135,32 @@
                     </div>
 
                     <div
-                        v-for="alert in alerts"
+                        v-if="gapsAhead.length"
+                        class="alert rounded-0 border-start-0 border-end-0 mb-0 log-alert"
+                        :class="gapsAhead.some((gap) => !gap.projected) ? 'alert-danger' : 'alert-warning'"
+                    >
+                        <div class="fw-semibold">
+                            {{ gapsAhead.length }} {{ $gettext('gap(s) in the next 24 hours') }} — {{ secondsToHms(gapsAheadSeconds) }}
+                        </div>
+                        <ul class="gap-list">
+                            <li v-for="gap in gapsAhead" :key="gap.start">
+                                <button
+                                    type="button"
+                                    class="btn btn-link btn-sm gap-jump"
+                                    :title="$gettext('Go to this gap in the log')"
+                                    @click="jumpToGap(gap)"
+                                >{{ formatGapTime(gap.start) }}</button>
+                                <span>{{ gapSummary(gap) }}</span>
+                                <span v-if="gap.projected" class="badge text-bg-secondary ms-1">{{ $gettext('PROJECTED') }}</span>
+                            </li>
+                        </ul>
+                        <div v-if="gapsAhead.some((gap) => gap.projected)" class="small">
+                            {{ $gettext('A projected gap is more than three hours away. The log is still topped up and re-timed before then, so it may close by itself.') }}
+                        </div>
+                    </div>
+
+                    <div
+                        v-for="alert in otherAlerts"
                         :key="`${alert.type}-${alert.at}`"
                         class="alert rounded-0 border-start-0 border-end-0 mb-0 log-alert"
                         :class="alert.level === 'danger' ? 'alert-danger' : 'alert-warning'"
@@ -354,6 +382,7 @@
                         :now-ts="nowTs"
                         :on-air-item="onAirItem"
                         :busy="isEditing || isBuilding"
+                        :highlight-gap="highlightGap"
                         @edit="onEdit"
                         @replace="openReplace"
                         @lock-lines="onLockLines"
@@ -422,13 +451,19 @@
 </template>
 
 <script setup lang="ts">
-import {computed, ref} from "vue";
+import {computed, nextTick, ref} from "vue";
 import LinearLogAiDjShifts from "~/components/Stations/Reports/LinearLogAiDjShifts.vue";
 import LinearLogSchedule from "~/components/Stations/Reports/LinearLogSchedule.vue";
 import LinearLogQueueTab from "~/components/Stations/Reports/LinearLogQueueTab.vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import Tab from "~/components/Common/Tab.vue";
-import type {LinearLogAlert, LinearLogHourGroup, LinearLogItem, LinearLogMediaOption} from "~/entities/LinearLog";
+import type {
+    LinearLogAlert,
+    LinearLogGapAhead,
+    LinearLogHourGroup,
+    LinearLogItem,
+    LinearLogMediaOption,
+} from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
@@ -451,6 +486,7 @@ const {
     allItems,
     gaps,
     alerts,
+    gapsAhead,
     aiDjShifts,
     nowTs,
     onAirItem,
@@ -500,6 +536,40 @@ function alertLabel(alert: LinearLogAlert): string {
         autodj: $gettext("AutoDJ stepped in:"),
     };
     return labels[alert.type] ?? "";
+}
+
+// A hole or a short hour the gap list shows, with a way to reach it, does not
+// need a second line; every other alert keeps its own.
+const otherAlerts = computed(() => alerts.value.filter(
+    (alert) => !gapsAhead.value.some((gap) => gap.type === alert.type && gap.start === alert.at),
+));
+
+const gapsAheadSeconds = computed(() => gapsAhead.value.reduce((sum, gap) => sum + gap.seconds, 0));
+
+function gapSummary(gap: LinearLogGapAhead): string {
+    const parts = [
+        secondsToHms(gap.seconds),
+        gap.type === "short_hour" ? $gettext("before the Station ID") : $gettext("nothing planned"),
+    ];
+    if (gap.show) {
+        parts.push(`${$gettext("in")} ${gap.show}`);
+    }
+    return parts.join(" · ");
+}
+
+// The GAP row the list jumps to, lit up for a moment once it is on screen.
+const highlightGap = ref<number | null>(null);
+let highlightTimer: number | null = null;
+
+async function jumpToGap(gap: LinearLogGapAhead): Promise<void> {
+    highlightGap.value = gap.start;
+    await nextTick();
+    document.getElementById(`log-gap-${gap.start}`)?.scrollIntoView({behavior: "smooth", block: "center"});
+
+    if (highlightTimer !== null) window.clearTimeout(highlightTimer);
+    highlightTimer = window.setTimeout(() => {
+        highlightGap.value = null;
+    }, 4000);
 }
 
 const replaceItem = ref<LinearLogItem | null>(null);
@@ -655,6 +725,15 @@ function formatTime(timestamp: number | null): string {
     });
 }
 
+function formatGapTime(timestamp: number): string {
+    return formatTimestampAsDateTime(timestamp, {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+}
+
 function formatDateTime(timestamp: number): string {
     return formatTimestampAsDateTime(timestamp, {
         weekday: "short",
@@ -675,6 +754,46 @@ const coverageWarning = computed(() => {
     return `${$gettext("Missing approximately")} ${secondsToHms(shortBy)}.`;
 });
 
+function isTopOfHourId(item: LinearLogItem): boolean {
+    return item.top_of_hour_legal_id || item.media_type === "id";
+}
+
+// Over/under per hour, as on an FM log: how far the last line before the
+// Station ID runs past it, or ends short of it. Read from the whole log, not
+// the filtered table, so a search or a type filter cannot change the answer.
+const overUnderByHour = computed(() => {
+    const airable = allItems.value
+        .filter((item) => item.log_status !== "dropped" && !!item.played_at)
+        .sort((a, b) => (a.played_at ?? 0) - (b.played_at ?? 0));
+
+    const byHour = new Map<number, LinearLogItem[]>();
+    for (const item of airable) {
+        const hour = Math.floor((item.played_at ?? 0) / 3600) * 3600;
+        byHour.set(hour, [...(byHour.get(hour) ?? []), item]);
+    }
+
+    const logEnds = airable.reduce((end, item) => Math.max(end, (item.played_at ?? 0) + (item.duration ?? 0)), 0);
+
+    const result = new Map<number, number>();
+    for (const [hour, items] of byHour) {
+        const hourEnd = hour + 3600;
+        // An hour that has aired is history, and one the log stops inside is
+        // not short, only unplanned.
+        if (hourEnd <= nowTs.value || logEnds < hourEnd) continue;
+
+        // The ID that closes this hour starts a second before the next one.
+        const closingId = items.find((item) => isTopOfHourId(item) && (item.played_at ?? 0) >= hourEnd - 120);
+        const target = closingId?.played_at ?? hourEnd;
+
+        const lines = items.filter((item) => item !== closingId && (item.played_at ?? 0) < target);
+        if (lines.length === 0) continue;
+
+        const lastEnd = Math.max(...lines.map((item) => (item.played_at ?? 0) + (item.duration ?? 0)));
+        result.set(hour, Math.round(lastEnd - target));
+    }
+    return result;
+});
+
 const hourGroups = computed<LinearLogHourGroup[]>(() => {
     const groups = new Map<number, LinearLogItem[]>();
     for (const item of filteredItems.value) {
@@ -683,6 +802,15 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
         const items = groups.get(hour) ?? [];
         items.push(item);
         groups.set(hour, items);
+    }
+
+    // A gap is a fact about the log, so its row shows whatever is filtered out,
+    // even in an hour the filters leave empty.
+    const gapsByHour = new Map<number, LinearLogGapAhead[]>();
+    for (const gap of gapsAhead.value) {
+        const hour = Math.floor(gap.start / 3600) * 3600;
+        gapsByHour.set(hour, [...(gapsByHour.get(hour) ?? []), gap]);
+        if (!groups.has(hour)) groups.set(hour, []);
     }
 
     const currentHour = Math.floor(nowTs.value / 3600) * 3600;
@@ -695,11 +823,25 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
         const lockable = sorted.filter((item) => !!item.log_entry_id
             && ["planned", "queued"].includes(item.log_status ?? ""));
 
+        const gapsBefore: Record<string, LinearLogGapAhead[]> = {};
+        const gapsAfter: LinearLogGapAhead[] = [];
+        for (const gap of gapsByHour.get(epochHour) ?? []) {
+            const next = sorted.find((item) => (item.played_at ?? 0) >= gap.start);
+            if (next) {
+                gapsBefore[next.id] = [...(gapsBefore[next.id] ?? []), gap];
+            } else {
+                gapsAfter.push(gap);
+            }
+        }
+
         return {
             epochHour,
             label: formatDateTime(epochHour),
             isCurrent: epochHour === currentHour,
             items: sorted,
+            gapsBefore,
+            gapsAfter,
+            overUnder: overUnderByHour.value.get(epochHour) ?? null,
             airableCount: airable.length,
             totalDurationFormatted: secondsToHms(total),
             hasId: sorted.some((item) => item.top_of_hour_legal_id || item.media_type === "id"),
@@ -738,6 +880,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 @media (prefers-reduced-motion: reduce){.on-air-badge{animation:none}}
 .filter-on-dark{border:1px solid var(--bs-secondary-color);box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
 .log-alert{padding:.6rem 1rem;font-size:.86rem}
+.gap-list{margin:.3rem 0;padding-left:1.1rem}
+.gap-jump{padding:0 .35rem 0 0;font-size:inherit;font-weight:600;vertical-align:baseline}
 .block-lock select{width:auto;max-width:11rem}
 .coverage-warning{padding:.6rem 1rem;border-bottom:1px solid var(--bs-warning-border-subtle);background:var(--bs-warning-bg-subtle);color:var(--bs-warning-text-emphasis);font-size:.82rem}
 .loading-state,.empty-state{padding:4rem 1.5rem;text-align:center}

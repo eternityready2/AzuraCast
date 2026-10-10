@@ -6,6 +6,7 @@ import type {
     LinearLogAiDjShift,
     LinearLogAlert,
     LinearLogGap,
+    LinearLogGapAhead,
     LinearLogItem,
     LinearLogMediaOption,
     LinearLogResponse,
@@ -53,6 +54,7 @@ export function useLinearLog() {
     const allItems = ref<LinearLogItem[]>([]);
     const gaps = ref<LinearLogGap[]>([]);
     const alerts = ref<LinearLogAlert[]>([]);
+    const gapsAhead = ref<LinearLogGapAhead[]>([]);
     const aiDjShifts = ref<LinearLogAiDjShift[]>([]);
     const nowTs = ref(Math.floor(Date.now() / 1000));
 
@@ -93,6 +95,7 @@ export function useLinearLog() {
             allItems.value = data.entries ?? [];
             gaps.value = data.gaps ?? [];
             alerts.value = data.alerts ?? [];
+            gapsAhead.value = data.gaps_ahead ?? [];
             aiDjShifts.value = data.ai_dj_shifts ?? [];
             buildError.value = data.error ?? "";
             nowTs.value = Math.floor(Date.now() / 1000);
@@ -320,6 +323,7 @@ export function useLinearLog() {
         allItems,
         gaps,
         alerts,
+        gapsAhead,
         aiDjShifts,
         nowTs,
         onAirItem,

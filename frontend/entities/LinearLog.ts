@@ -59,6 +59,18 @@ export interface LinearLogAlert {
     message: string;
 }
 
+// A gap in the next 24 hours: a hole, or an hour ending short of its Station ID.
+export interface LinearLogGapAhead {
+    type: "hole" | "short_hour";
+    start: number;
+    end: number;
+    seconds: number;
+    // The scheduled block it sits in, if any.
+    show: string | null;
+    // Further out than the alerts reach: the log may still fill it before it airs.
+    projected: boolean;
+}
+
 export interface LinearLogGap {
     started_at: number;
     duration: number;
@@ -88,6 +100,7 @@ export interface LinearLogResponse {
     gaps: LinearLogGap[];
     ai_dj_shifts: LinearLogAiDjShift[];
     alerts?: LinearLogAlert[];
+    gaps_ahead?: LinearLogGapAhead[];
     error: string | null;
 }
 
@@ -96,6 +109,13 @@ export interface LinearLogHourGroup {
     label: string;
     isCurrent: boolean;
     items: LinearLogItem[];
+    // Gaps in this hour, listed ahead of the line each one comes before; the
+    // rest follow the hour's last line.
+    gapsBefore: Record<string, LinearLogGapAhead[]>;
+    gapsAfter: LinearLogGapAhead[];
+    // Seconds the hour's last line runs past (+) or ends short of (-) the
+    // Station ID. Null for an hour that has aired or that the log does not reach.
+    overUnder: number | null;
     // Lines that air: a dropped line is listed, but not counted or timed.
     airableCount: number;
     totalDurationFormatted: string;
