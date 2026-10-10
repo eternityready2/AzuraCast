@@ -379,7 +379,7 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     tone: 'text-success',
                 },
                 {
-                    label: $gettext('Ended too soon (silence)'),
+                    label: $gettext('Song ended too soon'),
                     percent: r.early_percent,
                     detail: ofHours(r.early_count, r.music_hours),
                     tone: badTone(r.early_count),
@@ -535,7 +535,7 @@ const failureLines = (failure: TopOfHourLandingFailure): string[] => {
             break;
         case 'ended_early':
             lines.push($gettext(
-                'Ended %{seconds}s early, leaving a gap before the ID',
+                'Ended %{seconds}s too soon before the ID',
                 {seconds: whole(failure.seconds)}
             ));
             break;
