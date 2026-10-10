@@ -31,6 +31,8 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Media\BatchUtilities;
 use App\Media\GenrePlaylistService;
+use App\Media\MediaJoiner;
+use App\Media\MetadataLookup;
 use App\Message;
 use App\OpenApi;
 use App\Radio\Adapters;
@@ -86,7 +88,9 @@ final class BatchAction implements SingleActionInterface
         private readonly StationQueueRepository $queueRepo,
         private readonly StationFilesystems $stationFilesystems,
         private readonly MediaListCache $mediaListCache,
-        private readonly GenrePlaylistService $genrePlaylistService
+        private readonly GenrePlaylistService $genrePlaylistService,
+        private readonly MediaJoiner $mediaJoiner,
+        private readonly MetadataLookup $metadataLookup
     ) {
     }
 
@@ -116,6 +120,12 @@ final class BatchAction implements SingleActionInterface
                 $fsMedia
             ),
             'genre-playlists' => $this->doGenrePlaylists($request, $station, $storageLocation, $fsMedia),
+            'join' => $this->doJoin($request, $station, $storageLocation, $fsMedia),
+            'join-status' => $this->doJoinStatus($request, $station, $storageLocation, $fsMedia),
+            'lookup-list' => $this->doLookupList($request, $station, $storageLocation, $fsMedia),
+            'lookup' => $this->doLookup($request, $station, $storageLocation, $fsMedia),
+            'lookup-apply' => $this->doLookupApply($request, $station, $storageLocation, $fsMedia),
+            'lookup-settings' => $this->doLookupSettings($request, $station, $storageLocation, $fsMedia),
             default => throw new InvalidArgumentException('Invalid batch action specified.')
         };
 
@@ -621,6 +631,222 @@ final class BatchAction implements SingleActionInterface
         $this->mediaListCache->clearCache($storageLocation);
 
         return $result;
+    }
+
+    /**
+     * Join the ticked files into one new file in the same folder, in the order
+     * given. The join itself runs in the background; what comes back is the
+     * job to ask about with join-status.
+     */
+    private function doJoin(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $result = $this->parseRequest($request, $fs);
+
+        $name = Types::string($request->getParam('name'));
+
+        try {
+            $plan = $this->mediaJoiner->plan($storageLocation, $result->files, $name);
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            $result->errors[] = $e->getMessage();
+            return $result;
+        }
+
+        $message = new Message\JoinMediaMessage();
+        $message->job_id = bin2hex(random_bytes(8));
+        $message->storage_location_id = $storageLocation->id;
+        $message->media_ids = $plan['media_ids'];
+        $message->name = $name;
+        $message->replace_in_playlists = Types::bool($request->getParam('replace_in_playlists'), false, true);
+
+        $this->mediaJoiner->setStatus($message->job_id, MediaJoiner::STATUS_RUNNING);
+        $this->messageBus->dispatch($message);
+
+        $result->responseRecord = [
+            'job' => $message->job_id,
+            'path' => $plan['path'],
+            'reencode' => $plan['reencode'],
+            'seconds' => $plan['seconds'],
+        ];
+
+        return $result;
+    }
+
+    private function doJoinStatus(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $result = new MediaBatchResult();
+        $result->responseRecord = $this->mediaJoiner->getStatus(Types::string($request->getParam('job')))
+            ?? ['status' => MediaJoiner::STATUS_FAILED, 'path' => null, 'error' => 'This join is no longer known.'];
+
+        return $result;
+    }
+
+    /**
+     * The tracks among the ticked files and folders that can be looked up
+     * online: music with a title and an artist. Shows, IDs and promos are not
+     * in the catalogues, and a lookup would only find the wrong thing.
+     */
+    private function doLookupList(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $result = $this->parseRequest($request, $fs, true);
+
+        // Year and label are saved to these; the page shows them from its next load.
+        $this->metadataLookup->customFields();
+
+        $tracks = [];
+        $skipped = 0;
+        foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
+            if (
+                'music' !== $media->type
+                || '' === trim($media->title ?? '')
+                || '' === trim($media->artist ?? '')
+            ) {
+                $skipped++;
+                continue;
+            }
+
+            $tracks[] = [
+                'path' => $media->path,
+                'title' => $media->title,
+                'artist' => $media->artist,
+            ];
+        }
+
+        $result->responseRecord = [
+            'tracks' => $tracks,
+            'skipped' => $skipped,
+            ...$this->lookupSettings($station),
+        ];
+
+        return $result;
+    }
+
+    /** Look one track up. Nothing is saved; the result is for review. */
+    private function doLookup(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $result = $this->parseRequest($request, $fs);
+
+        foreach ($this->batchUtilities->iterateMedia($storageLocation, array_slice($result->files, 0, 1)) as $media) {
+            try {
+                $result->responseRecord = $this->metadataLookup->lookup($station, $media);
+            } catch (Throwable $e) {
+                $result->errors[] = $e->getMessage();
+            }
+        }
+
+        return $result;
+    }
+
+    /** Save the details accepted in the review, per track. */
+    private function doLookupApply(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $result = new MediaBatchResult();
+
+        /** @var array<string, string[]> $accepted path => details */
+        $accepted = [];
+        foreach (Types::array($request->getParam('accepted')) as $row) {
+            $accepted[Types::string($row['path'] ?? null)] = array_map(
+                static fn(mixed $field): string => Types::string($field),
+                Types::array($row['fields'] ?? null)
+            );
+        }
+
+        $result->files = array_keys($accepted);
+
+        $saved = [];
+        foreach ($this->batchUtilities->iterateMedia($storageLocation, $result->files) as $media) {
+            try {
+                $saved[$media->path] = $this->metadataLookup->apply($media, $accepted[$media->path] ?? []);
+            } catch (Throwable $e) {
+                $result->errors[] = sprintf('%s: %s', $media->path, $e->getMessage());
+                continue;
+            }
+
+            // The picture comes from another site at the moment it is saved.
+            if (
+                in_array(MetadataLookup::FIELD_ART, $accepted[$media->path] ?? [], true)
+                && !in_array(MetadataLookup::FIELD_ART, $saved[$media->path], true)
+            ) {
+                $result->errors[] = sprintf(
+                    '%s: the cover art could not be downloaded; the other details were saved.',
+                    $media->path
+                );
+            }
+        }
+
+        $this->mediaListCache->clearCache($storageLocation);
+
+        $result->responseRecord = ['saved' => $saved];
+
+        return $result;
+    }
+
+    /** Read the lookup settings, or save the ones sent. */
+    private function doLookupSettings(
+        ServerRequest $request,
+        Station $station,
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs
+    ): MediaBatchResult {
+        $config = $station->backend_config;
+        $changed = false;
+
+        $token = $request->getParam('discogs_token');
+        if (null !== $token) {
+            $config->media_lookup_discogs_token = trim(Types::string($token));
+            $changed = true;
+        }
+
+        $onUpload = $request->getParam('on_upload');
+        if (null !== $onUpload) {
+            $config->media_lookup_on_upload = Types::bool($onUpload, false, true);
+            $changed = true;
+        }
+
+        if ($changed) {
+            // A lookup setting never calls for the station to be restarted.
+            $needsRestartBefore = $station->needs_restart;
+            $station->backend_config = $config;
+            $station->needs_restart = $needsRestartBefore;
+            $this->em->persist($station);
+            $this->em->flush();
+        }
+
+        $result = new MediaBatchResult();
+        $result->responseRecord = $this->lookupSettings($station);
+
+        return $result;
+    }
+
+    /**
+     * @return array{has_discogs_token: bool, has_lastfm_key: bool, on_upload: bool}
+     */
+    private function lookupSettings(Station $station): array
+    {
+        return [
+            'has_discogs_token' => '' !== trim($station->backend_config->media_lookup_discogs_token ?? ''),
+            'has_lastfm_key' => $this->metadataLookup->hasLastFmKey(),
+            'on_upload' => $station->backend_config->media_lookup_on_upload,
+        ];
     }
 
     private function parseRequest(

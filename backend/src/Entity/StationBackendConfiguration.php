@@ -206,6 +206,18 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         set(bool|string|null $value) => Types::bool($value, true, true);
     }
 
+    // Online lookup of track details on the Music Files page.
+    #[OA\Property]
+    public ?string $media_lookup_discogs_token = null {
+        set(?string $value) => Types::stringOrNull($value, true);
+    }
+
+    /** Look a newly uploaded track up and fill in what it is missing. */
+    #[OA\Property]
+    public bool $media_lookup_on_upload = false {
+        set(bool|string|null $value) => Types::bool($value, false, true);
+    }
+
     protected const int DEFAULT_LINEAR_LOG_HOURS = 24;
 
     protected const int MAX_LINEAR_LOG_HOURS = 48;

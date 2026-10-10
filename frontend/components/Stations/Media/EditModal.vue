@@ -8,6 +8,20 @@
         @submit="doSubmit"
         @hidden="onClose"
     >
+        <div
+            v-if="form.path"
+            class="d-flex justify-content-end mb-2"
+        >
+            <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                :title="$gettext('Close this box and find this song\'s album, record label, year, genre, ISRC and cover art online. Unsaved changes here are not kept.')"
+                @click="lookUp"
+            >
+                {{ $gettext('Find Song Info Online') }}
+            </button>
+        </div>
+
         <tabs destroy-on-hide>
             <media-form-basic-info/>
             <media-form-playlists
@@ -61,7 +75,9 @@ const props = defineProps<{
     customFields: Required<CustomField>[],
     playlists: MediaInitialPlaylist[]
 }>();
-const emit = defineEmits<BaseEditModalEmits>();
+const emit = defineEmits<BaseEditModalEmits & {
+    (e: 'lookup', path: string): void
+}>();
 
 const $modal = useTemplateRef('$modal');
 
@@ -76,7 +92,8 @@ const {
     error,
     clearContents,
     edit,
-    doSubmit
+    doSubmit,
+    close
 } = useBaseEditModal<
     StationMediaRecord,
     MediaHttpResponse
@@ -114,6 +131,13 @@ const {
 
 const open = (editRecordUrl: string) => {
     void edit(editRecordUrl);
+};
+
+// The lookup has its own review box; this one makes way for it.
+const lookUp = () => {
+    const path = form.value.path;
+    close();
+    emit('lookup', path);
 };
 
 const onClose = () => {

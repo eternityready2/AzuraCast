@@ -12,6 +12,8 @@ return [
     Message\AddNewMediaMessage::class => App\Media\MediaProcessor::class,
     Message\ReprocessMediaMessage::class => App\Media\MediaProcessor::class,
     Message\ProcessCoverArtMessage::class => App\Media\MediaProcessor::class,
+    Message\JoinMediaMessage::class => App\Media\MediaJoiner::class,
+    Message\LookupMediaMetadataMessage::class => App\Media\MetadataLookup::class,
 
     Message\WritePlaylistFileMessage::class => Liquidsoap\PlaylistFileWriter::class,
 

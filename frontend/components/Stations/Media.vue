@@ -53,6 +53,7 @@
             />
 
             <media-toolbar
+                ref="$mediaToolbar"
                 :batch-url="batchUrl"
                 :selected-items="selectedItems"
                 :current-directory="currentDirectory"
@@ -260,6 +261,7 @@
         :custom-fields="customFields"
         :playlists="playlists"
         @relist="onTriggerRelist"
+        @lookup="(path: string) => $mediaToolbar?.lookUp(path)"
     />
 </template>
 
@@ -514,6 +516,7 @@ const rename = (path: string) => {
 };
 
 const $editModal = useTemplateRef('$editModal');
+const $mediaToolbar = useTemplateRef('$mediaToolbar');
 
 const edit = (recordUrl: string) => {
     $editModal.value?.open(recordUrl);

@@ -20,11 +20,13 @@ use App\Exception\StorageLocationFullException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Media\MediaProcessor;
+use App\Message\LookupMediaMetadataMessage;
 use App\OpenApi;
 use App\Service\Flow;
 use App\Utilities\Types;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\Messenger\MessageBus;
 
 #[
     OA\Post(
@@ -56,7 +58,8 @@ final class FlowUploadAction implements SingleActionInterface
         private readonly MediaProcessor $mediaProcessor,
         private readonly StationPlaylistMediaRepository $spmRepo,
         private readonly StationPlaylistFolderRepository $spfRepo,
-        private readonly MediaListCache $mediaListCache
+        private readonly MediaListCache $mediaListCache,
+        private readonly MessageBus $messageBus
     ) {
     }
 
@@ -109,6 +112,13 @@ final class FlowUploadAction implements SingleActionInterface
         }
 
         if ($stationMedia instanceof StationMedia) {
+            if ($station->backend_config->media_lookup_on_upload) {
+                $lookupMessage = new LookupMediaMetadataMessage();
+                $lookupMessage->station_id = $station->id;
+                $lookupMessage->media_id = $stationMedia->id;
+                $this->messageBus->dispatch($lookupMessage);
+            }
+
             if (!empty($allParams['searchPhrase'])) {
                 // If the user is looking at a playlist's contents, add uploaded media to that playlist.
                 [, $playlist] = $this->parseSearchQuery(

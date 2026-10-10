@@ -244,6 +244,34 @@
                         </span>
                     </button>
 
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        :disabled="!hasSelectedClassifyItems"
+                        :title="$gettext('Find the album, record label, year, genre, ISRC, songwriters and cover art online for the songs you ticked. You review what was found before anything is saved.')"
+                        @click="lookUpSelected"
+                    >
+                        <icon-ic-travel-explore/>
+
+                        <span>
+                            {{ $gettext('Find Song Info Online') }}
+                        </span>
+                    </button>
+
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        :disabled="!canJoin"
+                        :title="$gettext('Tick two or more files, such as the parts of a program, to combine them into one new file. The original files are kept.')"
+                        @click="joinFiles"
+                    >
+                        <icon-ic-merge/>
+
+                        <span>
+                            {{ $gettext('Join Files into One') }}
+                        </span>
+                    </button>
+
                     <div class="btn-group btn-group-sm dropdown allow-focus">
                         <div class="dropdown">
                             <button
@@ -330,6 +358,17 @@
                         </span>
                     </button>
                 </div>
+
+                <ul class="media-toolbar-hints">
+                    <li>
+                        <strong>{{ $gettext('Find Song Info Online') }}:</strong>
+                        {{ $gettext('tick songs to fill in their album, record label, year, ISRC, songwriters and cover art. You review everything before it is saved.') }}
+                    </li>
+                    <li>
+                        <strong>{{ $gettext('Join Files into One') }}:</strong>
+                        {{ $gettext('tick two or more files, such as the parts of a program, to make one new file. The originals are kept.') }}
+                    </li>
+                </ul>
             </div>
         </div>
     </div>
@@ -341,6 +380,21 @@
         :batch-url="batchUrl"
         @relist="emit('relist')"
         @add-playlist="(playlist) => emit('add-playlist', playlist)"
+    />
+
+    <join-files-modal
+        ref="$joinFilesModal"
+        :selected-items="selectedItems"
+        :current-directory="currentDirectory"
+        :batch-url="batchUrl"
+        @relist="emit('relist')"
+    />
+
+    <metadata-lookup-modal
+        ref="$metadataLookupModal"
+        :current-directory="currentDirectory"
+        :batch-url="batchUrl"
+        @relist="emit('relist')"
     />
 </template>
 
@@ -359,10 +413,14 @@ import IconIcClearAll from "~icons/ic/baseline-clear-all";
 import IconIcCloudDownload from "~icons/ic/baseline-cloud-download";
 import IconIcDelete from "~icons/ic/baseline-delete";
 import IconIcFolder from "~icons/ic/baseline-folder";
+import IconIcMerge from "~icons/ic/baseline-merge";
+import IconIcTravelExplore from "~icons/ic/baseline-travel-explore";
 import IconIcMoreHoriz from "~icons/ic/baseline-more-horiz";
 import IconIcOpenWith from "~icons/ic/baseline-open-with";
 import {formatMediaType, getMediaTypeOptions} from "~/functions/mediaTypes.ts";
 import GenrePlaylistsModal from "~/components/Stations/Media/GenrePlaylistsModal.vue";
+import JoinFilesModal from "~/components/Stations/Media/JoinFilesModal.vue";
+import MetadataLookupModal from "~/components/Stations/Media/MetadataLookupModal.vue";
 
 const props = defineProps<{
     currentDirectory: string,
@@ -388,6 +446,12 @@ const selectedItems = toRef(props, 'selectedItems');
 const hasSelectedItems = computed(() => {
     return selectedItems.value.all.length > 0;
 });
+
+// Joining is for media files only: at least two, and no folders.
+const canJoin = computed(
+    () => selectedItems.value.directories.length === 0
+        && selectedItems.value.all.filter((row) => !!row.media).length >= 2
+);
 
 const hasSelectedClassifyItems = computed(
     () => selectedItems.value.files.length > 0 || selectedItems.value.directories.length > 0
@@ -649,6 +713,25 @@ const downloadFromUrl = () => {
 
 const $genrePlaylistsModal = useTemplateRef('$genrePlaylistsModal');
 
+const $joinFilesModal = useTemplateRef('$joinFilesModal');
+
+const joinFiles = () => {
+    $joinFilesModal.value?.open();
+};
+
+const $metadataLookupModal = useTemplateRef('$metadataLookupModal');
+
+const lookUpSelected = () => {
+    void $metadataLookupModal.value?.open(selectedItems.value.files, selectedItems.value.directories);
+};
+
+// One track, from its edit box.
+const lookUp = (path: string) => {
+    void $metadataLookupModal.value?.open([path], []);
+};
+
+defineExpose({lookUp});
+
 const createGenrePlaylists = () => {
     void $genrePlaylistsModal.value?.open();
 };
@@ -751,6 +834,19 @@ const createGenrePlaylists = () => {
 .media-toolbar-controls,
 .media-toolbar-action-controls {
     min-height: 2.15rem;
+}
+
+.media-toolbar-hints {
+    margin: 0.6rem 0 0;
+    padding-left: 1rem;
+    color: var(--bs-secondary-color);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+.media-toolbar-hints strong {
+    color: var(--bs-body-color);
+    font-weight: 600;
 }
 
 .media-toolbar .form-select,
