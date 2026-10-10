@@ -8,6 +8,12 @@
             :compliance="state.compliance"
         />
     </loading>
+
+    <landing-panel
+        class="mt-4"
+        :api-url="landingUrl"
+        :date-range="dateRange"
+    />
 </template>
 
 <script setup lang="ts">
@@ -19,6 +25,8 @@ import {DateRange} from "~/components/Stations/Reports/Overview/CommonMetricsVie
 import {useQuery} from "@tanstack/vue-query";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
 import TopOfHourComplianceSection from "~/components/Stations/Reports/Overview/TopOfHourComplianceSection.vue";
+import LandingPanel from "~/components/Stations/TopOfHour/LandingPanel.vue";
+import {useApiRouter} from "~/functions/useApiRouter.ts";
 
 const props = defineProps<{
     dateRange: DateRange,
@@ -28,6 +36,8 @@ const props = defineProps<{
 const dateRange = toRef(props, 'dateRange');
 const {axios} = useAxios();
 const {DateTime} = useLuxon();
+const {getStationApiUrl} = useApiRouter();
+const landingUrl = getStationApiUrl('/top-of-hour/landing');
 
 type TopOfHourPerformanceData = {
     compliance: {

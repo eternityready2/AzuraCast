@@ -11,8 +11,8 @@ use App\Radio\AutoDJ\TopOfHour\TopOfHourLandingReport;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * How the last song or spot of each hour met the Top-of-Hour ID, over the last
- * "days" days of air history.
+ * How each hour met the Top-of-Hour ID, from the air history: over the last
+ * "days" days, or between "start" and "end" when a report page gives a range.
  */
 final class LandingReportAction implements SingleActionInterface
 {
@@ -26,11 +26,21 @@ final class LandingReportAction implements SingleActionInterface
         Response $response,
         array $params
     ): ResponseInterface {
-        $days = $request->getQueryParams()['days'] ?? null;
+        $station = $request->getStation();
+        $query = $request->getQueryParams();
+
+        $start = is_string($query['start'] ?? null) ? strtotime($query['start']) : false;
+        $end = is_string($query['end'] ?? null) ? strtotime($query['end']) : false;
+
+        if (false !== $start && false !== $end) {
+            return $response->withJson($this->landingReport->build($station, $start, $end));
+        }
+
+        $days = $query['days'] ?? null;
 
         return $response->withJson(
-            $this->landingReport->build(
-                $request->getStation(),
+            $this->landingReport->buildForDays(
+                $station,
                 is_numeric($days) ? (int)$days : TopOfHourLandingReport::DEFAULT_DAYS,
             )
         );
