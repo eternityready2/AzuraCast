@@ -516,11 +516,8 @@
                                 </div>
                                 <div class="col-6 col-md-3">
                                     <div class="border rounded p-2 text-center h-100">
-                                        <div class="fs-4 fw-semibold" :class="lastOffTime ? 'text-warning' : 'text-success'">
-                                            {{ lastOffTime ? lastOffTime.day : $gettext('None') }}
-                                        </div>
-                                        <div class="small text-secondary">{{ $gettext('Last ID off time') }}</div>
-                                        <div v-if="lastOffTime" class="small text-secondary">{{ lastOffTime.detail }}</div>
+                                        <div class="fs-4 fw-semibold">{{ compliance.hours_with_legal_id ?? 0 }}</div>
+                                        <div class="small text-secondary">{{ $gettext('IDs aired') }}</div>
                                     </div>
                                 </div>
                             </div>
@@ -568,7 +565,7 @@ const {getStationApiUrl} = useApiRouter();
 const {notifySuccess, notifyError} = useNotify();
 const {$gettext} = useTranslate();
 const {showAlert} = useDialog();
-const {formatIsoAsTime, formatIsoAsDateTime} = useStationDateTimeFormatter();
+const {formatIsoAsTime} = useStationDateTimeFormatter();
 
 const apiUrl = getStationApiUrl('/top-of-hour');
 const landingUrl = getStationApiUrl('/top-of-hour/landing');
@@ -655,25 +652,6 @@ const loadSettings = async () => {
         isLoading.value = false;
     }
 };
-
-// The most recent ID in the last 7 days that aired outside the tolerance, if any.
-const lastOffTime = computed(() => {
-    const event = compliance.value?.late_events?.[0];
-    if (!event) {
-        return null;
-    }
-
-    const at = event.actual_play_at ?? event.expected_play_at;
-    const drift = event.drift_seconds ?? 0;
-    const values = {time: formatIsoAsTime(at), seconds: String(Math.abs(drift))};
-
-    return {
-        day: formatIsoAsDateTime(at, {month: 'short', day: 'numeric'}),
-        detail: drift < 0
-            ? $gettext('%{time}, %{seconds}s early', values)
-            : $gettext('%{time}, %{seconds}s late', values),
-    };
-});
 
 // Turning the swap off changes how nearly every hour ends, so it asks first.
 const onSwapToggle = async (enabled: boolean | null) => {

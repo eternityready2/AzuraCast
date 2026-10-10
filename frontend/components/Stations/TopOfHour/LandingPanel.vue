@@ -445,10 +445,15 @@ const groups = computed<{title: string, boxes: LandingBox[]}[]>(() => {
                     percent: null,
                     value: r.id_average_offset_seconds === null ? null : String(r.id_average_offset_seconds),
                     unit: 's',
-                    detail: $gettext(
-                        'Average distance from its set time. Furthest: %{worst}s',
-                        {worst: String(r.id_worst_offset_seconds)}
-                    ),
+                    detail: r.id_worst_offset_seconds < 0
+                        ? $gettext(
+                            'Average, counting early and late alike. Furthest: %{worst}s early',
+                            {worst: String(Math.abs(r.id_worst_offset_seconds))}
+                        )
+                        : $gettext(
+                            'Average, counting early and late alike. Furthest: %{worst}s late',
+                            {worst: String(r.id_worst_offset_seconds)}
+                        ),
                     tone: secondsTone(r.id_average_offset_seconds),
                 },
                 {

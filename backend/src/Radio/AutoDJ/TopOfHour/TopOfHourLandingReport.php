@@ -237,7 +237,10 @@ final class TopOfHourLandingReport
 
             $offset = $idAt - $target;
             $offsetTotal += abs($offset);
-            $offsetWorst = max($offsetWorst, abs($offset));
+            // Kept signed, so the page can say whether the furthest one was early or late.
+            if (abs($offset) > abs($offsetWorst)) {
+                $offsetWorst = $offset;
+            }
             if (abs($offset) >= self::MISS_SECONDS) {
                 $failure['id_offset_seconds'] = round($offset, 1);
                 $c[$offset < 0 ? 'id_early' : 'id_late']++;
