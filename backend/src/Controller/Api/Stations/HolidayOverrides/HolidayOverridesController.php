@@ -88,7 +88,7 @@ final class HolidayOverridesController extends AbstractStationApiCrudController
             $record->clock_wheel = null;
             if ($wheelId !== null && $wheelId > 0) {
                 $wheel = $this->em->find(StationClockWheel::class, $wheelId);
-                if ($wheel instanceof StationClockWheel && $wheel->station_id === $record->station_id) {
+                if ($wheel instanceof StationClockWheel && $wheel->station_id === $record->station->id) {
                     $record->clock_wheel = $wheel;
                 }
             }
@@ -100,7 +100,7 @@ final class HolidayOverridesController extends AbstractStationApiCrudController
             $record->playlist = null;
             if ($playlistId !== null && $playlistId > 0) {
                 $playlist = $this->em->find(StationPlaylist::class, $playlistId);
-                if ($playlist instanceof StationPlaylist && $playlist->station_id === $record->station_id) {
+                if ($playlist instanceof StationPlaylist && $playlist->station_id === $record->station->id) {
                     $record->playlist = $playlist;
                 }
             }

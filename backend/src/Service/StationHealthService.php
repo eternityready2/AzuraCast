@@ -11,6 +11,7 @@ use App\Entity\Enums\PlaylistSources;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenApi\Attributes as OA;
 
@@ -148,7 +149,7 @@ final class StationHealthService
                 AND h.override_date >= :today
             DQL
         )->setParameter('station', $station)
-            ->setParameter('today', $today->toDateTimeImmutable())
+            ->setParameter('today', $today->toDateTimeImmutable(), Types::DATE_IMMUTABLE)
             ->getSingleScalarResult();
 
         foreach ($station->mounts as $mount) {
