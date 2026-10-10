@@ -146,11 +146,15 @@ final class PutAction implements SingleActionInterface
             TopOfHourClock::MIN_ID_START_SECOND,
             TopOfHourClock::MAX_ID_START_SECOND,
         );
-        $this->validateRange(
-            (int)($raw[TopOfHourClock::CONFIG_ID_START_MINUTE] ?? TopOfHourClock::DEFAULT_ID_START_MINUTE),
-            TopOfHourClock::MIN_ID_START_MINUTE,
-            TopOfHourClock::MAX_ID_START_MINUTE,
-        );
+        $startMinute = (int)($raw[TopOfHourClock::CONFIG_ID_START_MINUTE] ?? TopOfHourClock::DEFAULT_ID_START_MINUTE);
+        $startSecond = (int)($raw[TopOfHourClock::CONFIG_ID_START_SECOND] ?? TopOfHourClock::DEFAULT_ID_START_SECOND);
+        if (!TopOfHourClock::isOnTheHourStart($startMinute, $startSecond)) {
+            $this->validateRange(
+                $startMinute,
+                TopOfHourClock::MIN_ID_START_MINUTE,
+                TopOfHourClock::MAX_ID_START_MINUTE,
+            );
+        }
         $this->validateRange(
             (float)($raw[TopOfHourClock::CONFIG_ID_FADE_SECONDS] ?? TopOfHourClock::DEFAULT_ID_FADE_SECONDS),
             TopOfHourClock::MIN_ID_FADE_SECONDS,

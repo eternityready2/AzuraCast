@@ -64,10 +64,12 @@ final class TopOfHourClock
     public const int MAX_SWAP_MIN_GAP_SECONDS = 600;
 
     public const int DEFAULT_ID_START_MINUTE = 59;
-    // The ID belongs to the close of the hour. Every calculation works from the
-    // hour that ends at the next :00, so the start may sit anywhere in its last
-    // quarter; earlier than that a song could run from one hour's ID into the next.
+    // The ID belongs to the :00 it leads into. Every calculation works from the
+    // hour that ends at that :00, so the start may sit anywhere in the hour's
+    // last quarter, or exactly on :00:00 itself. Anything else would let a song
+    // run from one hour's ID into the next unnoticed.
     public const int MIN_ID_START_MINUTE = 45;
+    public const int ON_THE_HOUR_START_MINUTE = 0;
     public const int MAX_ID_START_MINUTE = 59;
 
     public const string CONFIG_ID_START_MINUTE = 'top_of_hour_id_start_minute';
@@ -141,9 +143,24 @@ final class TopOfHourClock
         );
     }
 
+    /** True for the one start time outside the last quarter: exactly :00:00. */
+    public static function isOnTheHourStart(int $minute, int $second): bool
+    {
+        return self::ON_THE_HOUR_START_MINUTE === $minute && 0 === $second;
+    }
+
     public function getIdStartMinute(Station $station): int
     {
         $raw = $station->backend_config->toArray(true) ?? [];
+
+        if (
+            self::isOnTheHourStart(
+                (int)($raw[self::CONFIG_ID_START_MINUTE] ?? self::DEFAULT_ID_START_MINUTE),
+                (int)($raw[self::CONFIG_ID_START_SECOND] ?? self::DEFAULT_ID_START_SECOND),
+            )
+        ) {
+            return self::ON_THE_HOUR_START_MINUTE;
+        }
 
         return $this->clamp(
             (int)($raw[self::CONFIG_ID_START_MINUTE] ?? self::DEFAULT_ID_START_MINUTE),
@@ -156,11 +173,17 @@ final class TopOfHourClock
     /**
      * Whole minutes the configured ID start sits ahead of minute :59. Zero at
      * the default, so every ":59:ss" calculation is unchanged until an operator
-     * moves the minute.
+     * moves the minute. An ID set to :00:00 starts on the hour the :59 one leads
+     * into, one minute after :59:00, so its offset is minus one.
      */
     public function getIdStartMinuteOffset(Station $station): int
     {
-        return self::MAX_ID_START_MINUTE - $this->getIdStartMinute($station);
+        $minute = $this->getIdStartMinute($station);
+        if (self::ON_THE_HOUR_START_MINUTE === $minute) {
+            return -1;
+        }
+
+        return self::MAX_ID_START_MINUTE - $minute;
     }
 
     public function getIdFadeSeconds(Station $station): float
@@ -248,9 +271,9 @@ final class TopOfHourClock
     /**
      * The moment the playout engine is told the ID lane may stop holding the
      * air once the ID (and any news) has finished. At minute :59 that is the
-     * :00 boundary, as always. An ID moved earlier is released one second after
-     * its start instead, the same spacing a :59:59 ID has from :00, so the lane
-     * ends with the ID rather than holding silence until the hour.
+     * :00 boundary, as always. An ID moved earlier, or set to :00:00, is
+     * released one second after its start instead, the same spacing a :59:59
+     * ID has from :00, so the lane ends with the ID rather than holding silence.
      */
     public function getRuntimeHoldUntil(
         Station $station,

@@ -1912,7 +1912,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $secondsIntoHour = $now->minute * 60 + $now->second;
         $idStart = $this->clock->getIdStartMinute($station) * 60 + $this->clock->getIdStartSecond($station);
 
-        if ($this->clock->getIdStartMinuteOffset($station) > 0) {
+        if (0 !== $this->clock->getIdStartMinuteOffset($station)) {
             // A moved ID settles for as long as a :59 one does, counted from its own start.
             $sinceIdStart = ($secondsIntoHour - $idStart + 3600) % 3600;
 

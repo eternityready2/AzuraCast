@@ -170,7 +170,7 @@
                                             v-model.number="form.top_of_hour_id_start_minute"
                                             type="number"
                                             class="form-control"
-                                            min="45"
+                                            min="0"
                                             max="59"
                                             :aria-label="$gettext('Minute')"
                                         >
