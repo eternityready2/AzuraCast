@@ -144,6 +144,17 @@ final class NextSongCommand extends AbstractCommand
             $this->topOfHourClock->getTargetStartFor($station, $now->toDateTimeImmutable())
         );
 
+        // An ID moved off minute :59 finishes long before :00. Past its first
+        // second the answer is the lane's own live state, the same question asked
+        // past :00 for a :59 ID, so songs flow again as soon as the ID ends.
+        if (
+            $this->topOfHourClock->getIdStartMinuteOffset($station) > 0
+            && $now >= $target->addSecond()
+        ) {
+            return abs($now->diffInSeconds($target)) <= self::MAX_OVERRUN_GRACE_SECONDS
+                && $this->isStillHeldByLiquidsoap($station);
+        }
+
         // Also refuse just before the ID: a track loaded now could only air a few
         // seconds before being cut, and one that is still loaded when the ID takes
         // over plays muted underneath it (2026-09-23 2:59:58 -> silent under ID).

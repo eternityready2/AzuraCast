@@ -613,6 +613,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $target = $boundary
             ->subMinute()
             ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
             ->addSeconds($this->clock->getIdStartSecond($station));
 
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
@@ -952,7 +953,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return false;
         }
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
 
         $gap = $this->secondsBetween($start, $target);
         if ($gap <= 0.0 || $gap > self::LATE_START_SECONDS) {
@@ -985,7 +990,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         CarbonImmutable $start,
     ): ?array {
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
         $gap = $this->secondsBetween($start, $target);
         $limit = $gap + self::PRE_ID_CUT_GRACE_SECONDS;
 
@@ -1758,7 +1767,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return false;
         }
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
         $gap = $this->secondsBetween($start, $target);
         if ($gap <= 0.0 || $gap > self::FINAL_APPROACH_SECONDS) {
             return false;
@@ -1811,7 +1824,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             return null;
         }
 
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
         if ($start->lessThan($target->subSecond())) {
             return null;
         }
@@ -1845,7 +1862,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     private function estimateTopOfHourRelease(Station $station, CarbonImmutable $start): CarbonImmutable
     {
         $boundary = CarbonImmutable::instance($this->clock->getNextBoundary($station, $start));
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
         $conn = $this->em->getConnection();
 
         $idSeconds = (float)($conn->fetchOne(
@@ -1873,6 +1894,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             $release = $release->addSeconds((int)ceil($newsSeconds));
         }
 
+        if ($this->clock->getIdStartMinuteOffset($station) > 0) {
+            // A moved ID hands the air back when it (and any news) ends, not at :00.
+            return $release;
+        }
+
         return $release->max($boundary);
     }
 
@@ -1884,7 +1910,14 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     {
         $now = CarbonImmutable::now($station->getTimezoneObject());
         $secondsIntoHour = $now->minute * 60 + $now->second;
-        $idStart = 59 * 60 + $this->clock->getIdStartSecond($station);
+        $idStart = $this->clock->getIdStartMinute($station) * 60 + $this->clock->getIdStartSecond($station);
+
+        if ($this->clock->getIdStartMinuteOffset($station) > 0) {
+            // A moved ID settles for as long as a :59 one does, counted from its own start.
+            $sinceIdStart = ($secondsIntoHour - $idStart + 3600) % 3600;
+
+            return $sinceIdStart < 60 - $this->clock->getIdStartSecond($station) + self::SETTLE_SECONDS_AFTER_HOUR;
+        }
 
         return $secondsIntoHour >= $idStart || $secondsIntoHour < self::SETTLE_SECONDS_AFTER_HOUR;
     }
@@ -1956,7 +1989,11 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($this->clock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
             return null;
         }
-        $target = $boundary->subMinute()->startOfMinute()->addSeconds($this->clock->getIdStartSecond($station));
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->clock->getIdStartSecond($station));
         $gap = $this->secondsBetween($start, $target);
         if ($gap < self::MIN_PRE_ID_FILL_SECONDS) {
             return null;
@@ -2202,6 +2239,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $target = $boundary
             ->subMinute()
             ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
             ->addSeconds($this->clock->getIdStartSecond($station));
 
         $gap = $this->secondsBetween($start, $target);
@@ -2249,6 +2287,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         $target = $boundary
             ->subMinute()
             ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
             ->addSeconds($this->clock->getIdStartSecond($station));
 
         $gap = $this->secondsBetween($start, $target);

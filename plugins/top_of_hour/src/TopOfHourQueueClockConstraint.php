@@ -56,6 +56,7 @@ final class TopOfHourQueueClockConstraint implements EventSubscriberInterface
         $candidateTarget = $boundary
             ->subMinute()
             ->startOfMinute()
+            ->subMinutes($this->clock->getIdStartMinuteOffset($station))
             ->addSeconds($this->clock->getIdStartSecond($station));
 
         if ($candidateTarget <= $start || $candidateTarget > $projectedEnd) {

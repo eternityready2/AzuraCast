@@ -282,7 +282,7 @@ final class StageTopOfHourStationIdTask extends AbstractTask
         $backend->command(
             $station,
             'top_of_hour_id_control.boundary_epoch '
-            . number_format((float)$plan->boundaryAt->format('U.u'), 3, '.', '')
+            . number_format((float)$this->clock->getRuntimeHoldUntil($station, $plan)->format('U.u'), 3, '.', '')
         );
         $backend->command(
             $station,

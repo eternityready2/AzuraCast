@@ -64,7 +64,10 @@ final class TopOfHourClock
     public const int MAX_SWAP_MIN_GAP_SECONDS = 600;
 
     public const int DEFAULT_ID_START_MINUTE = 59;
-    public const int MIN_ID_START_MINUTE = 59;
+    // The ID belongs to the close of the hour. Every calculation works from the
+    // hour that ends at the next :00, so the start may sit anywhere in its last
+    // quarter; earlier than that a song could run from one hour's ID into the next.
+    public const int MIN_ID_START_MINUTE = 45;
     public const int MAX_ID_START_MINUTE = 59;
 
     public const string CONFIG_ID_START_MINUTE = 'top_of_hour_id_start_minute';
@@ -140,7 +143,24 @@ final class TopOfHourClock
 
     public function getIdStartMinute(Station $station): int
     {
-        return self::DEFAULT_ID_START_MINUTE;
+        $raw = $station->backend_config->toArray(true) ?? [];
+
+        return $this->clamp(
+            (int)($raw[self::CONFIG_ID_START_MINUTE] ?? self::DEFAULT_ID_START_MINUTE),
+            self::MIN_ID_START_MINUTE,
+            self::MAX_ID_START_MINUTE,
+            self::DEFAULT_ID_START_MINUTE,
+        );
+    }
+
+    /**
+     * Whole minutes the configured ID start sits ahead of minute :59. Zero at
+     * the default, so every ":59:ss" calculation is unchanged until an operator
+     * moves the minute.
+     */
+    public function getIdStartMinuteOffset(Station $station): int
+    {
+        return self::MAX_ID_START_MINUTE - $this->getIdStartMinute($station);
     }
 
     public function getIdFadeSeconds(Station $station): float
@@ -220,7 +240,28 @@ final class TopOfHourClock
         return CarbonImmutable::instance($this->getNextBoundary($station, $from))
             ->subMinute()
             ->startOfMinute()
+            ->subMinutes($this->getIdStartMinuteOffset($station))
             ->addSeconds($this->getIdStartSecond($station))
+            ->toDateTimeImmutable();
+    }
+
+    /**
+     * The moment the playout engine is told the ID lane may stop holding the
+     * air once the ID (and any news) has finished. At minute :59 that is the
+     * :00 boundary, as always. An ID moved earlier is released one second after
+     * its start instead, the same spacing a :59:59 ID has from :00, so the lane
+     * ends with the ID rather than holding silence until the hour.
+     */
+    public function getRuntimeHoldUntil(
+        Station $station,
+        TopOfHourPlan $plan,
+    ): DateTimeImmutable {
+        if (0 === $this->getIdStartMinuteOffset($station)) {
+            return $plan->boundaryAt;
+        }
+
+        return CarbonImmutable::instance($plan->targetStartAt)
+            ->addSecond()
             ->toDateTimeImmutable();
     }
 
@@ -257,6 +298,11 @@ final class TopOfHourClock
         }
 
         $hard = $this->hasRigidStartAtBoundary($station, $boundary);
+        if ($this->getIdStartMinuteOffset($station) > 0) {
+            // An ID moved off minute :59 ends before :00 and never meets the
+            // programme that starts there, so for the ID the hour is open.
+            $hard = false;
+        }
         $mode = $hard ? TopOfHourMode::HardToh : TopOfHourMode::SoftEtm;
 
         // The operator owns the exact ID start. HARD/SOFT changes what happens
