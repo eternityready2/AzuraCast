@@ -112,27 +112,32 @@
                         </div>
                     </div>
                     <div v-if="report.worst_hours.length > 0" class="col-12 col-xl-5">
-                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Times of Day With the Most Problems') }}</h4>
-                        <div class="table-responsive">
-                            <table class="table table-sm align-middle mb-0 w-auto">
-                                <thead>
-                                    <tr>
-                                        <th>{{ $gettext('Time of day') }}</th>
-                                        <th class="text-end">{{ $gettext('Problem hours') }}</th>
-                                        <th class="text-end">{{ $gettext('Hours counted') }}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr
-                                        v-for="hour in report.worst_hours"
-                                        :key="hour.hour"
-                                    >
-                                        <td>{{ hourLabel(hour.hour) }}</td>
-                                        <td class="text-end fw-semibold text-warning">{{ hour.missed }}</td>
-                                        <td class="text-end">{{ hour.music_hours }}</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <h4 class="h6 mt-4 mb-2">{{ $gettext('Hours That Go Wrong Most Often') }}</h4>
+                        <div
+                            v-for="hour in report.worst_hours"
+                            :key="hour.hour"
+                            class="d-flex align-items-center gap-2 mb-1 small"
+                        >
+                            <span class="landing-day text-nowrap">{{ hourLabel(hour.hour) }}</span>
+                            <div
+                                class="progress flex-fill landing-day-bar"
+                                role="progressbar"
+                                :aria-label="hourLabel(hour.hour)"
+                                :aria-valuenow="hour.missed"
+                                aria-valuemin="0"
+                                :aria-valuemax="hour.music_hours"
+                            >
+                                <div
+                                    class="progress-bar bg-warning"
+                                    :style="{width: `${Math.round(100 * hour.missed / hour.music_hours)}%`}"
+                                />
+                            </div>
+                            <span class="landing-day-value text-nowrap">
+                                {{ $gettext('%{missed} of %{total} days', {missed: String(hour.missed), total: String(hour.music_hours)}) }}
+                            </span>
+                        </div>
+                        <div class="small text-secondary mt-2">
+                            {{ $gettext('The hours of the day where the last song most often did not end cleanly before the ID.') }}
                         </div>
                     </div>
                 </div>
