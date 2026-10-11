@@ -93,6 +93,53 @@ final class LinearLogSnapshotStore
         $this->saveCache($station, $snapshot);
     }
 
+    /**
+     * Keep a build that was asked for while the top of the hour settles (see
+     * LinearLogBuilder::secondsUntilClearOfTopOfHour()). One request is kept
+     * per station; a second one widens it.
+     */
+    public function holdBuild(
+        Station $station,
+        int $hours,
+        bool $rebuild,
+        bool $throughTomorrow,
+        bool $replanLockWindow,
+    ): void {
+        $held = $this->cache->get($this->getHeldKey($station));
+        $held = is_array($held) ? $held : [];
+
+        $this->cache->set($this->getHeldKey($station), [
+            'hours' => max($hours, (int)($held['hours'] ?? 0)),
+            'rebuild' => $rebuild || ($held['rebuild'] ?? false),
+            'through_tomorrow' => $throughTomorrow || ($held['through_tomorrow'] ?? false),
+            'replan_lock_window' => $replanLockWindow || ($held['replan_lock_window'] ?? false),
+        ], self::STALE_BUILD_SECONDS * 2);
+
+        $this->markQueued($station, $hours);
+    }
+
+    /**
+     * The held build, handed over once: the caller runs it.
+     *
+     * @return array{hours: int, rebuild: bool, through_tomorrow: bool, replan_lock_window: bool}|null
+     */
+    public function takeHeldBuild(Station $station): ?array
+    {
+        $held = $this->cache->get($this->getHeldKey($station));
+        if (!is_array($held)) {
+            return null;
+        }
+
+        $this->cache->delete($this->getHeldKey($station));
+
+        return [
+            'hours' => (int)($held['hours'] ?? $station->backend_config->linear_log_hours),
+            'rebuild' => (bool)($held['rebuild'] ?? false),
+            'through_tomorrow' => (bool)($held['through_tomorrow'] ?? false),
+            'replan_lock_window' => (bool)($held['replan_lock_window'] ?? false),
+        ];
+    }
+
     public function markBuilding(Station $station, int $hours): void
     {
         $snapshot = $this->get($station);
@@ -232,5 +279,10 @@ final class LinearLogSnapshotStore
     private function getKey(Station $station): string
     {
         return 'linear_log_v2.station_' . $station->id;
+    }
+
+    private function getHeldKey(Station $station): string
+    {
+        return 'linear_log_v2.held_build.station_' . $station->id;
     }
 }

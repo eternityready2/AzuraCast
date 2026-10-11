@@ -83,7 +83,11 @@ final class BuildLinearLogTask extends AbstractTask
             $isDailyBuild = self::BUILD_LOCAL_HOUR
                 === (int)Time::nowInTimezone($station->getTimezoneObject())->format('G');
 
-            if (!$force && !$isDailyBuild && !$this->needsRecoveryBuild($station)) {
+            // A build asked for while the top of the hour was settling (a
+            // schedule change, a hand edit) was kept for this run.
+            $held = $this->snapshotStore->takeHeldBuild($station);
+
+            if (!$force && !$isDailyBuild && null === $held && !$this->needsRecoveryBuild($station)) {
                 continue;
             }
 
@@ -97,11 +101,20 @@ final class BuildLinearLogTask extends AbstractTask
                 }
             );
 
-            $hours = $station->backend_config->linear_log_hours;
+            $hours = max($station->backend_config->linear_log_hours, $held['hours'] ?? 0);
 
             try {
                 $this->snapshotStore->markQueued($station, $hours);
-                $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, $force, false, true));
+                $this->messageBus->dispatch(new BuildLinearLogMessage(
+                    $station->id,
+                    $hours,
+                    $force || null !== $held,
+                    $held['rebuild'] ?? false,
+                    // A held re-plan keeps its own reach; the daily and recovery
+                    // builds plan through tomorrow.
+                    null === $held || $isDailyBuild || $held['through_tomorrow'],
+                    $held['replan_lock_window'] ?? false,
+                ));
             } catch (Throwable $e) {
                 $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
                 $this->logger->error(

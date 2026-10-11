@@ -40,6 +40,15 @@ final class LinearLogBuilder
     /** Longest a build may hold the station's build lock, and wait for it. */
     private const int BUILD_LOCK_SECONDS = 1200;
 
+    /** A build must be done simulating before the Station ID: none starts this close to it. */
+    private const int CLEAR_BEFORE_ID_SECONDS = 180;
+
+    /**
+     * How long past the top of the hour the Top-of-Hour swap stays stood down
+     * (its SETTLE_SECONDS_AFTER_HOUR).
+     */
+    private const int SETTLE_SECONDS_AFTER_HOUR = 360;
+
     public function __construct(
         private readonly Queue $queue,
         private readonly StationQueueRepository $queueRepo,
@@ -102,6 +111,10 @@ final class LinearLogBuilder
             $station = $this->stationRepo->findByIdentifier((string)$stationId) ?? $station;
         }
 
+        if ($this->holdForTopOfHour($station, $hoursOverride, $rebuild, $throughTomorrow, $replanLockWindow)) {
+            return $this->snapshotStore->get($station);
+        }
+
         // One build per station at a time. Two overlapping builds each replace
         // the plan they read at their start, so both plans survive: the 3am daily
         // build and a manual rebuild on 2026-10-05 left 529 overlapping lines and
@@ -120,10 +133,78 @@ final class LinearLogBuilder
             $this->em->clear();
             $station = $this->stationRepo->findByIdentifier((string)$stationId) ?? $station;
 
+            // Waiting for that build may have run into the top of the hour.
+            if ($this->holdForTopOfHour($station, $hoursOverride, $rebuild, $throughTomorrow, $replanLockWindow)) {
+                return $this->snapshotStore->get($station);
+            }
+
             return $this->buildWithRetry($station, $hoursOverride, $rebuild, $throughTomorrow, $replanLockWindow);
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Seconds until a build may simulate the queue; 0 when it may now.
+     *
+     * The simulation fits each hour's last song to the Station ID through the
+     * Top-of-Hour swap, and the swap stands down by the wall clock from the ID
+     * until the new hour has settled. A build that ran then fitted nothing: a
+     * schedule saved at 7:02 PM re-planned the log at 7:03, and 21 of its
+     * hour-ends ran past their ID or stopped short of it, one hour holding 71
+     * minutes (Sat 2026-10-10). The daily build has always run at :07.
+     */
+    public function secondsUntilClearOfTopOfHour(Station $station, ?int $now = null): int
+    {
+        if (!$this->topOfHourClock->isEnabled($station)) {
+            return 0;
+        }
+
+        $local = CarbonImmutable::createFromTimestamp($now ?? time(), $station->getTimezoneObject());
+        $idStartSecond = $this->topOfHourClock->getIdStartSecond($station);
+        $idStart = $this->topOfHourClock->getIdStartMinute($station) * 60 + $idStartSecond;
+
+        $sinceId = ($local->minute * 60 + $local->second - $idStart + 3600) % 3600;
+        $settledAfter = 60 - $idStartSecond + self::SETTLE_SECONDS_AFTER_HOUR;
+
+        if ($sinceId < $settledAfter) {
+            return $settledAfter - $sinceId;
+        }
+        if ($sinceId >= 3600 - self::CLEAR_BEFORE_ID_SECONDS) {
+            return 3600 - $sinceId + $settledAfter;
+        }
+
+        return 0;
+    }
+
+    /**
+     * A build asked for around the top of the hour is kept for the hourly task
+     * (BuildLinearLogTask, at :07), which runs it once the hour has settled.
+     * The saved log goes on driving playout as it is until then.
+     */
+    private function holdForTopOfHour(
+        Station $station,
+        ?int $hoursOverride,
+        bool $rebuild,
+        bool $throughTomorrow,
+        bool $replanLockWindow,
+    ): bool {
+        $wait = $this->secondsUntilClearOfTopOfHour($station);
+        if (0 === $wait) {
+            return false;
+        }
+
+        $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
+        $this->snapshotStore->holdBuild($station, $hours, $rebuild, $throughTomorrow, $replanLockWindow);
+
+        $this->logger->notice('Linear Log build held until the top of the hour has settled.', [
+            'station_id' => $station->id,
+            'clear_in_seconds' => $wait,
+            'rebuild' => $rebuild,
+            'replan_lock_window' => $replanLockWindow,
+        ]);
+
+        return true;
     }
 
     /** @return array<string, mixed> */

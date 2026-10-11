@@ -98,6 +98,9 @@ final class BuildLinearLogCommand extends CommandAbstract
             }
 
             try {
+                if ($this->linearLogBuilder->secondsUntilClearOfTopOfHour($station) > 0) {
+                    $io->note($station . ': held until the top of the hour has settled; it builds at :07.');
+                }
                 $this->linearLogBuilder->build($station, $hours, (bool)$input->getOption('rebuild'));
             } catch (Throwable $e) {
                 $failures++;
