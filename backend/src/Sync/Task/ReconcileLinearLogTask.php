@@ -43,6 +43,15 @@ final class ReconcileLinearLogTask extends AbstractTask
 
     /** Clock slack before a "played" row's future air time proves it never aired. */
     private const int FUTURE_PLAY_GRACE_SECONDS = 30;
+
+    /** How far a line's air time may sit from the song history row of that play. */
+    private const int AIRED_MATCH_SECONDS = 20;
+
+    /** Lines aired this long ago are no longer re-measured. */
+    private const int AIRED_LOOKBACK_SECONDS = 6 * 3600;
+
+    /** A crossfade or a trimmed outro is not a cut; a line this much shorter than planned is. */
+    private const int AIRED_SHORT_BY_SECONDS = 20;
     private const int HEARD_BEFORE_SECONDS = 600;
 
     public function __construct(
@@ -252,6 +261,39 @@ final class ReconcileLinearLogTask extends AbstractTask
         $this->recordLiveItems($station, $now);
 
         $this->em->flush();
+
+        $this->settleAiredLengths($station, $now);
+    }
+
+    /**
+     * An aired line is as long as it was on air. Song history closes an item
+     * when the next one starts, so a line cut short (by the Top-of-Hour ID, a
+     * skip, a restart) ends there, not where its file would have ended. Left at
+     * the file's length, a show cut after 50 minutes stayed on the page as a
+     * 2h50m line and every upcoming line was drawn after its "end".
+     */
+    private function settleAiredLengths(Station $station, int $now): void
+    {
+        $this->em->getConnection()->executeStatement(
+            'UPDATE station_log_entries e
+            JOIN song_history h ON h.station_id = e.station_id AND h.media_id = e.media_id
+                AND h.timestamp_end IS NOT NULL
+                AND UNIX_TIMESTAMP(h.timestamp_start) BETWEEN e.aired_at - ? AND e.aired_at + ?
+            SET e.duration = GREATEST(1, TIMESTAMPDIFF(MICROSECOND, h.timestamp_start, h.timestamp_end) / 1000000)
+            WHERE e.station_id = ? AND e.status IN (?, ?, ?) AND e.media_id IS NOT NULL
+            AND e.aired_at >= ?
+            AND TIMESTAMPDIFF(MICROSECOND, h.timestamp_start, h.timestamp_end) / 1000000 < e.duration - ?',
+            [
+                self::AIRED_MATCH_SECONDS,
+                self::AIRED_MATCH_SECONDS,
+                $station->id,
+                StationLogEntry::STATUS_AIRED,
+                StationLogEntry::STATUS_SWAPPED,
+                StationLogEntry::STATUS_REPLACED,
+                $now - self::AIRED_LOOKBACK_SECONDS,
+                self::AIRED_SHORT_BY_SECONDS,
+            ]
+        );
     }
 
     /**

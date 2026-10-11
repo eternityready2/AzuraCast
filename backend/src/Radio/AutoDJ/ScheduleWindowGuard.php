@@ -98,6 +98,15 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
             $entry = $this->em->find(StationLogEntry::class, $row->log_entry_id);
             if (
                 $entry instanceof StationLogEntry
+                && StationLogEntry::STATUS_QUEUED === $entry->status
+                && null !== $entry->note
+                && str_starts_with($entry->note, 'Live:')
+            ) {
+                // A song the AutoDJ picked itself was never on the plan; its
+                // line was written as it was picked and describes nothing now.
+                $this->em->remove($entry);
+            } elseif (
+                $entry instanceof StationLogEntry
                 && in_array($entry->status, [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED], true)
             ) {
                 $entry->status = StationLogEntry::STATUS_DROPPED;

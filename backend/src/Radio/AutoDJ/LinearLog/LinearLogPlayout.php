@@ -310,7 +310,12 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 $nextPlannedAt >= self::hourEnd($station, $expected) => "this hour's log lines ran out",
                 default => 'no log line was ready',
             };
-            $note = 'Live: picked by AutoDJ (' . $reason . ')';
+            // A show's own file is not a song the AutoDJ chose: it is the
+            // scheduled show airing, or going on after the Station ID, with no
+            // line on the plan for it.
+            $note = true === $row->playlist?->is_programme
+                ? 'Live: scheduled show (' . $reason . ')'
+                : 'Live: picked by AutoDJ (' . $reason . ')';
 
             $this->logger->notice('Linear Log: the AutoDJ picked a song the log did not plan.', [
                 'reason' => $reason,

@@ -721,7 +721,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             // let a promo 5s too long through, and the ID cut its last 5s.
             $shortForm = $this->findBestFitMedia(
                 $station,
-                $this->getShortFormFallbackPlaylists($station),
+                $this->getShortFormFallbackPlaylists($station, $start),
                 $media->id,
                 $start,
                 min($fitLimit, $gap + self::PRE_ID_CUT_GRACE_SECONDS),
@@ -870,7 +870,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if (null === $best) {
             $best = $this->findBestFitMedia(
                 $station,
-                $this->getShortFormFallbackPlaylists($station),
+                $this->getShortFormFallbackPlaylists($station, $start),
                 $media->id,
                 $start,
                 $gap + self::PRE_ID_CUT_GRACE_SECONDS,
@@ -1011,7 +1011,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             if (null === $ahead || !$this->isShortForm($ahead)) {
                 $best = $this->findBestFitMedia(
                     $station,
-                    $this->getShortFormFallbackPlaylists($station),
+                    $this->getShortFormFallbackPlaylists($station, $start),
                     $media->id,
                     $start,
                     $limit,
@@ -1550,6 +1550,15 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if (null === $row->media) {
             return false;
         }
+        // A show is not a song. Mad Christian Radio's 2h50m file was swapped
+        // for a 71s promo because it "would lose more than 30s to the ID"; the
+        // promo may not play in the show's window, the schedule guard removed
+        // it, and the slot was picked and swapped again about 12,000 times in
+        // an hour (Sat 2026-10-10). The ID interrupts a show and the show goes
+        // on after it (ProgrammeParts); it is never replaced.
+        if (true === $row->playlist?->is_programme) {
+            return false;
+        }
 
         return !StationMediaTypes::isStationId($row->media->type);
     }
@@ -1689,7 +1698,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
      *
      * @return list<StationPlaylist>
      */
-    private function getShortFormFallbackPlaylists(Station $station): array
+    private function getShortFormFallbackPlaylists(Station $station, ?CarbonImmutable $at = null): array
     {
         $eligible = [];
 
@@ -1698,6 +1707,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 continue;
             }
             if (!$candidate->is_enabled || !$candidate->is_jingle) {
+                continue;
+            }
+            // Only a pool that may play at the slot. A promo offered inside a
+            // scheduled block is removed by the schedule guard on the next
+            // queue cycle and the slot is offered another one: 21 promos in a
+            // minute before the 5am ID inside Hymns (Thu 2026-10-08).
+            if (null !== $at && !$this->scheduler->isPlaylistAllowedAt($candidate, $at->toDateTimeImmutable())) {
                 continue;
             }
 
@@ -2037,7 +2053,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         }
         $limit = $room + self::PRE_ID_CUT_GRACE_SECONDS;
 
-        $pool = $this->getShortFormFallbackPlaylists($station);
+        $pool = $this->getShortFormFallbackPlaylists($station, $start);
         if ([] === $pool) {
             return null;
         }

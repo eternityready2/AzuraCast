@@ -16,6 +16,7 @@ use App\Entity\StationMediaMetadata as Meta;
 use App\Entity\StationQueue;
 use App\Entity\StationRequest;
 use App\Event\Radio\AnnotateNextSong;
+use App\Event\Radio\ResolveQueueClockConstraint;
 use App\Event\Radio\RevalidateQueuedSong;
 use App\Radio\Backend\Liquidsoap\Command\NextSongHeldException;
 use App\Utilities\Time;
@@ -176,14 +177,34 @@ final class Annotations implements EventSubscriberInterface
         // Each track holds the air for its AutoCue cue_out - cue_in (measured
         // against song history to ~0.1s); the file length was off by up to 17s
         // per track, which is how the 8pm 2026-09-24 final song landed 18s short.
+        // A show on air holds it until its part ends or until the station
+        // clock takes it (the Top-of-Hour ID), as the queue's own projection
+        // has it. Counted to the end of its file, the row behind Mad Christian
+        // Radio's 2h50m file was judged at 3:50pm, outside the show's window,
+        // and sent at 1:00pm; the 2pm ID cut the show and that row, a song,
+        // aired inside it (Sat 2026-10-10). Music is timed as before.
         $expectedPlayAt = $now;
+        $airFreeAt = $now;
         if (null !== $currentSong && null !== $currentSong->timestamp_start) {
-            $currentLength = $this->airedLength->lengthOf($currentSong->media, $currentSong->duration);
-            $expectedPlayAt = CarbonImmutable::instance($currentSong->timestamp_start)
-                ->addSeconds(max(1.0, $currentLength));
+            $currentStart = CarbonImmutable::instance($currentSong->timestamp_start);
+            if (true === $currentSong->playlist?->is_programme && null !== $currentSong->media) {
+                [$expectedPlayAt, $airFreeAt] = $this->showHoldsAirUntil(
+                    $station,
+                    $currentStart,
+                    $currentSong->duration,
+                    $currentSong->media,
+                );
+            } else {
+                $currentLength = $this->airedLength->lengthOf($currentSong->media, $currentSong->duration);
+                $expectedPlayAt = $currentStart->addSeconds(max(1.0, $currentLength));
+                $airFreeAt = $expectedPlayAt;
+            }
 
             if ($expectedPlayAt->lessThan($now)) {
                 $expectedPlayAt = $now;
+            }
+            if ($airFreeAt->lessThan($now)) {
+                $airFreeAt = $now;
             }
         }
 
@@ -195,9 +216,19 @@ final class Annotations implements EventSubscriberInterface
             if ($aheadRow->id === $queueRow->id) {
                 continue;
             }
-            $expectedPlayAt = $expectedPlayAt->addSeconds(
+            if (true === $aheadRow->playlist?->is_programme && null !== $aheadRow->media) {
+                [$expectedPlayAt, $airFreeAt] = $this->showHoldsAirUntil(
+                    $station,
+                    $airFreeAt,
+                    $aheadRow->duration,
+                    $aheadRow->media,
+                );
+                continue;
+            }
+            $airFreeAt = $airFreeAt->addSeconds(
                 $this->airedLength->lengthOf($aheadRow->media, $aheadRow->duration)
             );
+            $expectedPlayAt = $airFreeAt;
         }
 
         $this->lastExpectedPlayAt = $expectedPlayAt;
@@ -216,6 +247,42 @@ final class Annotations implements EventSubscriberInterface
         }
 
         return $event->isHeldBack();
+    }
+
+    /**
+     * When the item after a show's part is due, and when the air is free for
+     * it: both the part's end, unless the station clock interrupts the part
+     * first. Then the next item is due at the interruption (it is held, and
+     * opens what follows) and the air is free when the clock event is over.
+     * A part holds the air for its own row's length, not its file's.
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function showHoldsAirUntil(
+        Station $station,
+        CarbonImmutable $start,
+        ?float $partSeconds,
+        StationMedia $media,
+    ): array {
+        $seconds = null !== $partSeconds && $partSeconds > 0.0
+            ? min($partSeconds, $media->length)
+            : $media->length;
+        $end = $start->addMilliseconds((int)round(max(1.0, $seconds) * 1000));
+
+        $constraint = new ResolveQueueClockConstraint(
+            $station,
+            $start->toDateTimeImmutable(),
+            $end->toDateTimeImmutable(),
+        );
+        $this->eventDispatcher->dispatch($constraint);
+
+        $interruptAt = $constraint->getInterruptAt();
+        $resumeAt = $constraint->getResumeAt();
+        if (null === $interruptAt || null === $resumeAt || $interruptAt <= $start) {
+            return [$end, $end];
+        }
+
+        return [CarbonImmutable::instance($interruptAt), CarbonImmutable::instance($resumeAt)];
     }
 
     public function annotateSongPath(AnnotateNextSong $event): void

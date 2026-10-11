@@ -970,6 +970,16 @@ final class LinearLogStore
                 continue;
             }
 
+            // Once a later line has aired, whatever aired before it is over,
+            // however long its file is. Mad Christian Radio's 2h50m file was cut
+            // by the 3pm ID after 50 minutes; counted to the end of its file it
+            // "ran" until 5:00:21pm, and every song not yet on air was drawn
+            // after that, leaving the current hour showing one song at a time
+            // (Sat 2026-10-10).
+            if (isset($entry['aired_at']) && null !== $hardEnd) {
+                $hardEnd = min($hardEnd, (int)$entry['played_at']);
+            }
+
             $hardEnd = max($hardEnd ?? PHP_INT_MIN, $end($entry));
             $cursor = $hardEnd;
         }

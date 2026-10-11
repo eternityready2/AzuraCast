@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ\LinearLog;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationLogEntry;
@@ -79,10 +80,14 @@ final class LinearLogRules
             ->setParameter('from', $from)
             ->getResult();
 
+        $removedFromPlaylist = $this->removedFromPlaylist($station, $from);
+
         foreach ($entries as $entry) {
             $result['checked']++;
 
-            $violation = $this->findViolation($entry, $enforceWindows, $dropOutside);
+            $violation = isset($removedFromPlaylist[$entry->id])
+                ? sprintf('the file is no longer in "%s"', (string)$entry->playlist?->name)
+                : $this->findViolation($entry, $enforceWindows, $dropOutside);
             if (null === $violation) {
                 continue;
             }
@@ -207,9 +212,11 @@ final class LinearLogRules
         // planned_at bounds the scan on its index; a line airs within minutes of it.
         $lines = $conn->fetchAllAssociative(
             'SELECT e.id, e.status, e.is_locked, e.duration, m.song_id, m.type,
+                COALESCE(p.is_programme, 0) AS is_programme,
                 COALESCE(e.aired_at, e.planned_at) AS airs_at
             FROM station_log_entries e
             JOIN station_media m ON m.id = e.media_id
+            LEFT JOIN station_playlists p ON p.id = e.playlist_id
             WHERE e.station_id = ? AND e.status <> ? AND e.planned_at >= ?
             ORDER BY airs_at ASC, e.sequence ASC',
             [$station->id, StationLogEntry::STATUS_DROPPED, $now - $window - 3600]
@@ -238,6 +245,9 @@ final class LinearLogRules
                 && StationLogEntry::STATUS_PLANNED === $line['status']
                 && !$line['is_locked']
                 && 'music' === ($line['type'] ?? 'music')
+                // A show's next part is its file going on after the Station
+                // ID (ProgrammeParts), not the file played again.
+                && !$line['is_programme']
                 && (float)$line['duration'] < LinearLogRefill::PROGRAMME_MIN_SECONDS
                 && !self::isFinalSong($station, $airsAt, (float)$line['duration'])
             ) {
@@ -264,6 +274,47 @@ final class LinearLogRules
             ->getTimestamp() - 1;
 
         return $airsAt + $duration >= $idAt - self::FINAL_SONG_TOLERANCE_SECONDS;
+    }
+
+    /**
+     * Open lines whose file has been taken out of the playlist they were
+     * planned from. The plan runs up to two days ahead; a show whose files are
+     * replaced after that still had the old ones on the log, and they aired:
+     * Mad Christian Radio's parts 1 and 2, twelve hours after the playlist had
+     * been changed to one joined file (Sat 2026-10-10).
+     *
+     * Only a plain file playlist is judged by its file list. A smart block
+     * chooses its files as it plays, and a clock wheel's line is the wheel's.
+     *
+     * @return array<int, true> by log line id
+     */
+    private function removedFromPlaylist(Station $station, int $from): array
+    {
+        $rows = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT e.id, e.payload FROM station_log_entries e
+            JOIN station_playlists p ON p.id = e.playlist_id
+            LEFT JOIN station_playlist_media spm ON spm.playlist_id = e.playlist_id AND spm.media_id = e.media_id
+            WHERE e.station_id = ? AND e.status IN (?, ?) AND e.planned_at >= ?
+            AND e.media_id IS NOT NULL AND spm.id IS NULL
+            AND p.source = ? AND p.is_smart_block = 0',
+            [
+                $station->id,
+                StationLogEntry::STATUS_PLANNED,
+                StationLogEntry::STATUS_QUEUED,
+                $from,
+                PlaylistSources::Songs->value,
+            ]
+        );
+
+        $removed = [];
+        foreach ($rows as $row) {
+            $payload = json_decode((string)$row['payload'], true);
+            if (!is_array($payload) || null === ($payload['clock_wheel_id'] ?? null)) {
+                $removed[(int)$row['id']] = true;
+            }
+        }
+
+        return $removed;
     }
 
     /**

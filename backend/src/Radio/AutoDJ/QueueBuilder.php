@@ -60,6 +60,7 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly UserUrlFilter $userUrlFilter,
         private readonly Client $httpClient,
         private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
+        private readonly ProgrammeParts $programmeParts,
         private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
     }
@@ -83,6 +84,19 @@ final class QueueBuilder implements EventSubscriberInterface
         // The saved linear log chooses this slot (LinearLogPlayout).
         if ($this->linearLogPlayout->ownsSelection($event)) {
             return;
+        }
+
+        // A show the clock interrupted goes on from where it stopped before
+        // anything else is picked.
+        if (!$event->isInterrupting()) {
+            $continuation = $this->programmeParts->continuationFor(
+                $event->getStation(),
+                DateTimeImmutable::createFromInterface($event->getExpectedPlayTime()),
+            );
+            if (null !== $continuation) {
+                $event->setNextSongs($continuation);
+                return;
+            }
         }
 
         $this->logger->info('AzuraCast AutoDJ is calculating the next song to play...');
@@ -807,6 +821,13 @@ final class QueueBuilder implements EventSubscriberInterface
         bool $allowDuplicates,
     ): ?StationPlaylistQueue {
         if (PlaylistTypes::Standard !== $playlist->type) {
+            return $selectedTrack;
+        }
+
+        // A show's files air whole and in order: the pick is never traded for
+        // another file of the show that happens to fit before the ID. The ID
+        // interrupts a show and the show goes on after it (ProgrammeParts).
+        if ($playlist->is_programme) {
             return $selectedTrack;
         }
 
