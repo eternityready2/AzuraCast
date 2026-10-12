@@ -41,7 +41,7 @@ final class BuildLinearLogTask extends AbstractTask
         $now = Time::nowInTimezone($station->getTimezoneObject());
         $next = $now->setTime(self::BUILD_LOCAL_HOUR, self::BUILD_MINUTE);
 
-        return ($next->getTimestamp() <= $now->getTimestamp() ? $next->addDay() : $next)->getTimestamp();
+        return ($next->getTimestamp() <= $now->getTimestamp() ? $next->modify('+1 day') : $next)->getTimestamp();
     }
 
     /**

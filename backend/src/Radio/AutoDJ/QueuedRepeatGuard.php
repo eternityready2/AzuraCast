@@ -52,7 +52,7 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
             || $row->clock_wheel_legal_id_substitute
             || null !== $row->request
             || null === $row->media
-            || 'music' !== ($row->media->type ?? 'music')
+            || 'music' !== $row->media->type
         ) {
             return;
         }
@@ -73,7 +73,7 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
             ->startOfHour()
             ->addMinutes(59)
             ->addSeconds(59);
-        $endsAt = $airsAt->addSeconds((int)round((float)($row->duration ?? $row->media->length ?? 0.0)));
+        $endsAt = $airsAt->addSeconds((int)round((float)($row->duration ?? $row->media->length)));
         if (abs($endsAt->getTimestamp() - $idTarget->getTimestamp()) <= self::FINAL_SONG_TOLERANCE_SECONDS) {
             return;
         }

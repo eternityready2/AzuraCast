@@ -9,6 +9,7 @@ use App\Container\LoggerAwareTrait;
 use App\Entity\StationLogEntry;
 use App\Entity\StationPlaylist;
 use App\Event\Radio\RevalidateQueuedSong;
+use App\Radio\AutoDJ\LinearLog\LinearLogLineWindow;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -21,6 +22,10 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * hand-off to Liquidsoap, and the saved Linear Log (the builder seeds saved
  * lines into the queue and drops any line whose row is removed here). Choices
  * made earlier -- including log lines saved by older code -- never bypass it.
+ *
+ * The row is what is removed. Its log line is only dropped when the line may
+ * not play at the time the log planned it for; a line that is right in the log
+ * and wrong only where the queue has timed its row goes back to the log.
  */
 final class ScheduleWindowGuard implements EventSubscriberInterface
 {
@@ -29,6 +34,7 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
 
     public function __construct(
         private readonly Scheduler $scheduler,
+        private readonly LinearLogLineWindow $lineWindow,
     ) {
     }
 
@@ -105,6 +111,27 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
                 // A song the AutoDJ picked itself was never on the plan; its
                 // line was written as it was picked and describes nothing now.
                 $this->em->remove($entry);
+            } elseif (
+                $entry instanceof StationLogEntry
+                && in_array($entry->status, [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED], true)
+                && $this->lineWindow->mayAirAsPlanned($entry)
+            ) {
+                // The queue's time for this row is a projection, re-made on
+                // every pass, and it is what failed here; the log's own time
+                // for the line is fine. Dropped on it, every line planned for
+                // the hour after a stream show was lost one by one while the
+                // queue timed them an hour off (Sat 2026-10-10), and each
+                // morning the 6:00 hour lost its first songs when the hour
+                // before it ended a minute early. The line stays planned and
+                // playout takes it again for a slot it may play in.
+                $entry->status = StationLogEntry::STATUS_PLANNED;
+                $entry->queue_id = null;
+                $this->em->persist($entry);
+
+                $this->logger->notice(
+                    'Linear Log: the line of a mistimed queue row goes back to the log.',
+                    ['log_entry_id' => $entry->id, 'planned_at' => $entry->planned_at]
+                );
             } elseif (
                 $entry instanceof StationLogEntry
                 && in_array($entry->status, [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED], true)

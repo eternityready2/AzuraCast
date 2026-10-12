@@ -93,8 +93,10 @@ final class LinearLogAlerts
                 'seconds' => (int)array_sum(array_column($picked, 'duration')),
                 'message' => sprintf(
                     1 === count($picked)
-                        ? 'AutoDJ had to step in: it picked %d song itself in the last hour, where the log had nothing (%s at %s).'
-                        : 'AutoDJ had to step in: it picked %d songs itself in the last hour, where the log had nothing (first: %s at %s).',
+                        ? 'AutoDJ had to step in: it picked %d song itself in the last hour, '
+                            . 'where the log had nothing (%s at %s).'
+                        : 'AutoDJ had to step in: it picked %d songs itself in the last hour, '
+                            . 'where the log had nothing (first: %s at %s).',
                     count($picked),
                     (string)$first['text'],
                     $time((int)$first['at'])
@@ -162,7 +164,10 @@ final class LinearLogAlerts
 
             // A hole that runs up to the Station ID is an hour running short;
             // anywhere else it is a hole in the middle of the log.
-            $hourEnd = CarbonImmutable::createFromTimestamp($hole['start'], $tz)->startOfHour()->addHour()->getTimestamp();
+            $hourEnd = CarbonImmutable::createFromTimestamp($hole['start'], $tz)
+                ->startOfHour()
+                ->addHour()
+                ->getTimestamp();
             $runsToId = $hole['end'] >= $hourEnd - 1;
             $end = min($hole['end'], $hourEnd);
             $seconds = $end - $hole['start'];

@@ -164,6 +164,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Radio\AutoDJ\QueueBuilder::class,
             App\Radio\AutoDJ\StrictProgrammeHold::class,
             App\Radio\AutoDJ\ProgrammeParts::class,
+            App\Radio\AutoDJ\LinearLog\LinearLogHourGuard::class,
             App\Radio\AutoDJ\ScheduleWindowGuard::class,
             App\Radio\AutoDJ\QueuedRepeatGuard::class,
             App\Radio\AutoDJ\BroadcastClockQueueTimingSubscriber::class,

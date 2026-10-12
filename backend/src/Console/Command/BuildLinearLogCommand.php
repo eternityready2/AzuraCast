@@ -17,17 +17,15 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
 
 /**
- * Projects and commits a full linear playout log ahead of real-time playback,
- * reusing the same selection pipeline (playlists, clock wheels, schedules,
- * top-of-hour protection) as live AutoDJ queue building -- just run with a much
- * larger time horizon. Runs manually against any station regardless of that
- * station's `linear_log_enabled` setting; {@see \App\Sync\Task\BuildLinearLogTask}
- * is what runs this automatically for stations that have opted in.
+ * Builds a station's saved linear log by hand: the same build
+ * {@see \App\Sync\Task\BuildLinearLogTask} runs every day for stations with
+ * the log turned on, for any station whatever its `linear_log_enabled` setting.
  *
- * This does not replace live queue building: it fills the same station_queue
- * table further out, and each future run (live or via this command again)
- * re-times existing rows to absorb any drift before adding anything new, so
- * the log stays accurate as real playback catches up.
+ * The plan comes from the live selection pipeline (playlists, clock wheels,
+ * schedules, top-of-hour protection) run ahead in a transaction that is rolled
+ * back; only the resulting log lines are saved. Without --rebuild the planned
+ * lines stay and the log is extended; with it, unlocked lines past the lock
+ * window are planned again.
  */
 #[AsCommand(
     name: 'azuracast:radio:build-linear-log',

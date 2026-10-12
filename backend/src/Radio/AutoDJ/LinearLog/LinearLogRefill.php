@@ -27,11 +27,7 @@ use Throwable;
  * once the queue reaches it (or a shorter hour that pulls everything after it
  * forward).
  *
- * - A line the schedule guard dropped at a projected air time that turned out
- *   wrong, while its own playlist may play when the log planned it, is put back
- *   once (Wed 2026-10-07 7pm: every song planned after Altered Stories was
- *   judged inside the show's window and dropped).
- * - Any other dropped song is replaced by a song of about the same length from
+ * - A dropped song is replaced by a song of about the same length from
  *   the playlist the AutoDJ would play at that time, so the rest of the hour
  *   keeps its timing; what difference is left moves the hour's later lines.
  * - A dropped short item (promo, liner) that cannot be replaced closes up: the
@@ -116,7 +112,7 @@ final class LinearLogRefill
     /**
      * Refill dropped lines in the station's future log.
      *
-     * @return int lines restored or refilled
+     * @return int lines refilled
      */
     public function refill(Station $station): int
     {
@@ -165,7 +161,7 @@ final class LinearLogRefill
                 $outcome = 'failed';
             }
 
-            if (in_array($outcome, ['restored', 'refilled', 'closed_up'], true)) {
+            if (in_array($outcome, ['refilled', 'closed_up'], true)) {
                 $done++;
             }
         }
@@ -367,30 +363,6 @@ final class LinearLogRefill
         $playlist = null !== $line['playlist_id']
             ? $this->em->find(StationPlaylist::class, (int)$line['playlist_id'])
             : null;
-
-        // Dropped by the schedule guard at a projected time, while the log's own
-        // time is fine for its playlist: the plan was right, so it stands.
-        if (
-            str_contains($note, ' may not play at ')
-            && empty($payload['restored'])
-            && $playlist instanceof StationPlaylist
-            && $this->scheduler->isPlaylistAllowedAt($playlist, $at)
-        ) {
-            $payload['restored'] = true;
-            $this->em->getConnection()->update('station_log_entries', [
-                'status' => StationLogEntry::STATUS_PLANNED,
-                'note' => mb_substr('Restored: ' . $note, 0, 255),
-                'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
-                'queue_id' => null,
-            ], ['id' => $id]);
-
-            $this->logger->notice('Linear Log: restored a line dropped at a projected time its plan did not have.', [
-                'log_entry_id' => $id,
-                'planned_at' => $plannedAt,
-                'reason' => $note,
-            ]);
-            return 'restored';
-        }
 
         // Media-less lines returned as programmes above.
         $excludeMediaId = (int)$line['media_id'];

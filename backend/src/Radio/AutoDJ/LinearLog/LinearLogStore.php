@@ -17,6 +17,7 @@ use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\LockMode;
 
 /**
@@ -33,6 +34,9 @@ final class LinearLogStore
 
     /** The next two hours are never re-planned by a rebuild. */
     public const int LOCK_SECONDS = 7200;
+
+    /** Shown on a planned line its hour has no room for. */
+    private const string OVER_SCHEDULED_NOTE = 'Over: airs only if this hour makes up the time';
 
     /**
      * Ids of the planned lines a rebuild is allowed to re-plan: unlocked, and
@@ -750,17 +754,21 @@ final class LinearLogStore
         if ([] !== $ids) {
             foreach (
                 $conn->fetchAllAssociative(
-                    'SELECT id, status, aired_at, note, is_locked, title, artist, text, payload
+                    'SELECT id, status, aired_at, note, is_locked, title, artist, text, payload,
+                        planned_at, playlist_id
                     FROM station_log_entries WHERE id IN (?)',
                     [$ids],
-                    [\Doctrine\DBAL\ArrayParameterType::INTEGER]
+                    [ArrayParameterType::INTEGER]
                 ) as $row
             ) {
                 $saved[(int)$row['id']] = $row;
             }
         }
 
-        usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
+        usort(
+            $entries,
+            static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
+        );
 
         // A line is re-timed only from its own live-queue row. The saved log is
         // the authority for every other line.
@@ -828,9 +836,16 @@ final class LinearLogStore
         }
         unset($entry);
 
-        usort($entries, static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)));
+        usort(
+            $entries,
+            static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
+        );
 
-        $entries = self::floatSoftLines(self::showAfterNews($entries), $now);
+        $entries = self::floatSoftLines(
+            self::showAfterNews($entries),
+            $now,
+            $this->hourEndsByLine($station, $saved),
+        );
 
         // Schedule exclusivity (a live-queue fill-in leaking into a scheduled
         // playlist's window) is enforced by LinearLogRules::apply(), which runs
@@ -846,6 +861,37 @@ final class LinearLogStore
             static fn(array $e): bool => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
                 && (int)($e['played_at'] ?? 0) <= $until
         ));
+    }
+
+    /**
+     * End of the hour each saved line belongs to, by line id. Shows are left
+     * out: a show is a timed event with a window of its own, not a line of an
+     * hour (see LinearLogHourGuard).
+     *
+     * @param array<int, array<string, mixed>> $saved rows of station_log_entries, by id
+     * @return array<int, int>
+     */
+    private function hourEndsByLine(Station $station, array $saved): array
+    {
+        $shows = [];
+        foreach ($station->playlists as $playlist) {
+            if ($playlist->is_programme) {
+                $shows[$playlist->id] = true;
+            }
+        }
+
+        $hourEnds = [];
+        foreach ($saved as $id => $line) {
+            if (
+                isset($shows[(int)$line['playlist_id']])
+                || str_contains((string)$line['payload'], 'scheduled_programme')
+            ) {
+                continue;
+            }
+            $hourEnds[$id] = LinearLogHourGuard::hourEnd($station, (int)$line['planned_at']);
+        }
+
+        return $hourEnds;
     }
 
     /**
@@ -934,24 +980,49 @@ final class LinearLogStore
      * markers. When the air ran 7m51s ahead of the plan (2026-10-07 14:40:59)
      * the next planned liner still showed its plan time of 14:48:50, and the
      * empty time between read as a hole. A run that overruns the next hard event
-     * shows the overrun, which the Top-of-Hour swap settles on air. Display
-     * only: nothing here is saved, and playout never reads it.
+     * shows the overrun, which the Top-of-Hour swap settles on air.
+     *
+     * A line airs in its own hour or not at all (see LinearLogHourGuard), so a
+     * planned line that could only start once its hour is over is not drawn in
+     * the next one. Drawn there, the last four songs of the 9pm hour were
+     * listed inside the 10pm Life Perspectives show (Sun 2026-10-11). It stays
+     * in its hour, at the hour's end, marked as over, and nothing is timed
+     * from it.
+     *
+     * Display only: nothing here is saved, and playout never reads it.
      *
      * @param list<array<string, mixed>> $entries sorted by played_at
+     * @param array<int, int> $hourEndByLine end of the hour each line belongs to, by line id
      * @return list<array<string, mixed>> sorted by played_at
      */
-    private static function floatSoftLines(array $entries, int $now): array
+    private static function floatSoftLines(array $entries, int $now, array $hourEndByLine): array
     {
         $end = static fn(array $e): int => (int)$e['played_at'] + (int)ceil((float)($e['duration'] ?? 0));
 
-        // A line planned at the same second as a hard event airs after it: the
-        // song held for the new hour is planned at the ID's 03:59:59 and opens
-        // the hour once the ID ends.
-        usort(
-            $entries,
-            static fn(array $a, array $b): int => [(int)($a['played_at'] ?? 0), self::isSoft($a, $now)]
-                <=> [(int)($b['played_at'] ?? 0), self::isSoft($b, $now)]
-        );
+        // What is in the queue airs before anything still planned, whatever
+        // time the plan has for it. When the air runs behind, the queue's time
+        // for its last rows is later than the plan's time for the lines that
+        // follow them; taken in time order, those planned lines were drawn
+        // ahead of rows already queued and pushed them later on the page than
+        // the queue has them (a spot queued for 9:46:51pm was listed at
+        // 10:01:42pm, Sun 2026-10-11).
+        $queuedUntil = 0;
+        foreach ($entries as $entry) {
+            if (StationLogEntry::STATUS_QUEUED === ($entry['log_status'] ?? null) && self::isSoft($entry, $now)) {
+                $queuedUntil = max($queuedUntil, (int)$entry['played_at']);
+            }
+        }
+        $airOrder = static function (array $e) use ($now, $queuedUntil): array {
+            $at = (int)($e['played_at'] ?? 0);
+            $soft = self::isSoft($e, $now);
+            $planned = $soft && StationLogEntry::STATUS_PLANNED === $e['log_status'];
+
+            // A line planned at the same second as a hard event airs after it:
+            // the song held for the new hour is planned at the ID's 03:59:59
+            // and opens the hour once the ID ends.
+            return [$planned ? max($at, $queuedUntil) : $at, $soft, $planned, $at];
+        };
+        usort($entries, static fn(array $a, array $b): int => $airOrder($a) <=> $airOrder($b));
 
         $cursor = null;
         // Hard events can overlap (a bulletin drawn inside a show), so a chain
@@ -963,6 +1034,19 @@ final class LinearLogStore
             }
 
             if (self::isSoft($entry, $now)) {
+                $hourEnd = $hourEndByLine[(int)$entry['log_entry_id']] ?? null;
+                if (
+                    null !== $cursor
+                    && null !== $hourEnd
+                    && $cursor >= $hourEnd
+                    && StationLogEntry::STATUS_PLANNED === $entry['log_status']
+                ) {
+                    $entries[$i]['played_at'] = $hourEnd - 1;
+                    $entries[$i]['over_scheduled'] = true;
+                    $entries[$i]['log_note'] = $entry['log_note'] ?? self::OVER_SCHEDULED_NOTE;
+                    continue;
+                }
+
                 if (null !== $cursor) {
                     $entries[$i]['played_at'] = $cursor;
                 }
@@ -1057,9 +1141,11 @@ final class LinearLogStore
         [, $until] = self::window($station, $hours, $now);
         $from = $now;
 
+        // A line its hour has no room for covers nothing: it does not air
+        // unless the hour makes up the time.
         $airable = array_filter(
             $liveEntries,
-            static fn(array $e): bool => self::isAirable($e),
+            static fn(array $e): bool => self::isAirable($e) && empty($e['over_scheduled']),
         );
 
         $spans = array_map(

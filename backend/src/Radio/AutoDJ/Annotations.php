@@ -25,6 +25,7 @@ use Carbon\CarbonImmutable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use RuntimeException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Throwable;
 
 final class Annotations implements EventSubscriberInterface
 {
@@ -37,12 +38,16 @@ final class Annotations implements EventSubscriberInterface
     /** Projected air time of the row last revalidated before send. */
     private ?CarbonImmutable $lastExpectedPlayAt = null;
 
+    /** Until when a stream show holds the air, from the same check; null when none does. */
+    private ?CarbonImmutable $lastStreamHeldUntil = null;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly CustomFieldRepository $customFieldRepo,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly AutoCueCache $autoCueCache,
         private readonly AiredLength $airedLength,
+        private readonly StreamProgrammeClock $streamProgrammeClock,
     ) {
     }
 
@@ -105,9 +110,10 @@ final class Annotations implements EventSubscriberInterface
             // failure here must never be able to take down normal playback.
             $heldBack = false;
             $this->lastExpectedPlayAt = null;
+            $this->lastStreamHeldUntil = null;
             try {
                 $heldBack = $this->revalidateBeforeSend($station, $queueRow);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 // Swallow and proceed with whatever queueRow already was --
                 // but LOG it. This used to swallow silently, which made a
                 // broken revalidation path indistinguishable from "nothing to
@@ -129,9 +135,24 @@ final class Annotations implements EventSubscriberInterface
             // at 11:00:17 under the exemption, sat loaded for 59 minutes where
             // the swap could not replace it, and the 11:59:59 ID cut it after
             // 20s (Mon 2026-10-05).
-            $opensThisHour = null !== $this->lastExpectedPlayAt
-                && $this->lastExpectedPlayAt->lessThan(Time::nowUtc()->addMinutes(self::HOUR_OPENER_WINDOW_MINUTES));
-            if ($heldBack && !($autoDjHeldByTopOfHour && $opensThisHour) && $this->em->contains($queueRow)) {
+            //
+            // A stream show on the air is the same case: Liquidsoap plays the
+            // stream from its own schedule switch, so what is sent meanwhile
+            // only loads, and starts from its beginning when the show (and the
+            // ID after it) hands the air back. It has to be loaded: with
+            // nothing in the AutoDJ transport, Liquidsoap takes the air as
+            // gone quiet and starts the Station ID as soon as its early window
+            // opens. Refused until the show's last 30 seconds, the item behind
+            // Unshackled left the transport empty and the ID aired at 11:59:29
+            // PM, cutting the show's last half minute and opening the next
+            // hour 30 seconds early (Sat 2026-10-10). Loaded when the show
+            // began, the item behind the Morning Show let the ID start at
+            // 8:59:59 and opened 9:00 straight after it (Fri 2026-10-09).
+            $onlyLoads = $autoDjHeldByTopOfHour || null !== $this->lastStreamHeldUntil;
+            $airFreeFrom = $this->lastStreamHeldUntil ?? Time::nowUtc();
+            $opensWhenAirIsFree = null !== $this->lastExpectedPlayAt
+                && $this->lastExpectedPlayAt->lessThan($airFreeFrom->addMinutes(self::HOUR_OPENER_WINDOW_MINUTES));
+            if ($heldBack && !($onlyLoads && $opensWhenAirIsFree) && $this->em->contains($queueRow)) {
                 $this->em->flush();
                 throw new NextSongHeldException(
                     'Held: this item waits for what holds the air first (the Top-of-Hour ID, or a strict programme).'
@@ -185,7 +206,7 @@ final class Annotations implements EventSubscriberInterface
         // aired inside it (Sat 2026-10-10). Music is timed as before.
         $expectedPlayAt = $now;
         $airFreeAt = $now;
-        if (null !== $currentSong && null !== $currentSong->timestamp_start) {
+        if (null !== $currentSong) {
             $currentStart = CarbonImmutable::instance($currentSong->timestamp_start);
             if (true === $currentSong->playlist?->is_programme && null !== $currentSong->media) {
                 [$expectedPlayAt, $airFreeAt] = $this->showHoldsAirUntil(
@@ -208,12 +229,22 @@ final class Annotations implements EventSubscriberInterface
             }
         }
 
+        // A stream show handed to Liquidsoap holds the air until its window
+        // closes, whatever its row's stored length says and however long ago
+        // it was sent: the same answer the queue's own projection uses.
+        $streamHeldUntil = $this->streamProgrammeClock->onAirHeldUntil($station, $now);
+        $this->lastStreamHeldUntil = $streamHeldUntil;
+        if (null !== $streamHeldUntil && $streamHeldUntil->greaterThan($airFreeAt)) {
+            $airFreeAt = $streamHeldUntil;
+            $expectedPlayAt = $streamHeldUntil;
+        }
+
         // ...and then everything already resolved into Liquidsoap ahead of
         // this row, because all of it airs before this row does. Now-playing
         // feedback lags a track change by several seconds, so the track that
         // has just started is still in this list and is counted here.
         foreach ($this->queueRepo->getUnairedSentRows($station) as $aheadRow) {
-            if ($aheadRow->id === $queueRow->id) {
+            if ($aheadRow->id === $queueRow->id || $this->streamProgrammeClock->isStreamProgrammeRow($aheadRow)) {
                 continue;
             }
             if (true === $aheadRow->playlist?->is_programme && null !== $aheadRow->media) {

@@ -35,6 +35,12 @@ final class LinearLogPlayout implements EventSubscriberInterface
     /** Shortest gap before the ID the Top-of-Hour filler will fill with a spot. */
     private const int PRE_ID_SLIVER_SECONDS = 5;
 
+    /** Planned lines looked at per query when finding the one for a slot. */
+    private const int LINE_BATCH_SIZE = 8;
+
+    /** Lines passed over for one slot before the log stands down for it. */
+    private const int MAX_LINES_PASSED_OVER = 48;
+
     /** Last log line offered, to detect a validator rejecting it. */
     private ?int $offeredEntryId = null;
     private ?int $offeredAt = null;
@@ -46,6 +52,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
         private readonly LinearLogPreviewContext $previewContext,
         private readonly LinearLogStore $store,
         private readonly StrictProgrammeClock $strictProgrammeClock,
+        private readonly LinearLogLineWindow $lineWindow,
     ) {
     }
 
@@ -106,7 +113,16 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
-     * True when the next planned line belongs to this hour (or an earlier one).
+     * True when the log has a line to play in the slot at $expected.
+     */
+    private function hasLineForHour(Station $station, DateTimeInterface $expected): bool
+    {
+        return null !== $this->nextLineFor($station, $expected);
+    }
+
+    /**
+     * The planned line playout takes for the slot at $expected, or null when
+     * the log has none for it.
      *
      * The log is taken in order, so when an hour runs out of lines the next one
      * up is the following hour's opener. Airing it now pulled every later hour
@@ -115,31 +131,93 @@ final class LinearLogPlayout implements EventSubscriberInterface
      * filled by the normal pickers instead, as on FM automation, and each
      * hour's own lines stay in their hour.
      *
+     * The same holds the other way: a line the hour before had no room for is
+     * not given a slot in this one. The queue fills about an hour ahead, so an
+     * hour's leftovers were taken for the next hour's first slots long before
+     * their own hour ended, where closeOutEndedHours() no longer reaches them.
+     * They opened the new hour ahead of its own lines, and every hour passed
+     * its overrun on: 16 minutes by 9pm on Sun 2026-10-11, which put the 9pm
+     * hour's last four songs inside the 10pm Life Perspectives show. A
+     * leftover stays planned, for its own hour only, until that hour ends.
+     * Shows are timed events and are offered as before.
+     *
      * "In order" is air-time order. Sequence is only the order lines were
      * written: a locked line keeps its old sequence through a rebuild, and
      * programme lines are written after the music around them, so taking by
      * sequence put an 11:00 locked line ahead of the 03:00-10:59 lines and
      * this guard then held back every hour in between.
+     *
+     * A line whose source may not play in this slot is passed over when the
+     * log's own time for it is fine: it was planned for another block (the
+     * last Hymns songs of an hour that ran long, once the slot is past 6:00;
+     * a show's line while the queue is timing the slot outside its window).
+     * Offered anyway, the schedule guard threw its row out on the next pass
+     * and the line with it. It stays planned for a slot it may play in, and is
+     * closed out with its hour's other leftovers if that never comes.
      */
-    private function hasLineForHour(Station $station, DateTimeInterface $expected): bool
+    private function nextLineFor(Station $station, DateTimeInterface $expected): ?StationLogEntry
     {
-        $nextPlannedAt = $this->nextPlannedAt($station);
+        $hourEnd = self::hourEnd($station, $expected);
 
-        return null !== $nextPlannedAt && $nextPlannedAt < self::hourEnd($station, $expected);
+        // A slot in the last seconds before the ID airs when the new hour
+        // opens (see hourEnd()), so that is where its line is judged.
+        $slotAt = new DateTimeImmutable('@' . max($expected->getTimestamp(), $hourEnd - 3600));
+
+        $strictLane = $this->strictLanePlaylistIds($station);
+
+        for ($offset = 0; $offset < self::MAX_LINES_PASSED_OVER; $offset += self::LINE_BATCH_SIZE) {
+            /** @var StationLogEntry[] $lines */
+            $lines = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT e FROM App\Entity\StationLogEntry e
+                    LEFT JOIN e.playlist p
+                    WHERE e.station = :station AND e.status = :planned
+                    AND e.planned_at < :hourEnd
+                    AND (e.planned_at >= :hourStart OR e.payload LIKE :programme OR p.is_programme = true)
+                    AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
+                    ORDER BY e.planned_at ASC, e.sequence ASC
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+                ->setParameter('hourEnd', $hourEnd)
+                ->setParameter('hourStart', $hourEnd - 3600)
+                ->setParameter('programme', '%scheduled_programme%')
+                ->setParameter('strictLane', $strictLane)
+                ->setFirstResult($offset)
+                ->setMaxResults(self::LINE_BATCH_SIZE)
+                ->getResult();
+
+            foreach ($lines as $line) {
+                if ($this->lineWindow->mayAirAt($line, $slotAt) || !$this->lineWindow->mayAirAsPlanned($line)) {
+                    return $line;
+                }
+            }
+
+            if (count($lines) < self::LINE_BATCH_SIZE) {
+                break;
+            }
+        }
+
+        return null;
     }
 
-    /** Planned air time of the line playout takes next, or null when none is planned. */
-    private function nextPlannedAt(Station $station): ?int
+    /**
+     * Planned air time of the next line the log has from $hourStart on, or null
+     * when none is planned. An earlier hour's leftovers are not lines for it.
+     */
+    private function nextPlannedAt(Station $station, int $hourStart): ?int
     {
         $plannedAt = $this->em->createQuery(
             <<<'DQL'
                 SELECT e.planned_at FROM App\Entity\StationLogEntry e
                 WHERE e.station = :station AND e.status = :planned
+                AND e.planned_at >= :hourStart
                 AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
                 ORDER BY e.planned_at ASC, e.sequence ASC
             DQL
         )->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
+            ->setParameter('hourStart', $hourStart)
             ->setParameter('strictLane', $this->strictLanePlaylistIds($station))
             ->setMaxResults(1)
             ->getOneOrNullResult();
@@ -233,14 +311,20 @@ final class LinearLogPlayout implements EventSubscriberInterface
         // MySQL counts changed rows, so a line that was already queued (a
         // re-offer) reports 0 here too; only a missing or closed line is lost.
         $dbStatus = 0 === $claimed
-            ? $this->em->getConnection()->fetchOne('SELECT status FROM station_log_entries WHERE id = ?', [$entryId])
+            ? $this->em->getConnection()->fetchOne(
+                'SELECT status FROM station_log_entries WHERE id = ?',
+                [$entryId]
+            )
             : StationLogEntry::STATUS_QUEUED;
         if (StationLogEntry::STATUS_QUEUED !== $dbStatus) {
-            $this->logger->notice('Linear Log: planned line was taken away before it was queued; airing as a live pick.', [
-                'log_entry_id' => $entryId,
-                'status_now' => false === $dbStatus ? 'deleted' : $dbStatus,
-                'song' => $row->text,
-            ]);
+            $this->logger->notice(
+                'Linear Log: planned line was taken away before it was queued; airing as a live pick.',
+                [
+                    'log_entry_id' => $entryId,
+                    'status_now' => false === $dbStatus ? 'deleted' : $dbStatus,
+                    'song' => $row->text,
+                ]
+            );
             $row->log_entry_id = null;
             $this->em->detach($entry);
             if ($this->offeredEntryId === $entryId) {
@@ -303,11 +387,12 @@ final class LinearLogPlayout implements EventSubscriberInterface
         if (null !== $row->request) {
             $note = 'Live: listener request';
         } else {
-            $nextPlannedAt = $this->nextPlannedAt($station);
+            $hourEnd = self::hourEnd($station, $expected);
+            $nextPlannedAt = $this->nextPlannedAt($station, $hourEnd - 3600);
             $reason = match (true) {
                 $event->isInterrupting() => 'an interrupting playlist took the slot',
                 null === $nextPlannedAt => 'the log has no planned lines',
-                $nextPlannedAt >= self::hourEnd($station, $expected) => "this hour's log lines ran out",
+                $nextPlannedAt >= $hourEnd => "this hour's log lines ran out",
                 default => 'no log line was ready',
             };
             // A show's own file is not a song the AutoDJ chose: it is the
@@ -339,7 +424,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
             'playlist_id' => $row->playlist?->id,
             'planned_at' => $at,
             'sequence' => $sequence,
-            'duration' => max(1.0, (float)($row->duration ?? $row->media->length ?? 0.0)),
+            'duration' => max(1.0, (float)($row->duration ?? $row->media->length)),
             'status' => StationLogEntry::STATUS_QUEUED,
             'text' => mb_substr((string)$row->text, 0, 255) ?: null,
             'title' => null !== $row->title ? mb_substr($row->title, 0, 255) : null,
@@ -354,17 +439,18 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
-     * Next planned line, dropping any left over from an hour that has already
-     * ended ("hit the post": the new hour opens with its own first line).
+     * Drop the planned lines left over from an hour that has already ended
+     * ("hit the post": the new hour opens with its own first line).
      */
-    private function takeNext(Station $station, DateTimeImmutable $expected): ?StationLogEntry
+    private function closeOutEndedHours(Station $station, DateTimeInterface $expected): void
     {
         // An hour has only "ended" once the wall clock is past it. The expected
         // slot time can run hours ahead of the clock (a long programme row in
         // the queue put it at 11:07 at 08:59), and using it alone dropped the
         // 10:00 God Family & Country line as a leftover before its hour began
         // -- the hour then aired nothing (Mon 2026-10-05).
-        $hourStart = CarbonImmutable::instance(min($expected, CarbonImmutable::now()))
+        $hourStart = CarbonImmutable::instance($expected)
+            ->min(CarbonImmutable::now())
             ->setTimezone($station->getTimezoneObject())
             ->startOfHour()
             ->getTimestamp();
@@ -374,8 +460,6 @@ final class LinearLogPlayout implements EventSubscriberInterface
         // carries what follows it. Taken, Faith Horizons' programme line (no
         // file of its own) was dropped as a removed file, and the log moved
         // straight on to the songs after the show (Wed 2026-10-07 17:00).
-        $strictLane = $this->strictLanePlaylistIds($station);
-
         $dropped = $this->em->createQuery(
             <<<'DQL'
                 UPDATE App\Entity\StationLogEntry e
@@ -387,7 +471,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
             DQL
         )->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
-            ->setParameter('strictLane', $strictLane)
+            ->setParameter('strictLane', $this->strictLanePlaylistIds($station))
             ->setParameter('note', 'Dropped: its hour ran long')
             // A scheduled programme block is not a leftover while its window is
             // still open: the next music line can belong to the following hour
@@ -404,28 +488,21 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 'count' => $dropped,
             ]);
         }
+    }
+
+    /**
+     * The line for the slot at $expected, once the leftovers of ended hours
+     * are closed out and any line whose file is gone has been dropped.
+     */
+    private function takeNext(Station $station, DateTimeImmutable $expected): ?StationLogEntry
+    {
+        $this->closeOutEndedHours($station, $expected);
 
         for ($i = 0; $i < 20; $i++) {
-            /** @var StationLogEntry|null $entry */
-            $entry = $this->em->createQuery(
-                <<<'DQL'
-                    SELECT e FROM App\Entity\StationLogEntry e
-                    WHERE e.station = :station AND e.status = :planned
-                    AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
-                    ORDER BY e.planned_at ASC, e.sequence ASC
-                DQL
-            )->setParameter('station', $station)
-                ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
-                ->setParameter('strictLane', $strictLane)
-                ->setMaxResults(1)
-                ->getOneOrNullResult();
-
+            // A later hour's line stays in its hour, and a line that may not
+            // play in this slot stays in the log; see nextLineFor().
+            $entry = $this->nextLineFor($station, $expected);
             if (!$entry instanceof StationLogEntry) {
-                return null;
-            }
-
-            // A later hour's line stays in its hour; see hasLineForHour().
-            if ($entry->planned_at >= self::hourEnd($station, $expected)) {
                 return null;
             }
 
