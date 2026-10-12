@@ -1,16 +1,10 @@
 <template>
-    <div class="card-body-flush">
-        <!-- The header upstream's Upcoming Song Queue page has (CardPage), lost when it became this tab. -->
-        <div class="card-header text-bg-primary">
-            <h2
-                id="hdr_upcoming_song_queue"
-                class="card-title"
-            >
-                {{ $gettext('Upcoming Song Queue') }}
-            </h2>
-        </div>
-
-        <div class="card-body buttons d-flex flex-wrap gap-2 align-items-center">
+    <!-- Upstream's Upcoming Song Queue page, as a tab: same card, header and buttons. -->
+    <card-page
+        header-id="hdr_upcoming_song_queue"
+        :title="$gettext('Upcoming Song Queue')"
+    >
+        <template #actions>
             <select
                 v-model="playlistFilter"
                 class="form-select d-inline-block w-auto me-2"
@@ -49,7 +43,7 @@
                     {{ $gettext('Clear Upcoming Song Queue') }}
                 </span>
             </button>
-        </div>
+        </template>
 
         <data-table
             id="station_queue"
@@ -114,12 +108,13 @@
                 </div>
             </template>
         </data-table>
-    </div>
+    </card-page>
 
     <queue-logs-modal ref="$logsModal" />
 </template>
 
 <script setup lang="ts">
+import CardPage from "~/components/Common/CardPage.vue";
 import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import QueueLogsModal from "~/components/Stations/Queue/LogsModal.vue";
 import PlaylistSourceBadge from "~/components/Stations/Common/PlaylistSourceBadge.vue";
