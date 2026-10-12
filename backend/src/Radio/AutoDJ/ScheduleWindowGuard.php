@@ -9,6 +9,7 @@ use App\Container\LoggerAwareTrait;
 use App\Entity\StationLogEntry;
 use App\Entity\StationPlaylist;
 use App\Event\Radio\RevalidateQueuedSong;
+use App\Radio\AutoDJ\LinearLog\LinearLogHour;
 use App\Radio\AutoDJ\LinearLog\LinearLogLineWindow;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -35,6 +36,8 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
     public function __construct(
         private readonly Scheduler $scheduler,
         private readonly LinearLogLineWindow $lineWindow,
+        private readonly LinearLogHour $hour,
+        private readonly StreamProgrammeClock $streamProgrammeClock,
     ) {
     }
 
@@ -67,6 +70,18 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
         $airsAt = $event->getOpensAfter() ?? $event->getExpectedPlayAt();
         if ($airsAt < $event->getExpectedPlayAt()) {
             $airsAt = $event->getExpectedPlayAt();
+        }
+
+        // A stream show due in the seconds before the ID airs after it; the
+        // Top-of-Hour swap holds only songs, so nothing else says so. Judged
+        // where the last song ended, Life Perspectives was outside its own
+        // window and thrown out every 10s from 9:50 to 10pm (Sun 2026-10-11).
+        if (
+            null === $event->getOpensAfter()
+            && $this->streamProgrammeClock->isStreamProgrammeRow($row)
+            && $this->hour->opensNextHour($row->station, $airsAt->getTimestamp())
+        ) {
+            $airsAt = $airsAt->setTimestamp($this->hour->endOf($row->station, $airsAt->getTimestamp()) - 3600);
         }
 
         $airsAtImmutable = DateTimeImmutable::createFromInterface($airsAt);

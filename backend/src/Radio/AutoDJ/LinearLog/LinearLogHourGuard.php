@@ -10,7 +10,6 @@ use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Event\Radio\RevalidateQueuedSong;
 use App\Radio\AutoDJ\LinearLogPreviewContext;
-use Carbon\CarbonImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -32,6 +31,15 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * is removed and its line goes back to the log. Playout offers it only for a
  * slot in its own hour, and closes it out when that hour ends
  * (LinearLogPlayout::closeOutEndedHours()).
+ *
+ * The other way round, a row the Top-of-Hour swap has given a short item that
+ * ends on the ID no longer plays its line, and airs before the hour that line
+ * is in. The line goes back to the log, and the hour opens on it after the ID.
+ * Left on the row, the next hour's opener was used up by a liner before the ID
+ * (Sidewalk Prophets, 11:59:52am Mon 2026-10-12).
+ *
+ * Which hour an item airs in is LinearLogHour's answer, the same one playout
+ * offers lines by.
  */
 final class LinearLogHourGuard implements EventSubscriberInterface
 {
@@ -40,6 +48,7 @@ final class LinearLogHourGuard implements EventSubscriberInterface
 
     public function __construct(
         private readonly LinearLogPreviewContext $previewContext,
+        private readonly LinearLogHour $hour,
     ) {
     }
 
@@ -52,17 +61,6 @@ final class LinearLogHourGuard implements EventSubscriberInterface
         return [
             RevalidateQueuedSong::class => ['onRevalidateQueuedSong', -9],
         ];
-    }
-
-    /**
-     * End of the clock hour, in station time, a line planned at $plannedAt belongs to.
-     */
-    public static function hourEnd(Station $station, int $plannedAt): int
-    {
-        return CarbonImmutable::createFromTimestamp($plannedAt, $station->getTimezoneObject())
-            ->startOfHour()
-            ->addHour()
-            ->getTimestamp();
     }
 
     /**
@@ -112,7 +110,21 @@ final class LinearLogHourGuard implements EventSubscriberInterface
             $startsAt = $event->getExpectedPlayAt();
         }
 
-        if ($startsAt->getTimestamp() < self::hourEnd($station, $entry->planned_at)) {
+        if ($this->hour->isFillerBeforeLine($station, $row, $startsAt->getTimestamp(), $entry)) {
+            $this->logger->notice(
+                'Linear Log: a short item before the ID took the slot of the next hour\'s line; '
+                . 'the line goes back to the log.',
+                ['queue_id' => $row->id, 'log_entry_id' => $entry->id, 'item' => $row->text]
+            );
+            $row->log_entry_id = null;
+            $this->em->persist($row);
+            $this->returnToLog($entry);
+            $this->em->flush();
+            return;
+        }
+
+        $rowHourEnd = $this->hour->endOf($station, $startsAt->getTimestamp(), (float)($row->duration ?? INF));
+        if ($rowHourEnd <= $this->hour->endOf($station, $entry->planned_at, $entry->duration)) {
             return;
         }
 
@@ -127,17 +139,22 @@ final class LinearLogHourGuard implements EventSubscriberInterface
             ]
         );
 
+        $this->returnToLog($entry);
+        $this->em->remove($row);
+        $this->em->flush();
+    }
+
+    private function returnToLog(StationLogEntry $entry): void
+    {
         if (null !== $entry->note && str_starts_with($entry->note, 'Live:')) {
             // A song the AutoDJ picked itself was never on the plan; its line
             // was written as it was picked and describes nothing now.
             $this->em->remove($entry);
-        } else {
-            $entry->status = StationLogEntry::STATUS_PLANNED;
-            $entry->queue_id = null;
-            $this->em->persist($entry);
+            return;
         }
 
-        $this->em->remove($row);
-        $this->em->flush();
+        $entry->status = StationLogEntry::STATUS_PLANNED;
+        $entry->queue_id = null;
+        $this->em->persist($entry);
     }
 }

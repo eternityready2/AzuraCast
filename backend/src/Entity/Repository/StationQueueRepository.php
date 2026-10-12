@@ -641,12 +641,25 @@ final class StationQueueRepository extends AbstractStationBasedRepository
      */
     public function getUnairedSentRows(Station $station): array
     {
+        // Thirty minutes before what is on air started, not before now: behind a
+        // long show, the next item is handed over when the show starts and waits
+        // until it ends. Counted from now, the liner loaded behind the 59-minute
+        // CMS show was forgotten at 11:30, the hand-off took the 34s before the
+        // ID for empty and put the same liner there again, and the ID cut it
+        // (Mon 2026-10-12). A row the player skipped is already marked played
+        // when a row handed over after it airs (trackPlayed()).
+        $cutoffFrom = Time::nowUtc();
+        $onAirSince = $station->current_song?->timestamp_start;
+        if (null !== $onAirSince && $cutoffFrom->greaterThan($onAirSince)) {
+            $cutoffFrom = CarbonImmutable::instance($onAirSince);
+        }
+
         $rows = $this->getUnplayedBaseQuery($station)
             ->andWhere('sq.sent_to_autodj = 1')
             ->andWhere('sq.top_of_hour_legal_id = 0')
             ->andWhere('sq.clock_wheel_legal_id_substitute = 0')
             ->andWhere('sq.timestamp_cued >= :cutoff')
-            ->setParameter('cutoff', Time::nowUtc()->subMinutes(30))
+            ->setParameter('cutoff', $cutoffFrom->subMinutes(30))
             ->getQuery()
             ->getResult();
 

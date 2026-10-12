@@ -7,6 +7,8 @@ export interface LinearLogItem {
     played_at: number | null;
     cued_at: number;
     duration: number;
+    // What the song really plays for: AutoCue's start to its end cue.
+    aired_duration?: number;
     title: string | null;
     artist: string | null;
     album: string | null;
@@ -34,6 +36,8 @@ export interface LinearLogItem {
     log_entry_id?: number | null;
     log_status?: "planned" | "queued" | "aired" | "swapped" | "replaced" | "dropped" | null;
     log_note?: string | null;
+    // A planned line its hour has no room for: it airs only if the hour makes up the time.
+    over_scheduled?: boolean;
     aired_at?: number | null;
     is_locked?: boolean;
     timing?: 'hard' | 'soft';

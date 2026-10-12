@@ -19,6 +19,9 @@ use App\OpenApi;
 use App\Paginator;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\AirTimePerSong;
+use App\Radio\AutoDJ\LinearLog\LinearLogHour;
+use App\Radio\AutoDJ\LinearLog\LinearLogHourGuard;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\RigidScheduleForecastItem;
@@ -129,6 +132,8 @@ final class QueueController extends AbstractStationApiCrudController
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
         private readonly LinearLogStore $linearLogStore,
+        private readonly LinearLogHour $linearLogHour,
+        private readonly AirTimePerSong $airTimePerSong,
         Serializer $serializer,
         ValidatorInterface $validator
     ) {
@@ -254,7 +259,7 @@ final class QueueController extends AbstractStationApiCrudController
             }
 
             if ($logPlayout) {
-                foreach ($this->getPlannedLogLines($station, $hourEnd) as $entry) {
+                foreach ($this->plannedLogLinesAsTheyAir($station, $queueRows, $now, $hourEnd) as [$entry, $airsAt]) {
                     if (null !== $filterPlaylistId && $entry->playlist?->id !== $filterPlaylistId) {
                         continue;
                     }
@@ -265,7 +270,7 @@ final class QueueController extends AbstractStationApiCrudController
                         continue;
                     }
 
-                    $rows[] = $this->viewLogLineRecord($station, $entry);
+                    $rows[] = $this->viewLogLineRecord($station, $entry, $airsAt);
                 }
             }
 
@@ -467,6 +472,72 @@ final class QueueController extends AbstractStationApiCrudController
         ];
     }
 
+    /**
+     * The log's planned lines as playout will air them: one after another from
+     * where the queue ends, each song taking what songs take on air in its hour,
+     * and only while its own hour has room (LinearLogHourGuard). A line its hour
+     * has no room for does not air, so it is not upcoming. Listed at its saved
+     * time, a song the hour guard had already taken back (We Bow Down, planned
+     * 2:57:13pm) showed here as coming up while the hour's last song was landing
+     * on the ID without it (Mon 2026-10-12).
+     *
+     * @param list<StationQueue> $queueRows
+     * @return list<array{0: StationLogEntry, 1: int}> each line with when it airs
+     */
+    private function plannedLogLinesAsTheyAir(
+        Station $station,
+        array $queueRows,
+        DateTimeImmutable $now,
+        DateTimeImmutable $until,
+    ): array {
+        // Where the queue ends, and the hour its last item airs in (the Station
+        // ID is not an item of an hour).
+        $cursor = $now->getTimestamp();
+        $cursorHourEnd = $this->linearLogHour->endOf($station, $cursor);
+        foreach ($queueRows as $queueRow) {
+            if ($queueRow->top_of_hour_legal_id) {
+                continue;
+            }
+            $start = ($queueRow->timestamp_played ?? $queueRow->timestamp_cued)->getTimestamp();
+            $seconds = (float)($queueRow->duration ?? 0.0);
+            $ends = (int)floor($start + $seconds + $this->airTimeBeyondFile($station, $start, $seconds));
+            if ($ends >= $cursor) {
+                $cursor = $ends;
+                $cursorHourEnd = $this->linearLogHour->endOf($station, $start, $seconds);
+            }
+        }
+
+        $lines = [];
+        foreach ($this->getPlannedLogLines($station, $until) as $entry) {
+            $seconds = $entry->duration;
+            $lineHourEnd = $this->linearLogHour->endOf($station, $entry->planned_at, $seconds);
+
+            if (!LinearLogHourGuard::isHourBound($entry) || $cursorHourEnd < $lineHourEnd) {
+                // A show keeps its time, and a later hour opens once the ID and
+                // its news have handed the air back, as the log planned it.
+                $airsAt = max($cursor, $entry->planned_at);
+            } elseif ($this->linearLogHour->endOf($station, $cursor, $seconds) === $lineHourEnd) {
+                $airsAt = $cursor;
+            } else {
+                continue;
+            }
+
+            $lines[] = [$entry, $airsAt];
+            $cursor = (int)floor($airsAt + $seconds + $this->airTimeBeyondFile($station, $airsAt, $seconds));
+            $cursorHourEnd = $this->linearLogHour->endOf($station, $airsAt, $seconds);
+        }
+
+        return $lines;
+    }
+
+    /** What a song starting at $at takes on air beyond its file; a show takes its own length. */
+    private function airTimeBeyondFile(Station $station, int $at, float $seconds): float
+    {
+        return $seconds > 0.0 && $seconds < 1200.0
+            ? $this->airTimePerSong->secondsBeyondFile($station, $at)
+            : 0.0;
+    }
+
     /** @return list<StationLogEntry> */
     private function getPlannedLogLines(Station $station, DateTimeImmutable $hourEnd): array
     {
@@ -486,12 +557,12 @@ final class QueueController extends AbstractStationApiCrudController
     }
 
     /** @return array<string, mixed> */
-    private function viewLogLineRecord(Station $station, StationLogEntry $entry): array
+    private function viewLogLineRecord(Station $station, StationLogEntry $entry, int $airsAt): array
     {
         // Read-only view of a planned log line; it becomes a real queue row
         // only when playout takes it.
         $record = $this->linearLogStore->toQueueRow($station, $entry, null);
-        $playedAt = CarbonImmutable::createFromTimestamp($entry->planned_at);
+        $playedAt = CarbonImmutable::createFromTimestamp($airsAt);
         $record->timestamp_cued = $playedAt;
         $record->timestamp_played = $playedAt;
         $record->duration = $entry->duration;

@@ -758,6 +758,11 @@ function isTopOfHourId(item: LinearLogItem): boolean {
     return item.top_of_hour_legal_id || item.media_type === "id";
 }
 
+// A scheduled programme or a show file (20 minutes or longer, as the swap counts one).
+function isShow(item: LinearLogItem): boolean {
+    return item.source_type === "scheduled_programme" || (item.duration ?? 0) >= 1200;
+}
+
 // Over/under per hour, as on an FM log: how far the last line before the
 // Station ID runs past it, or ends short of it. Read from the whole log, not
 // the filtered table, so a search or a type filter cannot change the answer.
@@ -788,7 +793,13 @@ const overUnderByHour = computed(() => {
         const lines = items.filter((item) => item !== closingId && (item.played_at ?? 0) < target);
         if (lines.length === 0) continue;
 
-        const lastEnd = Math.max(...lines.map((item) => (item.played_at ?? 0) + (item.duration ?? 0)));
+        // A show the ID interrupts carries on after it: the hour is not over.
+        const showRunsOn = lines.some((item) => isShow(item) && (item.played_at ?? 0) + (item.duration ?? 0) > target);
+        if (showRunsOn) continue;
+
+        // A song plays from its AutoCue start to its end cue, the length the
+        // plan and the swap land the hour's last song on the ID with.
+        const lastEnd = Math.max(...lines.map((item) => (item.played_at ?? 0) + (item.aired_duration ?? item.duration ?? 0)));
         result.set(hour, Math.round(lastEnd - target));
     }
     return result;

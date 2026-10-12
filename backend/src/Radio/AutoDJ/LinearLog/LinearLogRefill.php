@@ -13,6 +13,7 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\AirTimePerSong;
 use App\Radio\AutoDJ\LinearLogPreviewContext;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\StrictProgrammeClock;
@@ -100,6 +101,7 @@ final class LinearLogRefill
         private readonly LinearLogPreviewContext $previewContext,
         private readonly Scheduler $scheduler,
         private readonly StrictProgrammeClock $strictProgrammeClock,
+        private readonly AirTimePerSong $airTimePerSong,
     ) {
     }
 
@@ -205,13 +207,24 @@ final class LinearLogRefill
         $conn = $this->em->getConnection();
 
         // Where the live queue ends: the next slot playout is asked to fill.
-        $queueEnd = max(time(), (int)ceil((float)$conn->fetchOne(
-            'SELECT MAX(UNIX_TIMESTAMP(timestamp_played) + duration) FROM station_queue
+        $tail = $conn->fetchAssociative(
+            'SELECT MAX(UNIX_TIMESTAMP(timestamp_played)) AS starts_at,
+                MAX(UNIX_TIMESTAMP(timestamp_played) + duration) AS ends_at
+            FROM station_queue
             WHERE station_id = ? AND is_played = 0 AND top_of_hour_legal_id = 0',
             [$stationId]
-        )));
+        ) ?: [];
+        $queueEnd = max(time(), (int)ceil((float)($tail['ends_at'] ?? 0)));
 
-        $hourStart = CarbonImmutable::createFromTimestamp($queueEnd, $station->getTimezoneObject())
+        // The hour the queue is in is the hour its last item starts in. That
+        // item is usually an hour's last song, landed on the ID, and it ends a
+        // few seconds past it; judged from there, the next hour's lines ran on
+        // from :00 with no room for its ID and News Hour, and a song was added
+        // to hours that were already full (12pm, 1pm and 2pm, Mon 2026-10-12).
+        $hourStart = CarbonImmutable::createFromTimestamp(
+            max(time(), (int)($tail['starts_at'] ?? 0)),
+            $station->getTimezoneObject()
+        )
             ->startOfHour()
             ->getTimestamp();
         $hourEnd = $hourStart + 3600;
@@ -224,7 +237,9 @@ final class LinearLogRefill
             }
         }
 
-        // The hour's lines still to be queued air one after another from there.
+        // The hour's lines still to be queued air one after another from there,
+        // each taking what a song really takes in this hour beyond its file.
+        $perSong = $this->airTimePerSong->secondsBeyondFile($station, $hourStart);
         $plannedSeconds = 0;
         $lastPlannedAt = $hourStart;
         foreach (
@@ -238,7 +253,7 @@ final class LinearLogRefill
                 return 0;
             }
             if (StationLogEntry::STATUS_PLANNED === $line['status'] && (int)$line['planned_at'] >= $hourStart) {
-                $plannedSeconds += (int)ceil((float)$line['duration']);
+                $plannedSeconds += (int)ceil((float)$line['duration'] + $perSong);
                 $lastPlannedAt = max($lastPlannedAt, (int)$line['planned_at']);
             }
         }
@@ -265,11 +280,12 @@ final class LinearLogRefill
         }
 
         $songs = max(1, (int)floor($shortBy / self::TYPICAL_SONG_SECONDS));
+        // A song's file is that much shorter than the time it takes on air here.
         $pick = $this->pickReplacement(
             $station,
             CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable(),
-            $shortBy / $songs,
-            $shortBy + self::ID_GRACE_SECONDS,
+            $shortBy / $songs - $perSong,
+            $shortBy + self::ID_GRACE_SECONDS - $perSong,
             null,
             null
         );

@@ -61,9 +61,15 @@ final class StreamProgrammeClock
      * the end of its own schedule window. $from itself when that window has
      * already closed, since the show holds nothing more. Null when the row is
      * not a scheduled stream show and its stored length still applies.
+     *
+     * A window opening up to $leadInSeconds after $from counts: the row is sent
+     * while the song before the show still plays.
      */
-    public function airHeldUntil(StationQueue $row, DateTimeInterface $from): ?CarbonImmutable
-    {
+    public function airHeldUntil(
+        StationQueue $row,
+        DateTimeInterface $from,
+        int $leadInSeconds = self::OPENER_LEAD_IN_SECONDS,
+    ): ?CarbonImmutable {
         if (!$this->isStreamProgrammeRow($row)) {
             return null;
         }
@@ -90,7 +96,7 @@ final class StreamProgrammeClock
 
                 // Half-open, as the schedule guard reads a window: one ending
                 // at $from no longer owns the air there.
-                if ($endTs <= $fromTs || $startTs > $fromTs + self::OPENER_LEAD_IN_SECONDS) {
+                if ($endTs <= $fromTs || $startTs > $fromTs + $leadInSeconds) {
                     continue;
                 }
 
@@ -116,21 +122,8 @@ final class StreamProgrammeClock
     {
         $now = CarbonImmutable::instance($now);
 
-        /** @var StationQueue[] $rows */
-        $rows = $this->em->createQuery(
-            <<<'DQL'
-                SELECT sq, sp FROM App\Entity\StationQueue sq
-                JOIN sq.playlist sp
-                WHERE sq.station = :station
-                AND sq.is_played = 0
-                AND sq.sent_to_autodj = 1
-                AND sq.autodj_custom_uri IS NOT NULL
-            DQL
-        )->setParameter('station', $station)
-            ->getResult();
-
         $heldUntil = null;
-        foreach ($rows as $row) {
+        foreach ($this->sentStreamRows($station) as $row) {
             $startsAt = null !== $row->timestamp_played
                 ? CarbonImmutable::instance($row->timestamp_played)->max($now)
                 : $now;
@@ -147,5 +140,46 @@ final class StreamProgrammeClock
         }
 
         return $heldUntil;
+    }
+
+    /**
+     * Whether a stream show handed to Liquidsoap is on the air now: its start
+     * has come and its window is still open. One handed over while the song
+     * before it still plays is not on the air yet, and what is sent then plays
+     * in the AutoDJ transport the moment that song ends.
+     */
+    public function isOnAirNow(Station $station, DateTimeInterface $now): bool
+    {
+        $now = CarbonImmutable::instance($now);
+
+        foreach ($this->sentStreamRows($station) as $row) {
+            if (null === $row->timestamp_played || $now->lessThan($row->timestamp_played)) {
+                continue;
+            }
+
+            // Its own window must have opened too: a show due in the seconds
+            // before the ID is handed over then and starts after the ID.
+            if ($this->airHeldUntil($row, $now, 0)?->greaterThan($now)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return StationQueue[] stream show rows handed to Liquidsoap and not yet over */
+    private function sentStreamRows(Station $station): array
+    {
+        return $this->em->createQuery(
+            <<<'DQL'
+                SELECT sq, sp FROM App\Entity\StationQueue sq
+                JOIN sq.playlist sp
+                WHERE sq.station = :station
+                AND sq.is_played = 0
+                AND sq.sent_to_autodj = 1
+                AND sq.autodj_custom_uri IS NOT NULL
+            DQL
+        )->setParameter('station', $station)
+            ->getResult();
     }
 }

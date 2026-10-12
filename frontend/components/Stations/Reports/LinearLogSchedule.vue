@@ -50,7 +50,12 @@
                             :class="rowClasses(item)"
                         >
                             <td v-if="visibleColumns.includes('time')" class="queue-time ps-3">
-                                {{ formatTime(item.played_at) }}
+                                <span
+                                    v-if="item.over_scheduled"
+                                    class="text-body-secondary"
+                                    :title="item.log_note ?? ''"
+                                >{{ $gettext('Over') }}</span>
+                                <template v-else>{{ formatTime(item.played_at) }}</template>
                             </td>
 
                             <td v-if="visibleColumns.includes('title')" class="py-2">

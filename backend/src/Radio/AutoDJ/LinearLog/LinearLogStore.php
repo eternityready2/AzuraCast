@@ -15,6 +15,8 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
+use App\Radio\AutoDJ\AiredLength;
+use App\Radio\AutoDJ\AirTimePerSong;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Doctrine\DBAL\ArrayParameterType;
@@ -37,6 +39,13 @@ final class LinearLogStore
 
     /** Shown on a planned line its hour has no room for. */
     private const string OVER_SCHEDULED_NOTE = 'Over: airs only if this hour makes up the time';
+
+    public function __construct(
+        private readonly AiredLength $airedLength,
+        private readonly AirTimePerSong $airTimePerSong,
+        private readonly LinearLogHour $hour,
+    ) {
+    }
 
     /**
      * Ids of the planned lines a rebuild is allowed to re-plan: unlocked, and
@@ -714,7 +723,7 @@ final class LinearLogStore
         foreach (
             $conn->fetchAllAssociative(
                 'SELECT sq.log_entry_id, UNIX_TIMESTAMP(sq.timestamp_played) AS t,
-                        sq.text, sq.title, sq.artist, sq.duration, sq.song_id,
+                        sq.text, sq.title, sq.artist, sq.duration, sq.song_id, sq.media_id,
                         sq.playlist_id, sq.album, sp.name AS playlist_name
                 FROM station_queue sq
                 LEFT JOIN station_playlists sp ON sp.id = sq.playlist_id
@@ -755,7 +764,7 @@ final class LinearLogStore
             foreach (
                 $conn->fetchAllAssociative(
                     'SELECT id, status, aired_at, note, is_locked, title, artist, text, payload,
-                        planned_at, playlist_id
+                        planned_at, duration, playlist_id, media_id
                     FROM station_log_entries WHERE id IN (?)',
                     [$ids],
                     [ArrayParameterType::INTEGER]
@@ -836,6 +845,20 @@ final class LinearLogStore
         }
         unset($entry);
 
+        // A News Hour bulletin runs about as long as the last ones did, which is
+        // when the Top-of-Hour hold opens the hour after it. The build draws it
+        // at 2:00 when no bulletin is on disk at 3am, and every news hour was
+        // drawn 40-60s short of what aired (Mon 2026-10-12: 2:37-3:04).
+        $newsSeconds = $this->recentNewsSeconds($station);
+        if (null !== $newsSeconds) {
+            foreach ($entries as &$entry) {
+                if ('ai_news' === ($entry['source_type'] ?? null) && (int)($entry['played_at'] ?? 0) > $now) {
+                    $entry['duration'] = $newsSeconds;
+                }
+            }
+            unset($entry);
+        }
+
         usort(
             $entries,
             static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
@@ -845,6 +868,8 @@ final class LinearLogStore
             self::showAfterNews($entries),
             $now,
             $this->hourEndsByLine($station, $saved),
+            fn(int $at): float => $this->airTimePerSong->secondsBeyondFile($station, $at),
+            fn(int $at, float $seconds): int => $this->hour->endOf($station, $at, $seconds),
         );
 
         // Schedule exclusivity (a live-queue fill-in leaking into a scheduled
@@ -856,17 +881,83 @@ final class LinearLogStore
         // queue-shifted played_at times, which could disagree with the saved log
         // and silently blank lines that were never actually dropped.)
 
-        return array_values(array_filter(
-            $entries,
-            static fn(array $e): bool => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
-                && (int)($e['played_at'] ?? 0) <= $until
-        ));
+        return $this->withAiredLengths(
+            array_values(array_filter(
+                $entries,
+                static fn(array $e): bool
+                    => (int)($e['played_at'] ?? 0) + (int)ceil((float)($e['duration'] ?? 0)) >= $from
+                    && (int)($e['played_at'] ?? 0) <= $until
+            )),
+            $queued,
+            $saved,
+        );
+    }
+
+    /** Average length of the last five News Hour bulletins that aired, or null before any has. */
+    private function recentNewsSeconds(Station $station): ?float
+    {
+        $seconds = (float)($this->em->getConnection()->fetchOne(
+            'SELECT AVG(d) FROM (
+                SELECT duration AS d FROM song_history
+                WHERE station_id = ? AND text = ? AND duration > 30
+                ORDER BY id DESC LIMIT 5
+            ) recent',
+            [$station->id, 'Eternity Ready - News Hour']
+        ) ?: 0.0);
+
+        return $seconds > 0.0 ? round($seconds, 1) : null;
     }
 
     /**
-     * End of the hour each saved line belongs to, by line id. Shows are left
-     * out: a show is a timed event with a window of its own, not a line of an
-     * hour (see LinearLogHourGuard).
+     * How long each line's song really plays: AutoCue's start to its end cue,
+     * the length the plan and the Top-of-Hour swap land an hour's last song on
+     * the ID with. The page measured the last song by its whole file, and every
+     * hour that landed on the ID read 7-19s over (Mon 2026-10-12). Display only.
+     *
+     * @param list<array<string, mixed>> $entries
+     * @param array<int, array<string, mixed>> $queued live-queue rows, by line id
+     * @param array<int, array<string, mixed>> $saved saved lines, by line id
+     * @return list<array<string, mixed>>
+     */
+    private function withAiredLengths(array $entries, array $queued, array $saved): array
+    {
+        // What each line plays now: its queued row's song, else its saved line's.
+        $mediaIds = [];
+        foreach ($entries as $i => $entry) {
+            $lineId = (int)($entry['log_entry_id'] ?? 0);
+            $mediaId = $queued[$lineId]['media_id'] ?? $saved[$lineId]['media_id'] ?? null;
+            if (null !== $mediaId) {
+                $mediaIds[$i] = (int)$mediaId;
+            }
+        }
+        if ([] === $mediaIds) {
+            return $entries;
+        }
+
+        $media = [];
+        /** @var StationMedia $row */
+        foreach (
+            $this->em->createQuery('SELECT m FROM App\Entity\StationMedia m WHERE m.id IN (:ids)')
+                ->setParameter('ids', array_values(array_unique($mediaIds)))
+                ->getResult() as $row
+        ) {
+            $media[$row->id] = $row;
+        }
+
+        foreach ($mediaIds as $i => $mediaId) {
+            if (isset($media[$mediaId])) {
+                $entries[$i]['aired_duration'] = round($this->airedLength->lengthOf($media[$mediaId]), 1);
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * End of the hour each saved line belongs to, by line id, as playout and
+     * the hour guard count it (LinearLogHour). Shows are left out: a show is a
+     * timed event with a window of its own, not a line of an hour (see
+     * LinearLogHourGuard).
      *
      * @param array<int, array<string, mixed>> $saved rows of station_log_entries, by id
      * @return array<int, int>
@@ -888,7 +979,7 @@ final class LinearLogStore
             ) {
                 continue;
             }
-            $hourEnds[$id] = LinearLogHourGuard::hourEnd($station, (int)$line['planned_at']);
+            $hourEnds[$id] = $this->hour->endOf($station, (int)$line['planned_at'], (float)$line['duration']);
         }
 
         return $hourEnds;
@@ -983,8 +1074,9 @@ final class LinearLogStore
      * shows the overrun, which the Top-of-Hour swap settles on air.
      *
      * A line airs in its own hour or not at all (see LinearLogHourGuard), so a
-     * planned line that could only start once its hour is over is not drawn in
-     * the next one. Drawn there, the last four songs of the 9pm hour were
+     * planned line that could only start once its hour is over, or so close to
+     * the ID that the swap holds it for the next hour, is not drawn in the next
+     * one. Drawn there, the last four songs of the 9pm hour were
      * listed inside the 10pm Life Perspectives show (Sun 2026-10-11). It stays
      * in its hour, at the hour's end, marked as over, and nothing is timed
      * from it.
@@ -993,9 +1085,17 @@ final class LinearLogStore
      *
      * @param list<array<string, mixed>> $entries sorted by played_at
      * @param array<int, int> $hourEndByLine end of the hour each line belongs to, by line id
+     * @param callable(int): float $perSong what a song starting then takes on air beyond its file
+     * @param callable(int, float): int $hourEndOf end of the hour an item due then and running that long airs in
      * @return list<array<string, mixed>> sorted by played_at
      */
-    private static function floatSoftLines(array $entries, int $now, array $hourEndByLine): array
+    private static function floatSoftLines(
+        array $entries,
+        int $now,
+        array $hourEndByLine,
+        callable $perSong,
+        callable $hourEndOf,
+    ): array
     {
         $end = static fn(array $e): int => (int)$e['played_at'] + (int)ceil((float)($e['duration'] ?? 0));
 
@@ -1038,19 +1138,30 @@ final class LinearLogStore
                 if (
                     null !== $cursor
                     && null !== $hourEnd
-                    && $cursor >= $hourEnd
                     && StationLogEntry::STATUS_PLANNED === $entry['log_status']
+                    && $hourEndOf((int)floor($cursor), (float)($entry['duration'] ?? 0)) > $hourEnd
                 ) {
                     $entries[$i]['played_at'] = $hourEnd - 1;
                     $entries[$i]['over_scheduled'] = true;
-                    $entries[$i]['log_note'] = $entry['log_note'] ?? self::OVER_SCHEDULED_NOTE;
+                    // Whatever the line said before, what is true of it now is
+                    // that it does not fit: "Filled: the hour was running short"
+                    // was shown on a song drawn at 1:59:59pm (Mon 2026-10-12).
+                    $entries[$i]['log_note'] = self::OVER_SCHEDULED_NOTE;
                     continue;
                 }
 
+                // Run on in exact seconds, as the plan times its lines: rounded up
+                // line by line, an hour drifted 7s later on the page than in the
+                // plan (Mon 2026-10-12). Each song takes what songs really take on
+                // air in its hour, as the plan and the queue time it.
                 if (null !== $cursor) {
-                    $entries[$i]['played_at'] = $cursor;
+                    $entries[$i]['played_at'] = (int)floor($cursor);
                 }
-                $cursor = $end($entries[$i]);
+                $duration = (float)($entries[$i]['duration'] ?? 0);
+                $airSeconds = $duration + ($duration < 1200 ? $perSong((int)$entries[$i]['played_at']) : 0.0);
+                // The air it holds, the talk after it included, so that time is not read as a hole.
+                $entries[$i]['air_seconds'] = round($airSeconds, 1);
+                $cursor = (null !== $cursor ? (float)$cursor : (float)$entries[$i]['played_at']) + $airSeconds;
                 continue;
             }
 
@@ -1153,7 +1264,9 @@ final class LinearLogStore
                 $start = (int)($e['played_at'] ?? 0);
                 return [
                     'start' => $start,
-                    'end' => $start + (int)ceil((float)($e['duration'] ?? 0)),
+                    // A song holds the air for the time songs take in its hour, as
+                    // the lines are timed; the talk between two songs is no hole.
+                    'end' => $start + (int)ceil((float)($e['air_seconds'] ?? $e['duration'] ?? 0)),
                     'media_type' => $e['media_type'] ?? null,
                 ];
             },

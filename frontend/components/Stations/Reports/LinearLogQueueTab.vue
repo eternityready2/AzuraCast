@@ -1,5 +1,15 @@
 <template>
     <div class="card-body-flush">
+        <!-- The header upstream's Upcoming Song Queue page has (CardPage), lost when it became this tab. -->
+        <div class="card-header text-bg-primary">
+            <h2
+                id="hdr_upcoming_song_queue"
+                class="card-title"
+            >
+                {{ $gettext('Upcoming Song Queue') }}
+            </h2>
+        </div>
+
         <div class="card-body buttons d-flex flex-wrap gap-2 align-items-center">
             <select
                 v-model="playlistFilter"

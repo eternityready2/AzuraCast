@@ -19,6 +19,7 @@ use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeInterface;
+use Doctrine\DBAL\ArrayParameterType;
 use Monolog\Handler\TestHandler;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LogLevel;
@@ -51,6 +52,9 @@ final class Queue
      */
     private const int MAX_CONSECUTIVE_PREVIEW_GAP_STEPS = 500;
 
+    /** An item at least this long is a programme, not a song (as the Top-of-Hour swap counts one). */
+    private const float PROGRAMME_MIN_SECONDS = 1200.0;
+
     public function __construct(
         private readonly EventDispatcherInterface $dispatcher,
         private readonly StationQueueRepository $queueRepo,
@@ -59,6 +63,7 @@ final class Queue
         private readonly QueueLogCache $queueLogCache,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly StreamProgrammeClock $streamProgrammeClock,
+        private readonly AirTimePerSong $airTimePerSong,
     ) {
     }
 
@@ -150,8 +155,13 @@ final class Queue
         // line as the one before it starts, so the first is taken now.
         $takenAt = Time::nowUtc()->getTimestamp();
 
+        $unsentWhenRead = [];
         foreach ($upcomingQueue as $queueRow) {
             if (!$queueRow->sent_to_autodj) {
+                // By id, taken now: a row a listener removes and flushes below no
+                // longer has one.
+                $unsentWhenRead[$queueRow->id] = $queueRow;
+
                 // A saved log line airs no earlier than the log planned it. The
                 // seeded queue omits what owns the air between lines (a stream
                 // show, a strict programme), so projecting the lines back to back
@@ -261,6 +271,14 @@ final class Queue
                 }
             }
 
+            $nextExpectedPlayTime = $this->withAirTime(
+                $station,
+                $queueRow,
+                CarbonImmutable::instance($expectedPlayTime),
+                $effectiveDuration,
+                $nextExpectedPlayTime,
+            );
+
             if ($queueRow->sent_to_autodj) {
                 $expectedCueTime = $this->addDurationToTime(
                     $station,
@@ -288,6 +306,7 @@ final class Queue
             $lastSongId = $queueRow->song_id;
         }
 
+        $this->keepWhatWasHandedOver($unsentWhenRead);
         $this->em->flush();
 
         // Build the remainder of the queue.
@@ -563,6 +582,14 @@ final class Queue
                     }
                 }
 
+                $nextExpectedPlayTime = $this->withAirTime(
+                    $station,
+                    $queueRow,
+                    CarbonImmutable::instance($expectedPlayTime),
+                    $effectiveDuration,
+                    $nextExpectedPlayTime,
+                );
+
                 $queueRow->timestamp_cued = $expectedCueTime;
                 $queueRow->timestamp_played = $expectedPlayTime;
                 $queueRow->updateVisibility();
@@ -837,6 +864,72 @@ final class Queue
         }
 
         return $soonest;
+    }
+
+    /**
+     * A row handed to the player while this pass was working on it stays what
+     * was sent. The hand-off and this pass both re-check the hour's last song;
+     * at 13:50:05 Mon 2026-10-12 the hand-off sent "Build My Love" and this pass,
+     * holding the row as unsent, then saved "God Is Able" over it, and the
+     * station recorded a song that never aired (4 times Oct 6-12).
+     *
+     * @param array<int, StationQueue> $rows rows that were unsent when this pass read them, by id
+     */
+    private function keepWhatWasHandedOver(array $rows): void
+    {
+        if ([] === $rows) {
+            return;
+        }
+
+        // A row removed and flushed during the pass is gone from the table, so it is not found here.
+        $sentNow = $this->em->getConnection()->fetchFirstColumn(
+            'SELECT id FROM station_queue WHERE id IN (?) AND sent_to_autodj = 1',
+            [array_keys($rows)],
+            [ArrayParameterType::INTEGER]
+        );
+        foreach ($sentNow as $id) {
+            $row = $rows[(int)$id];
+            // Taken out by this pass: the player has it, so it stays.
+            if ($this->em->getUnitOfWork()->isScheduledForDelete($row)) {
+                $this->em->persist($row);
+            }
+            if ($this->em->contains($row)) {
+                $this->em->refresh($row);
+            }
+        }
+    }
+
+    /**
+     * When the next item really starts after a song or spot: its file length,
+     * plus what this station's songs take beyond that in this hour (the talk
+     * between them, the crossfade, AutoCue's trimmed ends), as measured from what
+     * aired. Timed by file length alone, the hours with talk ran 2-6 minutes
+     * past the ID and the others about a minute short (Mon 2026-10-12). A show,
+     * a stream, an ID, and an item the Top-of-Hour ID interrupts are timed as
+     * before: what follows them starts when they are over.
+     */
+    private function withAirTime(
+        Station $station,
+        StationQueue $queueRow,
+        CarbonImmutable $startsAt,
+        float $duration,
+        CarbonImmutable $nextStartsAt,
+    ): CarbonImmutable {
+        if (
+            null === $queueRow->media
+            || null !== $queueRow->autodj_custom_uri
+            || $queueRow->top_of_hour_legal_id
+            || $queueRow->clock_wheel_legal_id_substitute
+            || true === $queueRow->playlist?->is_programme
+            || $duration >= self::PROGRAMME_MIN_SECONDS
+            || !$nextStartsAt->equalTo($this->addDurationToTime($station, $startsAt, $duration))
+        ) {
+            return $nextStartsAt;
+        }
+
+        return $nextStartsAt->addMilliseconds(
+            (int)round($this->airTimePerSong->secondsBeyondFile($station, $startsAt) * 1000)
+        );
     }
 
     private function addDurationToTime(

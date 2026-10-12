@@ -95,7 +95,8 @@ final class RunnerCommand extends AbstractSyncRunnerCommand
                 'azuracast:sync:task',
                 $taskClass,
             ],
-            $timeout
+            $timeout,
+            yieldToPlayer: true
         );
     }
 }

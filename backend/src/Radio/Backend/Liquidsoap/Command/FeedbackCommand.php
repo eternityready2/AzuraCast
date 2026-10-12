@@ -113,6 +113,25 @@ final class FeedbackCommand extends AbstractCommand
                 // over after the TOH ID). Skip the same-song guard so a
                 // back-to-back repeat is not swallowed.
                 $isFreshQueueRow = true;
+
+                // The player names what it is really playing. A row changed after
+                // it was handed over -- two re-checks of the hour's last song in
+                // the same second -- kept the later song while the player aired
+                // the one it was sent, and Now Playing, the history and the log
+                // named a song that never aired ("Build My Love" aired at 1:54pm,
+                // "God Is Able" was recorded; Mon 2026-10-12).
+                if ($sq->media?->id !== $media->id) {
+                    $sq->setSong($media);
+                    $sq->media = $media;
+                    $sq->duration = $media->getCalculatedLength();
+                    if (!empty($payload['playlist_id'])) {
+                        $playlist = $this->em->find(StationPlaylist::class, $payload['playlist_id']);
+                        if ($playlist instanceof StationPlaylist) {
+                            $sq->playlist = $playlist;
+                        }
+                    }
+                    $this->em->persist($sq);
+                }
             }
         } else {
             $sq = $this->queueRepo->findRecentlyCuedSong($station, $media);

@@ -32,9 +32,6 @@ final class LinearLogPlayout implements EventSubscriberInterface
     use EntityManagerAwareTrait;
     use LoggerAwareTrait;
 
-    /** Shortest gap before the ID the Top-of-Hour filler will fill with a spot. */
-    private const int PRE_ID_SLIVER_SECONDS = 5;
-
     /** Planned lines looked at per query when finding the one for a slot. */
     private const int LINE_BATCH_SIZE = 8;
 
@@ -53,6 +50,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
         private readonly LinearLogStore $store,
         private readonly StrictProgrammeClock $strictProgrammeClock,
         private readonly LinearLogLineWindow $lineWindow,
+        private readonly LinearLogHour $hour,
     ) {
     }
 
@@ -96,20 +94,16 @@ final class LinearLogPlayout implements EventSubscriberInterface
     /**
      * End of the clock hour the slot at $expected airs in, in station time.
      *
-     * A slot in the last seconds before the Top-of-Hour ID at :59:59 holds
-     * nothing: no spot is that short, so whatever is picked for it is held and
-     * opens the next hour. Counted in the hour that was ending, the log stood
-     * down for it and the AutoDJ's pick aired after the ID as an extra song
-     * ahead of the next hour's own first line (22:59:57, Wed 2026-10-07).
+     * A song due in the swap's hold window before the ID is held and opens the
+     * next hour, so that is the hour the slot's line comes from. Counted in the
+     * hour that was ending, the log stood down for it and the AutoDJ's pick
+     * aired after the ID as an extra song ahead of the next hour's own first
+     * line (22:59:57, Wed 2026-10-07), or was held, sent back by the hour guard
+     * and picked again (10:06-11:00am, Mon 2026-10-12).
      */
-    private static function hourEnd(Station $station, DateTimeInterface $expected): int
+    private function hourEnd(Station $station, DateTimeInterface $expected): int
     {
-        return CarbonImmutable::instance($expected)
-            ->setTimezone($station->getTimezoneObject())
-            ->addSeconds(self::PRE_ID_SLIVER_SECONDS + 1)
-            ->startOfHour()
-            ->addHour()
-            ->getTimestamp();
+        return $this->hour->endOf($station, $expected->getTimestamp());
     }
 
     /**
@@ -157,7 +151,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
      */
     private function nextLineFor(Station $station, DateTimeInterface $expected): ?StationLogEntry
     {
-        $hourEnd = self::hourEnd($station, $expected);
+        $hourEnd = $this->hourEnd($station, $expected);
 
         // A slot in the last seconds before the ID airs when the new hour
         // opens (see hourEnd()), so that is where its line is judged.
@@ -294,6 +288,14 @@ final class LinearLogPlayout implements EventSubscriberInterface
             return;
         }
 
+        // The Top-of-Hour swap put a short item that ends on the ID in this
+        // slot: the next hour's line stays in the log and opens that hour.
+        if ($this->hour->isFillerBeforeLine($event->getStation(), $row, $at, $entry)) {
+            $row->log_entry_id = null;
+            $this->writeLiveLine($event, $row);
+            return;
+        }
+
         // Claim the line in the database, not only in memory: a schedule-change
         // re-plan may have replaced it since takeNext() read it. Its commit
         // locks the lines it replaces, so either this claim lands first and the
@@ -387,7 +389,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
         if (null !== $row->request) {
             $note = 'Live: listener request';
         } else {
-            $hourEnd = self::hourEnd($station, $expected);
+            $hourEnd = $this->hourEnd($station, $expected);
             $nextPlannedAt = $this->nextPlannedAt($station, $hourEnd - 3600);
             $reason = match (true) {
                 $event->isInterrupting() => 'an interrupting playlist took the slot',

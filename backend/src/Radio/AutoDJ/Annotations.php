@@ -41,6 +41,9 @@ final class Annotations implements EventSubscriberInterface
     /** Until when a stream show holds the air, from the same check; null when none does. */
     private ?CarbonImmutable $lastStreamHeldUntil = null;
 
+    /** Whether that stream show is on the air now, from the same check. */
+    private bool $lastStreamOnAir = false;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
         private readonly CustomFieldRepository $customFieldRepo,
@@ -48,6 +51,7 @@ final class Annotations implements EventSubscriberInterface
         private readonly AutoCueCache $autoCueCache,
         private readonly AiredLength $airedLength,
         private readonly StreamProgrammeClock $streamProgrammeClock,
+        private readonly PendingAiDjSpeech $pendingAiDjSpeech,
     ) {
     }
 
@@ -111,6 +115,7 @@ final class Annotations implements EventSubscriberInterface
             $heldBack = false;
             $this->lastExpectedPlayAt = null;
             $this->lastStreamHeldUntil = null;
+            $this->lastStreamOnAir = false;
             try {
                 $heldBack = $this->revalidateBeforeSend($station, $queueRow);
             } catch (Throwable $e) {
@@ -148,7 +153,13 @@ final class Annotations implements EventSubscriberInterface
             // hour 30 seconds early (Sat 2026-10-10). Loaded when the show
             // began, the item behind the Morning Show let the ID start at
             // 8:59:59 and opened 9:00 straight after it (Fri 2026-10-09).
-            $onlyLoads = $autoDjHeldByTopOfHour || null !== $this->lastStreamHeldUntil;
+            //
+            // Only once the show is on the air: handed over while the song before
+            // it still played, the Morning Show made the song for 9am load at
+            // 6:49; the 6am hour's last song ended a second before the ID, the
+            // player started that song, and the ID cut it after 0.2s and 9am lost
+            // its first song (Mon 2026-10-12).
+            $onlyLoads = $autoDjHeldByTopOfHour || $this->lastStreamOnAir;
             $airFreeFrom = $this->lastStreamHeldUntil ?? Time::nowUtc();
             $opensWhenAirIsFree = null !== $this->lastExpectedPlayAt
                 && $this->lastExpectedPlayAt->lessThan($airFreeFrom->addMinutes(self::HOUR_OPENER_WINDOW_MINUTES));
@@ -234,9 +245,20 @@ final class Annotations implements EventSubscriberInterface
         // it was sent: the same answer the queue's own projection uses.
         $streamHeldUntil = $this->streamProgrammeClock->onAirHeldUntil($station, $now);
         $this->lastStreamHeldUntil = $streamHeldUntil;
+        $this->lastStreamOnAir = null !== $streamHeldUntil
+            && $this->streamProgrammeClock->isOnAirNow($station, $now);
         if (null !== $streamHeldUntil && $streamHeldUntil->greaterThan($airFreeAt)) {
             $airFreeAt = $streamHeldUntil;
             $expectedPlayAt = $streamHeldUntil;
+        }
+
+        // ...then AI DJ speech waiting in Liquidsoap's own queue, which airs at
+        // the next song change: its row is already marked played and has no
+        // length, so the rows counted below never include it.
+        $speechSeconds = $this->pendingAiDjSpeech->secondsWaiting($station);
+        if ($speechSeconds > 0.0) {
+            $airFreeAt = $airFreeAt->addSeconds($speechSeconds);
+            $expectedPlayAt = $airFreeAt;
         }
 
         // ...and then everything already resolved into Liquidsoap ahead of
