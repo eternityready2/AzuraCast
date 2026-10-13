@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Sync\Task;
 
 use App\Controller\Api\Stations\Features\FeatureSuiteController;
+use App\Entity\Station;
 use App\Service\AirCheckDiagnosticsRecorder;
 use App\Service\AirCheckHealthMonitor;
 use App\Service\AirCheckHistoryRetention;
@@ -32,7 +33,20 @@ final class AirCheckTask extends AbstractTask
 
     public function run(bool $force = false): void
     {
-        foreach ($this->iterateStations() as $station) {
+        // Not iterateStations(): its transaction would hold one snapshot for the
+        // whole check, which takes seconds. A song change writes the station row
+        // meanwhile, and saving the check's result over that snapshot fails with
+        // "Record has changed since last read" (10:39pm Oct 12).
+        /** @var Station[] $stations */
+        $stations = $this->em->createQuery(
+            <<<'DQL'
+                SELECT s FROM App\Entity\Station s
+            DQL
+        )->getResult();
+
+        foreach ($stations as $station) {
+            // Each station as it is when its turn comes, not as read at the start.
+            $this->em->refresh($station);
             if (!$force && !$station->backend_config->aircheck_enabled) {
                 continue;
             }

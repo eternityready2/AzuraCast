@@ -125,6 +125,8 @@ final class AirCheckLiquidsoapRecovery
             return;
         }
 
+        // Recovery takes seconds; save onto the station row as it is now.
+        $this->em->refresh($station);
         $needsRestartBefore = $station->needs_restart;
         $config = $station->backend_config;
         $history = array_values($config->aircheck_interventions);

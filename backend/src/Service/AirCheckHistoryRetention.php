@@ -22,6 +22,10 @@ final class AirCheckHistoryRetention
             return;
         }
 
+        // Save onto the station row as it is now, not as AirCheck read it.
+        $this->em->refresh($station);
+        $config = $station->backend_config;
+        $history = array_values($config->aircheck_interventions);
         $needsRestartBefore = $station->needs_restart;
         $config->aircheck_interventions = array_slice($history, 0, self::MAX_INTERVENTIONS);
         $station->backend_config = $config;

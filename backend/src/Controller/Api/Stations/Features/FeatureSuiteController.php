@@ -196,7 +196,6 @@ final class FeatureSuiteController
     /** @return array<string, mixed> */
     public function runAirCheck(Station $station, bool $manual = false): array
     {
-        $needsRestartBefore = $station->needs_restart;
         $config = $station->backend_config;
         $now = time();
         if (!$manual && (!$config->aircheck_enabled
@@ -283,6 +282,13 @@ final class FeatureSuiteController
                 $failures[] = $service . ': ' . $e->getMessage();
             }
         }
+
+        // The checks above take seconds and the station row changes meanwhile
+        // (every song change writes it); save onto the row as it is now, not as
+        // it was read when the check started.
+        $this->em->refresh($station);
+        $needsRestartBefore = $station->needs_restart;
+        $config = $station->backend_config;
 
         if ([] !== $restarted || [] !== $failures) {
             $history = $config->aircheck_interventions;
