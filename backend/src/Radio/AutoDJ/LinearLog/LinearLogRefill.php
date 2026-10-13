@@ -13,6 +13,7 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistMedia;
 use App\Event\Radio\BuildQueue;
+use App\Radio\AutoDJ\AiredLength;
 use App\Radio\AutoDJ\AirTimePerSong;
 use App\Radio\AutoDJ\LinearLogPreviewContext;
 use App\Radio\AutoDJ\Scheduler;
@@ -37,6 +38,9 @@ use Throwable;
  * Only the hour the drop is in changes. Locked lines, programmes and anything
  * already handed to the queue stay where they are, and each dropped line is
  * handled once.
+ *
+ * The song for a slot, and the line it is written as, are also what
+ * LinearLogHourFit keeps the hours ahead fitted to their Station ID with.
  */
 final class LinearLogRefill
 {
@@ -53,7 +57,7 @@ final class LinearLogRefill
     private const int MAX_PER_PASS = 10;
 
     /** Shorter than this is a short item (promo, liner, imaging), not a song. */
-    private const float MIN_SONG_SECONDS = 90.0;
+    public const float MIN_SONG_SECONDS = 90.0;
 
     /**
      * At least this long is a programme: never refilled, never moved. The
@@ -71,13 +75,13 @@ final class LinearLogRefill
     private const int MIN_ROOM_BEFORE_ID_SECONDS = 60;
 
     /** How far past the ID a planned line may end: the swap's tolerance. */
-    private const int ID_GRACE_SECONDS = 5;
+    public const int ID_GRACE_SECONDS = 5;
 
     /** StationMedia::$type of an ordinary song. */
-    private const string MUSIC_TYPE = 'music';
+    public const string MUSIC_TYPE = 'music';
 
     /** An hour whose lines end at least this far short of the ID has room for another song. */
-    private const int MIN_TOP_UP_SECONDS = 120;
+    public const int MIN_TOP_UP_SECONDS = 120;
 
     /** About one song: a longer shortfall is filled a song at a time. */
     private const float TYPICAL_SONG_SECONDS = 240.0;
@@ -89,6 +93,8 @@ final class LinearLogRefill
     private const array NOT_REFILLED = [
         // The hour already ended or overran; its time has gone.
         'Dropped: its hour ran long',
+        // The hour is full without it.
+        LinearLogHourFit::NO_ROOM_NOTE,
         // A strict programme's own source airs in that time.
         'Dropped: a strict programme owns this air time',
         // The slot is in the past: it was handed to Liquidsoap and never aired.
@@ -102,6 +108,7 @@ final class LinearLogRefill
         private readonly Scheduler $scheduler,
         private readonly StrictProgrammeClock $strictProgrammeClock,
         private readonly AirTimePerSong $airTimePerSong,
+        private readonly AiredLength $airedLength,
     ) {
     }
 
@@ -264,12 +271,37 @@ final class LinearLogRefill
             return 0;
         }
 
+        return $this->addSong($station, $hourStart, $idAt, $endsAt, $shortBy, $lastPlannedAt, false);
+    }
+
+    /**
+     * Write a song as the last line of the hour starting at $hourStart, whose
+     * lines end at $endsAt, $shortBy seconds short of the ID that starts at
+     * $idAt: what topUp() adds to the hour the queue is in, and
+     * LinearLogHourFit to an hour ahead of it.
+     *
+     * @param int $lastPlannedAt planned time of the hour's last planned line
+     * @param bool $landsOnId the song that fills the hour is picked to end on
+     *     the ID (see pickReplacement())
+     * @return int lines added
+     */
+    public function addSong(
+        Station $station,
+        int $hourStart,
+        int $idAt,
+        int $endsAt,
+        int $shortBy,
+        int $lastPlannedAt,
+        bool $landsOnId,
+    ): int {
         // A top-up line that was dropped means something takes lines out of this
-        // hour; adding more would only feed it.
-        $topUps = $conn->fetchAssociative(
+        // hour; adding more would only feed it. That holds for one the hour
+        // turned out to have no room for (LinearLogHourFit) as well: an hour
+        // given a song and then left without room for it is not given another.
+        $topUps = $this->em->getConnection()->fetchAssociative(
             'SELECT COUNT(*) AS total, COALESCE(SUM(status = ?), 0) AS dropped FROM station_log_entries
             WHERE station_id = ? AND planned_at >= ? AND planned_at < ? AND payload LIKE ?',
-            [StationLogEntry::STATUS_DROPPED, $stationId, $hourStart, $hourEnd, '%"top_up":true%']
+            [StationLogEntry::STATUS_DROPPED, $station->id, $hourStart, $hourStart + 3600, '%"top_up":true%']
         );
         if (
             false === $topUps
@@ -279,15 +311,19 @@ final class LinearLogRefill
             return 0;
         }
 
+        // A song's file is that much shorter than the time it takes on air
+        // here. One that ends on the ID has nothing after it to make room for.
         $songs = max(1, (int)floor($shortBy / self::TYPICAL_SONG_SECONDS));
-        // A song's file is that much shorter than the time it takes on air here.
+        $landsOnId = $landsOnId && 1 === $songs;
+        $perSong = $landsOnId ? 0.0 : $this->airTimePerSong->secondsBeyondFile($station, $hourStart);
         $pick = $this->pickReplacement(
             $station,
             CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable(),
             $shortBy / $songs - $perSong,
             $shortBy + self::ID_GRACE_SECONDS - $perSong,
             null,
-            null
+            null,
+            $landsOnId
         );
         if (null === $pick) {
             return 0;
@@ -439,15 +475,23 @@ final class LinearLogRefill
      * $duration as possible and not repeating a song or artist the log already
      * has near that time.
      *
+     * Finding that playlist clears the entity manager (autoDjPlaylistAt()):
+     * entities the caller read before are detached afterwards.
+     *
+     * @param bool $landsOnId the song is an hour's last and has to end on the
+     *     ID: its length is what it holds the air for (AiredLength), as the
+     *     Top-of-Hour swap measures the song it lands there, and only songs
+     *     that land within the swap's own tolerance share the draw
      * @return array{StationMedia, StationPlaylist}|null
      */
-    private function pickReplacement(
+    public function pickReplacement(
         Station $station,
         DateTimeImmutable $at,
         float $duration,
         float $maxLength,
         ?StationPlaylist $ownPlaylist,
         ?int $excludeMediaId,
+        bool $landsOnId = false,
     ): ?array {
         $wantShort = $duration < self::MIN_SONG_SECONDS;
 
@@ -501,7 +545,7 @@ final class LinearLogRefill
                 continue;
             }
 
-            $length = $media->getCalculatedLength();
+            $length = $landsOnId ? $this->airedLength->lengthOf($media) : $media->getCalculatedLength();
             if ($length > $maxLength) {
                 // Never planned to run into the ID.
                 continue;
@@ -521,9 +565,10 @@ final class LinearLogRefill
         // (the query order, kept by the stable sort).
         usort($scored, static fn(array $a, array $b): int => $a['diff'] <=> $b['diff']);
 
+        $drawWithin = $landsOnId ? (float)self::ID_GRACE_SECONDS : $window;
         $pool = array_values(array_filter(
             array_slice($scored, 0, self::CANDIDATE_POOL_SIZE),
-            static fn(array $c): bool => $c['diff'] <= $window,
+            static fn(array $c): bool => $c['diff'] <= $drawWithin,
         ));
         $chosen = [] !== $pool ? $pool[random_int(0, count($pool) - 1)] : $scored[0];
 
@@ -668,7 +713,7 @@ final class LinearLogRefill
     }
 
     /** @param array<string, mixed> $payload what the line is, beyond the song: refill_of or top_up */
-    private function writeLine(
+    public function writeLine(
         Station $station,
         StationMedia $media,
         StationPlaylist $playlist,
@@ -683,13 +728,31 @@ final class LinearLogRefill
         );
 
         $conn->insert('station_log_entries', [
+            ...self::songFields($media, $playlist, $payload),
             'station_id' => $station->id,
-            'media_id' => $media->id,
-            'playlist_id' => $playlist->id,
             'planned_at' => $plannedAt,
             'sequence' => $sequence,
-            'duration' => max(1.0, $media->getCalculatedLength()),
             'status' => StationLogEntry::STATUS_PLANNED,
+            'note' => $note,
+            'is_locked' => 0,
+            'created_at' => time(),
+        ]);
+
+        return (int)$conn->lastInsertId();
+    }
+
+    /**
+     * The columns of a log line that name the song it plays.
+     *
+     * @param array<string, mixed> $payload what the line is, beyond the song: refill_of or top_up
+     * @return array<string, mixed>
+     */
+    public static function songFields(StationMedia $media, StationPlaylist $playlist, array $payload): array
+    {
+        return [
+            'media_id' => $media->id,
+            'playlist_id' => $playlist->id,
+            'duration' => max(1.0, $media->getCalculatedLength()),
             'text' => mb_substr((string)$media->text, 0, 255) ?: null,
             'title' => null !== $media->title ? mb_substr($media->title, 0, 255) : null,
             'artist' => null !== $media->artist ? mb_substr($media->artist, 0, 255) : null,
@@ -699,12 +762,7 @@ final class LinearLogRefill
                 'media_type' => $media->type,
                 ...$payload,
             ], JSON_THROW_ON_ERROR),
-            'note' => $note,
-            'is_locked' => 0,
-            'created_at' => time(),
-        ]);
-
-        return (int)$conn->lastInsertId();
+        ];
     }
 
     /**

@@ -779,6 +779,11 @@ final class LinearLogStore
             static fn(array $a, array $b): int => ((int)($a['played_at'] ?? 0)) <=> ((int)($b['played_at'] ?? 0)),
         );
 
+        $playlistNames = [];
+        foreach ($station->playlists as $playlist) {
+            $playlistNames[$playlist->id] = $playlist->name;
+        }
+
         // A line is re-timed only from its own live-queue row. The saved log is
         // the authority for every other line.
         //
@@ -802,9 +807,27 @@ final class LinearLogStore
                     $entry['text'] = $saved[$id]['text'];
                     $entry['title'] = $saved[$id]['title'];
                     $entry['artist'] = $saved[$id]['artist'];
-                    $savedSongId = json_decode((string)$saved[$id]['payload'], true)['song_id'] ?? null;
+                    $savedPayload = json_decode((string)$saved[$id]['payload'], true);
+                    $savedSongId = is_array($savedPayload) ? ($savedPayload['song_id'] ?? null) : null;
                     if (is_string($savedSongId) && '' !== $savedSongId) {
                         $entry['song_id'] = $savedSongId;
+                    }
+                    // A line still planned is as long as the song it has now and
+                    // plays from that song's playlist: replaced by hand, or
+                    // re-fitted to the ID (LinearLogHourFit), it kept the old
+                    // song's length until the next build. A queued line takes
+                    // these from its queue row, below.
+                    if (StationLogEntry::STATUS_PLANNED === $saved[$id]['status']) {
+                        $entry['duration'] = max(1.0, (float)$saved[$id]['duration']);
+                        $savedPlaylistId = (int)$saved[$id]['playlist_id'];
+                        if (isset($playlistNames[$savedPlaylistId])) {
+                            $entry['playlist_id'] = $savedPlaylistId;
+                            $entry['playlist'] = $playlistNames[$savedPlaylistId];
+                        }
+                        if (is_array($savedPayload)) {
+                            $entry['album'] = $savedPayload['album'] ?? null;
+                            $entry['media_type'] = $savedPayload['media_type'] ?? $entry['media_type'] ?? null;
+                        }
                     }
                 }
                 if (null !== $saved[$id]['aired_at']) {
@@ -1095,8 +1118,7 @@ final class LinearLogStore
         array $hourEndByLine,
         callable $perSong,
         callable $hourEndOf,
-    ): array
-    {
+    ): array {
         $end = static fn(array $e): int => (int)$e['played_at'] + (int)ceil((float)($e['duration'] ?? 0));
 
         // What is in the queue airs before anything still planned, whatever
