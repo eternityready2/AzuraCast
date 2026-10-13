@@ -30,6 +30,13 @@ class StationLogEntry
     public const string STATUS_REPLACED = 'replaced';
     public const string STATUS_DROPPED = 'dropped';
 
+    /**
+     * Note of a line that was handed to the player, lost before it aired and
+     * given back to playout. It goes back once only, with the song it was
+     * handed over with.
+     */
+    public const string REOFFERED_NOTE = 'Re-offered: handed to Liquidsoap but never aired';
+
     #[ORM\Id, ORM\GeneratedValue, ORM\Column]
     public private(set) int $id;
 

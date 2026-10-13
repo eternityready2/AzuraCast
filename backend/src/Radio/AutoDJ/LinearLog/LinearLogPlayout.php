@@ -15,6 +15,7 @@ use App\Radio\AutoDJ\StrictProgrammeClock;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeInterface;
+use Doctrine\DBAL\Types\Types;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -335,6 +336,14 @@ final class LinearLogPlayout implements EventSubscriberInterface
             return;
         }
 
+        // The row was built from the line as takeNext() read it, and that is
+        // what airs. A song written to the line between that read and this
+        // claim (LinearLogHourFit re-fits planned lines every minute, in
+        // another process) would leave the log naming a song that never
+        // plays, and the row's own song recorded as a Top-of-Hour swap when it
+        // airs. Nothing re-fits a claimed line, so it is put back here as read.
+        $this->keepLineAsRead($entry);
+
         $entry->status = StationLogEntry::STATUS_QUEUED;
         if (null !== $note) {
             $entry->note = mb_substr(
@@ -363,6 +372,41 @@ final class LinearLogPlayout implements EventSubscriberInterface
         if ($this->offeredEntryId === $entryId) {
             $this->offeredEntryId = null;
         }
+    }
+
+    /**
+     * Write a claimed line's song back as this pass read it, when the saved
+     * line has been given another one since.
+     */
+    private function keepLineAsRead(StationLogEntry $entry): void
+    {
+        $conn = $this->em->getConnection();
+
+        $savedMediaId = $conn->fetchOne('SELECT media_id FROM station_log_entries WHERE id = ?', [$entry->id]);
+        if (false === $savedMediaId || (null === $savedMediaId ? null : (int)$savedMediaId) === $entry->media?->id) {
+            return;
+        }
+
+        $conn->update(
+            'station_log_entries',
+            [
+                'media_id' => $entry->media?->id,
+                'playlist_id' => $entry->playlist?->id,
+                'duration' => $entry->duration,
+                'text' => $entry->text,
+                'title' => $entry->title,
+                'artist' => $entry->artist,
+                'payload' => $entry->payload,
+                'note' => $entry->note,
+            ],
+            ['id' => $entry->id],
+            ['payload' => Types::JSON]
+        );
+
+        $this->logger->notice('Linear Log: a line was given another song as it was queued; it airs as read.', [
+            'log_entry_id' => $entry->id,
+            'song' => $entry->text,
+        ]);
     }
 
     /**

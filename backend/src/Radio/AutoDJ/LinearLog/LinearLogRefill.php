@@ -282,7 +282,7 @@ final class LinearLogRefill
      *
      * @param int $lastPlannedAt planned time of the hour's last planned line
      * @param bool $landsOnId the song that fills the hour is picked to end on
-     *     the ID (see pickReplacement())
+     *     the ID (LinearLogSongMatch::OnId)
      * @return int lines added
      */
     public function addSong(
@@ -323,7 +323,7 @@ final class LinearLogRefill
             $shortBy + self::ID_GRACE_SECONDS - $perSong,
             null,
             null,
-            $landsOnId
+            $landsOnId ? LinearLogSongMatch::OnId : LinearLogSongMatch::About
         );
         if (null === $pick) {
             return 0;
@@ -478,10 +478,8 @@ final class LinearLogRefill
      * Finding that playlist clears the entity manager (autoDjPlaylistAt()):
      * entities the caller read before are detached afterwards.
      *
-     * @param bool $landsOnId the song is an hour's last and has to end on the
-     *     ID: its length is what it holds the air for (AiredLength), as the
-     *     Top-of-Hour swap measures the song it lands there, and only songs
-     *     that land within the swap's own tolerance share the draw
+     * @param LinearLogSongMatch $match how close to $duration the song has to
+     *     be, and by which length
      * @return array{StationMedia, StationPlaylist}|null
      */
     public function pickReplacement(
@@ -491,7 +489,7 @@ final class LinearLogRefill
         float $maxLength,
         ?StationPlaylist $ownPlaylist,
         ?int $excludeMediaId,
-        bool $landsOnId = false,
+        LinearLogSongMatch $match = LinearLogSongMatch::About,
     ): ?array {
         $wantShort = $duration < self::MIN_SONG_SECONDS;
 
@@ -545,7 +543,9 @@ final class LinearLogRefill
                 continue;
             }
 
-            $length = $landsOnId ? $this->airedLength->lengthOf($media) : $media->getCalculatedLength();
+            $length = LinearLogSongMatch::OnId === $match
+                ? $this->airedLength->lengthOf($media)
+                : $media->getCalculatedLength();
             if ($length > $maxLength) {
                 // Never planned to run into the ID.
                 continue;
@@ -565,7 +565,7 @@ final class LinearLogRefill
         // (the query order, kept by the stable sort).
         usort($scored, static fn(array $a, array $b): int => $a['diff'] <=> $b['diff']);
 
-        $drawWithin = $landsOnId ? (float)self::ID_GRACE_SECONDS : $window;
+        $drawWithin = LinearLogSongMatch::About === $match ? $window : (float)self::ID_GRACE_SECONDS;
         $pool = array_values(array_filter(
             array_slice($scored, 0, self::CANDIDATE_POOL_SIZE),
             static fn(array $c): bool => $c['diff'] <= $drawWithin,

@@ -30,8 +30,6 @@ final class ReconcileLinearLogTask extends AbstractTask
 {
     private const string NO_AUDIO_NOTE = 'Dropped: no audio from the stream during its window';
 
-    private const string REOFFERED_NOTE = 'Re-offered: handed to Liquidsoap but never aired';
-
     /**
      * How far song history may sit from a queue row's played time and still
      * be that play. Liquidsoap reports a track as it starts, so after it is
@@ -102,9 +100,10 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // And an hour the queue is in that still ends short gets its
                 // last songs from the log.
                 $this->refill->topUp($station);
-                // The hours ahead of it are kept fitted to their Station ID: a
-                // line an hour has no room for goes, a short hour gets a song,
-                // and its last song is one that ends on the ID.
+                // That hour and the hours ahead of it are kept fitted to their
+                // Station ID: the last songs are ones that end on the ID, and
+                // ahead of the queue a line an hour has no room for goes and a
+                // short hour gets a song.
                 $this->hourFit->fit($station);
             } catch (Throwable $e) {
                 $this->logger->error('Linear Log reconciliation failed.', [
@@ -210,7 +209,7 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // the log's, so it goes back to playout while its hour runs, as FM
                 // automation keeps an unplayed event. Once only, and only if the
                 // song has not aired since, so a late start is never replayed.
-                $reoffered = null !== $entry->note && str_starts_with($entry->note, self::REOFFERED_NOTE);
+                $reoffered = null !== $entry->note && str_starts_with($entry->note, StationLogEntry::REOFFERED_NOTE);
                 if (
                     !$reoffered
                     && $entry->planned_at >= $hourStart
@@ -218,7 +217,7 @@ final class ReconcileLinearLogTask extends AbstractTask
                 ) {
                     $entry->status = StationLogEntry::STATUS_PLANNED;
                     $entry->queue_id = null;
-                    $entry->note = self::REOFFERED_NOTE;
+                    $entry->note = StationLogEntry::REOFFERED_NOTE;
                     $this->em->persist($entry);
                     continue;
                 }
