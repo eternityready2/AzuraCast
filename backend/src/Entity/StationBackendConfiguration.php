@@ -748,6 +748,29 @@ final class StationBackendConfiguration extends AbstractArrayEntity
         }
     }
 
+    /**
+     * AI DJ content categories already given the shipped default library
+     * (AiDjDefaultContent), so a category emptied by hand is not refilled.
+     *
+     * @var list<string>
+     */
+    #[OA\Property(
+        description: 'AI DJ content type slugs that have received the default content library',
+        type: 'array',
+        items: new OA\Items(type: 'string')
+    )]
+    public array $ai_dj_default_content_types = [] {
+        set (mixed $value) {
+            $this->ai_dj_default_content_types = array_values(array_unique(array_filter(
+                array_map(
+                    static fn(mixed $type): string => strtolower(trim((string)$type)),
+                    Types::array($value)
+                ),
+                static fn(string $type): bool => $type !== ''
+            )));
+        }
+    }
+
     #[OA\Property]
     public ?string $ai_news_voice_model_path = null {
         set => Types::stringOrNull($value, true);
