@@ -907,6 +907,15 @@ final class Queue
      * past the ID and the others about a minute short (Mon 2026-10-12). A show,
      * a stream, an ID, and an item the Top-of-Hour ID interrupts are timed as
      * before: what follows them starts when they are over.
+     *
+     * So is an item cut at a clock anchor (the top of the hour, a show's
+     * start): it ends there, whatever songs take in that hour. Given the hour's
+     * allowance, a song cut to the 3 s left before midnight, in an hour whose
+     * songs air 3.5 s short of their files, ended before it began: the queue's
+     * clock never reached the hour, and one pass took all 15 lines of the next
+     * hour for that slot (22:59:59, Mon 2026-10-12). For the same reason an
+     * item shorter than what the hour's songs give back is timed by its file:
+     * what follows an item never starts before the item does.
      */
     private function withAirTime(
         Station $station,
@@ -920,6 +929,7 @@ final class Queue
             || null !== $queueRow->autodj_custom_uri
             || $queueRow->top_of_hour_legal_id
             || $queueRow->clock_wheel_legal_id_substitute
+            || $queueRow->hour_boundary_enforce_cap
             || true === $queueRow->playlist?->is_programme
             || $duration >= self::PROGRAMME_MIN_SECONDS
             || !$nextStartsAt->equalTo($this->addDurationToTime($station, $startsAt, $duration))
@@ -927,9 +937,11 @@ final class Queue
             return $nextStartsAt;
         }
 
-        return $nextStartsAt->addMilliseconds(
+        $withAirTime = $nextStartsAt->addMilliseconds(
             (int)round($this->airTimePerSong->secondsBeyondFile($station, $startsAt) * 1000)
         );
+
+        return $withAirTime->greaterThan($startsAt) ? $withAirTime : $nextStartsAt;
     }
 
     private function addDurationToTime(
