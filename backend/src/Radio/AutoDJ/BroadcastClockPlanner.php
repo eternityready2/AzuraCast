@@ -236,7 +236,7 @@ final class BroadcastClockPlanner
 
                 // An end only matters while the window is actually running.
                 $occEnd = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
-                if ($now->between($occStart, $occEnd)) {
+                if ($now->between($occStart, $occEnd) && !$this->hasReleasedWindow($schedule, $occStart, $now)) {
                     $boundaries[] = $occEnd;
                 }
             }
@@ -269,12 +269,32 @@ final class BroadcastClockPlanner
             if ($schedule->start_time > $schedule->end_time) {
                 $end = $end->addDay();
             }
-            if ($now->between($start, $end)) {
+            if ($now->between($start, $end) && !$this->hasReleasedWindow($schedule, $start, $now)) {
                 $boundaries[] = $end;
             }
         }
 
         return $boundaries;
+    }
+
+    /**
+     * True once a play-once show has had the time one pass of its content
+     * takes since its window opened. The window is no longer its own from then
+     * (Scheduler::openScheduleSecondsForPlaylist()) and rotation fills what is
+     * left of it, so its end stops nothing: "Faith Horizons" (5:00-5:40pm,
+     * 25 minutes) left the songs after it planned up to 5:40pm, the last one
+     * squeezed to end there and another given the 2 seconds that left
+     * (Wed 2026-10-14).
+     */
+    private function hasReleasedWindow(
+        StationSchedule $schedule,
+        CarbonImmutable $windowStart,
+        CarbonImmutable $now,
+    ): bool {
+        $contentSeconds = $this->scheduler->loopOnceContentDurationSeconds($schedule);
+
+        return null !== $contentSeconds
+            && $now->getTimestamp() - $windowStart->getTimestamp() >= $contentSeconds;
     }
 
     private function isRigidStart(StationSchedule $schedule): bool

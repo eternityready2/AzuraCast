@@ -52,9 +52,10 @@ use Throwable;
  * line it has no room for is playout's to close out. It read 0:47 short on the
  * page from the moment the queue reached it until its last song was queued
  * (11pm, Mon 2026-10-12). Hours the queue has passed are the queue's. A locked line is the operator's. A show is
- * a timed event, and an hour whose show runs through the ID, or that carries a
- * stream or strict-lane programme, is left alone. So is an hour with no
- * Station ID at its top to be fitted to.
+ * a timed event, and an hour whose show runs through the ID, that carries a
+ * stream, or whose last line starts while a strict-lane programme holds the
+ * air, is left alone. So is an hour with no Station ID at its top to be fitted
+ * to.
  */
 final class LinearLogHourFit
 {
@@ -323,7 +324,7 @@ final class LinearLogHourFit
         // playout when the hour ends, as it always was.
         $leftovers = [];
         foreach ($isQueueHour ? [] : $hour['leftovers'] as $line) {
-            if (self::isPlannedAndUnlocked($line)) {
+            if (self::isPlannedAndUnlocked($line) && !self::isShow($line)) {
                 $leftovers[] = (int)$line['log_entry_id'];
             }
         }
@@ -338,10 +339,11 @@ final class LinearLogHourFit
             return 0;
         }
 
-        // Before anything is written: an hour that carries a stream or
-        // strict-lane programme is not the queue's to fill.
+        // Before anything is written: an hour that carries a stream, or whose
+        // last line starts under a strict-lane programme, is not the queue's
+        // to fill.
         $openLines = $this->openLinesOf($stationId, $hour['start']);
-        if ($this->carriesProgramme($station, $openLines)) {
+        if ($this->carriesProgramme($station, $openLines, (int)$closing['played_at'])) {
             return 0;
         }
 
@@ -436,12 +438,19 @@ final class LinearLogHourFit
     }
 
     /**
-     * True when one of the hour's lines is a stream (it has no file) or a
-     * programme the strict lane plays from its own source.
+     * True when one of the hour's lines is a stream, or a programme the strict
+     * lane plays from its own source still holds the air where the hour's
+     * last line starts.
+     *
+     * A strict-lane show that has ended hands the air back, and the lines
+     * after it are the queue's like any other hour's: the 5pm hour of "Faith
+     * Horizons" (over at 5:28pm) was left 0:33 short of its ID on the page for
+     * the day before it aired (Wed 2026-10-14).
      *
      * @param list<array<string, mixed>> $openLines
+     * @param int $closingStartsAt when the hour's last line starts, as the page lists it
      */
-    private function carriesProgramme(Station $station, array $openLines): bool
+    private function carriesProgramme(Station $station, array $openLines, int $closingStartsAt): bool
     {
         $strictLane = [];
         foreach ($station->playlists as $playlist) {
@@ -450,13 +459,22 @@ final class LinearLogHourFit
             }
         }
 
+        // A show's line names no file, whichever lane plays it: the playlist
+        // tells a strict-lane show from a stream.
+        $hasStrictLaneLine = false;
         foreach ($openLines as $line) {
-            if (null === $line['media_id'] || isset($strictLane[(int)$line['playlist_id']])) {
+            $isStrictLane = isset($strictLane[(int)$line['playlist_id']]);
+            if (null === $line['media_id'] && !$isStrictLane) {
                 return true;
             }
+            $hasStrictLaneLine = $hasStrictLaneLine || $isStrictLane;
         }
 
-        return false;
+        return $hasStrictLaneLine
+            && null !== $this->strictProgrammeClock->holdAt(
+                $station,
+                CarbonImmutable::createFromTimestamp($closingStartsAt, 'UTC')->toDateTimeImmutable()
+            );
     }
 
     /**
