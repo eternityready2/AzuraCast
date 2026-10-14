@@ -8,6 +8,7 @@ use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationLogEntry;
 use App\Entity\StationQueue;
+use App\Radio\AutoDJ\LinearLog\LinearLogBacktime;
 use App\Radio\AutoDJ\LinearLog\LinearLogHourFit;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogRefill;
@@ -57,6 +58,7 @@ final class ReconcileLinearLogTask extends AbstractTask
         private readonly LinearLogRules $rules,
         private readonly LinearLogRefill $refill,
         private readonly LinearLogHourFit $hourFit,
+        private readonly LinearLogBacktime $backtime,
         private readonly LinearLogStore $store,
         private readonly StrictProgrammeClock $strictProgrammeClock,
     ) {
@@ -105,6 +107,9 @@ final class ReconcileLinearLogTask extends AbstractTask
                 // ahead of the queue a line an hour has no room for goes and a
                 // short hour gets a song.
                 $this->hourFit->fit($station);
+                // The hour on air, held in the queue, is backtimed to its ID
+                // from real elapsed time in its last half hour.
+                $this->backtime->backtime($station);
             } catch (Throwable $e) {
                 $this->logger->error('Linear Log reconciliation failed.', [
                     'station_id' => $station->id,

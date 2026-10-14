@@ -120,6 +120,9 @@ export interface LinearLogHourGroup {
     // Seconds the hour's last line runs past (+) or ends short of (-) the
     // Station ID. Null for an hour that has aired or that the log does not reach.
     overUnder: number | null;
+    // When the log will have landed this hour on its ID by itself (the swap's
+    // final approach); null for an hour it does not land, or once that is past.
+    autoFitBy: number | null;
     // Lines that air: a dropped line is listed, but not counted or timed.
     airableCount: number;
     totalDurationFormatted: string;

@@ -9,6 +9,7 @@ use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
+use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -99,6 +100,16 @@ final class DmcaComplianceListener implements EventSubscriberInterface
                 return;
             }
         }
+    }
+
+    /**
+     * True when $entry may air at $at within the station's DMCA limits, judged
+     * as a queue build judges a pick.
+     */
+    public function allows(StationQueue $entry, Station $station, DateTimeImmutable $at): bool
+    {
+        return !$station->backend_config->dmca_compliance_enabled
+            || $this->isCompliant($entry, $station, $at, false);
     }
 
     private function isCompliant(

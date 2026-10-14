@@ -1193,7 +1193,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 'last_played' => $spm->last_played,
             ];
 
-            if (isset($recentSongIds[$candidateMedia->song_id])) {
+            if (self::isRecentlySelected($recentSongIds, $candidateMedia)) {
                 $repeats[] = $candidate;
             } else {
                 $fresh[] = $candidate;
@@ -1331,7 +1331,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
                 'last_played' => $spm->last_played,
             ];
 
-            if (isset($recentSongIds[$candidateMedia->song_id])) {
+            if (self::isRecentlySelected($recentSongIds, $candidateMedia)) {
                 $repeats[] = $entry;
             } else {
                 $fresh[] = $entry;
@@ -1437,7 +1437,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             if (null === $bestAny || $length > $bestAny[3]) {
                 $bestAny = [$spm, $candidateMedia, true, $length];
             }
-            if (!isset($recentSongIds[$candidateMedia->song_id]) && (null === $bestFresh || $length > $bestFresh[3])) {
+            if (
+                !self::isRecentlySelected($recentSongIds, $candidateMedia)
+                && (null === $bestFresh || $length > $bestFresh[3])
+            ) {
                 $bestFresh = [$spm, $candidateMedia, false, $length];
             }
         }
@@ -1492,7 +1495,7 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
 
             $anyPlayable ??= [$spm, $candidateMedia, true];
 
-            if (!isset($recentSongIds[$candidateMedia->song_id])) {
+            if (!self::isRecentlySelected($recentSongIds, $candidateMedia)) {
                 $fresh = [$spm, $candidateMedia, false];
                 break;
             }
@@ -1564,6 +1567,13 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
     }
 
     /**
+     * Song IDs and titles played recently or waiting in the queue. A title
+     * counts on its own, as the AutoDJ's DuplicatePrevention counts it:
+     * another artist's "It Is Well With My Soul" was swapped in at 12:54am, 35
+     * minutes after the song had aired (Wed 2026-10-14). The queue holds an
+     * hour ahead, so what is still to air counts too: "There Is None Like You"
+     * was swapped in at 1:56am with another recording queued for 2:39am.
+     *
      * @return array<string, true>
      */
     private function getRecentlySelectedSongIds(
@@ -1576,15 +1586,39 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             max(30, $station->backend_config->duplicate_prevention_time_range),
         );
 
+        $queued = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT song_id, title FROM station_queue WHERE station_id = ? AND is_played = 0',
+            [$station->id]
+        );
+
         $ids = [];
-        foreach ($recent as $entry) {
+        foreach ([...$recent, ...$queued] as $entry) {
             $songId = $entry['song_id'] ?? null;
             if (is_string($songId) && '' !== $songId) {
                 $ids[$songId] = true;
             }
+            $titleKey = self::titleKey($entry['title'] ?? null);
+            if (null !== $titleKey) {
+                $ids[$titleKey] = true;
+            }
         }
 
         return $ids;
+    }
+
+    /** @param array<string, true> $recent from getRecentlySelectedSongIds() */
+    private static function isRecentlySelected(array $recent, StationMedia $media): bool
+    {
+        $titleKey = self::titleKey($media->title);
+
+        return isset($recent[$media->song_id]) || (null !== $titleKey && isset($recent[$titleKey]));
+    }
+
+    private static function titleKey(?string $title): ?string
+    {
+        $title = mb_strtolower(trim($title ?? ''));
+
+        return '' === $title ? null : 'title:' . $title;
     }
 
     /**
@@ -2089,7 +2123,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
             if (null === $best || $length > $best[1]) {
                 $best = [$spm, $length];
             }
-            if (!isset($recentSongIds[$spm->media->song_id]) && (null === $bestFresh || $length > $bestFresh[1])) {
+            if (
+                !self::isRecentlySelected($recentSongIds, $spm->media)
+                && (null === $bestFresh || $length > $bestFresh[1])
+            ) {
                 $bestFresh = [$spm, $length];
             }
         }

@@ -64,9 +64,9 @@ final class LinearLogHourFit
 
     public const string NO_ROOM_NOTE = 'Dropped: its hour has no room for it before the ID';
 
-    private const string REFITTED_NOTE = 'Re-fitted to land on the top of the hour; planned: ';
+    public const string REFITTED_NOTE = 'Re-fitted to land on the top of the hour; planned: ';
 
-    private const string REFITTED_BEFORE_NOTE = 'Re-fitted so the next song lands on the top of the hour; planned: ';
+    public const string REFITTED_BEFORE_NOTE = 'Re-fitted so the next song lands on the top of the hour; planned: ';
 
     /** Lines changed per pass; the rest wait for the next minute. */
     private const int MAX_PER_PASS = 10;
@@ -321,7 +321,7 @@ final class LinearLogHourFit
         }
 
         // In the queue's hour a line there is no room for is closed out by
-        // playout when the hour ends, as it always was.
+        // playout once the queue leaves the hour (LinearLogPlayout).
         $leftovers = [];
         foreach ($isQueueHour ? [] : $hour['leftovers'] as $line) {
             if (self::isPlannedAndUnlocked($line) && !self::isShow($line)) {

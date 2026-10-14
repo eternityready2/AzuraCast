@@ -766,6 +766,10 @@ function isShow(item: LinearLogItem): boolean {
 // The Top-of-Hour swap's hold window before the ID (LinearLogHour::ID_HOLD_WINDOW_SECONDS).
 const ID_HOLD_WINDOW_SECONDS = 45;
 
+// The swap's final approach (LinearLogBacktime::SWAP_APPROACH_SECONDS): until
+// then the log lands an hour on its ID by itself.
+const SWAP_APPROACH_SECONDS = 720;
+
 // Over/under per hour, as on an FM log: how far the last line before the
 // Station ID runs past it, or ends short of it. Read from the whole log, not
 // the filtered table, so a search or a type filter cannot change the answer.
@@ -782,7 +786,7 @@ const overUnderByHour = computed(() => {
 
     const logEnds = airable.reduce((end, item) => Math.max(end, (item.played_at ?? 0) + (item.duration ?? 0)), 0);
 
-    const result = new Map<number, number>();
+    const result = new Map<number, {offBy: number, autoFitBy: number | null}>();
     for (const [hour, items] of byHour) {
         const hourEnd = hour + 3600;
         // An hour that has aired is history, and one the log stops inside is
@@ -811,7 +815,20 @@ const overUnderByHour = computed(() => {
         // Music Spotlight file ends 0:38 before the 11:59:59 ID, and the hour
         // read 0:38 short while the ID started within 7s of it (Tue 2026-10-13).
         const swapFills = isShow(closing) && offBy < 0 && -offBy <= ID_HOLD_WINDOW_SECONDS;
-        result.set(hour, swapFills ? 0 : offBy);
+
+        // Until the swap's final approach the log lands an hour of songs on
+        // its ID by itself: ahead of the queue the fit re-times it every
+        // minute, and the hour on air is backtimed from real elapsed time.
+        // A show, a stream or a Clock Wheel's slot keeps its own time.
+        const selfFits = !!closingId
+            && closing.media_type === "music"
+            && !lines.some((item) => isShow(item) || item.clock_wheel_id !== null);
+        const autoFitBy = target - SWAP_APPROACH_SECONDS;
+
+        result.set(hour, {
+            offBy: swapFills ? 0 : offBy,
+            autoFitBy: selfFits && nowTs.value < autoFitBy ? autoFitBy : null,
+        });
     }
     return result;
 });
@@ -863,7 +880,8 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
             items: sorted,
             gapsBefore,
             gapsAfter,
-            overUnder: overUnderByHour.value.get(epochHour) ?? null,
+            overUnder: overUnderByHour.value.get(epochHour)?.offBy ?? null,
+            autoFitBy: overUnderByHour.value.get(epochHour)?.autoFitBy ?? null,
             airableCount: airable.length,
             totalDurationFormatted: secondsToHms(total),
             hasId: sorted.some((item) => item.top_of_hour_legal_id || item.media_type === "id"),

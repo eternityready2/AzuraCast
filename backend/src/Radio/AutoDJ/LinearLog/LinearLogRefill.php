@@ -19,6 +19,7 @@ use App\Radio\AutoDJ\LinearLogPreviewContext;
 use App\Radio\AutoDJ\Scheduler;
 use App\Radio\AutoDJ\StrictProgrammeClock;
 use Carbon\CarbonImmutable;
+use Closure;
 use DateTimeImmutable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Throwable;
@@ -70,6 +71,9 @@ final class LinearLogRefill
 
     /** Closest-length candidates the replacement is drawn from, so it does not always pick the same song. */
     private const int CANDIDATE_POOL_SIZE = 3;
+
+    /** Candidates a caller's own check is run on, at most, per search. */
+    private const int MAX_ACCEPT_CHECKS = 30;
 
     /** A slot starting closer than this to the ID is left to the Top-of-Hour hold and filler. */
     private const int MIN_ROOM_BEFORE_ID_SECONDS = 60;
@@ -490,6 +494,7 @@ final class LinearLogRefill
         ?StationPlaylist $ownPlaylist,
         ?int $excludeMediaId,
         LinearLogSongMatch $match = LinearLogSongMatch::About,
+        ?Closure $accept = null,
     ): ?array {
         $wantShort = $duration < self::MIN_SONG_SECONDS;
 
@@ -509,7 +514,7 @@ final class LinearLogRefill
         }
 
         $range = $station->backend_config->duplicate_prevention_time_range;
-        [$nearSongIds, $nearArtists] = $this->logNear($station, $at->getTimestamp(), max(60, $range) * 60);
+        [$nearSongIds, $nearArtists, $nearTitles] = $this->logNear($station, $at->getTimestamp(), max(60, $range) * 60);
 
         $window = $wantShort ? $duration * 0.5 : max(self::LENGTH_MATCH_SECONDS, $duration * 0.15);
 
@@ -542,6 +547,10 @@ final class LinearLogRefill
             if ('' !== $artist && isset($nearArtists[$artist])) {
                 continue;
             }
+            $title = mb_strtolower(trim((string)$media->title));
+            if ('' !== $title && isset($nearTitles[$title])) {
+                continue;
+            }
 
             $length = LinearLogSongMatch::OnId === $match
                 ? $this->airedLength->lengthOf($media)
@@ -565,6 +574,13 @@ final class LinearLogRefill
         // (the query order, kept by the stable sort).
         usort($scored, static fn(array $a, array $b): int => $a['diff'] <=> $b['diff']);
 
+        if (null !== $accept) {
+            $scored = self::firstAccepted($scored, $playlist, $accept);
+            if ([] === $scored) {
+                return null;
+            }
+        }
+
         $drawWithin = LinearLogSongMatch::About === $match ? $window : (float)self::ID_GRACE_SECONDS;
         $pool = array_values(array_filter(
             array_slice($scored, 0, self::CANDIDATE_POOL_SIZE),
@@ -573,6 +589,29 @@ final class LinearLogRefill
         $chosen = [] !== $pool ? $pool[random_int(0, count($pool) - 1)] : $scored[0];
 
         return [$chosen['media'], $playlist];
+    }
+
+    /**
+     * The best candidates, in order, that $accept lets through: as many as
+     * the draw takes, from at most MAX_ACCEPT_CHECKS looked at.
+     *
+     * @param list<array{diff: float, media: StationMedia}> $scored
+     * @param Closure(StationMedia, StationPlaylist): bool $accept
+     * @return list<array{diff: float, media: StationMedia}>
+     */
+    private static function firstAccepted(array $scored, StationPlaylist $playlist, Closure $accept): array
+    {
+        $accepted = [];
+        foreach (array_slice($scored, 0, self::MAX_ACCEPT_CHECKS) as $candidate) {
+            if ($accept($candidate['media'], $playlist)) {
+                $accepted[] = $candidate;
+                if (count($accepted) >= self::CANDIDATE_POOL_SIZE) {
+                    break;
+                }
+            }
+        }
+
+        return $accepted;
     }
 
     /**
@@ -648,14 +687,16 @@ final class LinearLogRefill
     }
 
     /**
-     * Song ids and artists of the log's lines within $seconds of $at.
+     * Song ids, artists and titles of the log's lines within $seconds of $at.
+     * A title counts on its own, as the AutoDJ's DuplicatePrevention counts it:
+     * another artist's recording of a song is still the same song to a listener.
      *
-     * @return array{array<string, true>, array<string, true>}
+     * @return array{array<string, true>, array<string, true>, array<string, true>}
      */
     private function logNear(Station $station, int $at, int $seconds): array
     {
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT e.payload, m.song_id, m.artist
+            'SELECT e.payload, m.song_id, m.artist, m.title
             FROM station_log_entries e
             LEFT JOIN station_media m ON m.id = e.media_id
             WHERE e.station_id = ? AND e.status <> ?
@@ -665,6 +706,7 @@ final class LinearLogRefill
 
         $songIds = [];
         $artists = [];
+        $titles = [];
         foreach ($rows as $row) {
             if (!empty($row['song_id'])) {
                 $songIds[(string)$row['song_id']] = true;
@@ -673,9 +715,13 @@ final class LinearLogRefill
             if ('' !== $artist) {
                 $artists[$artist] = true;
             }
+            $title = mb_strtolower(trim((string)($row['title'] ?? '')));
+            if ('' !== $title) {
+                $titles[$title] = true;
+            }
         }
 
-        return [$songIds, $artists];
+        return [$songIds, $artists, $titles];
     }
 
     /** True when a line planned after this slot has already been handed to the queue. */

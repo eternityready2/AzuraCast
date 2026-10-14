@@ -6,8 +6,19 @@
             <span class="hour-summary">
                 {{ group.airableCount }} {{ $gettext('items') }} / {{ group.totalDurationFormatted }}
             </span>
+            <template v-if="group.overUnder !== null && isAutoFit(group)">
+                <span
+                    class="hour-over-under text-body-secondary"
+                    :title="autoFitTitle(group)"
+                >{{ $gettext('On time') }}</span>
+                <span
+                    class="badge text-bg-info hour-auto-fit"
+                    :title="autoFitTitle(group)"
+                >{{ $gettext('Auto-fit') }}</span>
+                <span class="hour-estimate text-body-secondary">({{ $gettext('now') }} {{ overUnderLabel(group.overUnder) }})</span>
+            </template>
             <span
-                v-if="group.overUnder !== null"
+                v-else-if="group.overUnder !== null"
                 class="hour-over-under"
                 :class="overUnderClass(group.overUnder)"
                 :title="$gettext('How far the last line before the Station ID runs past it, or ends short of it')"
@@ -410,6 +421,17 @@ function overUnderLabel(seconds: number): string {
         : `${$gettext("Under")} ${formatDuration(-seconds)}`;
 }
 
+// The log is still landing this hour on its ID by itself, and it reads off now.
+function isAutoFit(group: LinearLogHourGroup): boolean {
+    return group.autoFitBy !== null && group.overUnder !== null && Math.abs(group.overUnder) > ON_TIME_SECONDS;
+}
+
+function autoFitTitle(group: LinearLogHourGroup): string {
+    return $gettext("The log lands this hour on its Station ID by itself by %{time}, from what has really aired.", {
+        time: formatTime(group.autoFitBy),
+    });
+}
+
 function overUnderClass(seconds: number): string {
     if (seconds <= -SHORT_HOUR_SECONDS) return "text-danger";
     if (Math.abs(seconds) > ON_TIME_SECONDS) return "text-warning-emphasis";
@@ -422,6 +444,8 @@ function formatStretch(ratio: number): string {
 </script>
 
 <style scoped>
+.hour-auto-fit{font-size:.68rem;letter-spacing:.03em}
+.hour-estimate{font-size:.75rem}
 .hour-header{display:flex;align-items:center;gap:.6rem;padding:.62rem 1rem;border-bottom:1px solid var(--bs-border-color);background:color-mix(in srgb,var(--bs-secondary-bg) 72%,var(--bs-body-bg))}
 .hour-header.current-hour{background:linear-gradient(90deg,color-mix(in srgb,var(--bs-primary) 18%,var(--bs-body-bg)),color-mix(in srgb,var(--bs-primary) 8%,var(--bs-body-bg)));box-shadow:inset 3px 0 0 var(--bs-primary)}
 .hour-summary{color:var(--bs-secondary-color);font-size:.76rem}
