@@ -373,10 +373,13 @@ final class LinearLogRefill
             }
         }
 
+        // A line with no file is a stream or a strict-lane programme's marker,
+        // unless its file was removed from the library (LinearLogRemovedFiles):
+        // that slot is a song's and is refilled like any other.
         if (
             $duration >= self::PROGRAMME_MIN_SECONDS
             || 'scheduled_programme' === ($payload['source_type'] ?? null)
-            || null === $line['media_id']
+            || (null === $line['media_id'] && LinearLogRemovedFiles::REMOVED_NOTE !== $note)
         ) {
             return $this->markHandled($id, $payload, 'programme');
         }
@@ -420,7 +423,7 @@ final class LinearLogRefill
             ? $this->em->find(StationPlaylist::class, (int)$line['playlist_id'])
             : null;
 
-        // Media-less lines returned as programmes above.
+        // A line whose file was removed has none to leave out.
         $excludeMediaId = (int)$line['media_id'];
         $pick = $this->pickReplacement(
             $station,

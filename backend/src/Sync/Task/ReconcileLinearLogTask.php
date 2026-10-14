@@ -12,6 +12,7 @@ use App\Radio\AutoDJ\LinearLog\LinearLogBacktime;
 use App\Radio\AutoDJ\LinearLog\LinearLogHourFit;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLog\LinearLogRefill;
+use App\Radio\AutoDJ\LinearLog\LinearLogRemovedFiles;
 use App\Radio\AutoDJ\LinearLog\LinearLogRules;
 use App\Radio\AutoDJ\LinearLog\LinearLogStore;
 use App\Radio\AutoDJ\StrictProgrammeClock;
@@ -57,6 +58,7 @@ final class ReconcileLinearLogTask extends AbstractTask
     public function __construct(
         private readonly LinearLogRules $rules,
         private readonly LinearLogRefill $refill,
+        private readonly LinearLogRemovedFiles $removedFiles,
         private readonly LinearLogHourFit $hourFit,
         private readonly LinearLogBacktime $backtime,
         private readonly LinearLogStore $store,
@@ -87,6 +89,10 @@ final class ReconcileLinearLogTask extends AbstractTask
 
             try {
                 $this->reconcile($station);
+                // A show's lines are timed from the file its playlist holds
+                // now, and a song whose file was deleted is dropped for the
+                // refill, before anything below measures the hours.
+                $this->removedFiles->resolve($station);
                 // Standing operator rules run on every pass, so a wrong line is
                 // taken out of the plan long before its air time.
                 $this->rules->apply($station);

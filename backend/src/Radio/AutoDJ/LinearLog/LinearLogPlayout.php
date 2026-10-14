@@ -595,7 +595,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
             }
 
             $entry->status = StationLogEntry::STATUS_DROPPED;
-            $entry->note = 'Dropped: the planned file was removed from the library';
+            $entry->note = LinearLogRemovedFiles::REMOVED_NOTE;
             $this->em->persist($entry);
             $this->em->flush();
         }
