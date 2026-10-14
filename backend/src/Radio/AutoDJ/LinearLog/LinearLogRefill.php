@@ -104,6 +104,8 @@ final class LinearLogRefill
         // The slot is in the past: it was handed to Liquidsoap and never aired.
         'Dropped: marked played but never aired',
         'Dropped: removed from the queue before it aired',
+        // A show's own part before it, in the same airing, still holds the air.
+        LinearLogRemovedFiles::NO_PART_NOTE,
     ];
 
     public function __construct(

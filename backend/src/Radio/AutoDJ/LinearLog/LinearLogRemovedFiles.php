@@ -154,13 +154,16 @@ final class LinearLogRemovedFiles
         );
 
         $airings = [];
+        $windowEnds = [];
         foreach ($lines as $line) {
-            $airings[$this->airingKey($playlist, (int)$line['planned_at'], (int)$line['id'])][] = $line;
+            $window = $this->airingWindow($playlist, (int)$line['planned_at'], (int)$line['id']);
+            $airings[$window['key']][] = $line;
+            $windowEnds[$window['key']] = $window['end'];
         }
 
         $done = 0;
-        foreach ($airings as $airing) {
-            $done += $this->timeAiring($station, $playlist, $media, $airing);
+        foreach ($airings as $key => $airing) {
+            $done += $this->timeAiring($station, $playlist, $media, $airing, $windowEnds[$key]);
         }
 
         return $done;
@@ -170,9 +173,15 @@ final class LinearLogRemovedFiles
      * Give an airing's lines the parts the show's file airs in.
      *
      * @param non-empty-list<array<string, mixed>> $airing its lines, in planned order
+     * @param int|null $windowEnd end of the show's scheduled window this airing is in, if any
      */
-    private function timeAiring(Station $station, StationPlaylist $playlist, StationMedia $media, array $airing): int
-    {
+    private function timeAiring(
+        Station $station,
+        StationPlaylist $playlist,
+        StationMedia $media,
+        array $airing,
+        ?int $windowEnd
+    ): int {
         foreach ($airing as $line) {
             // Started or locked airings are playout's and the operator's; a
             // line naming another file still in the library is LinearLogRules'.
@@ -186,7 +195,20 @@ final class LinearLogRemovedFiles
             }
         }
 
-        $parts = $this->parts($station, $media, $airing);
+        ['parts' => $parts, 'continues_at' => $continuesAt] = $this->parts($station, $media, $airing);
+
+        // A continuation with no room left in the show's own scheduled window
+        // is not the show's to keep: the window closing there, not the ID, is
+        // what cuts the file short (the 10am God Family & Country hour, cut
+        // 31.98s short of its file one second before its window's own end,
+        // Wed 2026-10-14).
+        if (
+            null !== $continuesAt
+            && null !== $windowEnd
+            && $continuesAt['at'] + self::MIN_REMAINDER_SECONDS > $windowEnd
+        ) {
+            $continuesAt = null;
+        }
 
         $done = 0;
         $dropped = [];
@@ -204,6 +226,16 @@ final class LinearLogRemovedFiles
             }
 
             $done += $this->retime($line, $playlist, $media, $seconds);
+        }
+
+        // The file grew past the ID since the plan was built: the last part
+        // was cut there with more of the file still to air, and no line of
+        // this airing exists yet for what comes after it.
+        if (null !== $continuesAt) {
+            if (null !== $windowEnd) {
+                $continuesAt['seconds'] = min($continuesAt['seconds'], (float)($windowEnd - $continuesAt['at']));
+            }
+            $done += $this->addContinuation($station, $playlist, $media, $continuesAt);
         }
 
         if ([] !== $dropped) {
@@ -232,13 +264,14 @@ final class LinearLogRemovedFiles
      * the air has nothing of its own.
      *
      * @param non-empty-list<array<string, mixed>> $airing
-     * @return array<int, float|null> by line id
+     * @return array{parts: array<int, float|null>, continues_at: array{at: int, seconds: float}|null}
      */
     private function parts(Station $station, StationMedia $media, array $airing): array
     {
         $left = max(1.0, $media->getCalculatedLength());
         $heldUntil = 0;
         $parts = [];
+        $cutShortOfFileEnd = false;
         foreach ($airing as $line) {
             $startsAt = (int)$line['planned_at'];
             if ($left < self::MIN_REMAINDER_SECONDS || $startsAt < $heldUntil) {
@@ -248,6 +281,7 @@ final class LinearLogRemovedFiles
 
             $cutAt = $this->idAfter($station, $startsAt);
             $seconds = null !== $cutAt ? min($left, (float)($cutAt - $startsAt)) : $left;
+            $cutShortOfFileEnd = null !== $cutAt && $seconds < $left;
             $left -= $seconds;
             if ($left >= self::MIN_REMAINDER_SECONDS) {
                 $left += self::REJOIN_SECONDS;
@@ -256,7 +290,87 @@ final class LinearLogRemovedFiles
             $parts[(int)$line['id']] = $seconds;
         }
 
-        return $parts;
+        // The airing's last line was cut by the ID with the file not yet at
+        // its end, and nothing after it in this airing claims the rest.
+        $continuesAt = $cutShortOfFileEnd && $left >= self::MIN_REMAINDER_SECONDS
+            ? ['at' => $heldUntil, 'seconds' => $left]
+            : null;
+
+        return ['parts' => $parts, 'continues_at' => $continuesAt];
+    }
+
+    /**
+     * Write the line this airing has none of yet: what the show's file still
+     * has to air after an ID that cut a part short of the file's end.
+     *
+     * @param array{at: int, seconds: float} $continuesAt
+     */
+    private function addContinuation(
+        Station $station,
+        StationPlaylist $playlist,
+        StationMedia $media,
+        array $continuesAt
+    ): int {
+        $at = $continuesAt['at'];
+        $exists = (int)$this->em->getConnection()->fetchOne(
+            'SELECT COUNT(*) FROM station_log_entries
+            WHERE station_id = ? AND playlist_id = ? AND planned_at = ? AND status <> ?',
+            [$station->id, $playlist->id, $at, StationLogEntry::STATUS_DROPPED]
+        );
+        if ($exists > 0) {
+            return 0;
+        }
+
+        $newId = $this->writeLine(
+            $station,
+            $media,
+            $playlist,
+            $at,
+            self::RETIMED_NOTE . $media->text,
+            $continuesAt['seconds']
+        );
+
+        $this->logger->notice("Linear Log: the show's file runs past its planned end; gave it a continuation line.", [
+            'log_entry_id' => $newId,
+            'show' => $playlist->name,
+            'planned_at' => $at,
+        ]);
+
+        return 1;
+    }
+
+    /**
+     * Write a planned line for a part of the show's file, $seconds long.
+     */
+    private function writeLine(
+        Station $station,
+        StationMedia $media,
+        StationPlaylist $playlist,
+        int $plannedAt,
+        string $note,
+        float $seconds,
+    ): int {
+        $conn = $this->em->getConnection();
+        $sequence = 1 + (int)$conn->fetchOne(
+            'SELECT COALESCE(MAX(sequence), 0) FROM station_log_entries WHERE station_id = ?',
+            [$station->id]
+        );
+
+        $fields = LinearLogRefill::songFields($media, $playlist, []);
+        $fields['duration'] = max(1.0, $seconds);
+
+        $conn->insert('station_log_entries', [
+            ...$fields,
+            'station_id' => $station->id,
+            'planned_at' => $plannedAt,
+            'sequence' => $sequence,
+            'status' => StationLogEntry::STATUS_PLANNED,
+            'note' => $note,
+            'is_locked' => 0,
+            'created_at' => time(),
+        ]);
+
+        return (int)$conn->lastInsertId();
     }
 
     /**
@@ -386,11 +500,14 @@ final class LinearLogRemovedFiles
     }
 
     /**
-     * Which airing of the show a line belongs to: the occurrence of its
-     * schedule open at the line's time, as ProgrammeParts finds the part
-     * before a row. A line outside every occurrence is an airing of its own.
+     * Which airing of the show a line belongs to, and when its scheduled
+     * window ends: the occurrence of its schedule open at the line's time, as
+     * ProgrammeParts finds the part before a row. A line outside every
+     * occurrence is an airing of its own, with no window to end it.
+     *
+     * @return array{key: string, end: int|null}
      */
-    private function airingKey(StationPlaylist $playlist, int $at, int $lineId): string
+    private function airingWindow(StationPlaylist $playlist, int $at, int $lineId): array
     {
         $tz = $playlist->station->getTimezoneObject();
         $moment = CarbonImmutable::createFromTimestamp($at, $tz);
@@ -404,13 +521,16 @@ final class LinearLogRemovedFiles
             );
             foreach ($occurrences as $occurrence) {
                 $start = CarbonImmutable::instance($occurrence->start);
-                if ($start <= $moment && $moment <= CarbonImmutable::instance($occurrence->end)) {
-                    $latest = null === $latest || $start > $latest ? $start : $latest;
+                $end = CarbonImmutable::instance($occurrence->end);
+                if ($start <= $moment && $moment <= $end && (null === $latest || $start > $latest['start'])) {
+                    $latest = ['start' => $start, 'end' => $end];
                 }
             }
         }
 
-        return null !== $latest ? 'window-' . $latest->getTimestamp() : 'line-' . $lineId;
+        return null !== $latest
+            ? ['key' => 'window-' . $latest['start']->getTimestamp(), 'end' => $latest['end']->getTimestamp()]
+            : ['key' => 'line-' . $lineId, 'end' => null];
     }
 
     /** @return array<string, mixed> */
