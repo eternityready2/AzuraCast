@@ -763,6 +763,9 @@ function isShow(item: LinearLogItem): boolean {
     return item.source_type === "scheduled_programme" || (item.duration ?? 0) >= 1200;
 }
 
+// The Top-of-Hour swap's hold window before the ID (LinearLogHour::ID_HOLD_WINDOW_SECONDS).
+const ID_HOLD_WINDOW_SECONDS = 45;
+
 // Over/under per hour, as on an FM log: how far the last line before the
 // Station ID runs past it, or ends short of it. Read from the whole log, not
 // the filtered table, so a search or a type filter cannot change the answer.
@@ -799,8 +802,16 @@ const overUnderByHour = computed(() => {
 
         // A song plays from its AutoCue start to its end cue, the length the
         // plan and the swap land the hour's last song on the ID with.
-        const lastEnd = Math.max(...lines.map((item) => (item.played_at ?? 0) + (item.aired_duration ?? item.duration ?? 0)));
-        result.set(hour, Math.round(lastEnd - target));
+        const endOf = (item: LinearLogItem) => (item.played_at ?? 0) + (item.aired_duration ?? item.duration ?? 0);
+        const closing = lines.reduce((last, item) => (endOf(item) >= endOf(last) ? item : last));
+        const offBy = Math.round(endOf(closing) - target);
+
+        // A show that ends inside the swap's hold window is followed on air by
+        // the liner the swap puts there, which ends on the ID: the Christian
+        // Music Spotlight file ends 0:38 before the 11:59:59 ID, and the hour
+        // read 0:38 short while the ID started within 7s of it (Tue 2026-10-13).
+        const swapFills = isShow(closing) && offBy < 0 && -offBy <= ID_HOLD_WINDOW_SECONDS;
+        result.set(hour, swapFills ? 0 : offBy);
     }
     return result;
 });

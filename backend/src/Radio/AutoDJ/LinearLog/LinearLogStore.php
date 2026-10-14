@@ -833,14 +833,19 @@ final class LinearLogStore
                 if (null !== $saved[$id]['aired_at']) {
                     $entry['aired_at'] = (int)$saved[$id]['aired_at'];
                     $entry['played_at'] = (int)$saved[$id]['aired_at'];
+                    // A line that aired is as long as its saved line: what aired,
+                    // as the swap, a re-fit, a hand replacement or a cut song's
+                    // settled length left it. Left at the snapshot's length, a
+                    // song re-fitted before it was queued was timed on air as
+                    // the song it replaced.
+                    $entry['duration'] = max(1.0, (float)$saved[$id]['duration']);
                     continue;
                 }
             }
 
             if ($id > 0 && isset($queued[$id])) {
                 $live = $queued[$id];
-                $liveAt = (int)$live['t'];
-                $entry['played_at'] = $liveAt;
+                $entry['played_at'] = (int)$live['t'];
                 $entry['is_live_queue'] = true;
                 if (($live['text'] ?? null) !== ($entry['text'] ?? null)) {
                     $entry['text'] = $live['text'];
@@ -850,18 +855,24 @@ final class LinearLogStore
                     if (null !== ($live['song_id'] ?? null)) {
                         $entry['song_id'] = $live['song_id'];
                     }
-                    if (null !== $live['duration']) {
-                        $entry['duration'] = max(1.0, (float)$live['duration']);
-                    }
-                    // A replacement song may come from a different playlist
-                    // and album; keep the report consistent with what airs.
-                    if (null !== ($live['playlist_id'] ?? null)) {
-                        $entry['playlist_id'] = (int)$live['playlist_id'];
-                        $entry['playlist'] = $live['playlist_name'];
-                    }
-                    if (null !== ($live['album'] ?? null)) {
-                        $entry['album'] = $live['album'];
-                    }
+                }
+                // A queued line is as long as what its row plays, and plays from
+                // that row's playlist and album, whatever its name. Taken only
+                // when the names differed, a song re-fitted while planned
+                // (LinearLogHourFit) kept the length of the song it replaced
+                // once it was queued, its saved name being the row's already:
+                // "Fear Is Not My Future" (422s) was timed as "Made For Me"
+                // (374s), and 3 PM read 0:49 short of an ID it landed on (Tue
+                // 2026-10-13).
+                if (null !== $live['duration']) {
+                    $entry['duration'] = max(1.0, (float)$live['duration']);
+                }
+                if (null !== ($live['playlist_id'] ?? null)) {
+                    $entry['playlist_id'] = (int)$live['playlist_id'];
+                    $entry['playlist'] = $live['playlist_name'];
+                }
+                if (null !== ($live['album'] ?? null)) {
+                    $entry['album'] = $live['album'];
                 }
                 continue;
             }
@@ -1097,14 +1108,15 @@ final class LinearLogStore
      * shows the overrun, which the Top-of-Hour swap settles on air.
      *
      * A line airs in its own hour or not at all (see LinearLogHourGuard), so a
-     * planned line that could only start once its hour is over, or so close to
-     * the ID that the swap holds it for the next hour, is not drawn in the next
-     * one. Drawn there, the last four songs of the 9pm hour were
-     * listed inside the 10pm Life Perspectives show (Sun 2026-10-11). It stays
-     * in its hour, at the hour's end, marked as over, and nothing is timed
-     * from it.
+     * line that could only start once its hour is over, or so close to the ID
+     * that the swap holds it for the next hour, is not drawn in the next one.
+     * Drawn there, the last four songs of the 9pm hour were listed inside the
+     * 10pm Life Perspectives show (Sun 2026-10-11). It stays in its hour, at
+     * the hour's end, marked as over, and nothing is timed from it. A line of
+     * the next hour due there waits for the ID, and opens that hour.
      *
-     * Display only: nothing here is saved, and playout never reads it.
+     * Nothing here is saved. LinearLogHourFit fits each hour to its ID by
+     * these times; playout reads none of it.
      *
      * @param list<array<string, mixed>> $entries sorted by played_at
      * @param array<int, int> $hourEndByLine end of the hour each line belongs to, by line id
@@ -1150,41 +1162,108 @@ final class LinearLogStore
         // Hard events can overlap (a bulletin drawn inside a show), so a chain
         // restarts from the latest end among them, not the last one listed.
         $hardEnd = null;
+        // The Station IDs in the order they are taken, how many have been,
+        // and the lines waiting for the next one, in the order they air.
+        $idStarts = [];
+        foreach ($entries as $entry) {
+            if (self::isAirable($entry) && 'top_of_hour_id' === ($entry['source_type'] ?? null)) {
+                $idStarts[] = (int)$entry['played_at'];
+            }
+        }
+        $idsTaken = 0;
+        $held = [];
+        $heldFor = 0;
+
+        // Run on in exact seconds, as the plan times its lines: rounded up line
+        // by line, an hour drifted 7s later on the page than in the plan (Mon
+        // 2026-10-12). Each song takes what songs really take on air in its
+        // hour, as the plan and the queue time it.
+        $runOn = static function (int $i) use (&$entries, &$cursor, $perSong): void {
+            if (null !== $cursor) {
+                $entries[$i]['played_at'] = (int)floor($cursor);
+            }
+            $duration = (float)($entries[$i]['duration'] ?? 0);
+            $airSeconds = $duration + ($duration < 1200 ? $perSong((int)$entries[$i]['played_at']) : 0.0);
+            // The air it holds, the talk after it included, so that time is not read as a hole.
+            $entries[$i]['air_seconds'] = round($airSeconds, 1);
+            $cursor = (null !== $cursor ? (float)$cursor : (float)$entries[$i]['played_at']) + $airSeconds;
+        };
+
+        $takeSoft = static function (int $i) use (
+            &$entries,
+            &$cursor,
+            &$held,
+            &$heldFor,
+            &$idsTaken,
+            $idStarts,
+            $hourEndByLine,
+            $hourEndOf,
+            $runOn,
+        ): void {
+            $hourEnd = $hourEndByLine[(int)$entries[$i]['log_entry_id']] ?? null;
+            $airsIn = null !== $cursor ? $hourEndOf((int)floor($cursor), (float)($entries[$i]['duration'] ?? 0)) : null;
+
+            // A queued line is taken back the same way by the hour guard
+            // (LinearLogHourGuard), and counted in its hour until then. A
+            // listener request is never taken back: it airs after the ID.
+            if (null !== $airsIn && null !== $hourEnd && $airsIn > $hourEnd && empty($entries[$i]['is_request'])) {
+                $entries[$i]['played_at'] = $hourEnd - 1;
+                $entries[$i]['over_scheduled'] = true;
+                // Whatever the line said before, what is true of it now is
+                // that it does not fit: "Filled: the hour was running short"
+                // was shown on a song drawn at 1:59:59pm (Mon 2026-10-12).
+                $entries[$i]['log_note'] = self::OVER_SCHEDULED_NOTE;
+                return;
+            }
+
+            // A line that airs in an hour the ID still ahead of it opens --
+            // due under the ID, past it, or so close to it that the swap holds
+            // it (LinearLogHour::opensNextHour()) -- waits for that ID, as the
+            // queue times it, and every line after it waits behind it. Drawn
+            // where it was due, the next hour's first song sat 20s before the
+            // 12:59:59pm ID and the hour read 3:10 over until the queue moved
+            // it (Tue 2026-10-13). An ID set to :00:00 starts on the top of
+            // the hour it opens.
+            $nextIdAt = $idStarts[$idsTaken] ?? null;
+            if ([] !== $held || (null !== $airsIn && null !== $nextIdAt && $nextIdAt <= $airsIn - 3600)) {
+                $held[] = $i;
+                $heldFor = $idsTaken;
+                return;
+            }
+
+            $runOn($i);
+        };
+
+        // What waited for the ID opens the hour once it, and what follows it
+        // there, have aired: the News, or a show moved behind them (see
+        // showAfterNews()) -- drawn from the News, the lines held for the hour
+        // sat inside the show.
+        $release = static function () use (&$held, $takeSoft): void {
+            $waiting = $held;
+            $held = [];
+            foreach ($waiting as $h) {
+                $takeSoft($h);
+            }
+        };
+
         foreach ($entries as $i => $entry) {
             if (!self::isAirable($entry)) {
                 continue;
             }
 
-            if (self::isSoft($entry, $now)) {
-                $hourEnd = $hourEndByLine[(int)$entry['log_entry_id']] ?? null;
-                if (
-                    null !== $cursor
-                    && null !== $hourEnd
-                    && StationLogEntry::STATUS_PLANNED === $entry['log_status']
-                    && $hourEndOf((int)floor($cursor), (float)($entry['duration'] ?? 0)) > $hourEnd
-                ) {
-                    $entries[$i]['played_at'] = $hourEnd - 1;
-                    $entries[$i]['over_scheduled'] = true;
-                    // Whatever the line said before, what is true of it now is
-                    // that it does not fit: "Filled: the hour was running short"
-                    // was shown on a song drawn at 1:59:59pm (Mon 2026-10-12).
-                    $entries[$i]['log_note'] = self::OVER_SCHEDULED_NOTE;
-                    continue;
-                }
+            $soft = self::isSoft($entry, $now);
+            $opensHour = 'ai_news' === ($entry['source_type'] ?? null) || (int)$entry['played_at'] <= $cursor;
+            if ([] !== $held && $idsTaken > $heldFor && ($soft || !$opensHour)) {
+                $release();
+            }
 
-                // Run on in exact seconds, as the plan times its lines: rounded up
-                // line by line, an hour drifted 7s later on the page than in the
-                // plan (Mon 2026-10-12). Each song takes what songs really take on
-                // air in its hour, as the plan and the queue time it.
-                if (null !== $cursor) {
-                    $entries[$i]['played_at'] = (int)floor($cursor);
-                }
-                $duration = (float)($entries[$i]['duration'] ?? 0);
-                $airSeconds = $duration + ($duration < 1200 ? $perSong((int)$entries[$i]['played_at']) : 0.0);
-                // The air it holds, the talk after it included, so that time is not read as a hole.
-                $entries[$i]['air_seconds'] = round($airSeconds, 1);
-                $cursor = (null !== $cursor ? (float)$cursor : (float)$entries[$i]['played_at']) + $airSeconds;
+            if ($soft) {
+                $takeSoft($i);
                 continue;
+            }
+
+            if ('top_of_hour_id' === ($entry['source_type'] ?? null)) {
+                $idsTaken++;
             }
 
             // Once a later line has aired, whatever aired before it is over,
@@ -1200,6 +1279,7 @@ final class LinearLogStore
             $hardEnd = max($hardEnd ?? PHP_INT_MIN, $end($entry));
             $cursor = $hardEnd;
         }
+        $release();
 
         usort(
             $entries,
