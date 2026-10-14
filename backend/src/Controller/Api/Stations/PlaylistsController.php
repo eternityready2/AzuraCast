@@ -223,6 +223,7 @@ final class PlaylistsController extends AbstractScheduledEntityController
 
                 return [
                     'id' => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
+                    'type' => 'playlist',
                     'schedule_id' => $scheduleItem->id,
                     'playlist_id' => $playlist->id,
                     'title' => $playlist->name . ($playlist->is_enabled ? '' : ' (' . __('Disabled') . ')'),
@@ -242,6 +243,9 @@ final class PlaylistsController extends AbstractScheduledEntityController
                     'play_per_hour_minute' => $playlist->play_per_hour_minute,
                     'avoid_duplicates' => $playlist->avoid_duplicates,
                     'is_jingle' => $playlist->is_jingle,
+                    'include_in_on_demand' => $playlist->include_in_on_demand,
+                    'remote_url' => $playlist->remote_url,
+                    'remote_type' => $playlist->remote_type?->value,
                     'num_songs' => $playlist->media_items->count(),
                     'total_length' => array_sum(
                         $playlist->media_items->map(
@@ -253,6 +257,14 @@ final class PlaylistsController extends AbstractScheduledEntityController
                             'id' => $spg->playlist->id,
                             'name' => $spg->playlist->name,
                             'source' => $spg->playlist->source->value,
+                            'order' => $spg->playlist->order->value,
+                            'weight' => $spg->weight,
+                            'count' => match ($spg->playlist->source) {
+                                PlaylistSources::Songs => $spg->playlist->media_items->count(),
+                                PlaylistSources::Playlists => $spg->playlist->playlists->count(),
+                                default => null,
+                            },
+                            'is_enabled' => $spg->playlist->is_enabled,
                             'consecutive_plays' => $spg->consecutive_plays,
                             'play_full_cycle' => $spg->play_full_cycle,
                         ]
@@ -297,6 +309,16 @@ final class PlaylistsController extends AbstractScheduledEntityController
 
         $return['num_songs'] = $songTotals['num_songs'];
         $return['total_length'] = round((float)$songTotals['total_length']);
+
+        $parentGroups = [];
+        foreach ($record->playlist_groups as $spg) {
+            $group = $spg->playlist_group;
+            $parentGroups[$group->id] = [
+                'id' => $group->id,
+                'name' => $group->name,
+            ];
+        }
+        $return['playlist_groups'] = array_values($parentGroups);
 
         $isInternal = $request->isInternal();
         $router = $request->getRouter();

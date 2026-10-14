@@ -1,5 +1,8 @@
 <template>
-    <tab :label="$gettext('Schedule & Playback')">
+    <tab
+        :label="$gettext('Schedule & Playback')"
+        badge="NEW"
+    >
         <div class="schedule-hero mb-4">
             <div>
                 <h2 class="h4 mb-1">{{ $gettext('Schedule & Playback') }}</h2>

@@ -328,6 +328,11 @@
                 </tab>
 
                 <playlist-grouping-tab :list-url="listUrl" />
+                <schedule-view-tab
+                    ref="$scheduleTab"
+                    :schedule-url="scheduleUrl"
+                    @click="doCalendarClick"
+                />
             </tabs>
         </div>
     </section>
@@ -356,12 +361,14 @@
 import {toRefs} from "@vueuse/core";
 import {ref, useTemplateRef} from "vue";
 import {useRouter} from "vue-router";
+import {EventImpl} from "@fullcalendar/core/internal";
 import AddButton from "~/components/Common/AddButton.vue";
 import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import Tab from "~/components/Common/Tab.vue";
 import Tabs from "~/components/Common/Tabs.vue";
 import {useNotify} from "~/components/Common/Toasts/useNotify.ts";
 import PlaylistSourceIcon from "~/components/Stations/Common/PlaylistSourceIcon.vue";
+import ScheduleViewTab from "~/components/Stations/Common/ScheduleViewTab.vue";
 import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import ApplyToModal from "~/components/Stations/Playlists/ApplyToModal.vue";
 import CloneModal from "~/components/Stations/Playlists/CloneModal.vue";
@@ -388,6 +395,7 @@ import IconBiCloudUpload from "~icons/bi/cloud-upload";
 const router = useRouter();
 const {getStationApiUrl} = useApiRouter();
 const listUrl = getStationApiUrl('/playlists');
+const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const exportPlaylistsConfigUrl = getStationApiUrl('/playlists/export-config');
 const importPlaylistsConfigUrl = getStationApiUrl('/playlists/import-config');
 const getPlaylistExportConfigUrl = (playlistId: number): string => {
@@ -418,11 +426,22 @@ const formatLength = (length: number) => {
     return Duration.fromMillis(length * 1000).rescale().toHuman();
 };
 
+const $scheduleTab = useTemplateRef('$scheduleTab');
+
 const relist = () => {
     void listItemProvider.refresh();
+    $scheduleTab.value?.refresh();
 };
 
 const doCreate = () => router.push({name: 'stations:playlists:new'});
+
+const doCalendarClick = (event: EventImpl) => {
+    void router.push({
+        name: 'stations:playlists:edit',
+        params: {playlist_id: event.extendedProps.playlist_id},
+        query: {tab: 'schedule_legacy'},
+    });
+};
 const doEdit = (playlistId: number) => router.push({
     name: 'stations:playlists:edit',
     params: {playlist_id: playlistId},

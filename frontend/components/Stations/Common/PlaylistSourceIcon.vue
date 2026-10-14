@@ -3,29 +3,36 @@
         class="playlist-source-icon d-inline-flex align-items-center"
         aria-hidden="true"
     >
-        <template v-if="source === PlaylistSources.Songs">
-            <icon-ic-library-music />
-        </template>
-        <template v-else-if="source === PlaylistSources.Playlists">
-            <icon-ic-queue-music />
-        </template>
-        <template v-else-if="source === PlaylistSources.Requests">
-            <icon-bi-people />
-        </template>
-        <template v-else-if="source === PlaylistSources.RemoteUrl">
-            <icon-ic-public />
-        </template>
+        <component
+            :is="icon"
+            v-if="icon"
+            :class="sizeClass"
+        />
     </span>
 </template>
 
 <script setup lang="ts">
-import {PlaylistSources} from "~/entities/ApiInterfaces.ts";
-import IconBiPeople from "~icons/bi/people";
-import IconIcLibraryMusic from "~icons/ic/baseline-library-music";
-import IconIcPublic from "~icons/ic/baseline-public";
-import IconIcQueueMusic from "~icons/ic/baseline-queue-music";
+import { type Component, computed } from "vue";
+import {
+    isPlaylistSource,
+    playlistSourceIcons,
+} from "~/components/Stations/Common/playlistSourceIcons.ts";
+import { IconSize } from "~/functions/icons.ts";
 
-defineProps<{
+const props = defineProps<{
     source: string;
+    size?: IconSize;
 }>();
+
+const icon = computed<Component | undefined>(() => {
+    return isPlaylistSource(props.source)
+        ? playlistSourceIcons[props.source]
+        : undefined;
+});
+
+const sizeClass = computed<IconSize | undefined>(() => {
+    return props.size && Object.values(IconSize).includes(props.size)
+        ? props.size
+        : undefined;
+});
 </script>

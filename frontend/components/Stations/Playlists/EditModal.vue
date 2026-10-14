@@ -12,14 +12,18 @@
     >
         <tabs>
             <form-basic-info/>
+            <form-schedule-legacy v-model:schedule-items="form.schedule_items" />
             <form-schedule v-model:schedule-items="form.schedule_items" />
+            <form-advanced v-if="form.source !== 'requests'" />
         </tabs>
     </modal-form>
 </template>
 
 <script setup lang="ts">
+import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
+import FormScheduleLegacy from "~/components/Stations/Playlists/Form/ScheduleLegacy.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
 import {useTranslate} from "~/vendor/gettext";

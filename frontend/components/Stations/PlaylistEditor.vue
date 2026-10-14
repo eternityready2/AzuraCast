@@ -26,7 +26,31 @@
             <div class="playlist-editor-surface">
                 <tabs>
                     <form-basic-info />
+                    <form-schedule-legacy v-model:schedule-items="form.schedule_items" />
                     <form-schedule v-model:schedule-items="form.schedule_items" />
+                    <playlist-link-list-tab
+                        v-if="isEditMode && form.source === PlaylistSources.Playlists"
+                        tab-id="playlist_members"
+                        :label="$gettext('Members')"
+                        :description="$gettext('This playlist group contains the following member playlists:')"
+                        empty-id="no_playlist_members"
+                        :empty-label="$gettext('No Members')"
+                        :empty-text="$gettext('This playlist group has no member playlists.')"
+                        :items="playlistMembers"
+                        @navigate="onNavigateToPlaylist"
+                    />
+                    <playlist-link-list-tab
+                        v-if="isEditMode"
+                        tab-id="group_memberships"
+                        :label="$gettext('Memberships')"
+                        :description="$gettext('This playlist is a member of the following playlist groups:')"
+                        empty-id="no_playlist_groups"
+                        :empty-label="$gettext('No Group Memberships')"
+                        :empty-text="$gettext('This playlist is not a member of any playlist group.')"
+                        :items="playlistGroups"
+                        @navigate="onNavigateToPlaylist"
+                    />
+                    <form-advanced v-if="form.source !== 'requests'" />
                 </tabs>
             </div>
 
@@ -50,13 +74,18 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onBeforeUnmount, onMounted, ref} from "vue";
+import {computed, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import {storeToRefs} from "pinia";
 import {toRefs} from "@vueuse/core";
 import {useRoute, useRouter} from "vue-router";
 import Tabs from "~/components/Common/Tabs.vue";
+import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
+import FormScheduleLegacy from "~/components/Stations/Playlists/Form/ScheduleLegacy.vue";
+import PlaylistLinkListTab from "~/components/Stations/Playlists/Form/PlaylistLinkListTab.vue";
+import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
+import {PlaylistSources} from "~/entities/ApiInterfaces";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form.ts";
 import {useAppCollectScope} from "~/vendor/regle.ts";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
@@ -79,6 +108,14 @@ const formStore = useStationsPlaylistsForm();
 const {form, r$} = storeToRefs(formStore);
 const {$reset: resetForm} = formStore;
 const {r$: validatedr$} = useAppCollectScope('stations-playlists');
+
+interface PlaylistLink {
+    id: number,
+    name: string,
+}
+
+const playlistGroups = ref<PlaylistLink[]>([]);
+const playlistMembers = ref<PlaylistLink[]>([]);
 
 const loading = ref(false);
 const saving = ref(false);
@@ -138,11 +175,19 @@ const populateForm = (data: Record<string, any>) => {
     r$.value.$reset({
         toState: mergeExisting(r$.value.$value, data),
     });
+
+    playlistGroups.value = data.playlist_groups ?? [];
+    playlistMembers.value = (data.playlists ?? []).map((member: PlaylistLink) => ({
+        id: member.id,
+        name: member.name,
+    }));
 };
 
 const loadPlaylist = async () => {
     resetForm();
     error.value = null;
+    playlistGroups.value = [];
+    playlistMembers.value = [];
 
     if (!isEditMode.value) {
         return;
@@ -236,7 +281,26 @@ const doSubmit = async () => {
     }
 };
 
+const {showAlert} = useDialog();
+
+const onNavigateToPlaylist = async (item: PlaylistLink): Promise<void> => {
+    if (r$.value.$anyEdited) {
+        const {value} = await showAlert({
+            title: $gettext('Discard unsaved changes?'),
+            confirmButtonClass: 'btn-danger',
+            confirmButtonText: $gettext('Discard'),
+        });
+
+        if (!value) {
+            return;
+        }
+    }
+
+    await router.push({name: 'stations:playlists:edit', params: {playlist_id: item.id}});
+};
+
 onMounted(loadPlaylist);
+watch(playlistId, loadPlaylist);
 onBeforeUnmount(resetForm);
 </script>
 

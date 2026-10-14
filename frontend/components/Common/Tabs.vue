@@ -24,6 +24,10 @@
                 @click="selectTab(childItem.computedId)"
             >
                 {{ childItem.label }}
+                <span
+                    v-if="childItem.badge"
+                    class="nav-link-badge"
+                >{{ childItem.badge }}</span>
             </button>
         </div>
     </nav>
@@ -85,3 +89,20 @@ watch(() => route?.query.tab, (tabId) => {
     }
 });
 </script>
+
+<style scoped>
+.nav-link-badge {
+    display: inline-block;
+    margin-left: .45rem;
+    padding: .2em .55em;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #ff8a00, #e52e71);
+    color: #fff;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    line-height: 1.2;
+    vertical-align: middle;
+    box-shadow: 0 1px 3px rgba(229, 46, 113, .35);
+}
+</style>

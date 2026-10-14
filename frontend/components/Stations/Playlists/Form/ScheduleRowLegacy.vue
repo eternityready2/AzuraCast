@@ -1,0 +1,195 @@
+<template>
+    <section class="card mb-3">
+        <div class="card-header text-bg-primary d-flex align-items-center">
+            <div class="flex-fill">
+                <h2 class="card-title">
+                    {{ $gettext('Scheduled Time #%{num}', {num: index + 1}) }}
+                </h2>
+            </div>
+            <div class="flex-shrink-0">
+                <button
+                    type="button"
+                    class="btn btn-sm btn-dark"
+                    @click="doRemove()"
+                >
+                    <icon-ic-remove/>
+
+                    <span>
+                        {{ $gettext('Remove') }}
+                    </span>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <form-group-field
+                    :id="'legacy_edit_form_start_time_'+index"
+                    class="col-md-4"
+                    :field="r$.start_time"
+                    :label="$gettext('Start Time')"
+                    :description="$gettext('To play once per day, set the start and end times to the same value.')"
+                >
+                    <template #default="{id, model, fieldClass}">
+                        <playlist-time
+                            :id="id"
+                            v-model="model.$model"
+                            :class="fieldClass"
+                        />
+                    </template>
+                </form-group-field>
+
+                <form-group-field
+                    :id="'legacy_edit_form_end_time_'+index"
+                    class="col-md-4"
+                    :field="r$.end_time"
+                    :label="$gettext('End Time')"
+                    :description="$gettext('If the end time is before the start time, the playlist will play overnight.')"
+                >
+                    <template #default="{id, model, fieldClass}">
+                        <playlist-time
+                            :id="id"
+                            v-model="model.$model"
+                            :class="fieldClass"
+                        />
+                    </template>
+                </form-group-field>
+
+                <form-markup
+                    id="legacy_station_time_zone"
+                    class="col-md-4"
+                    :label="$gettext('Station Time Zone')"
+                >
+                    <time-zone />
+                </form-markup>
+
+                <form-group-field
+                    :id="'legacy_edit_form_start_date_'+index"
+                    class="col-md-4"
+                    :field="r$.start_date"
+                    input-type="date"
+                    :label="$gettext('Start Date')"
+                    :description="$gettext('To set this schedule to run only within a certain date range, specify a start and end date.')"
+                />
+
+                <form-group-field
+                    :id="'legacy_edit_form_end_date_'+index"
+                    class="col-md-4"
+                    :field="r$.end_date"
+                    input-type="date"
+                    :label="$gettext('End Date')"
+                />
+
+                <form-group-multi-check
+                    :id="'legacy_edit_form_days_'+index"
+                    class="col-md-4"
+                    :field="r$.days"
+                    :label="$gettext('Scheduled Play Days of Week')"
+                    :description="$gettext('Leave blank to play on every day of the week.')"
+                    :options="dayOptions"
+                    stacked
+                />
+
+                <form-group-checkbox
+                    v-if="form.source !== PlaylistSources.Requests"
+                    :id="'legacy_edit_form_loop_once_'+index"
+                    class="col-md-6"
+                    :field="r$.loop_once"
+                    :label="$gettext('Loop Once')"
+                    :description="$gettext('Only loop through playlist once.')"
+                />
+
+                <form-group-checkbox
+                    v-if="form.source !== PlaylistSources.Requests"
+                    :id="'legacy_edit_form_prevent_requests_'+index"
+                    class="col-md-6"
+                    :field="r$.prevent_requests"
+                    :label="$gettext('Block Request Queue While Active')"
+                    :description="$gettext('While this scheduled window is active, listener requests will not be played via the automatic request queue.')"
+                />
+
+                <form-group-checkbox
+                    v-if="form.source === PlaylistSources.Songs || form.source === PlaylistSources.Playlists"
+                    :id="'legacy_edit_form_reset_queue_at_start_'+index"
+                    class="col-md-6"
+                    :field="r$.reset_queue_at_start"
+                    :label="$gettext('Reset Queue at Schedule Start')"
+                    :description="$gettext('When this scheduled window starts, restart the playlist from the beginning of its rotation instead of resuming where it was interrupted.')"
+                />
+
+                <form-group-checkbox
+                    v-if="form.source === PlaylistSources.Playlists && row.reset_queue_at_start"
+                    :id="'legacy_edit_form_reset_queue_recursive_'+index"
+                    class="col-md-6"
+                    :field="r$.reset_queue_recursive"
+                    :label="$gettext('Also Reset Nested Playlists')"
+                    :description="$gettext('Also restart every nested playlist group and member playlist from the beginning.')"
+                />
+            </div>
+        </div>
+    </section>
+</template>
+
+<script setup lang="ts">
+import { required } from "@regle/rules";
+import { storeToRefs } from "pinia";
+import { toRef } from "vue";
+import PlaylistTime from "~/components/Common/TimeCode.vue";
+import FormGroupCheckbox from "~/components/Form/FormGroupCheckbox.vue";
+import FormGroupField from "~/components/Form/FormGroupField.vue";
+import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
+import FormMarkup from "~/components/Form/FormMarkup.vue";
+import TimeZone from "~/components/Stations/Common/TimeZone.vue";
+import { useStationsPlaylistsForm } from "~/components/Stations/Playlists/Form/form.ts";
+import { PlaylistSources } from "~/entities/ApiInterfaces";
+import { useTranslate } from "~/vendor/gettext";
+import { useAppScopedRegle } from "~/vendor/regle.ts";
+import IconIcRemove from "~icons/ic/baseline-remove";
+
+const { form } = storeToRefs(useStationsPlaylistsForm());
+
+interface PlaylistScheduleRow {
+    start_time: number;
+    end_time: number;
+    start_date: string;
+    end_date: string;
+    days: number[];
+    loop_once: boolean;
+    prevent_requests: boolean;
+    reset_queue_at_start: boolean;
+    reset_queue_recursive: boolean;
+}
+
+const props = defineProps<{
+    index: number;
+    row: PlaylistScheduleRow;
+}>();
+
+const emit = defineEmits<(e: "remove") => void>();
+
+const { r$ } = useAppScopedRegle(
+    toRef(props, "row"),
+    {
+        start_time: { required },
+        end_time: { required },
+    },
+    {
+        namespace: "stations-playlists",
+    },
+);
+
+const { $gettext } = useTranslate();
+
+const dayOptions = [
+    { value: 1, text: $gettext("Monday") },
+    { value: 2, text: $gettext("Tuesday") },
+    { value: 3, text: $gettext("Wednesday") },
+    { value: 4, text: $gettext("Thursday") },
+    { value: 5, text: $gettext("Friday") },
+    { value: 6, text: $gettext("Saturday") },
+    { value: 7, text: $gettext("Sunday") },
+];
+
+const doRemove = () => {
+    emit("remove");
+};
+</script>
