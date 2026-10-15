@@ -426,11 +426,11 @@ export function useStationsMenu() {
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
         {
-            key: 'playout_controls',
-            label: $gettext('Playout Controls'),
+            key: 'live_controls',
+            label: $gettext('Live Controls'),
             icon: () => IconIcGraphicEq,
             url: {
-                name: 'stations:playout_controls'
+                name: 'stations:live_controls'
             },
             visible: () => userAllowedForStation(StationPermissions.Broadcasting)
         },
@@ -476,6 +476,22 @@ export function useStationsMenu() {
                         && station.value.features.media
                 },
                 {
+                    key: 'crossfade',
+                    label: $gettext('Crossfade'),
+                    url: {
+                        name: 'stations:crossfade_profiles'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
+                {
+                    key: 'audio_settings',
+                    label: $gettext('Audio Settings'),
+                    url: {
+                        name: 'stations:audio_settings'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
+                },
+                {
                     key: 'ls_config',
                     label: $gettext('Edit Liquidsoap Configuration'),
                     url: {
@@ -492,6 +508,14 @@ export function useStationsMenu() {
                     },
                     visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                         && station.value.features.media
+                },
+                {
+                    key: 'restart',
+                    label: $gettext('Restart Broadcasting'),
+                    url: {
+                        name: 'stations:restart:index',
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Broadcasting)
                 },
             ]
         },

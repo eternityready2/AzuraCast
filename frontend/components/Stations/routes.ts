@@ -18,7 +18,21 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'stereo_tool_config', component: () => import('~/components/Stations/StereoToolConfig.vue'), name: 'stations:stereo_tool_config'},
                 {path: 'ai_news', component: () => import('~/components/Stations/AiNews.vue'), name: 'stations:ai_news'},
                 {path: 'top_of_hour', component: () => import('~/components/Stations/TopOfHour.vue'), name: 'stations:top_of_hour'},
-                {path: 'playout-controls', component: () => import('~/components/Stations/PlayoutControls.vue'), name: 'stations:playout_controls'},
+                {path: 'live-controls', component: () => import('~/components/Stations/LiveControls.vue'), name: 'stations:live_controls'},
+                {path: 'audio-settings', component: () => import('~/components/Stations/AudioSettings.vue'), name: 'stations:audio_settings'},
+                {
+                    path: 'playout-controls',
+                    name: 'stations:playout_controls',
+                    // The old tabbed page: each tab now has a page of its own.
+                    redirect: (to) => ({
+                        name: {
+                            audio_settings: 'stations:audio_settings',
+                            crossfade: 'stations:crossfade_profiles',
+                            restart_broadcasting: 'stations:restart:index',
+                        }[String(to.query.tab ?? '')] ?? 'stations:live_controls',
+                        query: {},
+                    }),
+                },
                 {path: 'dmca_compliance', component: () => import('~/components/Stations/DmcaCompliance.vue'), name: 'stations:dmca_compliance'},
                 {path: 'sponsor_plays', component: () => import('~/components/Stations/SponsorPlays.vue'), name: 'stations:sponsor_plays'},
                 {path: 'crossfade_profiles', component: () => import('~/components/Stations/CrossfadeProfiles.vue'), name: 'stations:crossfade_profiles'},
