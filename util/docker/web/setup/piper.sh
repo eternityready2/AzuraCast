@@ -67,7 +67,8 @@ rm -rf /tmp/hf_cache
 # because each .onnx is over GitHub's 100 MB git file limit.
 # en_US-kim-high.onnx holds all four moods (AI DJ "Auto Mood"); the others are
 # single-mood copies.
-KIM_URL="https://github.com/eternityready2/AzuraCast/releases/download/voice-kim-rasmussen-v1"
+# v2 (Oct 15 2026): retrained models; each .onnx.json keeps the live station's tuned settings.
+KIM_URL="https://github.com/eternityready2/AzuraCast/releases/download/voice-kim-rasmussen-v2"
 KIM_DIR=/usr/local/share/piper-station-voices/kim_rasmussen
 mkdir -p "$KIM_DIR"
 for voice in en_US-kim-high en_US-kim_warm-high en_US-kim_calm-high en_US-kim_upbeat-high en_US-kim_amused-high; do
