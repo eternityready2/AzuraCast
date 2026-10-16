@@ -9,6 +9,8 @@ export interface LinearLogItem {
     duration: number;
     // What the song really plays for: AutoCue's start to its end cue.
     aired_duration?: number;
+    // The air the line holds on the log: its length plus the talk planned after it.
+    air_seconds?: number;
     title: string | null;
     artist: string | null;
     album: string | null;

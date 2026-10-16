@@ -696,9 +696,33 @@ function secondsToHms(total: number): string {
 // own line, so counting both would double-count that time in the totals.
 const airableItems = computed(() => filteredItems.value.filter((item) => item.log_status !== "dropped"));
 
-const totalDurationFormatted = computed(() => secondsToHms(
-    airableItems.value.reduce((sum, item) => sum + (item.duration ?? 0), 0),
-));
+// How much air the lines hold, measured the way the server measures the log's
+// depth (LinearLogStore::measureCoverage): each line from its start for the air
+// it holds -- the talk planned after a song included -- and time two lines
+// share counted once. Summing song lengths left out that talk, ~28 minutes a
+// day, and read a whole 24-hour log as 23h 46m (Thu 2026-10-15).
+function airSeconds(items: LinearLogItem[]): number {
+    const spans = items
+        .filter((item) => null !== item.played_at && !item.over_scheduled)
+        .map((item) => {
+            const start = item.played_at as number;
+            return [start, start + Math.ceil(item.air_seconds ?? item.duration ?? 0)];
+        })
+        .sort((a, b) => a[0] - b[0]);
+
+    let total = 0;
+    let cursor = -Infinity;
+    for (const [start, end] of spans) {
+        const from = Math.max(start, cursor);
+        if (end > from) {
+            total += end - from;
+            cursor = end;
+        }
+    }
+    return total;
+}
+
+const totalDurationFormatted = computed(() => secondsToHms(airSeconds(airableItems.value)));
 const gapCount = computed(() => gaps.value.length);
 const totalGapDuration = computed(() => secondsToHms(gaps.value.reduce((sum, gap) => sum + gap.duration, 0)));
 // What is on the air, and what follows it, is a fact about the station, not
@@ -858,7 +882,7 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
         const sorted = [...items].sort((a, b) => (a.played_at ?? 0) - (b.played_at ?? 0)
             || Number(b.log_status === "dropped") - Number(a.log_status === "dropped"));
         const airable = sorted.filter((item) => item.log_status !== "dropped");
-        const total = airable.reduce((sum, item) => sum + (item.duration ?? 0), 0);
+        const total = airSeconds(airable);
         const lockable = sorted.filter((item) => !!item.log_entry_id
             && ["planned", "queued"].includes(item.log_status ?? ""));
 
