@@ -50,7 +50,7 @@ export function useStationSearchSources(): DataSearchSource[] {
     const shows: DataSearchSource = {
         routeName: 'stations:shows:index',
         search: async (query) => {
-            showsPromise ??= axios.get(getStationApiUrl('/shows').value).then(({data}) => rowsOf(data));
+            showsPromise ??= axios.get(getStationApiUrl('/features/shows').value).then(({data}) => rowsOf(data));
             const needle = query.toLowerCase();
 
             return (await showsPromise)
