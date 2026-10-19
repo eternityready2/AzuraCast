@@ -13,7 +13,6 @@ use App\Radio\AutoDJ\LinearLogBuilder;
 use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Radio\AutoDJ\StrictProgrammeClock;
 use Carbon\CarbonImmutable;
-use Doctrine\DBAL\ArrayParameterType;
 use Psr\SimpleCache\CacheInterface;
 use Throwable;
 
@@ -33,8 +32,13 @@ use Throwable;
  * (LinearLogStore::liveEntries()) and brought back to its ID whichever way it
  * is out:
  *
- * - A line that cannot start before the ID does not air (LinearLogHour). It is
- *   dropped now, as playout drops it once the hour has ended.
+ * - A line that cannot start before the ID (LinearLogHour) is left where it
+ *   is, behind the hour's last line, and listed as having no room. The
+ *   measure is an estimate: when the hour runs short on air, that line is the
+ *   one playout takes next. Dropped here instead, it could never come back,
+ *   and the hour's last minutes aired from the AutoDJ, a song the ID then cut
+ *   (1:57am and 3:58am, Sun 2026-10-18). Playout closes it out once its hour
+ *   has ended.
  * - An hour two minutes or more short is given a song, as the queue's hour is.
  * - An hour whose last song ends more than half a minute off the ID gets
  *   another song in that line, one that ends on the ID; see landClosingSong().
@@ -61,8 +65,6 @@ final class LinearLogHourFit
 {
     use EntityManagerAwareTrait;
     use LoggerAwareTrait;
-
-    public const string NO_ROOM_NOTE = 'Dropped: its hour has no room for it before the ID';
 
     public const string REFITTED_NOTE = 'Re-fitted to land on the top of the hour; planned: ';
 
@@ -285,7 +287,7 @@ final class LinearLogHourFit
      *     leftovers: list<array<string, mixed>>
      * } $hour
      * @param bool $isQueueHour playout is taking this hour's lines for the queue
-     * @return int lines dropped, added or re-fitted
+     * @return int lines added or re-fitted
      */
     private function fitHour(int $stationId, array $hour, bool $isQueueHour): int
     {
@@ -320,17 +322,10 @@ final class LinearLogHourFit
             return 0;
         }
 
-        // In the queue's hour a line there is no room for is closed out by
-        // playout once the queue leaves the hour (LinearLogPlayout).
-        $leftovers = [];
-        foreach ($isQueueHour ? [] : $hour['leftovers'] as $line) {
-            if (self::isPlannedAndUnlocked($line) && !self::isShow($line)) {
-                $leftovers[] = (int)$line['log_entry_id'];
-            }
-        }
-
-        $isOff = abs($offBy) > self::ON_TIME_SECONDS;
-        if ([] === $leftovers && !$isOff) {
+        // A line there is no room for stays planned behind the last one: it
+        // airs if the hour runs short, and playout closes it out once the
+        // hour has ended (LinearLogPlayout).
+        if (abs($offBy) <= self::ON_TIME_SECONDS) {
             return 0;
         }
 
@@ -347,11 +342,6 @@ final class LinearLogHourFit
             return 0;
         }
 
-        $done = $this->dropForNoRoom($stationId, $leftovers);
-        if (!$isOff) {
-            return $done;
-        }
-
         // An hour that nothing could be found for rests while it stays as it
         // was: the search reads a whole playlist, and finds the same a minute
         // later.
@@ -363,7 +353,7 @@ final class LinearLogHourFit
             intdiv((int)round($offBy), 10),
         ]);
         if ($state === $this->cache->get($restKey)) {
-            return $done;
+            return 0;
         }
 
         // Giving the queue's hour a song is the top-up's work, by its own
@@ -388,13 +378,13 @@ final class LinearLogHourFit
             );
         }
         if (0 === $changed) {
-            $changed = $this->landClosingSong($stationId, $hour, $closing, $offBy, $isQueueHour);
+            $changed = $this->landClosingSong($stationId, $hour, $closing, $offBy);
         }
         if (0 === $changed) {
             $this->cache->set($restKey, $state, self::REST_SECONDS);
         }
 
-        return $done + $changed;
+        return $changed;
     }
 
     /**
@@ -478,35 +468,6 @@ final class LinearLogHourFit
     }
 
     /**
-     * Drop planned lines their hour has no room for. A line claimed for the
-     * queue or locked by hand in the meantime stays.
-     *
-     * @param list<int> $ids
-     */
-    private function dropForNoRoom(int $stationId, array $ids): int
-    {
-        if ([] === $ids) {
-            return 0;
-        }
-
-        $dropped = (int)$this->em->getConnection()->executeStatement(
-            'UPDATE station_log_entries SET status = ?, note = ?
-            WHERE station_id = ? AND id IN (?) AND status = ? AND is_locked = 0',
-            [StationLogEntry::STATUS_DROPPED, self::NO_ROOM_NOTE, $stationId, $ids, StationLogEntry::STATUS_PLANNED],
-            [3 => ArrayParameterType::INTEGER]
-        );
-
-        if ($dropped > 0) {
-            $this->logger->notice('Linear Log: dropped planned lines their hour has no room for before its ID.', [
-                'dropped' => $dropped,
-                'of_log_entry_ids' => $ids,
-            ]);
-        }
-
-        return $dropped;
-    }
-
-    /**
      * Land the hour's last line on the ID, when it ends more than half a
      * minute past the ID or short of it: what the Top-of-Hour swap does when
      * the queue reaches the line, done in the log ahead of it.
@@ -520,19 +481,18 @@ final class LinearLogHourFit
      * the hour closer is written, when that is closer than the swap's own
      * tolerance would leave it.
      *
-     * When the last song runs over and no song is short enough for its room,
-     * it does not air whole whatever happens (the swap replaces or drops a
-     * last song the ID would cut by more than that): ahead of the queue it is
-     * dropped, and on the next pass the hour is given a song or the one before
-     * it becomes the one to fit. An ending nothing brings closer to the ID is
-     * left to the swap.
+     * An ending nothing brings closer to the ID is left to the swap, which
+     * replaces a last song the ID would cut when it airs. The last song is not
+     * dropped ahead of time when no song is short enough for its room: the
+     * room is an estimate, and an hour that then ran short had lost its last
+     * song for good.
      *
      * @param array{id_at: int, lines: non-empty-list<array<string, mixed>>, ...} $hour
      * @param array<string, mixed> $closing the hour's last line, as the page lists it
      * @param float $offBy seconds it ends past the ID; negative when short of it
-     * @return int lines re-fitted or dropped
+     * @return int lines re-fitted
      */
-    private function landClosingSong(int $stationId, array $hour, array $closing, float $offBy, bool $isQueueHour): int
+    private function landClosingSong(int $stationId, array $hour, array $closing, float $offBy): int
     {
         $song = $this->fittableSong($closing);
         if (null === $song && !$this->passesTimeOn($closing)) {
@@ -558,10 +518,6 @@ final class LinearLogHourFit
             if (self::landsCloser($refit, $offBy) && $this->putSong($refit, $offBy) > 0) {
                 return 1;
             }
-        }
-
-        if (null !== $song && null === $ofClosing && $offBy > 0 && !$isQueueHour) {
-            return $this->dropForNoRoom($stationId, [(int)$closing['log_entry_id']]);
         }
 
         return 0;

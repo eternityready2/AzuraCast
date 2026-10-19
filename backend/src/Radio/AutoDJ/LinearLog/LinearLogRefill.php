@@ -97,8 +97,6 @@ final class LinearLogRefill
     private const array NOT_REFILLED = [
         // The hour already ended or overran; its time has gone.
         'Dropped: its hour ran long',
-        // The hour is full without it.
-        LinearLogHourFit::NO_ROOM_NOTE,
         // A strict programme's own source airs in that time.
         'Dropped: a strict programme owns this air time',
         // The slot is in the past: it was handed to Liquidsoap and never aired.
@@ -301,9 +299,7 @@ final class LinearLogRefill
         bool $landsOnId,
     ): int {
         // A top-up line that was dropped means something takes lines out of this
-        // hour; adding more would only feed it. That holds for one the hour
-        // turned out to have no room for (LinearLogHourFit) as well: an hour
-        // given a song and then left without room for it is not given another.
+        // hour; adding more would only feed it.
         $topUps = $this->em->getConnection()->fetchAssociative(
             'SELECT COUNT(*) AS total, COALESCE(SUM(status = ?), 0) AS dropped FROM station_log_entries
             WHERE station_id = ? AND planned_at >= ? AND planned_at < ? AND payload LIKE ?',

@@ -133,8 +133,8 @@ final class LinearLogPlayout implements EventSubscriberInterface
      * They opened the new hour ahead of its own lines, and every hour passed
      * its overrun on: 16 minutes by 9pm on Sun 2026-10-11, which put the 9pm
      * hour's last four songs inside the 10pm Life Perspectives show. A
-     * leftover stays planned, for its own hour only, until the queue leaves
-     * that hour (closeOutEndedHours()).
+     * leftover stays planned, for its own hour only, until that hour ends
+     * (closeOutEndedHours()).
      * Shows are timed events and are offered as before.
      *
      * "In order" is air-time order. Sequence is only the order lines were
@@ -486,48 +486,33 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
-     * Drop the planned lines left over from an hour the queue has left
+     * Drop the planned lines left over from an hour that has already ended
      * ("hit the post": the new hour opens with its own first line).
      *
-     * Once the queue fills a slot of the next hour, nextLineFor() never offers
-     * the hour before another line, so its leftovers are dropped then rather
-     * than when the clock reaches the top of the hour. Kept planned until
-     * then, the page listed them after the ID as "Over" for the hour's last
-     * minutes although they would never air (12:59:59am, Wed 2026-10-14).
+     * An hour has only "ended" once the wall clock is past it. The expected
+     * slot time can run hours ahead of the clock (a long programme row in the
+     * queue put it at 11:07 at 08:59), and using it alone dropped the 10:00
+     * God Family & Country line as a leftover before its hour began -- the
+     * hour then aired nothing (Mon 2026-10-05).
+     *
+     * Nor is the hour on the clock closed early once the slot time passes its
+     * end. That time is the queue's estimate, and it jumps: behind a stream
+     * show, and after a restart, it reached the next hour with most of the
+     * hour on the clock still to air. Closing early then dropped all eleven
+     * songs left in the 9am hour at 9:00:37 (Thu 2026-10-15) and all nine
+     * left in the 11pm hour at 11:19:30 (Fri 2026-10-16), and the AutoDJ
+     * filled both hours. A leftover is never offered once the queue is in a
+     * later hour (nextLineFor()), and the page lists it as having no room
+     * (LinearLogStore::floatSoftLines()), so it waits harmlessly for the
+     * clock.
      */
     private function closeOutEndedHours(Station $station, DateTimeInterface $expected): void
     {
-        $tz = $station->getTimezoneObject();
-        $clockHourStart = CarbonImmutable::now($tz)->startOfHour()->getTimestamp();
-
-        $this->dropLeftoversBefore(
-            $station,
-            min(CarbonImmutable::instance($expected)->setTimezone($tz)->startOfHour()->getTimestamp(), $clockHourStart),
-            'Dropped: its hour ran long',
-            false
-        );
-
-        // Only the hour on the clock is closed early. The expected slot time
-        // can run hours ahead of the clock (a long programme row in the queue
-        // put it at 11:07 at 08:59), and closing every hour before it dropped
-        // the 10:00 God Family & Country line before its hour began -- the
-        // hour then aired nothing (Mon 2026-10-05). Programme lines are left
-        // to the hour's end: nextLineFor() still offers them in later slots.
-        if ($this->hourEnd($station, $expected) - 3600 > $clockHourStart) {
-            $this->dropLeftoversBefore($station, $clockHourStart + 3600, LinearLogHourFit::NO_ROOM_NOTE, true);
-        }
-    }
-
-    private function dropLeftoversBefore(Station $station, int $hourStart, string $note, bool $keepProgrammes): void
-    {
-        $keptPlaylists = $this->strictLanePlaylistIds($station);
-        if ($keepProgrammes) {
-            foreach ($station->playlists as $playlist) {
-                if ($playlist->is_programme) {
-                    $keptPlaylists[] = $playlist->id;
-                }
-            }
-        }
+        $hourStart = CarbonImmutable::instance($expected)
+            ->min(CarbonImmutable::now())
+            ->setTimezone($station->getTimezoneObject())
+            ->startOfHour()
+            ->getTimestamp();
 
         // Lines of a show the strict lane plays from its own files are neither
         // queued nor dropped here: Liquidsoap airs the show, and the queue only
@@ -542,17 +527,16 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 AND e.status = :planned
                 AND e.planned_at < :hourStart
                 AND (e.payload IS NULL OR e.payload NOT LIKE :programme OR e.planned_at + e.duration <= :now)
-                AND (e.playlist IS NULL OR e.playlist NOT IN (:keptPlaylists))
+                AND (e.playlist IS NULL OR e.playlist NOT IN (:strictLane))
             DQL
         )->setParameter('dropped', StationLogEntry::STATUS_DROPPED)
-            ->setParameter('keptPlaylists', $keptPlaylists)
-            ->setParameter('note', $note)
+            ->setParameter('strictLane', $this->strictLanePlaylistIds($station))
+            ->setParameter('note', 'Dropped: its hour ran long')
             // A scheduled programme block is not a leftover while its window is
             // still open: the next music line can belong to the following hour
-            // because the programme owns the air until then. Closing early, it
-            // is kept until its hour ends whatever its time.
+            // because the programme owns the air until then.
             ->setParameter('programme', '%scheduled_programme%')
-            ->setParameter('now', $keepProgrammes ? 0 : time())
+            ->setParameter('now', time())
             ->setParameter('station', $station)
             ->setParameter('planned', StationLogEntry::STATUS_PLANNED)
             ->setParameter('hourStart', $hourStart)

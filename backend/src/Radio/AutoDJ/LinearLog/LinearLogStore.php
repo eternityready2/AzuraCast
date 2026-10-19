@@ -780,8 +780,13 @@ final class LinearLogStore
         );
 
         $playlistNames = [];
+        $showPlaylistIds = [];
         foreach ($station->playlists as $playlist) {
             $playlistNames[$playlist->id] = $playlist->name;
+            // A show's file airs in parts (ProgrammeParts::isProgrammeRow()).
+            if ($playlist->is_programme && PlaylistSources::Songs === $playlist->source) {
+                $showPlaylistIds[$playlist->id] = true;
+            }
         }
 
         // A line is re-timed only from its own live-queue row. The saved log is
@@ -863,8 +868,12 @@ final class LinearLogStore
                 // once it was queued, its saved name being the row's already:
                 // "Fear Is Not My Future" (422s) was timed as "Made For Me"
                 // (374s), and 3 PM read 0:49 short of an ID it landed on (Tue
-                // 2026-10-13).
-                if (null !== $live['duration']) {
+                // 2026-10-13). A row with no length keeps the line's: a stream
+                // programme's row never has one (it airs for its schedule
+                // window), and taking its 0 drew the show as one second long and
+                // the rest of its hour as a gap (Sun 2026-10-18, Life
+                // Perspectives Weekend: "59m 21s before the Station ID").
+                if ((float)($live['duration'] ?? 0) > 0) {
                     $entry['duration'] = max(1.0, (float)$live['duration']);
                 }
                 if (null !== ($live['playlist_id'] ?? null)) {
@@ -924,6 +933,7 @@ final class LinearLogStore
             )),
             $queued,
             $saved,
+            $showPlaylistIds,
         );
     }
 
@@ -948,12 +958,17 @@ final class LinearLogStore
      * the ID with. The page measured the last song by its whole file, and every
      * hour that landed on the ID read 7-19s over (Mon 2026-10-12). Display only.
      *
+     * A show's line is one part of its file and plays no longer than the part:
+     * measured by the whole file, each part of Mad Christian Radio (one 2h50m
+     * file, three parts cut at the IDs) read its hour "Over 113:16".
+     *
      * @param list<array<string, mixed>> $entries
      * @param array<int, array<string, mixed>> $queued live-queue rows, by line id
      * @param array<int, array<string, mixed>> $saved saved lines, by line id
+     * @param array<int, true> $showPlaylistIds playlists whose files air in parts
      * @return list<array<string, mixed>>
      */
-    private function withAiredLengths(array $entries, array $queued, array $saved): array
+    private function withAiredLengths(array $entries, array $queued, array $saved, array $showPlaylistIds): array
     {
         // What each line plays now: its queued row's song, else its saved line's.
         $mediaIds = [];
@@ -979,9 +994,15 @@ final class LinearLogStore
         }
 
         foreach ($mediaIds as $i => $mediaId) {
-            if (isset($media[$mediaId])) {
-                $entries[$i]['aired_duration'] = round($this->airedLength->lengthOf($media[$mediaId]), 1);
+            if (!isset($media[$mediaId])) {
+                continue;
             }
+
+            $aired = $this->airedLength->lengthOf($media[$mediaId]);
+            if (isset($showPlaylistIds[(int)($entries[$i]['playlist_id'] ?? 0)])) {
+                $aired = min($aired, (float)($entries[$i]['duration'] ?? $aired));
+            }
+            $entries[$i]['aired_duration'] = round($aired, 1);
         }
 
         return $entries;

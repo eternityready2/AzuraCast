@@ -821,7 +821,11 @@ const overUnderByHour = computed(() => {
         const closingId = items.find((item) => isTopOfHourId(item) && (item.played_at ?? 0) >= hourEnd - 120);
         const target = closingId?.played_at ?? hourEnd;
 
-        const lines = items.filter((item) => item !== closingId && (item.played_at ?? 0) < target);
+        // A line the hour has no room for does not air in it (LinearLogHourFit
+        // leaves it out the same way); it waits for its hour to end.
+        const lines = items.filter((item) => item !== closingId
+            && !item.over_scheduled
+            && (item.played_at ?? 0) < target);
         if (lines.length === 0) continue;
 
         // A show the ID interrupts carries on after it: the hour is not over.
