@@ -6,6 +6,7 @@ namespace App\Entity\Repository;
 
 use App\Container\LoggerAwareTrait;
 use App\Doctrine\Repository;
+use App\Entity\CustomField;
 use App\Entity\Song;
 use App\Entity\Station;
 use App\Entity\StationMedia;
@@ -189,6 +190,38 @@ final class StationMediaRepository extends Repository
 
                 $this->em->persist($customFieldRow);
 
+                $fieldCollection->add($customFieldRow);
+            }
+        }
+
+        // Fill the Year field from the file's year tag, but only while it is empty, so a year
+        // typed in (review/Edit) or found online is never overwritten when the file is re-read.
+        $yearField = $this->em->getRepository(CustomField::class)->findOneBy(
+            ['short_name' => 'year'],
+            ['id' => 'ASC']
+        );
+        $yearTag = trim((string)($tags['year'] ?? ''));
+        if (
+            $yearField instanceof CustomField
+            && empty($yearField->auto_assign)
+            && 1 === preg_match('/\b(1[89]\d{2}|20\d{2})\b/', $yearTag, $yearMatch)
+        ) {
+            $hasYear = false;
+            foreach ($fieldCollection as $existingCustomField) {
+                /** @var StationMediaCustomField $existingCustomField */
+                if (
+                    $existingCustomField->field->id === $yearField->id
+                    && '' !== trim((string)$existingCustomField->value)
+                ) {
+                    $hasYear = true;
+                    break;
+                }
+            }
+
+            if (!$hasYear) {
+                $customFieldRow = new StationMediaCustomField($media, $yearField);
+                $customFieldRow->value = $yearMatch[1];
+                $this->em->persist($customFieldRow);
                 $fieldCollection->add($customFieldRow);
             }
         }

@@ -50,6 +50,15 @@
                 :valid-mime-types="validMimeTypes"
                 :current-directory="currentDirectory"
                 @relist="onTriggerRelist"
+                @uploaded="onUploaded"
+            />
+
+            <media-review
+                ref="$mediaReview"
+                :batch-url="batchUrl"
+                :storage-key="reviewStorageKey"
+                :media-categories="mediaCategories"
+                @relist="onTriggerRelist"
             />
 
             <media-toolbar
@@ -271,6 +280,7 @@ import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import MediaToolbar from "~/components/Stations/Media/MediaToolbar.vue";
 import Breadcrumb from "~/components/Stations/Media/Breadcrumb.vue";
 import FileUpload from "~/components/Stations/Media/FileUpload.vue";
+import MediaReview, {ReviewItem} from "~/components/Stations/Media/MediaReview.vue";
 import NewDirectoryModal from "~/components/Stations/Media/NewDirectoryModal.vue";
 import DownloadFromUrlModal from "~/components/Stations/Media/DownloadFromUrlModal.vue";
 import MoveFilesModal from "~/components/Stations/Media/MoveFilesModal.vue";
@@ -502,6 +512,16 @@ const queryClient = useQueryClient();
 const propsQueryKey = queryKeyWithStation([QueryKeys.StationMedia, 'props']);
 
 const onAddPlaylist = () => {
+    void queryClient.invalidateQueries({queryKey: propsQueryKey});
+};
+
+const $mediaReview = useTemplateRef('$mediaReview');
+const reviewStorageKey = computed(() => `azuracast_media_review:${uploadUrl.value}`);
+
+const onUploaded = (items: ReviewItem[]) => {
+    $mediaReview.value?.add(items);
+
+    // The upload may have added the Year/Label/Writers/ISWC custom fields; reload them for Edit.
     void queryClient.invalidateQueries({queryKey: propsQueryKey});
 };
 

@@ -13,6 +13,7 @@ use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationMediaCustomField;
 use App\Entity\StorageLocation;
+use App\Lock\LockFactory;
 use App\Message\LookupMediaMetadataMessage;
 use App\Service\Discogs;
 use App\Service\LastFm;
@@ -92,6 +93,7 @@ final class MetadataLookup
         private readonly CustomFieldRepository $customFieldRepo,
         private readonly CacheInterface $cache,
         private readonly Client $httpClient,
+        private readonly LockFactory $lockFactory,
     ) {
     }
 
@@ -341,17 +343,40 @@ final class MetadataLookup
     {
         $repo = $this->em->getRepository(CustomField::class);
 
-        $fields = [];
-        foreach (self::CUSTOM_FIELDS as $field => $name) {
-            $record = $repo->findOneBy(['short_name' => $field]);
-            if (!($record instanceof CustomField)) {
-                $record = new CustomField();
-                $record->name = $name;
-                $record->short_name = $field;
-                $this->em->persist($record);
-                $this->em->flush();
+        $find = function () use ($repo): array {
+            $fields = [];
+            foreach (array_keys(self::CUSTOM_FIELDS) as $field) {
+                $record = $repo->findOneBy(['short_name' => $field], ['id' => 'ASC']);
+                if ($record instanceof CustomField) {
+                    $fields[$field] = $record;
+                }
             }
-            $fields[$field] = $record;
+            return $fields;
+        };
+
+        $fields = $find();
+        if (count($fields) === count(self::CUSTOM_FIELDS)) {
+            return $fields;
+        }
+
+        // Several uploads can get here at once; only one may create the fields.
+        $lock = $this->lockFactory->createLock('media_lookup_custom_fields', 30);
+        $lock->acquire(true);
+
+        try {
+            $fields = $find();
+            foreach (self::CUSTOM_FIELDS as $field => $name) {
+                if (!isset($fields[$field])) {
+                    $record = new CustomField();
+                    $record->name = $name;
+                    $record->short_name = $field;
+                    $this->em->persist($record);
+                    $this->em->flush();
+                    $fields[$field] = $record;
+                }
+            }
+        } finally {
+            $lock->release();
         }
 
         return $fields;
