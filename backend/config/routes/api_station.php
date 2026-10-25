@@ -1026,7 +1026,6 @@ return static function (RouteCollectorProxy $group) {
                                     );
                                 }
                             );
-
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));

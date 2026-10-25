@@ -12,14 +12,14 @@ use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Enums\StationMediaTypes;
-use App\Entity\StationPlaylist;
-use App\Entity\StationSchedule;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
+use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
+use App\Entity\StationSchedule;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
@@ -892,7 +892,11 @@ final class ClockWheelPlaybackPlanner
             $behindPace[$behind->id] = true;
         }
 
-        $pool = array_filter($remaining, static fn (array $r, int $pid) => isset($behindPace[$pid]), ARRAY_FILTER_USE_BOTH);
+        $pool = array_filter(
+            $remaining,
+            static fn (array $r, int $pid) => isset($behindPace[$pid]),
+            ARRAY_FILTER_USE_BOTH
+        );
         if ([] === $pool) {
             $pool = $remaining;
         }
@@ -1281,7 +1285,7 @@ final class ClockWheelPlaybackPlanner
         foreach ($recentHistory as $h) {
             $songId = $h['song_id'];
             $ts = $h['timestamp_played'];
-            if ($ts instanceof \DateTimeInterface) {
+            if ($ts instanceof DateTimeInterface) {
                 $ts = $ts->getTimestamp();
             }
             $ts = (int)$ts;

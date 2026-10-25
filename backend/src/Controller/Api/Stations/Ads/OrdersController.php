@@ -9,10 +9,12 @@ use App\Entity\AdAdvertiser;
 use App\Entity\AdOrder;
 use App\Entity\Api\Error;
 use App\Entity\Api\Status;
+use App\Entity\StationMedia;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Service\Ads\AdOrderPlayoutSync;
+use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\Serializer\Serializer;
@@ -124,7 +126,7 @@ final class OrdersController extends AbstractApiCrudController
         $advertiser = $this->em->find(AdAdvertiser::class, $advertiserId);
 
         if (null === $advertiser || $advertiser->station->id !== $station->id) {
-            throw new \InvalidArgumentException('Choose which advertiser this booking is for.');
+            throw new InvalidArgumentException('Choose which advertiser this booking is for.');
         }
 
         $record = new AdOrder($station, $advertiser);
@@ -208,11 +210,11 @@ final class OrdersController extends AbstractApiCrudController
             return;
         }
 
-        $media = $this->em->find(\App\Entity\StationMedia::class, (int)$mediaId);
+        $media = $this->em->find(StationMedia::class, (int)$mediaId);
         $storageLocation = $request->getStation()->media_storage_location;
 
         if (null === $media || $media->storage_location->id !== $storageLocation->id) {
-            throw new \InvalidArgumentException('That audio file is not in this station\'s library.');
+            throw new InvalidArgumentException('That audio file is not in this station\'s library.');
         }
 
         $record->media = $media;
