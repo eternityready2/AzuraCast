@@ -1,375 +1,377 @@
 <template>
+    <!-- Extra tools: song details and file tools for the ticked files. -->
     <div
-        id="app-toolbar"
-        class="media-toolbar"
+        class="station-toolbar"
+        role="toolbar"
+        :aria-label="$gettext('Media tools')"
     >
-        <div class="media-toolbar-utilities d-flex flex-wrap align-items-center justify-content-between gap-3">
-            <div class="media-toolbar-title">
-                <span class="media-toolbar-title-mark" />
-                <span>{{ $gettext('Library') }}</span>
-            </div>
-
-            <div class="media-toolbar-utility-actions d-flex flex-wrap align-items-center gap-2">
-                <button
-                    type="button"
-                    class="btn btn-sm btn-secondary"
-                    @click="downloadFromUrl"
+        <div class="station-toolbar-rows">
+            <div class="station-toolbar-row">
+                <div
+                    class="station-toolbar-selection"
+                    :class="{'is-active': selectedItems.all.length > 0}"
                 >
-                    <icon-ic-cloud-download/>
-                    <span>
-                        {{ $gettext('Download from URL') }}
+                    <icon-ic-check-box class="station-toolbar-selection-icon" />
+                    <span v-if="selectedItems.all.length > 0">
+                        {{ $gettext('%{count} selected', {count: String(selectedItems.all.length)}) }}
                     </span>
-                </button>
-
-                <button
-                    type="button"
-                    class="btn btn-sm btn-primary"
-                    @click="createDirectory"
-                >
-                    <icon-ic-folder/>
-                    <span>
-                        {{ $gettext('New Folder') }}
-                    </span>
-                </button>
-            </div>
-        </div>
-
-        <div class="media-toolbar-bulk">
-            <div class="media-toolbar-section media-toolbar-classify">
-                <div class="media-toolbar-section-heading">
-                    <span class="media-toolbar-label">
-                        {{ $gettext('With selected:') }}
-                    </span>
-                    <span
-                        v-if="selectedItems.all.length > 0"
-                        class="media-toolbar-count"
-                    >
-                        {{ selectedItems.all.length }}
+                    <span v-else>
+                        {{ $gettext('Tick files to use these tools') }}
                     </span>
                 </div>
 
-                <div class="media-toolbar-controls d-flex flex-wrap align-items-center gap-2">
-                    <select
-                        id="bulk_media_type"
-                        class="form-select form-select-sm bulk-classify-select"
-                        :disabled="!hasSelectedClassifyItems || classifyPending"
-                        :title="$gettext('Set type on selected files')"
-                        @change="onBulkTypeChange"
-                    >
-                        <option
-                            value=""
-                            selected
-                            disabled
-                            hidden
-                        >
-                            {{ $gettext('Set type…') }}
-                        </option>
-                        <option
-                            v-for="opt in mediaTypeOptions"
-                            :key="opt.value"
-                            :value="opt.value"
-                        >
-                            {{ opt.shortLabel }}
-                        </option>
-                    </select>
-
-                    <select
-                        id="bulk_media_category"
-                        class="form-select form-select-sm bulk-classify-select"
-                        :disabled="!hasSelectedClassifyItems || classifyPending"
-                        :title="$gettext('Set category on selected files')"
-                        @change="onBulkCategoryChange"
-                    >
-                        <option
-                            value=""
-                            selected
-                            disabled
-                            hidden
-                        >
-                            {{ $gettext('Set category…') }}
-                        </option>
-                        <option value="none">
-                            {{ $gettext('No category') }}
-                        </option>
-                        <option
-                            v-for="cat in mediaCategories"
-                            :key="cat.id"
-                            :value="String(cat.id)"
-                        >
-                            {{ cat.name }}
-                        </option>
-                    </select>
-
-                    <div class="input-group input-group-sm bulk-genre-group">
-                        <input
-                            id="bulk_media_genre"
-                            v-model="bulkGenre"
-                            type="text"
-                            class="form-control"
+                <div class="station-toolbar-section">
+                    <span class="station-toolbar-label">
+                        {{ $gettext('Song Details') }}
+                    </span>
+                    <div class="station-toolbar-controls">
+                        <select
+                            id="bulk_media_type"
+                            class="form-select form-select-sm bulk-classify-select"
                             :disabled="!hasSelectedClassifyItems || classifyPending"
-                            :title="$gettext('Set genre on selected files')"
-                            :placeholder="$gettext('Set genre…')"
-                            @keyup.enter="onBulkGenreApply"
+                            :title="$gettext('Set type on selected files')"
+                            @change="onBulkTypeChange"
                         >
+                            <option
+                                value=""
+                                selected
+                                disabled
+                                hidden
+                            >
+                                {{ $gettext('Set type…') }}
+                            </option>
+                            <option
+                                v-for="opt in mediaTypeOptions"
+                                :key="opt.value"
+                                :value="opt.value"
+                            >
+                                {{ opt.shortLabel }}
+                            </option>
+                        </select>
+
+                        <select
+                            id="bulk_media_category"
+                            class="form-select form-select-sm bulk-classify-select"
+                            :disabled="!hasSelectedClassifyItems || classifyPending"
+                            :title="$gettext('Set category on selected files')"
+                            @change="onBulkCategoryChange"
+                        >
+                            <option
+                                value=""
+                                selected
+                                disabled
+                                hidden
+                            >
+                                {{ $gettext('Set category…') }}
+                            </option>
+                            <option value="none">
+                                {{ $gettext('No category') }}
+                            </option>
+                            <option
+                                v-for="cat in mediaCategories"
+                                :key="cat.id"
+                                :value="String(cat.id)"
+                            >
+                                {{ cat.name }}
+                            </option>
+                        </select>
+
+                        <div class="input-group input-group-sm bulk-genre-group">
+                            <input
+                                id="bulk_media_genre"
+                                v-model="bulkGenre"
+                                type="text"
+                                class="form-control"
+                                :disabled="!hasSelectedClassifyItems || classifyPending"
+                                :title="$gettext('Set genre on selected files')"
+                                :placeholder="$gettext('Set genre…')"
+                                @keyup.enter="onBulkGenreApply"
+                            >
+
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                :disabled="!hasSelectedClassifyItems || classifyPending || bulkGenre.trim() === ''"
+                                @click="onBulkGenreApply"
+                            >
+                                {{ $gettext('Apply Genre') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="station-toolbar-row">
+                <div class="station-toolbar-section">
+                    <span class="station-toolbar-label">
+                        {{ $gettext('Tools') }}
+                    </span>
+                    <div class="station-toolbar-controls">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            @click="downloadFromUrl"
+                        >
+                            <icon-ic-cloud-download/>
+                            <span>
+                                {{ $gettext('Download from URL') }}
+                            </span>
+                        </button>
 
                         <button
                             type="button"
-                            class="btn btn-primary"
-                            :disabled="!hasSelectedClassifyItems || classifyPending || bulkGenre.trim() === ''"
-                            @click="onBulkGenreApply"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!hasSelectedClassifyItems"
+                            :title="$gettext('Find the album, record label, year, genre, ISRC, songwriters and cover art online for the songs you ticked. You review what was found before anything is saved.')"
+                            @click="lookUpSelected"
                         >
-                            {{ $gettext('Apply Genre') }}
+                            <icon-ic-travel-explore/>
+
+                            <span>
+                                {{ $gettext('Find Song Info Online') }}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!canJoin"
+                            :title="$gettext('Tick two or more files, such as the parts of a program, to combine them into one new file. The original files are kept.')"
+                            @click="joinFiles"
+                        >
+                            <icon-ic-merge/>
+
+                            <span>
+                                {{ $gettext('Join Files into One') }}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!hasSelectedClassifyItems"
+                            :title="$gettext('Create or populate playlists from the MP3 genre of selected files')"
+                            @click="createGenrePlaylists"
+                        >
+                            <icon-ic-playlist-add/>
+
+                            <span>
+                                {{ $gettext('Create Playlists from Genre') }}
+                            </span>
                         </button>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
 
-            <div class="media-toolbar-section media-toolbar-actions">
-                <div class="media-toolbar-section-heading">
-                    <span class="media-toolbar-label">
-                        {{ $gettext('Actions') }}
-                    </span>
-                </div>
+    <!-- Stock AzuraCast row: file actions on the left, New Folder on the right. -->
+    <div
+        id="app-toolbar"
+        class="d-flex pt-2"
+    >
+        <div class="flex-fill buttons d-flex align-items-center">
+            <span>
+                {{ $gettext('With selected:') }}
+            </span>
 
-                <div class="media-toolbar-action-controls d-flex flex-wrap align-items-center gap-2">
-                    <div class="btn-group btn-group-sm dropdown allow-focus">
-                        <div class="dropdown">
-                            <button
-                                ref="$playlistDropdown"
-                                class="btn btn-sm btn-primary dropdown-toggle"
-                                type="button"
-                                data-bs-toggle="dropdown"
-                                data-bs-auto-close="outside"
-                                aria-expanded="false"
-                                :disabled="!hasSelectedItems"
-                            >
-                                <icon-ic-clear-all/>
+            <div class="btn-group btn-group-sm dropdown allow-focus">
+                <div class="dropdown">
+                    <button
+                        ref="$playlistDropdown"
+                        class="btn btn-sm btn-primary dropdown-toggle"
+                        type="button"
+                        data-bs-toggle="dropdown"
+                        data-bs-auto-close="outside"
+                        aria-expanded="false"
+                        :disabled="!hasSelectedItems"
+                    >
+                        <icon-ic-clear-all/>
 
-                                <span>
-                                    {{ $gettext('Playlists') }}
-                                </span>
-                                <span class="caret" />
-                            </button>
+                        <span>
+                            {{ $gettext('Playlists') }}
+                        </span>
+                        <span class="caret" />
+                    </button>
+                    <div
+                        class="dropdown-menu"
+                        style="min-width: 300px;"
+                    >
+                        <form
+                            class="px-4 py-3"
+                            @submit.prevent="setPlaylists"
+                        >
                             <div
-                                class="dropdown-menu"
-                                style="min-width: 300px;"
+                                v-for="playlist in playlists"
+                                :key="playlist.id"
+                                class="form-group"
                             >
-                                <form
-                                    class="px-4 py-3"
-                                    @submit.prevent="setPlaylists"
-                                >
-                                    <div
-                                        v-for="playlist in playlists"
-                                        :key="playlist.id"
-                                        class="form-group"
+                                <div class="custom-control custom-checkbox">
+                                    <input
+                                        :id="'chk_playlist_' + playlist.id"
+                                        v-model="checkedPlaylists"
+                                        type="checkbox"
+                                        class="custom-control-input"
+                                        name="playlists[]"
+                                        :value="playlist.id"
                                     >
-                                        <div class="custom-control custom-checkbox">
-                                            <input
-                                                :id="'chk_playlist_' + playlist.id"
-                                                v-model="checkedPlaylists"
-                                                type="checkbox"
-                                                class="custom-control-input"
-                                                name="playlists[]"
-                                                :value="playlist.id"
-                                            >
-                                            <label
-                                                class="custom-control-label"
-                                                :for="'chk_playlist_'+playlist.id"
-                                            >
-                                                {{ playlist.name }}
-                                            </label>
-                                        </div>
-                                    </div>
-
-                                    <hr class="dropdown-divider">
-
-                                    <div class="form-group mt-3 mb-4">
-                                        <div class="input-group custom-control custom-checkbox">
-                                            <div class="input-group-text">
-                                                <input
-                                                    id="chk_playlist_new"
-                                                    v-model="checkedPlaylists"
-                                                    type="checkbox"
-                                                    class="custom-control-input"
-                                                    value="new"
-                                                >
-                                                <label
-                                                    class="custom-control-label"
-                                                    for="chk_playlist_new"
-                                                />
-                                            </div>
-
-                                            <input
-                                                id="new_playlist_name"
-                                                v-model="newPlaylist"
-                                                type="text"
-                                                class="form-control p-2"
-                                                name="new_playlist_name"
-                                                style="min-width: 150px;"
-                                                :placeholder="$gettext('New Playlist')"
-                                            >
-                                        </div>
-                                    </div>
-
-                                    <div class="buttons">
-                                        <button
-                                            class="btn btn-primary"
-                                            type="submit"
-                                        >
-                                            {{ $gettext('Save') }}
-                                        </button>
-                                        <button
-                                            class="btn btn-warning"
-                                            type="button"
-                                            @click="clearPlaylists()"
-                                        >
-                                            {{ $gettext('Clear') }}
-                                        </button>
-                                    </div>
-                                </form>
+                                    <label
+                                        class="custom-control-label"
+                                        :for="'chk_playlist_'+playlist.id"
+                                    >
+                                        {{ playlist.name }}
+                                    </label>
+                                </div>
                             </div>
-                        </div>
+
+                            <hr class="dropdown-divider">
+
+                            <div class="form-group mt-3 mb-4">
+                                <div class="input-group custom-control custom-checkbox">
+                                    <div class="input-group-text">
+                                        <input
+                                            id="chk_playlist_new"
+                                            v-model="checkedPlaylists"
+                                            type="checkbox"
+                                            class="custom-control-input"
+                                            value="new"
+                                        >
+                                        <label
+                                            class="custom-control-label"
+                                            for="chk_playlist_new"
+                                        />
+                                    </div>
+
+                                    <input
+                                        id="new_playlist_name"
+                                        v-model="newPlaylist"
+                                        type="text"
+                                        class="form-control p-2"
+                                        name="new_playlist_name"
+                                        style="min-width: 150px;"
+                                        :placeholder="$gettext('New Playlist')"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="buttons">
+                                <button
+                                    class="btn btn-primary"
+                                    type="submit"
+                                >
+                                    {{ $gettext('Save') }}
+                                </button>
+                                <button
+                                    class="btn btn-warning"
+                                    type="button"
+                                    @click="clearPlaylists()"
+                                >
+                                    {{ $gettext('Clear') }}
+                                </button>
+                            </div>
+                        </form>
                     </div>
-
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!hasSelectedItems"
-                        @click="moveFiles"
-                    >
-                        <icon-ic-open-with/>
-
-                        <span>
-                            {{ $gettext('Move') }}
-                        </span>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!hasSelectedClassifyItems"
-                        :title="$gettext('Find the album, record label, year, genre, ISRC, songwriters and cover art online for the songs you ticked. You review what was found before anything is saved.')"
-                        @click="lookUpSelected"
-                    >
-                        <icon-ic-travel-explore/>
-
-                        <span>
-                            {{ $gettext('Find Song Info Online') }}
-                        </span>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!canJoin"
-                        :title="$gettext('Tick two or more files, such as the parts of a program, to combine them into one new file. The original files are kept.')"
-                        @click="joinFiles"
-                    >
-                        <icon-ic-merge/>
-
-                        <span>
-                            {{ $gettext('Join Files into One') }}
-                        </span>
-                    </button>
-
-                    <div class="btn-group btn-group-sm dropdown allow-focus">
-                        <div class="dropdown">
-                            <button
-                                class="btn btn-sm btn-secondary dropdown-toggle"
-                                type="button"
-                                data-bs-toggle="dropdown"
-                                aria-expanded="false"
-                                :disabled="!hasSelectedItems"
-                            >
-                                <icon-ic-more-horiz/>
-                                <span>
-                                    {{ $gettext('More') }}
-                                </span>
-                                <span class="caret" />
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <button
-                                        type="button"
-                                        :title="$gettext('Queue the selected media to play next')"
-                                        class="dropdown-item"
-                                        @click="doQueue"
-                                    >
-                                        {{ $gettext('Queue') }}
-                                    </button>
-                                </li>
-                                <li>
-                                    <button
-                                        v-if="supportsImmediateQueue"
-                                        type="button"
-                                        class="dropdown-item"
-                                        :title="$gettext('Make the selected media play immediately, interrupting existing media')"
-                                        @click="doImmediateQueue"
-                                    >
-                                        {{ $gettext('Play Now') }}
-                                    </button>
-                                </li>
-                                <li>
-                                    <button
-                                        type="button"
-                                        class="dropdown-item"
-                                        :title="$gettext('Analyze and reprocess the selected media')"
-                                        @click="doReprocess"
-                                    >
-                                        {{ $gettext('Reprocess') }}
-                                    </button>
-                                </li>
-                                <li>
-                                    <button
-                                        type="button"
-                                        class="dropdown-item"
-                                        :title="$gettext('Remove any extra metadata (fade points, cue points, etc.) from the selected media')"
-                                        @click="doClearExtra"
-                                    >
-                                        {{ $gettext('Clear Extra Metadata') }}
-                                    </button>
-                                </li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <button
-                                        type="button"
-                                        class="dropdown-item"
-                                        :disabled="!hasSelectedClassifyItems"
-                                        :title="$gettext('Create or populate playlists from the MP3 genre of selected files')"
-                                        @click="createGenrePlaylists"
-                                    >
-                                        {{ $gettext('Create Playlists from Genre') }}
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-danger"
-                        :disabled="!hasSelectedItems"
-                        @click="doDelete"
-                    >
-                        <icon-ic-delete/>
-
-                        <span>
-                            {{ $gettext('Delete') }}
-                        </span>
-                    </button>
                 </div>
-
-                <ul class="media-toolbar-hints">
-                    <li>
-                        <strong>{{ $gettext('Find Song Info Online') }}:</strong>
-                        {{ $gettext('tick songs to fill in their album, record label, year, ISRC, songwriters and cover art. You review everything before it is saved.') }}
-                    </li>
-                    <li>
-                        <strong>{{ $gettext('Join Files into One') }}:</strong>
-                        {{ $gettext('tick two or more files, such as the parts of a program, to make one new file. The originals are kept.') }}
-                    </li>
-                </ul>
             </div>
+
+            <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                :disabled="!hasSelectedItems"
+                @click="moveFiles"
+            >
+                <icon-ic-open-with/>
+
+                <span>
+                    {{ $gettext('Move') }}
+                </span>
+            </button>
+
+            <div class="btn-group btn-group-sm dropdown allow-focus">
+                <div class="dropdown">
+                    <button
+                        class="btn btn-sm btn-secondary dropdown-toggle"
+                        type="button"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false"
+                        :disabled="!hasSelectedItems"
+                    >
+                        <icon-ic-more-horiz/>
+                        <span>
+                            {{ $gettext('More') }}
+                        </span>
+                        <span class="caret" />
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <button
+                                type="button"
+                                :title="$gettext('Queue the selected media to play next')"
+                                class="dropdown-item"
+                                @click="doQueue"
+                            >
+                                {{ $gettext('Queue') }}
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                v-if="supportsImmediateQueue"
+                                type="button"
+                                class="dropdown-item"
+                                :title="$gettext('Make the selected media play immediately, interrupting existing media')"
+                                @click="doImmediateQueue"
+                            >
+                                {{ $gettext('Play Now') }}
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                type="button"
+                                class="dropdown-item"
+                                :title="$gettext('Analyze and reprocess the selected media')"
+                                @click="doReprocess"
+                            >
+                                {{ $gettext('Reprocess') }}
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                type="button"
+                                class="dropdown-item"
+                                :title="$gettext('Remove any extra metadata (fade points, cue points, etc.) from the selected media')"
+                                @click="doClearExtra"
+                            >
+                                {{ $gettext('Clear Extra Metadata') }}
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <button
+                type="button"
+                class="btn btn-sm btn-danger"
+                :disabled="!hasSelectedItems"
+                @click="doDelete"
+            >
+                <icon-ic-delete/>
+
+                <span>
+                    {{ $gettext('Delete') }}
+                </span>
+            </button>
+        </div>
+        <div class="flex-shrink-0">
+            <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                @click="createDirectory"
+            >
+                <icon-ic-folder/>
+                <span>
+                    {{ $gettext('New Folder') }}
+                </span>
+            </button>
         </div>
     </div>
 
@@ -409,6 +411,7 @@ import {useNotify} from "~/components/Common/Toasts/useNotify.ts";
 import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
 import type {MediaInitialPlaylist, MediaSelectedItems} from "~/components/Stations/Media.vue";
 import {ApiStationMediaPlaylist} from "~/entities/ApiInterfaces";
+import IconIcCheckBox from "~icons/ic/baseline-check-box";
 import IconIcClearAll from "~icons/ic/baseline-clear-all";
 import IconIcCloudDownload from "~icons/ic/baseline-cloud-download";
 import IconIcDelete from "~icons/ic/baseline-delete";
@@ -417,6 +420,7 @@ import IconIcMerge from "~icons/ic/baseline-merge";
 import IconIcTravelExplore from "~icons/ic/baseline-travel-explore";
 import IconIcMoreHoriz from "~icons/ic/baseline-more-horiz";
 import IconIcOpenWith from "~icons/ic/baseline-open-with";
+import IconIcPlaylistAdd from "~icons/ic/baseline-playlist-add";
 import {formatMediaType, getMediaTypeOptions} from "~/functions/mediaTypes.ts";
 import GenrePlaylistsModal from "~/components/Stations/Media/GenrePlaylistsModal.vue";
 import JoinFilesModal from "~/components/Stations/Media/JoinFilesModal.vue";
@@ -738,165 +742,116 @@ const createGenrePlaylists = () => {
 </script>
 
 <style lang="scss" scoped>
-.media-toolbar {
-    overflow: visible;
-    margin-bottom: 1.6rem;
-    padding: 0.55rem;
-    border: 0;
-    border-radius: 1.1rem;
-    background:
-        linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.14), transparent 42%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 55%),
-        var(--bs-secondary-bg);
-    box-shadow:
-        0 1rem 2.5rem rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.045);
+// Same look and layout as the Playlists toolbar.
+// Neutral gray panel with the same 1px border and corners as the search box.
+// The panel hugs its tools (no empty space on the right) and sits centered.
+.station-toolbar {
+    width: fit-content;
+    max-width: calc(100% - 2rem);
+    margin: 0 auto 0.75rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-tertiary-bg);
 }
 
-.media-toolbar-utilities {
-    min-height: 3.15rem;
-    padding: 0.35rem 0.45rem 0.7rem;
-}
-
-.media-toolbar-title {
+.station-toolbar-selection {
     display: inline-flex;
+    align-self: center;
     align-items: center;
-    gap: 0.55rem;
-    padding-left: 0.2rem;
-    color: var(--bs-secondary-color);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-}
-
-.media-toolbar-title-mark {
-    display: inline-block;
-    width: 0.3rem;
-    height: 1.15rem;
-    border-radius: 999px;
-    background: linear-gradient(180deg, var(--bs-primary), rgba(var(--bs-primary-rgb), 0.42));
-    box-shadow: 0 0 0.8rem rgba(var(--bs-primary-rgb), 0.32);
-}
-
-.media-toolbar-bulk {
-    display: grid;
-    grid-template-columns: minmax(0, 1.55fr) minmax(20rem, 0.85fr);
-    gap: 0.65rem;
-}
-
-.media-toolbar-section {
-    min-width: 0;
-    padding: 0.72rem 0.78rem 0.78rem;
-    border-radius: 0.85rem;
+    gap: 0.4rem;
+    min-height: 1.75rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
     background: var(--bs-body-bg);
-    box-shadow:
-        0 0.3rem 0.9rem rgba(0, 0, 0, 0.09),
-        inset 0 1px 0 rgba(255, 255, 255, 0.035);
-}
-
-.media-toolbar-classify {
-    background:
-        linear-gradient(120deg, rgba(var(--bs-primary-rgb), 0.065), transparent 48%),
-        var(--bs-body-bg);
-}
-
-.media-toolbar-section-heading {
-    display: flex;
-    min-height: 1.15rem;
-    align-items: center;
-    gap: 0.45rem;
-    margin-bottom: 0.55rem;
-}
-
-.media-toolbar-label {
     color: var(--bs-secondary-color);
-    font-size: 0.69rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &.is-active {
+        border-color: var(--bs-primary);
+        color: var(--bs-primary-text-emphasis);
+    }
+}
+
+.station-toolbar-selection-icon {
+    font-size: 1rem;
+}
+
+.station-toolbar-label {
+    display: block;
+    color: var(--bs-secondary-color);
+    font-size: 0.64rem;
     font-weight: 700;
     letter-spacing: 0.075em;
     text-transform: uppercase;
 }
 
-.media-toolbar-count {
-    display: inline-flex;
-    min-width: 1.3rem;
-    height: 1.3rem;
+// Two rows: the panel is as wide as the longer row, so no empty space is
+// left on the sides; a row wraps only when the screen is too narrow for it.
+.station-toolbar-rows {
+    display: flex;
+    flex-direction: column;
     align-items: center;
+    gap: 0.5rem;
+}
+
+.station-toolbar-row {
+    display: flex;
+    flex-wrap: wrap;
     justify-content: center;
-    padding: 0 0.38rem;
-    border-radius: 999px;
-    background: rgba(var(--bs-primary-rgb), 0.16);
-    color: var(--bs-primary-text-emphasis);
-    font-size: 0.67rem;
-    font-weight: 700;
+    gap: 1.25rem;
 }
 
-.media-toolbar-controls,
-.media-toolbar-action-controls {
-    min-height: 2.15rem;
+.station-toolbar-section {
+    flex: 0 1 auto;
+    min-width: 0;
+    // Groups have no box of their own: the labels and spacing separate them.
+    padding: 0.15rem 0.1rem;
+
+    > .station-toolbar-label {
+        margin-bottom: 0.3rem;
+    }
 }
 
-.media-toolbar-hints {
-    margin: 0.6rem 0 0;
-    padding-left: 1rem;
-    color: var(--bs-secondary-color);
-    font-size: 0.74rem;
-    line-height: 1.45;
+.station-toolbar-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
 }
 
-.media-toolbar-hints strong {
-    color: var(--bs-body-color);
-    font-weight: 600;
-}
-
-.media-toolbar .form-select,
-.media-toolbar .form-control {
-    min-height: 2.15rem;
-    border-color: transparent;
-    border-radius: 0.58rem;
-    background-color: var(--bs-tertiary-bg);
-    box-shadow: inset 0 0 0 1px var(--bs-border-color-translucent);
-    transition:
-        box-shadow 130ms ease,
-        background-color 130ms ease;
-}
-
-.media-toolbar .form-select:focus,
-.media-toolbar .form-control:focus {
-    border-color: transparent;
-    box-shadow:
-        inset 0 0 0 1px rgba(var(--bs-primary-rgb), 0.72),
-        0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.12);
-}
-
-.media-toolbar .btn {
-    min-height: 2.15rem;
-    border-radius: 0.58rem;
+.station-toolbar .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.85rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: var(--bs-border-radius);
     font-weight: 600;
     letter-spacing: 0.01em;
-    box-shadow: 0 0.22rem 0.55rem rgba(0, 0, 0, 0.11);
-    transition:
-        transform 120ms ease,
-        box-shadow 120ms ease,
-        filter 120ms ease;
 }
 
-.media-toolbar .btn:not(:disabled):hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0.4rem 0.9rem rgba(0, 0, 0, 0.14);
-    filter: brightness(1.035);
+// Disabled buttons still show their hover hint
+// but cannot be clicked: the native disabled attribute blocks clicks.
+.station-toolbar .btn:disabled {
+    pointer-events: auto;
+    cursor: not-allowed;
 }
 
-.media-toolbar .btn:disabled {
-    box-shadow: none;
-}
+@media (max-width: 767.98px) {
+    .station-toolbar {
+        width: auto;
+        max-width: none;
+        margin: 0 0.5rem 0.75rem;
+        padding: 0.4rem;
+    }
 
-.media-toolbar .btn-primary:not(:disabled) {
-    box-shadow: 0 0.3rem 0.85rem rgba(var(--bs-primary-rgb), 0.2);
-}
-
-.media-toolbar .btn-danger:not(:disabled) {
-    box-shadow: 0 0.3rem 0.8rem rgba(var(--bs-danger-rgb), 0.16);
+    .station-toolbar-section {
+        flex: 1 1 100%;
+    }
 }
 
 .bulk-classify-select {
@@ -911,46 +866,7 @@ const createGenrePlaylists = () => {
     max-width: 18rem;
 }
 
-.bulk-genre-group > .form-control {
-    border-radius: 0.58rem 0 0 0.58rem;
-}
-
-.bulk-genre-group > .btn {
-    border-radius: 0 0.58rem 0.58rem 0;
-}
-
-@media (max-width: 1199.98px) {
-    .media-toolbar-bulk {
-        grid-template-columns: 1fr;
-    }
-}
-
 @media (max-width: 767.98px) {
-    .media-toolbar {
-        padding: 0.45rem;
-        border-radius: 0.9rem;
-    }
-
-    .media-toolbar-utilities {
-        align-items: flex-start !important;
-        padding: 0.35rem 0.35rem 0.65rem;
-    }
-
-    .media-toolbar-title,
-    .media-toolbar-utility-actions,
-    .media-toolbar-controls,
-    .media-toolbar-action-controls {
-        width: 100%;
-    }
-
-    .media-toolbar-utility-actions {
-        justify-content: flex-start;
-    }
-
-    .media-toolbar-section {
-        padding: 0.68rem;
-    }
-
     .bulk-classify-select,
     .bulk-genre-group {
         flex: 1 1 100%;
