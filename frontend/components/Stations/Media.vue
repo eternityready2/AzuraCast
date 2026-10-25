@@ -50,9 +50,19 @@
                 :valid-mime-types="validMimeTypes"
                 :current-directory="currentDirectory"
                 @relist="onTriggerRelist"
+                @uploaded="onUploaded"
+            />
+
+            <media-review
+                ref="$mediaReview"
+                :batch-url="batchUrl"
+                :storage-key="reviewStorageKey"
+                :media-categories="mediaCategories"
+                @relist="onTriggerRelist"
             />
 
             <media-toolbar
+                ref="$mediaToolbar"
                 :batch-url="batchUrl"
                 :selected-items="selectedItems"
                 :current-directory="currentDirectory"
@@ -62,6 +72,7 @@
                 @add-playlist="onAddPlaylist"
                 @relist="onTriggerRelist"
                 @create-directory="createDirectory"
+                @download-from-url="$downloadFromUrlModal?.open()"
                 @move-files="moveFiles"
             />
         </div>
@@ -226,6 +237,12 @@
         </data-table>
     </section>
 
+    <download-from-url-modal
+        ref="$downloadFromUrlModal"
+        :current-directory="currentDirectory"
+        @relist="onTriggerRelist"
+    />
+
     <new-directory-modal
         ref="$newDirectoryModal"
         :current-directory="currentDirectory"
@@ -253,15 +270,19 @@
         :custom-fields="customFields"
         :playlists="playlists"
         @relist="onTriggerRelist"
+        @lookup="(path: string) => $mediaToolbar?.lookUp(path)"
     />
 </template>
 
 <script setup lang="ts">
+import {useQueryClient} from "@tanstack/vue-query";
 import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import MediaToolbar from "~/components/Stations/Media/MediaToolbar.vue";
 import Breadcrumb from "~/components/Stations/Media/Breadcrumb.vue";
 import FileUpload from "~/components/Stations/Media/FileUpload.vue";
+import MediaReview, {ReviewItem} from "~/components/Stations/Media/MediaReview.vue";
 import NewDirectoryModal from "~/components/Stations/Media/NewDirectoryModal.vue";
+import DownloadFromUrlModal from "~/components/Stations/Media/DownloadFromUrlModal.vue";
 import MoveFilesModal from "~/components/Stations/Media/MoveFilesModal.vue";
 import RenameModal from "~/components/Stations/Media/RenameModal.vue";
 import EditModal from "~/components/Stations/Media/EditModal.vue";
@@ -449,7 +470,7 @@ const fields = computed<DataTableField<MediaRow>[]>(() => {
     return fields;
 });
 
-const playlists = ref<MediaInitialPlaylist[]>(props.initialPlaylists.slice());
+const playlists = computed(() => props.initialPlaylists);
 const selectedItems = ref<MediaSelectedItems>({
     all: [],
     files: [],
@@ -468,6 +489,7 @@ const onRowSelected = (items: MediaRow[]) => {
     };
 };
 
+const $downloadFromUrlModal = useTemplateRef('$downloadFromUrlModal');
 const $dataTable = useTemplateRef('$dataTable');
 
 const onTriggerNavigate = () => {
@@ -486,8 +508,21 @@ const onTriggerRelist = () => {
     $quota.value?.update();
 };
 
-const onAddPlaylist = (row: MediaInitialPlaylist) => {
-    playlists.value.push(row);
+const queryClient = useQueryClient();
+const propsQueryKey = queryKeyWithStation([QueryKeys.StationMedia, 'props']);
+
+const onAddPlaylist = () => {
+    void queryClient.invalidateQueries({queryKey: propsQueryKey});
+};
+
+const $mediaReview = useTemplateRef('$mediaReview');
+const reviewStorageKey = computed(() => `azuracast_media_review:${uploadUrl.value}`);
+
+const onUploaded = (items: ReviewItem[]) => {
+    $mediaReview.value?.add(items);
+
+    // The upload may have added the Year/Label/Writers/ISWC custom fields; reload them for Edit.
+    void queryClient.invalidateQueries({queryKey: propsQueryKey});
 };
 
 const onFiltered = (newFilter: string) => {
@@ -501,6 +536,7 @@ const rename = (path: string) => {
 };
 
 const $editModal = useTemplateRef('$editModal');
+const $mediaToolbar = useTemplateRef('$mediaToolbar');
 
 const edit = (recordUrl: string) => {
     $editModal.value?.open(recordUrl);

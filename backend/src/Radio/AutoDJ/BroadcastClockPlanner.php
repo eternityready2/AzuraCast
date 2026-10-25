@@ -1,0 +1,385 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Radio\AutoDJ;
+
+use App\Entity\Enums\PlaylistTypes;
+use App\Entity\Station;
+use App\Entity\StationPlaylist;
+use App\Entity\StationSchedule;
+use App\Utilities\ScheduleRecurrence;
+use Carbon\CarbonImmutable;
+use DateTimeImmutable;
+
+/**
+ * Defines soft wall-clock anchors for ordinary AutoDJ playout.
+ *
+ * Unlike a hard interrupt, a soft anchor gives queue planning enough notice to
+ * backtime the preceding audio. Stretch/squeeze can then close a small timing
+ * gap and the normal cue-out/fade path is only used when a track cannot fit.
+ *
+ * Automatic Top-of-Hour Station ID and rigid schedule starts are deliberately
+ * NOT soft AutoDJ anchors. Dedicated Liquidsoap wall-clock switches own those
+ * deadlines and interrupt whatever ordinary music is actually on air. Making a
+ * hard deadline a soft queue anchor manufactures tiny synthetic song slots just
+ * before the deadline and leaves those rows available to air afterwards.
+ */
+final class BroadcastClockPlanner
+{
+    private const int LOOKAHEAD_SECONDS = 3600;
+
+    public function __construct(
+        private readonly Scheduler $scheduler,
+    ) {
+    }
+
+    public function secondsUntilNextSoftAnchor(
+        Station $station,
+        DateTimeImmutable $now,
+    ): ?int {
+        $tz = $station->getTimezoneObject();
+        $nowLocal = CarbonImmutable::instance($now)->setTimezone($tz);
+        $best = null;
+
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled || !$this->isClockAnchoredPlaylist($playlist)) {
+                continue;
+            }
+
+            foreach ($playlist->schedule_items as $schedule) {
+                foreach ($this->getScheduleBoundaries($schedule, $nowLocal) as $boundary) {
+                    $delta = $boundary->getTimestamp() - $nowLocal->getTimestamp();
+                    if ($delta <= 0 || $delta > self::LOOKAHEAD_SECONDS) {
+                        continue;
+                    }
+
+                    $best = null === $best ? $delta : min($best, $delta);
+                }
+            }
+        }
+
+        $newsDelta = $this->secondsUntilNextAiNewsAnchor($station, $nowLocal);
+        if (null !== $newsDelta) {
+            $best = null === $best ? $newsDelta : min($best, $newsDelta);
+        }
+
+        return $best;
+    }
+
+    /**
+     * Maximum source duration that makes the next queue item's projected start
+     * land on the next soft anchor.
+     *
+     * Queue::addDurationToTime() subtracts the configured crossfade overlap from
+     * every normal source duration. Using raw wall-clock seconds here would make
+     * the queue cursor land one crossfade early and could allow another general
+     * rotation track to be planned immediately before the scheduled programme.
+     */
+    public function maxContentDurationBeforeNextSoftAnchor(
+        Station $station,
+        DateTimeImmutable $now,
+    ): ?float {
+        $seconds = $this->secondsUntilNextSoftAnchor($station, $now);
+        if (null === $seconds) {
+            return null;
+        }
+
+        $crossfadeOverlap = max(0.0, $station->backend_config->getCrossfadeDuration());
+
+        return max(1.0, (float)$seconds + $crossfadeOverlap);
+    }
+
+    /**
+     * True when an ordinary Standard playlist would occupy airtime currently
+     * owned by a scheduled long-form Standard playlist.
+     */
+    public function isPlaylistPreemptedByProgram(
+        StationPlaylist $playlist,
+        DateTimeImmutable $when,
+    ): bool {
+        if (PlaylistTypes::Standard !== $playlist->type) {
+            return false;
+        }
+
+        if (
+            $playlist->schedule_items->count() > 0
+            && $this->scheduler->isPlaylistScheduledToPlayNow($playlist, $when, true)
+        ) {
+            return false;
+        }
+
+        return $this->isProgramWindowActive($playlist->station, $when);
+    }
+
+    public function isProgramWindowActive(
+        Station $station,
+        DateTimeImmutable $when,
+    ): bool {
+        return null !== $this->findActiveProgramPlaylist($station, $when);
+    }
+
+    public function areRequestsBlockedBySchedule(
+        Station $station,
+        DateTimeImmutable $when,
+    ): bool {
+        $tz = $station->getTimezoneObject();
+
+        foreach ($station->playlists as $playlist) {
+            if (!$playlist->is_enabled || 0 === $playlist->schedule_items->count()) {
+                continue;
+            }
+
+            foreach ($playlist->schedule_items as $schedule) {
+                if (!$schedule->prevent_requests) {
+                    continue;
+                }
+
+                if ($this->scheduler->shouldSchedulePlayNow($schedule, $tz, $when, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function findActiveProgramPlaylist(
+        Station $station,
+        DateTimeImmutable $when,
+    ): ?StationPlaylist {
+        $tz = $station->getTimezoneObject();
+
+        foreach ($station->playlists as $scheduledPlaylist) {
+            if (
+                !$scheduledPlaylist->is_enabled
+                || PlaylistTypes::Standard !== $scheduledPlaylist->type
+                || 0 === $scheduledPlaylist->schedule_items->count()
+            ) {
+                continue;
+            }
+
+            foreach ($scheduledPlaylist->schedule_items as $schedule) {
+                if ($schedule->start_time === $schedule->end_time) {
+                    continue;
+                }
+
+                if ($this->scheduler->shouldSchedulePlayNow($schedule, $tz, $when, true)) {
+                    return $scheduledPlaylist;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function isClockAnchoredPlaylist(StationPlaylist $playlist): bool
+    {
+        // For scheduled playlists, the schedule row's strict_start/emergency
+        // settings are authoritative. A legacy playlist-level interrupt option
+        // must not erase the soft anchor of a Flexible schedule; the runtime
+        // interrupting queue applies the same ownership rule.
+        if (PlaylistTypes::Standard === $playlist->type) {
+            return true;
+        }
+
+        // Non-standard strict schedules no longer need a soft start anchor, but
+        // they can still have a meaningful strict-end boundary. Keep them in the
+        // scan so getScheduleBoundaries() can return that end when appropriate.
+        foreach ($playlist->schedule_items as $schedule) {
+            if ($schedule->strict_start || $schedule->is_emergency) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<CarbonImmutable> */
+    private function getScheduleBoundaries(
+        StationSchedule $schedule,
+        CarbonImmutable $now,
+    ): array {
+        $playlist = $schedule->playlist;
+        if (!$playlist instanceof StationPlaylist) {
+            return [];
+        }
+
+        $tz = $playlist->station->getTimezoneObject();
+        $boundaries = [];
+        $allowOverrun = in_array(
+            StationPlaylist::OPTION_ALLOW_OVERRUN,
+            $playlist->backend_options,
+            true,
+        );
+        $rigidStart = $this->isRigidStart($schedule);
+
+        if (ScheduleRecurrence::hasRecurrence($schedule)) {
+            $occurrences = ScheduleRecurrence::getOccurrencesInRange(
+                $schedule,
+                $tz,
+                $now->subDay(),
+                $now->addDay(),
+                20,
+            );
+
+            foreach ($occurrences as $occurrence) {
+                $occStart = CarbonImmutable::instance($occurrence->start)->setTimezone($tz);
+
+                if (!$rigidStart) {
+                    $boundaries[] = $occStart;
+                }
+
+                if ($schedule->start_time === $schedule->end_time || $allowOverrun) {
+                    continue;
+                }
+
+                // An end only matters while the window is actually running.
+                $occEnd = CarbonImmutable::instance($occurrence->end)->setTimezone($tz);
+                if ($now->between($occStart, $occEnd) && !$this->hasReleasedWindow($schedule, $occStart, $now)) {
+                    $boundaries[] = $occEnd;
+                }
+            }
+
+            return $boundaries;
+        }
+
+        $dayStart = $now->startOfDay();
+        foreach ([-1, 0, 1] as $dayOffset) {
+            $candidateDay = $dayStart->addDays($dayOffset);
+            $start = StationSchedule::getDateTime($schedule->start_time, $tz, $candidateDay);
+
+            if (!$this->scheduler->shouldSchedulePlayOnCurrentDate($schedule, $tz, $start)) {
+                continue;
+            }
+
+            if (!$this->scheduler->isScheduleScheduledToPlayToday($schedule, $start->dayOfWeekIso)) {
+                continue;
+            }
+
+            if (!$rigidStart) {
+                $boundaries[] = $start;
+            }
+
+            if ($schedule->start_time === $schedule->end_time || $allowOverrun) {
+                continue;
+            }
+
+            $end = StationSchedule::getDateTime($schedule->end_time, $tz, $candidateDay);
+            if ($schedule->start_time > $schedule->end_time) {
+                $end = $end->addDay();
+            }
+            if ($now->between($start, $end) && !$this->hasReleasedWindow($schedule, $start, $now)) {
+                $boundaries[] = $end;
+            }
+        }
+
+        return $boundaries;
+    }
+
+    /**
+     * True once a play-once show has had the time one pass of its content
+     * takes since its window opened. The window is no longer its own from then
+     * (Scheduler::openScheduleSecondsForPlaylist()) and rotation fills what is
+     * left of it, so its end stops nothing: "Faith Horizons" (5:00-5:40pm,
+     * 25 minutes) left the songs after it planned up to 5:40pm, the last one
+     * squeezed to end there and another given the 2 seconds that left
+     * (Wed 2026-10-14).
+     */
+    private function hasReleasedWindow(
+        StationSchedule $schedule,
+        CarbonImmutable $windowStart,
+        CarbonImmutable $now,
+    ): bool {
+        $contentSeconds = $this->scheduler->loopOnceContentDurationSeconds($schedule);
+
+        return null !== $contentSeconds
+            && $now->getTimestamp() - $windowStart->getTimestamp() >= $contentSeconds;
+    }
+
+    private function isRigidStart(StationSchedule $schedule): bool
+    {
+        return $schedule->strict_start
+            || $schedule->is_emergency;
+    }
+
+    private function secondsUntilNextAiNewsAnchor(
+        Station $station,
+        CarbonImmutable $now,
+    ): ?int {
+        $config = $station->backend_config;
+        if (!$config->ai_news_enabled) {
+            return null;
+        }
+
+        $minutes = [];
+
+        // The legacy Liquidsoap top-of-hour bulletin is a direct request-queue
+        // injection at :59. When the automatic Station ID is enabled, that would
+        // race the mandatory ID for the same track boundary. The matching
+        // Liquidsoap configuration guard suppresses that :59 bulletin, so it
+        // must not remain as a phantom broadcast-clock anchor here either.
+        if ($config->ai_news_top_of_hour && !$config->top_of_hour_id_enabled) {
+            $minutes[] = 59;
+        }
+        if ($config->ai_news_bottom_of_hour) {
+            $minutes[] = 29;
+        }
+        if ([] === $minutes) {
+            return null;
+        }
+
+        $best = null;
+        for ($hourOffset = 0; $hourOffset <= 1; $hourOffset++) {
+            $hour = $now->startOfHour()->addHours($hourOffset);
+
+            foreach ($minutes as $minute) {
+                $candidate = $hour->setMinute($minute)->setSecond(0);
+                $delta = $candidate->getTimestamp() - $now->getTimestamp();
+                if ($delta <= 0 || $delta > self::LOOKAHEAD_SECONDS) {
+                    continue;
+                }
+
+                if (!$this->isAiNewsActiveAt($station, $candidate)) {
+                    continue;
+                }
+
+                $best = null === $best ? $delta : min($best, $delta);
+            }
+        }
+
+        return $best;
+    }
+
+    private function isAiNewsActiveAt(Station $station, CarbonImmutable $candidate): bool
+    {
+        $config = $station->backend_config;
+        $activeDays = array_map(
+            static fn(mixed $day): int => (int)$day,
+            $config->ai_news_active_days,
+        );
+
+        if ([] !== $activeDays && !in_array($candidate->dayOfWeekIso, $activeDays, true)) {
+            return false;
+        }
+
+        $activeHours = trim((string)$config->ai_news_active_hours);
+        if ('' === $activeHours) {
+            return true;
+        }
+
+        if (!preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
+            return true;
+        }
+
+        $start = ((int)$matches[1] * 60) + (int)$matches[2];
+        $end = ((int)$matches[3] * 60) + (int)$matches[4];
+        $current = ($candidate->hour * 60) + $candidate->minute;
+
+        if ($start <= $end) {
+            return $current >= $start && $current < $end;
+        }
+
+        return $current >= $start || $current < $end;
+    }
+}

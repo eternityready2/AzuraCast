@@ -11,6 +11,7 @@ use App\Enums\StationPermissions;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\Radio\Backend\Liquidsoap\Command\AbstractCommand;
+use App\Radio\Backend\Liquidsoap\Command\NextSongHeldException;
 use App\Radio\Enums\LiquidsoapCommands;
 use App\Utilities\Types;
 use InvalidArgumentException;
@@ -31,16 +32,24 @@ final class LiquidsoapAction implements SingleActionInterface
         $action = Types::string($params['action'] ?? '');
 
         $station = $request->getStation();
-        $asAutoDj = $request->hasHeader('X-Liquidsoap-Api-Key');
+        $asAutoDj = false;
         $payload = (array)$request->getParsedBody();
 
         try {
             $acl = $request->getAcl();
+            $authKey = $request->getHeaderLine('X-Liquidsoap-Api-Key');
+
             if (!$acl->isAllowed(StationPermissions::View, $station->id)) {
-                $authKey = $request->getHeaderLine('X-Liquidsoap-Api-Key');
                 if (!$station->validateAdapterApiKey($authKey)) {
                     throw new RuntimeException('Invalid API key.');
                 }
+                $asAutoDj = true;
+            } else {
+                // Even ACL-authenticated users must provide a valid adapter key for
+                // AutoDJ-privileged operations (DJ on/off, next-song, feedback, cache
+                // save) -- merely holding the header is not sufficient. Matches
+                // upstream GHSA-4fm3-ggg2-c6qx.
+                $asAutoDj = !empty($authKey) && $station->validateAdapterApiKey($authKey);
             }
 
             $command = LiquidsoapCommands::tryFrom($action);
@@ -54,6 +63,11 @@ final class LiquidsoapAction implements SingleActionInterface
             return $response->withJson(
                 $commandObj->run($station, $asAutoDj, $payload)
             );
+        } catch (NextSongHeldException $e) {
+            // An intended wait, not a failure: same refusal, logged quietly.
+            $this->logger->debug($e->getMessage(), ['station' => (string)$station]);
+
+            return $response->withStatus(400)->withJson(['message' => $e->getMessage()]);
         } catch (Throwable $e) {
             $this->logger->error(
                 sprintf(

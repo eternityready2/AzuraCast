@@ -12,10 +12,15 @@ use App\Radio\Enums\StreamFormats;
 use App\Service\Acme;
 use App\Utilities\Arrays;
 use App\Xml\Writer;
+use GuzzleHttp\Promise\Create;
+use GuzzleHttp\Promise\PromiseInterface;
 use GuzzleHttp\Promise\Utils;
 use GuzzleHttp\Psr7\Uri;
+use NowPlaying\Result\Listeners;
 use NowPlaying\Result\Result;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\UriInterface;
+use RuntimeException;
 use Supervisor\Exception\SupervisorException as SupervisorLibException;
 use Symfony\Component\Filesystem\Path;
 
@@ -67,9 +72,15 @@ class Icecast extends AbstractFrontend
                 $defaultMountId = $mount->id;
             }
 
+            // Listeners are read here rather than by the NowPlaying library,
+            // which only understands Icecast-KH's listener field names.
             $mountPromises[$mount->id] = $npAdapter->getNowPlayingAsync(
                 $mount->name,
-                $includeClients
+                false
+            )->then(
+                fn(Result $result) => $includeClients
+                    ? $this->attachListClients($result, $baseUrl, $feConfig->admin_pw, $mount->name)
+                    : $result
             )->then(
                 function (Result $result) use ($mount) {
                     if (!empty($result->clients)) {
@@ -108,6 +119,42 @@ class Icecast extends AbstractFrontend
         return $defaultResult;
     }
 
+    private function attachListClients(
+        Result $result,
+        UriInterface $baseUrl,
+        ?string $adminPassword,
+        string $mountName
+    ): PromiseInterface {
+        $adminPassword = trim($adminPassword ?? '');
+        if ('' === $adminPassword) {
+            return Create::promiseFor($result);
+        }
+
+        $uri = $baseUrl->withPath('/admin/listclients')
+            ->withQuery(http_build_query(['mount' => $mountName]));
+
+        return $this->httpClient->getAsync($uri, [
+            'auth' => ['admin', $adminPassword],
+            'timeout' => 5,
+            'http_errors' => false,
+        ])->then(
+            function (ResponseInterface $response) use ($result) {
+                if (200 !== $response->getStatusCode()) {
+                    return $result;
+                }
+
+                $clients = IcecastConfig::parseListClients((string)$response->getBody());
+                if (null !== $clients) {
+                    $result->clients = $clients;
+                    $result->listeners = new Listeners($result->listeners->total, count($clients));
+                }
+
+                return $result;
+            },
+            fn() => $result
+        );
+    }
+
     public function getConfigurationPath(Station $station): string
     {
         return $station->getRadioConfigDir() . '/icecast.xml';
@@ -142,23 +189,45 @@ class Icecast extends AbstractFrontend
         $frontendConfig = $station->frontend_config;
         $configDir = $station->getRadioConfigDir();
 
-        $settingsBaseUrl = $this->settingsRepo->readSettings()->getBaseUrlAsUri();
+        $radioPort = $frontendConfig->port;
+        if (null === $radioPort) {
+            throw new RuntimeException(
+                'Station frontend port must be assigned before generating Icecast configuration.'
+            );
+        }
+
+        $settings = $this->settingsRepo->readSettings();
+        $settingsBaseUrl = $settings->getBaseUrlAsUri();
         $baseUrl = $settingsBaseUrl ?? new Uri('http://localhost');
+        $hostname = $baseUrl->getHost();
+
+        // Icecast 2.5 warns when its reserved placeholder contact is used. Do not
+        // reuse ACME's registration email here because <admin> is public in Icecast
+        // status output. Generate a non-sensitive host-scoped technical contact.
+        $contactHost = '' !== $hostname && 'localhost' !== $hostname
+            ? $hostname
+            : 'localhost.localdomain';
+        $adminContact = 'icemaster@' . $contactHost;
 
         [$certPath, $certKey] = Acme::getCertificatePaths();
 
         $config = [
             'location' => 'AzuraCast',
-            'admin' => 'icemaster@localhost',
-            'hostname' => $baseUrl->getHost(),
+            'admin' => $adminContact,
+            'hostname' => $hostname,
             'limits' => [
-                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners * 2 : 2500,
-                'max-listeners' => $frontendConfig->max_listeners ?? -1,
-                'sources' => $station->mounts->count(),
+                // Icecast 2.5 has no server-wide <max-listeners> tag. Its global
+                // <clients> limit is the aggregate cap across all mount points.
+                // Use the configured station-wide maximum here instead of copying
+                // it to every mount, which would allow the total to multiply.
+                'clients' => !empty($frontendConfig->max_listeners) ? $frontendConfig->max_listeners : 2500,
+                'sources' => IcecastConfig::getSourceLimit($station->mounts->count()),
                 'queue-size' => 524288,
                 'client-timeout' => 30,
                 'header-timeout' => 15,
-                'source-timeout' => 10,
+                // Allow short-lived source stalls to recover without Icecast
+                // immediately dropping a healthy Liquidsoap source.
+                'source-timeout' => 30,
                 'burst-size' => 65535,
             ],
             'authentication' => [
@@ -168,9 +237,10 @@ class Icecast extends AbstractFrontend
                 'admin-password' => $frontendConfig->admin_pw,
             ],
 
-            'listen-socket' => [
-                'port' => $frontendConfig->port,
-            ],
+            'listen-socket' => IcecastConfig::getListenSockets(
+                $radioPort,
+                $frontendConfig->trusted_proxy_address
+            ),
 
             'mount' => [],
             'fileserve' => 1,
@@ -179,37 +249,42 @@ class Icecast extends AbstractFrontend
                 'logdir' => $configDir,
                 'webroot' => self::WEBROOT,
                 'adminroot' => self::ADMINROOT,
-                'pidfile' => $configDir . '/icecast.pid',
                 'alias' => [
                     [
                         '@source' => '/',
                         '@dest' => '/status.xsl',
                     ],
                 ],
-                'ssl-private-key' => $certKey,
-                'ssl-certificate' => $certPath,
-                // phpcs:disable Generic.Files.LineLength
-                'ssl-allowed-ciphers' => 'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS',
-                // phpcs:enable
                 'deny-ip' => $this->writeIpBansFile($station),
-                'deny-agents' => $this->writeUserAgentBansFile($station),
-                'x-forwarded-for' => '127.0.0.1',
             ],
             'logging' => [
                 'accesslog' => 'icecast_access.log',
-                'errorlog' => '/dev/stderr',
+                'errorlog' => '-',
                 'loglevel' => $this->environment->isProduction() ? self::LOGLEVEL_WARN : self::LOGLEVEL_INFO,
                 'logsize' => 10000,
             ],
             'security' => [
-                'chroot' => 0,
+                'chroot' => 'false',
+                'tls-context' => [
+                    // phpcs:disable Generic.Files.LineLength
+                    'tls-allowed-ciphers' => 'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS',
+                    // phpcs:enable
+                    'tls-certificate' => $certPath,
+                    'tls-key' => $certKey,
+                ],
+                'prng-seed' => [
+                    '@type' => 'read-write',
+                    '@size' => '1024',
+                    '_' => $configDir . '/icecast.prng-seed',
+                ],
             ],
         ];
 
         $bannedCountries = $frontendConfig->banned_countries ?? [];
+        $bannedUserAgents = trim($frontendConfig->banned_user_agents ?? '');
         $allowedIps = $this->getIpsAsArray($frontendConfig->allowed_ips);
 
-        $useListenerAuth = !empty($bannedCountries) || !empty($allowedIps);
+        $useListenerAuth = !empty($bannedCountries) || '' !== $bannedUserAgents || !empty($allowedIps);
         $charset = match ($station->backend_config->charset) {
             'ISO-8859-1' => 'ISO8859-1',
             default => 'UTF8',
@@ -222,7 +297,6 @@ class Icecast extends AbstractFrontend
                 'mount-name' => $mountRow->name,
                 'charset' => $charset,
                 'stream-name' => $station->name,
-                'listenurl' => $this->getUrlForMount($station, $mountRow),
             ];
 
             if ($station->max_bitrate !== 0) {
@@ -257,13 +331,13 @@ class Icecast extends AbstractFrontend
 
             if (!empty($mountRow->fallback_mount)) {
                 $mount['fallback-mount'] = $mountRow->fallback_mount;
-                $mount['fallback-override'] = 1;
+                $mount['fallback-override'] = IcecastConfig::getFallbackOverride();
             } elseif ($mountRow->enable_autodj) {
                 $autoDjFormat = $mountRow->autodj_format ?? StreamFormats::default();
                 $autoDjBitrate = $mountRow->autodj_bitrate;
 
                 $mount['fallback-mount'] = '/fallback-[' . $autoDjBitrate . '].' . $autoDjFormat->getExtension();
-                $mount['fallback-override'] = 1;
+                $mount['fallback-override'] = IcecastConfig::getFallbackOverride();
             }
 
             if ($mountRow->max_listener_duration) {

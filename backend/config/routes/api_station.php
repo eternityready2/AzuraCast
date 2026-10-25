@@ -207,6 +207,22 @@ return static function (RouteCollectorProxy $group) {
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
+
+                    // AI Assistant
+                    $group->group(
+                        '/assistant',
+                        function (RouteCollectorProxy $group) {
+                            $group->get('/settings', Controller\Api\Stations\AssistantController::class . ':getSettingsAction')
+                                ->setName('api:stations:assistant:settings');
+
+                            $group->post('/settings', Controller\Api\Stations\AssistantController::class . ':saveSettingsAction')
+                                ->setName('api:stations:assistant:settings:save');
+
+                            $group->post('/chat', Controller\Api\Stations\AssistantController::class . ':chatAction')
+                                ->setName('api:stations:assistant:chat');
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Podcast Private Pages
                     $group->group(
                         '',
@@ -670,6 +686,26 @@ return static function (RouteCollectorProxy $group) {
                                     );
 
                                     $group->get(
+                                        '/members',
+                                        Controller\Api\Stations\Playlists\GetGroupMembersAction::class
+                                    )->setName('api:stations:playlist:members');
+
+                                    $group->put(
+                                        '/members',
+                                        Controller\Api\Stations\Playlists\PutGroupMembersAction::class
+                                    );
+
+                                    $group->get(
+                                        '/smart-block',
+                                        Controller\Api\Stations\Playlists\GetSmartBlockAction::class
+                                    )->setName('api:stations:playlist:smart-block');
+
+                                    $group->put(
+                                        '/smart-block',
+                                        Controller\Api\Stations\Playlists\PutSmartBlockAction::class
+                                    );
+
+                                    $group->get(
                                         '/queue',
                                         Controller\Api\Stations\Playlists\GetQueueAction::class
                                     )->setName('api:stations:playlist:queue');
@@ -709,6 +745,63 @@ return static function (RouteCollectorProxy $group) {
                                         Controller\Api\Stations\Playlists\EmptyAction::class
                                     )->setName('api:stations:playlist:empty');
                                 }
+                            );
+                        }
+                    )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
+                        ->add(new Middleware\Permissions(StationPermissions::Media, true));
+
+                    // Ads: advertisers, the airtime they bought, and what it delivered.
+                    $group->group(
+                        '/ads',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/advertisers',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':listAction'
+                            )->setName('api:stations:ads:advertisers');
+
+                            $group->post(
+                                '/advertisers',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':getAction'
+                            )->setName('api:stations:ads:advertiser');
+
+                            $group->put(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':editAction'
+                            );
+
+                            $group->delete(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':deleteAction'
+                            );
+
+                            $group->get(
+                                '/orders',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':listAction'
+                            )->setName('api:stations:ads:orders');
+
+                            $group->post(
+                                '/orders',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':getAction'
+                            )->setName('api:stations:ads:order');
+
+                            $group->put(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':editAction'
+                            );
+
+                            $group->delete(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':deleteAction'
                             );
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
@@ -760,24 +853,14 @@ return static function (RouteCollectorProxy $group) {
                             )->setName('api:stations:clock-wheels:schedule');
 
                             $group->get(
-                                '/clock-wheels/program-grid',
-                                Controller\Api\Stations\ClockWheels\ProgramGridAction::class
-                            )->setName('api:stations:clock-wheels:program-grid');
+                                '/clock-wheels/slot-lengths',
+                                Controller\Api\Stations\ClockWheels\SlotLengthsAction::class
+                            )->setName('api:stations:clock-wheels:slot-lengths');
 
                             $group->get(
                                 '/clock-wheels/reconciliation-log',
                                 Controller\Api\Stations\ClockWheels\ReconciliationLogAction::class
                             )->setName('api:stations:clock-wheels:reconciliation-log');
-
-                            $group->get(
-                                '/clock-wheels/reconciliation-log/export',
-                                Controller\Api\Stations\ClockWheels\ReconciliationLogExportAction::class
-                            )->setName('api:stations:clock-wheels:reconciliation-log:export');
-
-                            $group->post(
-                                '/clock-wheels/generate',
-                                Controller\Api\Stations\ClockWheels\GenerateAction::class
-                            )->setName('api:stations:clock-wheels:generate');
 
                             $group->post(
                                 '/clock-wheels/import',
@@ -898,6 +981,11 @@ return static function (RouteCollectorProxy $group) {
                                     )->setName('api:stations:clock-wheel:preview');
 
                                     $group->get(
+                                        '/log',
+                                        Controller\Api\Stations\ClockWheels\WheelLogAction::class
+                                    )->setName('api:stations:clock-wheel:log');
+
+                                    $group->get(
                                         '/analytics',
                                         Controller\Api\Stations\ClockWheels\AnalyticsAction::class
                                     )->setName('api:stations:clock-wheel:analytics');
@@ -938,10 +1026,138 @@ return static function (RouteCollectorProxy $group) {
                                     );
                                 }
                             );
-
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
+
+                    $group->group(
+                        '/features',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/aircheck',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':getAirCheckAction'
+                            );
+                            $group->put(
+                                '/aircheck',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':saveAirCheckAction'
+                            );
+                            $group->post(
+                                '/aircheck/run',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':runAirCheckAction'
+                            );
+
+                            $group->get(
+                                '/shows',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':listShowsAction'
+                            );
+                            $group->post(
+                                '/shows',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':saveShowAction'
+                            );
+                            $group->delete(
+                                '/shows/{id}',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':deleteShowAction'
+                            );
+
+                            $group->get(
+                                '/playout-simulator',
+                                Controller\Api\Stations\Features\FeatureSuiteController::class . ':simulateAction'
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->post(
+                        '/files/download-from-url',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':downloadFromUrlAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Media, true));
+
+                    $group->get(
+                        '/reports/ppca',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':ppcaReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/ppl',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':pplReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/cadence',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':cadenceReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/ascap',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':ascapReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/bmi',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':bmiReportAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/linear-log',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':linearLogStatusAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->get(
+                        '/reports/linear-log/export',
+                        Controller\Api\Stations\Reports\LinearLogExportAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    $group->post(
+                        '/reports/linear-log/build',
+                        Controller\Api\Stations\Features\FeatureSuiteController::class . ':buildLinearLogAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+
+                    // Hand edits on the saved linear log.
+                    $group->get(
+                        '/reports/linear-log/media',
+                        Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':mediaAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->post(
+                        '/reports/linear-log/rules/apply',
+                        Controller\Api\Stations\Reports\LinearLogRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->post(
+                        '/reports/linear-log/entries/{entry_id}/{edit}',
+                        Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':editAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    // Per-feature settings edited on each feature's own page.
+                    $group->get(
+                        '/reports/linear-log/settings',
+                        Controller\Api\Stations\Reports\LinearLogSettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/reports/linear-log/settings',
+                        Controller\Api\Stations\Reports\LinearLogSettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
+                        '/dmca-compliance/settings',
+                        Controller\Api\Stations\DmcaCompliance\SettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/dmca-compliance/settings',
+                        Controller\Api\Stations\DmcaCompliance\SettingsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
+                        '/dmca-compliance/exempt-playlists',
+                        Controller\Api\Stations\DmcaCompliance\ExemptPlaylistsAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    $group->get(
+                        '/ai-dj-talk-rules',
+                        Controller\Api\Stations\AiDj\TalkRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+                    $group->put(
+                        '/ai-dj-talk-rules',
+                        Controller\Api\Stations\AiDj\TalkRulesAction::class
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
                     // Reports
                     $group->get('/history', Controller\Api\Stations\HistoryAction::class)
@@ -984,6 +1200,11 @@ return static function (RouteCollectorProxy $group) {
                                 '/overview/dmca-compliance',
                                 Controller\Api\Stations\Reports\Overview\DmcaComplianceAction::class
                             )->setName('api:stations:reports:overview-dmca-compliance');
+
+                            $group->get(
+                                '/overview/log-compliance',
+                                Controller\Api\Stations\Reports\Overview\LogComplianceAction::class
+                            )->setName('api:stations:reports:overview-log-compliance');
 
                             $group->get(
                                 '/overview/sponsor-plays',
@@ -1029,6 +1250,11 @@ return static function (RouteCollectorProxy $group) {
                                 '/overview/clock-performance',
                                 Controller\Api\Stations\Reports\Overview\ClockPerformanceAction::class
                             )->setName('api:stations:reports:overview-clock-performance');
+
+                            $group->get(
+                                '/overview/top-of-hour-performance',
+                                Controller\Api\Stations\Reports\Overview\TopOfHourPerformanceAction::class
+                            )->setName('api:stations:reports:overview-top-of-hour-performance');
 
                             $group->get(
                                 '/overview/playlist-performance',
@@ -1334,6 +1560,22 @@ return static function (RouteCollectorProxy $group) {
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
+                    // Station-wide playout controls (strict boundaries and interrupting ducking)
+                    $group->group(
+                        '/playout-controls',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '',
+                                Controller\Api\Stations\PlayoutControls\GetAction::class
+                            )->setName('api:stations:playout-controls');
+
+                            $group->put(
+                                '',
+                                Controller\Api\Stations\PlayoutControls\PutAction::class
+                            );
+                        }
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Top-of-hour legal ID protection (v0.29)
                     $group->group(
                         '/top-of-hour',
@@ -1347,6 +1589,11 @@ return static function (RouteCollectorProxy $group) {
                                 '',
                                 Controller\Api\Stations\TopOfHour\PutAction::class
                             );
+
+                            $group->get(
+                                '/landing',
+                                Controller\Api\Stations\TopOfHour\LandingReportAction::class
+                            )->setName('api:stations:top-of-hour:landing');
                         }
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 

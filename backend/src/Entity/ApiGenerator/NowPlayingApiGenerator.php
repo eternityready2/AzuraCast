@@ -19,6 +19,9 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\RigidScheduleForecastService;
+use App\Utilities\Time;
 use Exception;
 use GuzzleHttp\Psr7\Uri;
 use NowPlaying\Result\Result;
@@ -39,7 +42,9 @@ final class NowPlayingApiGenerator
         private readonly StationStreamerBroadcastRepository $broadcastRepo,
         private readonly Adapters $adapters,
         private readonly Router $router,
-        private readonly NowPlayingCache $nowPlayingCache
+        private readonly NowPlayingCache $nowPlayingCache,
+        private readonly RigidScheduleForecastService $rigidScheduleForecast,
+        private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
     ) {
     }
 
@@ -70,6 +75,13 @@ final class NowPlayingApiGenerator
             total: $npResult->listeners->total,
             unique: $npResult->listeners->unique
         );
+
+        // A local backend can be starting/restarting before its first feedback row
+        // has created Station::current_song. That is an ordinary offline/startup
+        // state, not an exception-worthy "No track to update" condition.
+        if (!$updateSongFromNowPlaying && null === $station->current_song) {
+            return $this->offlineApi($station, $baseUri);
+        }
 
         try {
             if ($updateSongFromNowPlaying) {
@@ -117,16 +129,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
-        if (null === $nextVisibleSong) {
-            $np->playing_next = $npOld->playing_next ?? null;
-        } else {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisibleSong,
-                $baseUri,
-                true
-            );
-        }
+        $this->populatePlayingNext($np, $station, $baseUri, $npOld);
 
         // Detect and report live DJ status
         $currentStreamer = $station->current_streamer;
@@ -170,6 +173,85 @@ final class NowPlayingApiGenerator
         return $np ?? $this->offlineApi($station);
     }
 
+    private function populatePlayingNext(
+        NowPlaying $np,
+        Station $station,
+        ?UriInterface $baseUri,
+        ?NowPlaying $npOld = null,
+    ): void {
+        // Strict / Exact Time playlists play from a dedicated native Liquidsoap
+        // source. While that source owns the air, Playing Next must use the same
+        // live remaining cursor as Upcoming Song Queue, not the day-ahead Linear
+        // Log forecast and not the unrelated PHP AutoDJ underlay queue.
+        $strictUpcoming = $this->rigidScheduleForecast->getActiveUpcoming(
+            $station,
+            Time::nowUtc(),
+            1,
+        );
+
+        if ([] !== $strictUpcoming) {
+            $nativeUpcomingRow = $this->rigidScheduleForecast->toQueueRow(
+                $station,
+                $strictUpcoming[0],
+            );
+            $np->playing_next = ($this->stationQueueApiGenerator)(
+                $nativeUpcomingRow,
+                $baseUri,
+                true
+            );
+            return;
+        }
+
+        // Playing Next is whichever airs first: the next ordinary song, the staged
+        // Top-of-Hour Station ID (excluded from getNextVisible() because it runs
+        // in its own lane), or the AI News bulletin (a Liquidsoap-owned item with
+        // no queue row, airing right after the ID).
+        $candidates = [];
+
+        $nextVisibleSong = $this->queueRepo->getNextVisible($station);
+        if (null !== $nextVisibleSong) {
+            $candidates[] = $nextVisibleSong;
+        }
+
+        $nextStationId = $this->queueRepo->getUnplayedBaseQuery($station)
+            ->andWhere('sq.top_of_hour_legal_id = 1')
+            ->getQuery()
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+        if ($nextStationId instanceof StationQueue) {
+            $candidates[] = $nextStationId;
+        }
+
+        $now = Time::nowUtc();
+        $newsIsOnAir = 'News Hour' === $np->now_playing?->song?->title;
+        $newsTimes = $newsIsOnAir
+            ? []
+            : $this->aiNewsScheduleForecast->getAiringTimes($station, $now, $now->modify('+1 hour'));
+        if ([] !== $newsTimes) {
+            $candidates[] = $this->aiNewsScheduleForecast->toQueueRow(
+                $station,
+                $newsTimes[0]->toDateTimeImmutable()
+            );
+        }
+
+        if ([] === $candidates) {
+            $np->playing_next = $npOld?->playing_next;
+            return;
+        }
+
+        usort(
+            $candidates,
+            static fn(StationQueue $a, StationQueue $b): int => ($a->timestamp_played?->getTimestamp() ?? PHP_INT_MAX)
+                <=> ($b->timestamp_played?->getTimestamp() ?? PHP_INT_MAX),
+        );
+
+        $np->playing_next = ($this->stationQueueApiGenerator)(
+            $candidates[0],
+            $baseUri,
+            true
+        );
+    }
+
     private function offlineApi(
         Station $station,
         ?UriInterface $baseUri = null
@@ -196,14 +278,7 @@ final class NowPlayingApiGenerator
             true
         );
 
-        $nextVisible = $this->queueRepo->getNextVisible($station);
-        if ($nextVisible instanceof StationQueue) {
-            $np->playing_next = ($this->stationQueueApiGenerator)(
-                $nextVisible,
-                $baseUri,
-                true
-            );
-        }
+        $this->populatePlayingNext($np, $station, $baseUri);
 
         $np->live = new Live();
 

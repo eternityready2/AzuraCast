@@ -11,6 +11,7 @@ use App\Exception\ValidationException;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
+use App\Service\AiNewsDashboardService;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -41,6 +42,7 @@ final class TestPostAction implements SingleActionInterface
 
     public function __construct(
         private readonly AiNewsGenerator $generator,
+        private readonly AiNewsDashboardService $dashboardService,
         private readonly ValidatorInterface $validator,
     ) {
     }
@@ -73,7 +75,7 @@ final class TestPostAction implements SingleActionInterface
                 'ai_news_last_generation_status' => $station->ai_news_last_generation_status,
                 'ai_news_last_generation_time' => $station->ai_news_last_generation_time?->format('Y-m-d\TH:i:s\Z'),
                 'ai_news_last_error' => $station->ai_news_last_error,
-                'dashboard' => GetAction::buildDashboardPayload($station),
+                'dashboard' => $this->dashboardService->buildDashboardPayload($station),
             ]);
         } catch (Throwable $e) {
             return $response->withStatus(500)->withJson(Error::fromException($e));

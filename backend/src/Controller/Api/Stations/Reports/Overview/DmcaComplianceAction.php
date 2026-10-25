@@ -43,23 +43,20 @@ final class DmcaComplianceAction extends AbstractReportAction
 
         // Pull recent play history for the date range window.
         $now     = new \DateTimeImmutable('now', $station->getTimezoneObject());
-        $history = $this->queueRepo->getRecentlyPlayedByTimeRange(
+        $history = $this->queueRepo->getPlayedMusicHistoryByTimeRange(
             $station,
             $now,
             $config->dmca_window_minutes ?? 180
         );
 
         // Build play counts per song, album, artist — music only.
+        // (getPlayedMusicHistoryByTimeRange already restricts to actually-played
+        // music tracks, so no additional media_type filtering is needed here.)
         $songCounts   = [];
         $albumCounts  = [];
         $artistCounts = [];
 
         foreach ($history as $row) {
-            // Skip non-music content (IDs, talk, promos, ads)
-            if (($row['media_type'] ?? 'music') !== 'music') {
-                continue;
-            }
-
             $songId = $row['song_id'] ?? null;
             $album  = strtolower(trim($row['album'] ?? ''));
             $artist = strtolower(trim($row['artist'] ?? ''));
@@ -82,11 +79,6 @@ final class DmcaComplianceAction extends AbstractReportAction
         // Songs approaching or exceeding limits — music only.
         $warnings = [];
         foreach ($history as $row) {
-            // Skip non-music content
-            if (($row['media_type'] ?? 'music') !== 'music') {
-                continue;
-            }
-
             $songId = $row['song_id'] ?? null;
             $title  = $row['title'] ?? '';
             $artist = $row['artist'] ?? '';
@@ -147,6 +139,16 @@ final class DmcaComplianceAction extends AbstractReportAction
             'total_plays_in_window' => count($history),
             'warnings'      => array_values($warnings),
             'warning_count' => count($warnings),
+            // Planned songs the air-time DMCA check refused and replaced in the
+            // last 14 days (written to the Linear Log as they happen).
+            'replacements'  => $this->em->getConnection()->fetchAllAssociative(
+                'SELECT COALESCE(aired_at, planned_at) AS at, text, note
+                FROM station_log_entries
+                WHERE station_id = ? AND note LIKE ? AND COALESCE(aired_at, planned_at) >= ?
+                ORDER BY at DESC
+                LIMIT 50',
+                [$station->id, '%failed the DMCA rules%', time() - 14 * 86400]
+            ),
         ]);
     }
 }

@@ -1,5 +1,6 @@
 name: Build Custom AzuraCast
 on:
+  workflow_dispatch:
   push:
     branches: [ main, dev ]
     tags: [ 'v*' ]
@@ -13,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Create Version File
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
@@ -21,31 +21,31 @@ jobs:
           else
             echo "$(git rev-parse --short HEAD)" > .version
           fi
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
-
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      # Only v* release tags build arm64 (emulated arm64 takes ~1 hour) and only
+      # they publish :stable, so ARM64 hosts (e.g. Oracle Ampere A1) pulling
+      # :stable always get a multi-arch image. main (:latest) and dev
+      # (:rolling) are amd64-only for fast builds.
       - name: Build and Push (multi-arch)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           target: final
           tags: |
             ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || github.ref_name == 'dev' && 'rolling' || github.ref_name }}
             ${{ startsWith(github.ref, 'refs/tags/') && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
-          cache-from: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache
           cache-to: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max

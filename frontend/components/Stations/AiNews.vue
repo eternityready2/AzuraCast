@@ -1,495 +1,559 @@
 <template>
     <form
-        class="ai-news-page"
+        class="form"
         @submit.prevent="saveChanges"
     >
         <section
-            class="ai-news-shell"
+            class="card"
             role="region"
             aria-labelledby="hdr_ai_news"
         >
-            <header class="ai-news-topbar">
-                <div class="ai-news-branding">
-                    <span class="logo-dot" />
-                    <div>
-                        <h2
-                            id="hdr_ai_news"
-                            class="ai-news-title"
-                        >
-                            {{ $gettext('Radio Newscaster') }}
-                        </h2>
-                        <p class="ai-news-subtitle mb-0">
-                            {{ $gettext('AI News Bulletin Admin Panel') }}
-                        </p>
-                    </div>
+            <div class="card-header text-bg-primary">
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                    <h2
+                        id="hdr_ai_news"
+                        class="card-title flex-fill my-0 d-flex align-items-center gap-2"
+                    >
+                        <icon-ic-baseline-campaign />
+                        {{ $gettext('AI News Bulletin') }}
+                    </h2>
+                    <span
+                        v-if="form.ai_news_enabled"
+                        class="ai-news-live-badge"
+                    >
+                        <span
+                            class="ai-news-live-dot"
+                            aria-hidden="true"
+                        />
+                        {{ $gettext('Streaming Live') }}
+                    </span>
+                    <span
+                        v-else
+                        class="ai-news-disabled-badge"
+                    >
+                        <span
+                            class="ai-news-disabled-dot"
+                            aria-hidden="true"
+                        />
+                        {{ $gettext('Bulletin Disabled') }}
+                    </span>
                 </div>
+            </div>
 
-                <div
-                    class="live-badge"
-                    :class="liveBadgeClass"
-                >
-                    <span class="live-dot" />
-                    {{ liveBadgeText }}
-                </div>
-            </header>
-
-            <loading :loading="isLoading" lazy>
-                <div class="ai-news-container">
-                    <div class="reference-note">
-                        <p class="mb-2">
-                            {{ $gettext('This page mirrors the client dashboard while staying connected to the current AzuraCast AI News APIs.') }}
-                        </p>
+            <loading
+                :loading="isLoading"
+                lazy
+            >
+                <div class="card-body">
+                    <div class="alert alert-info small mb-4">
                         <p class="mb-0">
-                            {{ $gettext('Active hours format: start and end times use 12-hour text like 01:00 AM. Leave both blank to run all day. Source URLs should be one per line, and regular website pages will be scraped before feed fallback is attempted.') }}
+                            {{ $gettext('Active hours format: start and end times use 12-hour text like 01:00 AM. Leave both blank to run all day. Source URLs should be one per line, and each must be a valid RSS or Atom feed URL.') }}
                         </p>
                     </div>
 
-                    <section class="dashboard-card status-strip">
-                        <div class="dashboard-card-title">
-                            {{ $gettext('System Status') }}
-                        </div>
-
-                        <div class="status-grid">
-                            <div
-                                v-for="item in statusCards"
-                                :key="item.label"
-                                class="stat-card"
-                            >
-                                <div class="stat-label">
+                    <h3 class="text-muted text-uppercase small fw-bold mb-3">
+                        {{ $gettext('System Status') }}
+                    </h3>
+                    <div class="row row-cols-2 row-cols-md-3 g-2 mb-4">
+                        <div
+                            v-for="item in statusCards"
+                            :key="item.label"
+                            class="col"
+                        >
+                            <div class="card card-body h-100 py-2 px-3">
+                                <div class="text-muted text-uppercase small">
                                     {{ item.label }}
                                 </div>
                                 <div
-                                    class="stat-value"
+                                    class="fw-semibold"
                                     :class="item.tone"
+                                    style="white-space: pre-line;"
                                 >
                                     {{ item.value }}
                                 </div>
                                 <div
                                     v-if="item.helper"
-                                    class="stat-helper"
+                                    class="text-muted small"
                                 >
                                     {{ item.helper }}
                                 </div>
                             </div>
                         </div>
-                    </section>
+                    </div>
 
-                    <div class="content-grid">
-                        <div class="left-column">
-                            <section class="dashboard-card">
-                                <div class="dashboard-card-title">
-                                    {{ $gettext('Generate Bulletin') }}
-                                </div>
+                    <div class="row g-4 align-items-start">
+                        <div class="col-lg-6 d-flex flex-column gap-4">
+                            <div class="card">
+                                <div class="card-body">
+                                    <h3 class="text-muted text-uppercase small fw-bold mb-3">
+                                        {{ $gettext('Generate Bulletin') }}
+                                    </h3>
 
-                                <div class="generate-area">
-                                    <button
-                                        type="button"
-                                        class="big-btn"
-                                        :disabled="isGenerateDisabled"
-                                        @click="runTest"
-                                    >
-                                        <span
-                                            v-if="isTesting"
-                                            class="spinner"
-                                        />
-                                        <span v-else>{{ generateButtonIcon }}</span>
-                                        <span>{{ generateButtonText }}</span>
-                                    </button>
-                                    <div
-                                        v-if="generateHelpText"
-                                        class="generate-help"
-                                    >
-                                        {{ generateHelpText }}
+                                    <div class="text-center py-2">
+                                        <button
+                                            type="button"
+                                            class="btn btn-primary btn-lg"
+                                            :disabled="isGenerateDisabled"
+                                            @click="runTest"
+                                        >
+                                            <span
+                                                v-if="isTesting"
+                                                class="spinner-border spinner-border-sm"
+                                                role="status"
+                                                aria-hidden="true"
+                                            />
+                                            <icon-ic-baseline-play-arrow v-else-if="form.ai_news_enabled" />
+                                            <icon-ic-baseline-stop v-else />
+                                            {{ generateButtonText }}
+                                        </button>
+                                        <div
+                                            v-if="generateHelpText"
+                                            class="text-danger small mt-2"
+                                        >
+                                            {{ generateHelpText }}
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div class="audio-section show">
-                                    <div class="player-box">
-                                        <div class="player-title">
+                                    <div class="ai-news-summary-box mt-3">
+                                        <div class="text-muted small mb-2">
                                             {{ $gettext('Latest Bulletin') }}
                                         </div>
-                                        <div class="audio-placeholder">
+
+                                        <div
+                                            v-if="audioAvailable && bulletinPlaybackUrl"
+                                            class="ai-news-status-callout ai-news-status-success small"
+                                        >
+                                            <icon-ic-baseline-check />
+                                            <span>{{ latestBulletinText }}</span>
+                                        </div>
+                                        <div
+                                            v-else-if="lastStatus === 'error'"
+                                            class="ai-news-status-callout ai-news-status-danger small"
+                                        >
+                                            <icon-ic-baseline-warning />
+                                            <span>{{ latestBulletinText }}</span>
+                                        </div>
+                                        <div
+                                            v-else
+                                            class="small text-muted"
+                                        >
                                             {{ latestBulletinText }}
                                         </div>
-                                        <audio
-                                            v-if="audioAvailable && bulletinPlaybackUrl"
-                                            :key="bulletinPlaybackUrl"
-                                            class="bulletin-player"
-                                            controls
-                                            preload="metadata"
-                                            :src="bulletinPlaybackUrl"
-                                        />
+
                                         <div
                                             v-if="audioAvailable && bulletinPlaybackUrl"
-                                            class="audio-link-row"
+                                            class="ai-news-player mt-3"
                                         >
-                                            <a
-                                                :href="bulletinPlaybackUrl"
-                                                class="btn btn-secondary btn-sm"
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                            >
-                                                {{ $gettext('Open Audio') }}
-                                            </a>
-                                            <a
-                                                :href="bulletinPlaybackUrl"
-                                                class="btn btn-secondary btn-sm"
-                                                download="news_bulletin.mp3"
-                                            >
-                                                {{ $gettext('Download MP3') }}
-                                            </a>
+                                            <audio
+                                                :key="bulletinPlaybackUrl"
+                                                class="w-100"
+                                                controls
+                                                preload="metadata"
+                                                :src="bulletinPlaybackUrl"
+                                            />
+                                            <div class="d-flex flex-wrap gap-2 mt-3">
+                                                <a
+                                                    :href="bulletinPlaybackUrl"
+                                                    class="btn btn-secondary btn-sm d-inline-flex align-items-center gap-1"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                >
+                                                    <icon-ic-baseline-open-in-new />
+                                                    {{ $gettext('Open Audio') }}
+                                                </a>
+                                                <a
+                                                    :href="bulletinPlaybackUrl"
+                                                    class="btn btn-secondary btn-sm d-inline-flex align-items-center gap-1"
+                                                    download="news_bulletin.mp3"
+                                                >
+                                                    <icon-ic-baseline-cloud-download />
+                                                    {{ $gettext('Download MP3') }}
+                                                </a>
+                                            </div>
                                         </div>
-                                        <div class="meta-row">
-                                            <div class="meta-item">
-                                                {{ metaStoriesText }}
-                                            </div>
-                                            <div class="meta-item">
-                                                {{ metaSourcesText }}
-                                            </div>
-                                            <div class="meta-item">
-                                                {{ metaTimeText }}
+
+                                        <div class="d-flex flex-wrap gap-3 text-muted small mt-3 pt-3 border-top">
+                                            <div>{{ metaStoriesText }}</div>
+                                            <div>{{ metaSourcesText }}</div>
+                                            <div>{{ metaTimeText }}</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-3">
+                                        <div class="text-muted text-uppercase small fw-bold mb-2">
+                                            {{ $gettext('Generation Log') }}
+                                        </div>
+                                        <div class="ai-news-summary-box log-panel">
+                                            <div
+                                                v-for="entry in logEntries"
+                                                :key="entry.id"
+                                                class="small font-monospace"
+                                                :class="entry.tone"
+                                            >
+                                                [{{ entry.time }}] {{ entry.message }}
                                             </div>
                                         </div>
                                     </div>
                                 </div>
+                            </div>
 
-                                <div class="log-section">
-                                    <div class="dashboard-card-title">
-                                        {{ $gettext('Generation Log') }}
-                                    </div>
-                                    <div class="log-box">
-                                        <div
-                                            v-for="entry in logEntries"
-                                            :key="entry.id"
-                                            class="log-line"
-                                            :class="entry.type"
-                                        >
-                                            [{{ entry.time }}] {{ entry.message }}
-                                        </div>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section class="dashboard-card">
-                                <div class="headlines-title-row">
-                                    <div class="dashboard-card-title mb-0">
+                            <div class="card">
+                                <div class="card-body">
+                                <div class="d-flex align-items-center justify-content-between mb-3">
+                                    <h3 class="text-muted text-uppercase small fw-bold mb-0">
                                         {{ $gettext('Live Headlines Preview') }}
-                                    </div>
+                                    </h3>
                                     <button
                                         type="button"
                                         class="btn btn-secondary btn-sm"
                                         @click="refreshHeadlinePreview"
                                     >
+                                        <icon-ic-baseline-refresh />
                                         {{ $gettext('Refresh') }}
                                     </button>
                                 </div>
 
-                                <div class="headline-list-wrap">
-                                    <ul class="headline-list">
-                                        <li
-                                            v-for="headline in headlinePreviewItems"
-                                            :key="headline.id"
-                                            class="headline-item"
+                                <ul class="list-group list-group-flush headline-list">
+                                    <li
+                                        v-for="headline in headlinePreviewItems"
+                                        :key="headline.id"
+                                        class="list-group-item d-flex align-items-start gap-2"
+                                    >
+                                        <span
+                                            class="badge text-uppercase"
+                                            :class="headline.tone"
                                         >
-                                            <span
-                                                class="src-tag"
-                                                :class="headline.tone"
-                                            >
-                                                {{ headline.source }}
-                                            </span>
-                                            <div>
-                                                <div class="hl-title">
-                                                    {{ headline.title }}
-                                                </div>
-                                                <div class="hl-summary">
-                                                    {{ headline.summary }}
-                                                </div>
+                                            {{ headline.source }}
+                                        </span>
+                                        <div>
+                                            <div class="fw-semibold small">
+                                                {{ headline.title }}
                                             </div>
-                                        </li>
-                                    </ul>
+                                            <div class="text-muted small">
+                                                {{ headline.summary }}
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ul>
                                 </div>
-                            </section>
+                            </div>
                         </div>
 
-                        <section class="dashboard-card settings-card settings-card-plain">
-                            <div class="dashboard-card-title">
-                                {{ $gettext('Settings') }}
-                            </div>
+                        <div class="col-lg-6">
+                            <div class="card">
+                                <div class="card-body">
+                                <h3 class="text-muted text-uppercase small fw-bold mb-3">
+                                    {{ $gettext('Settings') }}
+                                </h3>
 
-                            <div class="toggle-row">
-                                <div>
-                                    <div class="toggle-label">
-                                        {{ $gettext('Bulletin Enabled') }}
+                                <div class="mb-4">
+                                    <div class="form-check form-switch">
+                                        <input
+                                            id="ai_news_enabled"
+                                            v-model="form.ai_news_enabled"
+                                            class="form-check-input"
+                                            type="checkbox"
+                                            role="switch"
+                                        >
+                                        <label
+                                            class="form-check-label fw-semibold"
+                                            for="ai_news_enabled"
+                                        >
+                                            {{ $gettext('Bulletin Enabled') }}
+                                        </label>
                                     </div>
-                                    <div class="toggle-helper">
+                                    <div class="form-text">
                                         {{ enabledDescription }}
                                     </div>
                                 </div>
 
-                                <label class="toggle">
-                                    <input
-                                        v-model="form.ai_news_enabled"
-                                        type="checkbox"
-                                    >
-                                    <span class="slider" />
-                                </label>
-                            </div>
-
-                            <form-group-field
-                                id="edit_ai_news_reporter_name"
-                                :field="r$.ai_news_reporter_name"
-                            >
-                                <template #label>
-                                    {{ $gettext('AI Reporter Name') }}
-                                </template>
-                                <template #default="{id, model}">
-                                    <input
-                                        :id="id"
-                                        v-model="model.$model"
-                                        class="form-control form-control-dark"
-                                        type="text"
-                                        :placeholder="$gettext('AzuraCast News Desk')"
-                                    >
-                                </template>
-                                <template #description>
-                                    {{ $gettext('Optional presenter line read before the bulletin intro.') }}
-                                </template>
-                            </form-group-field>
-
-                            <form-group-field
-                                id="edit_ai_news_intro"
-                                :field="r$.ai_news_intro"
-                            >
-                                <template #label>
-                                    {{ $gettext('Intro Script') }}
-                                    <span class="label-helper">{{ $gettext('(read at start of every bulletin)') }}</span>
-                                </template>
-                                <template #default="{id, model}">
-                                    <textarea
-                                        :id="id"
-                                        v-model="model.$model"
-                                        class="form-control form-control-dark"
-                                        rows="4"
-                                    />
-                                </template>
-                            </form-group-field>
-
-                            <form-group-field
-                                id="edit_ai_news_outro"
-                                :field="r$.ai_news_outro"
-                            >
-                                <template #label>
-                                    {{ $gettext('Outro Script') }}
-                                    <span class="label-helper">{{ $gettext('(read at end of every bulletin)') }}</span>
-                                </template>
-                                <template #default="{id, model}">
-                                    <textarea
-                                        :id="id"
-                                        v-model="model.$model"
-                                        class="form-control form-control-dark"
-                                        rows="3"
-                                    />
-                                </template>
-                            </form-group-field>
-
-                            <form-group-field
-                                id="edit_ai_news_voice_model_path"
-                                :field="r$.ai_news_voice_model_path"
-                            >
-                                <template #label>
-                                    {{ $gettext('AI Voice') }}
-                                </template>
-                                <template #default="{model}">
-                                    <form-select
-                                        v-model="model.$model"
-                                        class="form-control-dark"
-                                        :options="voiceSelectOptions"
-                                    />
-                                </template>
-                                <template #description>
-                                    {{ $gettext('Choose an installed Piper voice model. Add more voices by downloading additional Piper models onto the server.') }}
-                                </template>
-                            </form-group-field>
-
-                            <form-group-field
-                                id="edit_ai_news_story_count"
-                                :field="r$.ai_news_story_count"
-                            >
-                                <template #label>
-                                    {{ $gettext('Stories Per Bulletin') }}
-                                </template>
-                                <template #default="{id, model}">
-                                    <input
-                                        :id="id"
-                                        v-model="model.$model"
-                                        class="form-control form-control-dark"
-                                        type="number"
-                                        min="1"
-                                        max="25"
-                                    >
-                                </template>
-                                <template #description>
-                                    {{ $gettext('How many headlines to include in each generated bulletin. Range: 1-25.') }}
-                                </template>
-                            </form-group-field>
-
-                            <div class="settings-group settings-group-tight">
-                                <label>{{ $gettext('Broadcast Window') }}</label>
-                                <div class="time-row">
-                                    <div class="time-field">
-                                        <label
-                                            class="time-field-label"
-                                            for="edit_ai_news_start_time"
-                                        >
-                                            {{ $gettext('Start Time') }}
-                                        </label>
-                                        <input
-                                            id="edit_ai_news_start_time"
-                                            v-model="activeHoursStartInput"
-                                            class="form-control form-control-dark"
-                                            type="text"
-                                            :placeholder="$gettext('01:00 AM')"
-                                        >
-                                        <div class="field-note">
-                                            {{ $gettext('Format: 01:00 AM') }}
-                                        </div>
-                                        <div
-                                            v-if="activeHoursStartError"
-                                            class="invalid-feedback d-block"
-                                        >
-                                            {{ activeHoursStartError }}
-                                        </div>
-                                    </div>
-                                    <div class="time-field">
-                                        <label
-                                            class="time-field-label"
-                                            for="edit_ai_news_end_time"
-                                        >
-                                            {{ $gettext('End Time') }}
-                                        </label>
-                                        <input
-                                            id="edit_ai_news_end_time"
-                                            v-model="activeHoursEndInput"
-                                            class="form-control form-control-dark"
-                                            type="text"
-                                            :placeholder="$gettext('01:00 AM')"
-                                        >
-                                        <div class="field-note">
-                                            {{ $gettext('Format: 01:00 AM') }}
-                                        </div>
-                                        <div
-                                            v-if="activeHoursEndError"
-                                            class="invalid-feedback d-block"
-                                        >
-                                            {{ activeHoursEndError }}
-                                        </div>
-                                    </div>
-                                </div>
-                                <form-group-multi-check
-                                    id="edit_ai_news_active_days"
-                                    v-model="form.ai_news_active_days"
-                                    class="day-selector"
-                                    :options="dayOptions"
-                                >
+                                <form-group-field
+                                    id="edit_ai_news_reporter_name"
+                                    :field="r$.ai_news_reporter_name"
+                                
+                                    class="mb-4"
+>
                                     <template #label>
-                                        {{ $gettext('Run On Days') }}
+                                        {{ $gettext('AI Reporter Name') }}
+                                    </template>
+                                    <template #default="{id, model}">
+                                        <input
+                                            :id="id"
+                                            v-model="model.$model"
+                                            class="form-control"
+                                            type="text"
+                                            :placeholder="$gettext('AzuraCast News Desk')"
+                                        >
                                     </template>
                                     <template #description>
-                                        {{ $gettext('Leave all days unchecked to allow bulletins every day. Select one or more days to limit when scheduled bulletins can run.') }}
+                                        {{ $gettext('Optional presenter line read before the bulletin intro.') }}
                                     </template>
-                                </form-group-multi-check>
-                                <div class="broadcast-slots">
-                                    <label class="broadcast-slot-option">
-                                        <input
-                                            v-model="form.ai_news_top_of_hour"
-                                            class="form-check-input"
-                                            type="checkbox"
-                                        >
-                                        <span>{{ $gettext('Top of hour') }}</span>
-                                    </label>
-                                    <label class="broadcast-slot-option">
-                                        <input
-                                            v-model="form.ai_news_bottom_of_hour"
-                                            class="form-check-input"
-                                            type="checkbox"
-                                        >
-                                        <span>{{ $gettext('Bottom of hour') }}</span>
-                                    </label>
-                                </div>
-                                <div class="field-note">
-                                    {{ $gettext('Stored as a single HH:MM-HH:MM range in the current AzuraCast API.') }}
-                                </div>
-                                <div class="field-note">
-                                    {{ $gettext('Top of hour runs at xx:00. Bottom of hour runs at xx:30. Select one or both options.') }}
-                                </div>
-                            </div>
+                                </form-group-field>
 
-                            <form-group-field
-                                id="edit_ai_news_source_urls"
-                                :field="r$.ai_news_source_urls"
-                            >
-                                <template #label>
-                                    {{ $gettext('Website or Feed Sources') }}
-                                </template>
-                                <template #default="{id, model}">
-                                    <textarea
-                                        :id="id"
-                                        v-model="model.$model"
-                                        class="form-control form-control-dark"
-                                        rows="5"
-                                    />
-                                </template>
-                                <template #description>
-                                    {{ $gettext('One source URL per line. The backend now tries to scrape website headlines first and falls back to RSS/Atom parsing when a feed is detected or HTML scraping returns nothing useful.') }}
-                                </template>
-                            </form-group-field>
+                                <form-group-field
+                                    id="edit_ai_news_intro"
+                                    :field="r$.ai_news_intro"
+                                
+                                    class="mb-4"
+>
+                                    <template #label>
+                                        {{ $gettext('Intro Script') }}
+                                        <span class="text-muted fw-normal">{{ $gettext('(read at start of every bulletin)') }}</span>
+                                    </template>
+                                    <template #default="{id, model}">
+                                        <textarea
+                                            :id="id"
+                                            v-model="model.$model"
+                                            class="form-control"
+                                            rows="4"
+                                        />
+                                    </template>
+                                </form-group-field>
 
-                            <div class="settings-group settings-group-tight">
-                                <div class="source-list">
-                                    <div
-                                        v-for="source in fixedSources"
-                                        :key="source.key"
-                                        class="source-card"
-                                        :class="{active: source.active}"
-                                    >
-                                        <div class="source-card-head">
-                                            <span class="source-card-label">{{ source.label }}</span>
-                                            <span class="source-card-status" :class="`status-${source.status}`">{{ sourceStatusLabel(source.status) }}</span>
+                                <form-group-field
+                                    id="edit_ai_news_outro"
+                                    :field="r$.ai_news_outro"
+                                
+                                    class="mb-4"
+>
+                                    <template #label>
+                                        {{ $gettext('Outro Script') }}
+                                        <span class="text-muted fw-normal">{{ $gettext('(read at end of every bulletin)') }}</span>
+                                    </template>
+                                    <template #default="{id, model}">
+                                        <textarea
+                                            :id="id"
+                                            v-model="model.$model"
+                                            class="form-control"
+                                            rows="3"
+                                        />
+                                    </template>
+                                </form-group-field>
+
+                                <form-group-field
+                                    id="edit_ai_news_voice_model_path"
+                                    :field="r$.ai_news_voice_model_path"
+                                
+                                    class="mb-4"
+>
+                                    <template #label>
+                                        {{ $gettext('AI Voice') }}
+                                    </template>
+                                    <template #default="{model}">
+                                        <form-select
+                                            v-model="model.$model"
+                                            :options="voiceSelectOptions"
+                                        />
+                                    </template>
+                                    <template #description>
+                                        {{ $gettext('Choose an installed Piper voice model. Add more voices by downloading additional Piper models onto the server.') }}
+                                    </template>
+                                </form-group-field>
+
+                                <form-group-field
+                                    id="edit_ai_news_story_count"
+                                    :field="r$.ai_news_story_count"
+                                
+                                    class="mb-4"
+>
+                                    <template #label>
+                                        {{ $gettext('Stories Per Bulletin') }}
+                                    </template>
+                                    <template #default="{id, model}">
+                                        <input
+                                            :id="id"
+                                            v-model="model.$model"
+                                            class="form-control"
+                                            type="number"
+                                            min="1"
+                                            max="25"
+                                        >
+                                    </template>
+                                    <template #description>
+                                        {{ $gettext('How many headlines to include in each generated bulletin. Range: 1-25.') }}
+                                    </template>
+                                </form-group-field>
+
+                                <div class="mb-4">
+                                    <label class="form-label">{{ $gettext('Broadcast Window') }}</label>
+                                    <div class="row g-2">
+                                        <div class="col-sm-6">
+                                            <label
+                                                class="form-label small text-muted"
+                                                for="edit_ai_news_start_time"
+                                            >
+                                                {{ $gettext('Start Time') }}
+                                            </label>
+                                            <input
+                                                id="edit_ai_news_start_time"
+                                                v-model="activeHoursStartInput"
+                                                class="form-control"
+                                                type="text"
+                                                :placeholder="$gettext('01:00 AM')"
+                                            >
+                                            <div class="form-text">
+                                                {{ $gettext('Format: 01:00 AM') }}
+                                            </div>
+                                            <div
+                                                v-if="activeHoursStartError"
+                                                class="invalid-feedback d-block"
+                                            >
+                                                {{ activeHoursStartError }}
+                                            </div>
                                         </div>
-                                        <div class="source-card-url">
-                                            {{ source.url }}
-                                        </div>
-                                        <div class="source-card-meta">
-                                            {{ source.message }}
-                                        </div>
-                                        <div v-if="source.headlineCount > 0" class="source-card-count">
-                                            {{ $gettext('Headlines fetched: ') + source.headlineCount }}
+                                        <div class="col-sm-6">
+                                            <label
+                                                class="form-label small text-muted"
+                                                for="edit_ai_news_end_time"
+                                            >
+                                                {{ $gettext('End Time') }}
+                                            </label>
+                                            <input
+                                                id="edit_ai_news_end_time"
+                                                v-model="activeHoursEndInput"
+                                                class="form-control"
+                                                type="text"
+                                                :placeholder="$gettext('01:00 AM')"
+                                            >
+                                            <div class="form-text">
+                                                {{ $gettext('Format: 01:00 AM') }}
+                                            </div>
+                                            <div
+                                                v-if="activeHoursEndError"
+                                                class="invalid-feedback d-block"
+                                            >
+                                                {{ activeHoursEndError }}
+                                            </div>
                                         </div>
                                     </div>
+
+                                    <form-group-multi-check
+                                        id="edit_ai_news_active_days"
+                                        v-model="form.ai_news_active_days"
+                                        class="mt-2"
+                                        :options="dayOptions"
+                                    >
+                                        <template #label>
+                                            {{ $gettext('Run On Days') }}
+                                        </template>
+                                        <template #description>
+                                            {{ $gettext('Leave all days unchecked to allow bulletins every day. Select one or more days to limit when scheduled bulletins can run.') }}
+                                        </template>
+                                    </form-group-multi-check>
+
+                                    <div class="d-flex flex-wrap gap-3 mt-2">
+                                        <div class="form-check form-check-inline mb-0">
+                                            <input
+                                                id="edit_ai_news_top_of_hour"
+                                                v-model="form.ai_news_top_of_hour"
+                                                class="form-check-input"
+                                                type="checkbox"
+                                            >
+                                            <label
+                                                class="form-check-label"
+                                                for="edit_ai_news_top_of_hour"
+                                            >{{ $gettext('Top of hour') }}</label>
+                                        </div>
+                                        <div class="form-check form-check-inline mb-0">
+                                            <input
+                                                id="edit_ai_news_bottom_of_hour"
+                                                v-model="form.ai_news_bottom_of_hour"
+                                                class="form-check-input"
+                                                type="checkbox"
+                                            >
+                                            <label
+                                                class="form-check-label"
+                                                for="edit_ai_news_bottom_of_hour"
+                                            >{{ $gettext('Bottom of hour') }}</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-text">
+                                        {{ $gettext('Stored as a single HH:MM-HH:MM range in the current AzuraCast API.') }}
+                                    </div>
+                                    <div class="form-text">
+                                        {{ $gettext('Top of hour runs at xx:00. Bottom of hour runs at xx:30. Select one or both options.') }}
+                                    </div>
+                                </div>
+
+                                <form-group-field
+                                    id="edit_ai_news_source_urls"
+                                    :field="r$.ai_news_source_urls"
+                                    class="mb-4"
+                                >
+                                    <template #label>
+                                        {{ $gettext('RSS/Atom Feed Sources') }}
+                                    </template>
+                                    <template #default="{id, model}">
+                                        <textarea
+                                            :id="id"
+                                            v-model="model.$model"
+                                            class="form-control"
+                                            rows="5"
+                                        />
+                                    </template>
+                                    <template #description>
+                                        {{ $gettext('One source URL per line. Each must be a valid RSS or Atom feed; plain website URLs are not scraped.') }}
+                                    </template>
+                                </form-group-field>
+
+                                <ul
+                                    v-if="fixedSources.length > 0"
+                                    class="list-group mb-3"
+                                >
+                                    <li
+                                        v-for="source in fixedSources"
+                                        :key="source.key"
+                                        class="list-group-item"
+                                        :class="{'border-primary': source.active}"
+                                    >
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <span class="fw-semibold">{{ source.label }}</span>
+                                            <span
+                                                class="badge"
+                                                :class="sourceStatusBadgeClass(source.status)"
+                                            >{{ sourceStatusLabel(source.status) }}</span>
+                                        </div>
+                                        <div class="text-muted small text-break">
+                                            {{ source.url }}
+                                        </div>
+                                        <div class="text-muted small">
+                                            {{ source.message }}
+                                        </div>
+                                        <div
+                                            v-if="source.headlineCount > 0"
+                                            class="text-muted small"
+                                        >
+                                            {{ $gettext('Headlines fetched: %{count}', {count: source.headlineCount}) }}
+                                        </div>
+                                    </li>
+                                </ul>
+
+                                <div class="d-flex gap-2">
+                                    <button
+                                        type="submit"
+                                        class="btn btn-primary"
+                                    >
+                                        {{ $gettext('Save Settings') }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-secondary"
+                                        :disabled="isLoading"
+                                        @click="relist"
+                                    >
+                                        {{ $gettext('Reset') }}
+                                    </button>
+                                </div>
+
+                                <div
+                                    v-if="saveStatusText"
+                                    class="text-success small mt-2"
+                                >
+                                    {{ saveStatusText }}
+                                </div>
                                 </div>
                             </div>
-
-                            <div class="btn-row">
-                                <button
-                                    type="submit"
-                                    class="btn btn-primary"
-                                >
-                                    {{ $gettext('Save Settings') }}
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-secondary"
-                                    :disabled="isLoading"
-                                    @click="relist"
-                                >
-                                    {{ $gettext('Reset') }}
-                                </button>
-                            </div>
-
-                            <div class="save-status">
-                                {{ saveStatusText }}
-                            </div>
-                        </section>
+                        </div>
                     </div>
                 </div>
             </loading>
@@ -591,7 +655,7 @@ interface LogEntry {
     id: number;
     time: string;
     message: string;
-    type: string;
+    tone: string;
 }
 
 const {getStationApiUrl} = useApiRouter();
@@ -842,12 +906,12 @@ const sourceCatalog = [
     {
         label: $gettext('Worthy News'),
         url: 'https://worthynews.com/',
-        tone: 'src-worthy'
+        badgeClass: 'text-bg-primary'
     },
     {
         label: $gettext('Rapture Ready'),
         url: 'https://www.raptureready.com/',
-        tone: 'src-rapture'
+        badgeClass: 'text-bg-warning'
     }
 ] as const;
 const dayOptions = [
@@ -900,16 +964,6 @@ const activeDayLabels = computed(() => {
         .join(', ');
 });
 
-const liveBadgeClass = computed(() => {
-    return form.value.ai_news_enabled ? 'is-live' : 'is-off';
-});
-
-const liveBadgeText = computed(() => {
-    return form.value.ai_news_enabled
-        ? $gettext('Streaming Live')
-        : $gettext('Bulletin Disabled');
-});
-
 const enabledDescription = computed(() => {
     return form.value.ai_news_enabled
         ? $gettext('The generator is allowed to run during the configured window.')
@@ -920,18 +974,18 @@ const statusTone = computed(() => {
     const value = lastStatus.value?.toLowerCase();
 
     if (value === 'completed') {
-        return 'tone-green';
+        return 'text-success';
     }
 
     if (value === 'error') {
-        return 'tone-red';
+        return 'text-danger';
     }
 
     if (form.value.ai_news_enabled) {
-        return 'tone-yellow';
+        return 'text-warning';
     }
 
-    return 'tone-muted';
+    return 'text-muted';
 });
 
 const scheduleText = computed(() => {
@@ -964,10 +1018,6 @@ const nextBulletinText = computed(() => {
 });
 
 const currentTimeText = computed(() => {
-    if (dashboardCurrentTime.value) {
-        return formatBrowserNow(browserNow.value);
-    }
-
     return formatBrowserNow(browserNow.value);
 });
 
@@ -1066,7 +1116,7 @@ const headlinePreviewItems = computed(() => {
                 source: $gettext('Info'),
                 title: $gettext('No headline preview available yet.'),
                 summary: $gettext('Run a test bulletin to fetch stories and populate the live preview panel.'),
-                tone: 'src-info'
+                tone: 'text-bg-secondary'
             }
         ];
     }
@@ -1079,7 +1129,7 @@ const headlinePreviewItems = computed(() => {
             source: source?.label ?? (item.source_type === 'website' ? $gettext('Website') : $gettext('Feed')),
             title: item.title,
             summary: item.description || $gettext('No summary available for this story.'),
-            tone: source?.tone ?? 'src-info'
+            tone: source?.badgeClass ?? 'text-bg-secondary'
         };
     });
 });
@@ -1090,42 +1140,41 @@ const statusCards = computed(() => {
             label: $gettext('Bulletin Schedule'),
             value: scheduleText.value,
             helper: '',
-            tone: form.value.ai_news_enabled ? 'tone-green' : 'tone-red'
+            tone: form.value.ai_news_enabled ? 'text-success' : 'text-danger'
         },
         {
             label: $gettext('Next Bulletin'),
             value: nextBulletinText.value,
             helper: dashboardNextBulletinTime.value ? browserTimezone : '',
-            tone: 'tone-yellow'
+            tone: 'text-warning'
         },
         {
             label: $gettext('Last Generated'),
             value: latestBulletin.value?.generated_at ? formatBrowserDateTime(latestBulletin.value.generated_at) : (timeText.value === '—' ? $gettext('Never') : formatBrowserDateTime(timeText.value, timeText.value)),
             helper: latestBulletin.value?.generated_at ? browserTimezone : '',
-            tone: 'tone-blue'
+            tone: 'text-info'
         },
         {
             label: $gettext('Current Time'),
             value: currentTimeText.value,
             helper: browserTimezone,
-            tone: 'tone-default'
+            tone: ''
         },
         {
             label: $gettext('Stream Output'),
             value: audioAvailable.value ? $gettext('Latest bulletin ready') : statusText.value,
             helper: '',
-            tone: audioAvailable.value ? 'tone-green' : statusTone.value
+            tone: audioAvailable.value ? 'text-success' : statusTone.value
         },
         {
             label: $gettext('TTS Engine'),
             value: ttsEngineText.value,
             helper: '',
-            tone: 'tone-blue'
+            tone: 'text-info'
         }
     ];
 });
 
-const generateButtonIcon = computed(() => form.value.ai_news_enabled ? '▶' : '■');
 const isGenerateDisabled = computed(() => isTesting.value || !form.value.ai_news_enabled);
 const generateButtonText = computed(() => {
     if (isTesting.value) {
@@ -1168,7 +1217,20 @@ const sourceStatusLabel = (status: string) => {
     }
 };
 
-const appendLog = (message: string, type = 'log-info') => {
+const sourceStatusBadgeClass = (status: string) => {
+    switch (status) {
+        case 'ok':
+            return 'text-bg-success';
+        case 'empty':
+            return 'text-bg-warning';
+        case 'skipped':
+            return 'text-bg-danger';
+        default:
+            return 'text-bg-secondary';
+    }
+};
+
+const appendLog = (message: string, tone = 'text-info') => {
     const timestamp = browserNow.value?.isValid
         ? browserNow.value.toLocaleString(displayTimeFormat)
         : DateTime.now().setZone(browserTimezone).toLocaleString(displayTimeFormat);
@@ -1180,7 +1242,7 @@ const appendLog = (message: string, type = 'log-info') => {
             id: logCounter.value,
             time: timestamp,
             message,
-            type
+            tone
         }
     ];
 };
@@ -1191,17 +1253,17 @@ const appendSourceResultsToLog = (sourceResults: AiNewsSourceResult[] = []) => {
         const headlineSuffix = result.headline_count > 0
             ? $gettext(' Headlines fetched: ') + result.headline_count
             : '';
-        const type = result.status === 'ok'
-            ? 'log-ok'
-            : (result.status === 'skipped' ? 'log-err' : 'log-info');
+        const tone = result.status === 'ok'
+            ? 'text-success'
+            : (result.status === 'skipped' ? 'text-danger' : 'text-info');
 
-        appendLog(`[${label}] ${sourceTypeLabel(result.source_type)} ${result.url} - ${result.message}${headlineSuffix}`, type);
+        appendLog(`[${label}] ${sourceTypeLabel(result.source_type)} ${result.url} - ${result.message}${headlineSuffix}`, tone);
     });
 };
 
 const setInitialLogs = () => {
     logEntries.value = [];
-    appendLog($gettext('Ready. Click "Generate Now" to produce a bulletin with the current station settings.'), 'log-info');
+    appendLog($gettext('Ready. Click "Generate Now" to produce a bulletin with the current station settings.'), 'text-info');
 };
 
 const hydrateFromResponse = (data: AiNewsResponse) => {
@@ -1221,9 +1283,9 @@ const hydrateFromResponse = (data: AiNewsResponse) => {
     setInitialLogs();
 
     if (latestBulletin.value?.generated_at) {
-        appendLog($gettext('Latest bulletin completed successfully at ') + formatBrowserDateTime(latestBulletin.value.generated_at), 'log-ok');
+        appendLog($gettext('Latest bulletin completed successfully at ') + formatBrowserDateTime(latestBulletin.value.generated_at), 'text-success');
     } else if (lastStatus.value === 'error' && lastError.value) {
-        appendLog($gettext('Latest bulletin failed: ') + lastError.value, 'log-err');
+        appendLog($gettext('Latest bulletin failed: ') + lastError.value, 'text-danger');
     }
 
     appendSourceResultsToLog(data.dashboard?.latest_bulletin?.source_results ?? []);
@@ -1241,9 +1303,10 @@ const relist = async () => {
     }
 };
 
+const BROWSER_CLOCK_TICK_MS = 1_000;
 const timeTicker = window.setInterval(() => {
     browserNow.value = DateTime.now().setZone(browserTimezone);
-}, 1000);
+}, BROWSER_CLOCK_TICK_MS);
 
 onUnmounted(() => {
     window.clearInterval(timeTicker);
@@ -1269,7 +1332,7 @@ const saveChanges = async () => {
 
     if (!hasBroadcastSlotSelected.value) {
         notifyError($gettext('Select at least one broadcast slot.'));
-        appendLog($gettext('Settings not saved because no broadcast slot was selected.'), 'log-err');
+        appendLog($gettext('Settings not saved because no broadcast slot was selected.'), 'text-danger');
         return;
     }
 
@@ -1278,7 +1341,7 @@ const saveChanges = async () => {
     const {data} = await axios.put<ApiStatus>(apiUrl.value, form.value);
 
     notifySuccess(data.message);
-    appendLog($gettext('Settings saved successfully.'), 'log-ok');
+    appendLog($gettext('Settings saved successfully.'), 'text-success');
     saveStatusText.value = $gettext('All settings saved');
     mayNeedRestart();
     await relist();
@@ -1287,12 +1350,12 @@ const saveChanges = async () => {
 const runTest = async () => {
     if (!form.value.ai_news_enabled) {
         notifyError($gettext('Enable AI News before running a manual bulletin generation.'));
-        appendLog($gettext('Manual generation blocked while the bulletin is disabled.'), 'log-err');
+        appendLog($gettext('Manual generation blocked while the bulletin is disabled.'), 'text-danger');
         return;
     }
 
     isTesting.value = true;
-    appendLog($gettext('Fetching headlines from configured website and feed sources...'), 'log-info');
+    appendLog($gettext('Fetching headlines from configured RSS/Atom feed sources...'), 'text-info');
 
     try {
         const {data} = await axios.post<AiNewsTestResponse>(testUrl.value);
@@ -1301,7 +1364,7 @@ const runTest = async () => {
         lastTime.value = data.ai_news_last_generation_time ?? lastTime.value;
         lastError.value = data.ai_news_last_error ?? null;
         dashboard.value = data.dashboard ?? dashboard.value;
-        appendLog($gettext('Bulletin generated successfully.'), 'log-ok');
+        appendLog($gettext('Bulletin generated successfully.'), 'text-success');
         await relist();
     } catch (error: any) {
         const apiMessage = error?.response?.data?.message;
@@ -1310,7 +1373,7 @@ const runTest = async () => {
         if (apiMessage) {
             lastError.value = apiMessage;
         }
-        appendLog($gettext('Generation failed. Review the latest error status for details.'), 'log-err');
+        appendLog($gettext('Generation failed. Review the latest error status for details.'), 'text-danger');
         await relist();
     } finally {
         isTesting.value = false;
@@ -1334,733 +1397,144 @@ const updateActiveHours = (start: string, end: string) => {
 };
 
 const refreshHeadlinePreview = () => {
-    appendLog($gettext('Headline preview refreshed from the latest backend dashboard payload.'), 'log-info');
+    appendLog($gettext('Headline preview refreshed from the latest backend dashboard payload.'), 'text-info');
 };
 </script>
 
 <style scoped>
-.ai-news-page {
-    color: #e2e8f0;
-}
-
-.ai-news-shell {
-    overflow: hidden;
-    border: 1px solid #2a2d3e;
-    border-radius: 14px;
-    background: #0f1117;
-}
-
-.ai-news-topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid #2a2d3e;
-    background: #1a1d27;
-}
-
-.ai-news-branding {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.logo-dot {
-    flex: 0 0 auto;
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: #4f8ef7;
-    box-shadow: 0 0 12px rgba(79, 142, 247, 0.75);
-}
-
-.ai-news-title {
-    margin: 0;
-    color: #e2e8f0;
-    font-size: 1.2rem;
-    font-weight: 700;
-}
-
-.ai-news-subtitle {
-    color: #94a3b8;
-    font-size: 0.85rem;
-}
-
-.live-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.85rem;
-    border: 1px solid #22c55e;
-    border-radius: 999px;
-    background: rgba(34, 197, 94, 0.1);
-    color: #22c55e;
-    font-size: 0.8rem;
-    font-weight: 600;
-}
-
-.live-badge.is-off {
-    border-color: #ef4444;
-    background: rgba(239, 68, 68, 0.08);
-    color: #fca5a5;
-}
-
-.live-dot {
-    width: 0.45rem;
-    height: 0.45rem;
-    border-radius: 999px;
-    background: currentColor;
-    box-shadow: 0 0 8px currentColor;
-}
-
-.ai-news-container {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 1.5rem;
-}
-
-.reference-note {
-    margin-bottom: 1.25rem;
-    color: #94a3b8;
-    font-size: 0.85rem;
-    line-height: 1.5;
-}
-
-.reference-note p {
-    margin: 0;
-}
-
-.dashboard-card {
-    padding: 1.5rem;
-    border: 1px solid #2a2d3e;
-    border-radius: 12px;
-    background: #1a1d27;
-}
-
-.status-strip {
-    margin-bottom: 1.5rem;
-}
-
-.dashboard-card-title {
-    margin-bottom: 1rem;
-    color: #6b7280;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.status-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-.stat-card {
-    padding: 0.875rem 1rem;
-    border: 1px solid #2a2d3e;
-    border-radius: 8px;
-    background: #0f1117;
-}
-
-.stat-label {
-    margin-bottom: 0.25rem;
-    color: #6b7280;
-    font-size: 0.7rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.stat-value {
-    color: #e2e8f0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    white-space: pre-line;
-}
-
-.stat-helper {
-    margin-top: 0.35rem;
-    color: #94a3b8;
-    font-size: 0.75rem;
-}
-
-.tone-green {
-    color: #22c55e;
-}
-
-.tone-yellow {
-    color: #f59e0b;
-}
-
-.tone-blue {
-    color: #4f8ef7;
-}
-
-.tone-red {
-    color: #ef4444;
-}
-
-.tone-muted {
-    color: #94a3b8;
-}
-
-.tone-default {
-    color: #e2e8f0;
-}
-
-.content-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 1.5rem;
-}
-
-.left-column {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-}
-
-.generate-area {
-    padding: 0.75rem 0;
-    text-align: center;
-}
-
-.big-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 1rem 2.25rem;
-    border: 0;
-    border-radius: 8px;
-    background: #4f8ef7;
-    color: #fff;
-    font-size: 1.1rem;
-    font-weight: 700;
-    box-shadow: 0 0 20px rgba(79, 142, 247, 0.3);
-    transition: filter 0.2s ease, box-shadow 0.2s ease;
-}
-
-.big-btn:hover:not(:disabled) {
-    filter: brightness(1.08);
-    box-shadow: 0 0 30px rgba(79, 142, 247, 0.45);
-}
-
-.big-btn:disabled {
-    opacity: 0.6;
-    box-shadow: none;
-    cursor: not-allowed;
-}
-
-.generate-help {
-    margin-top: 0.75rem;
-    color: #fca5a5;
-    font-size: 0.8rem;
-    line-height: 1.45;
-}
-
-.spinner {
-    width: 18px;
-    height: 18px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #fff;
-    border-radius: 999px;
-    animation: spin 0.7s linear infinite;
-}
-
-.audio-section {
-    margin-top: 1.5rem;
-}
-
-.player-box,
-.log-box {
-    border: 1px solid #2a2d3e;
-    border-radius: 8px;
-    background: #0f1117;
-}
-
-.player-box {
-    padding: 1rem 1.25rem;
-}
-
-.player-title {
-    margin-bottom: 0.75rem;
-    color: #94a3b8;
-    font-size: 0.8rem;
-}
-
-.audio-placeholder {
-    padding: 0.75rem 0.9rem;
-    border: 1px dashed #334155;
-    border-radius: 6px;
-    color: #cbd5e1;
-    font-size: 0.9rem;
-    line-height: 1.5;
-}
-
-.bulletin-player {
-    width: 100%;
-    margin-top: 0.9rem;
-    filter: saturate(0.9);
-}
-
-.audio-link-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.9rem;
-}
-
-.meta-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin-top: 0.75rem;
-    color: #94a3b8;
-    font-size: 0.78rem;
-}
-
-.meta-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-}
-
-.log-section {
-    margin-top: 1.25rem;
-}
-
-.log-box {
-    min-height: 70px;
-    max-height: 180px;
-    padding: 0.75rem 0.9rem;
-    overflow-y: auto;
-    color: #94a3b8;
-    font-family: monospace;
-    font-size: 0.78rem;
-}
-
-.log-line + .log-line {
-    margin-top: 0.25rem;
-}
-
-.log-ok {
-    color: #22c55e;
-}
-
-.log-err {
-    color: #ef4444;
-}
-
-.log-info {
-    color: #60a5fa;
-}
-
-.headlines-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
-}
-
-.headline-list-wrap {
-    max-height: 420px;
-    padding-right: 0.25rem;
+.log-panel {
+    min-height: 4.5rem;
+    max-height: 12rem;
     overflow-y: auto;
 }
 
 .headline-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    max-height: 26rem;
+    overflow-y: auto;
 }
 
-.headline-item {
+.ai-news-summary-box {
+    padding: 1rem;
+    border-radius: var(--bs-border-radius);
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+}
+
+.ai-news-status-callout {
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #2a2d3e;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--bs-border-radius);
+    border: 1px solid transparent;
 }
 
-.headline-item:last-child {
-    padding-bottom: 0;
-    border-bottom: 0;
+.ai-news-status-success {
+    background-color: rgba(var(--bs-success-rgb), 0.12);
+    border-color: rgba(var(--bs-success-rgb), 0.35);
+    color: var(--bs-success);
 }
 
-.src-tag {
-    flex: 0 0 auto;
-    margin-top: 0.1rem;
-    padding: 0.15rem 0.45rem;
-    border-radius: 4px;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+.ai-news-status-danger {
+    background-color: rgba(var(--bs-danger-rgb), 0.12);
+    border-color: rgba(var(--bs-danger-rgb), 0.35);
+    color: var(--bs-danger);
 }
 
-.src-worthy {
-    background: rgba(79, 142, 247, 0.15);
-    color: #4f8ef7;
+.ai-news-player {
+    padding: 0.85rem 1rem;
+    border-radius: var(--bs-border-radius);
+    background-color: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
 }
 
-.src-rapture {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-}
-
-.src-bbc {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-}
-
-.src-info {
-    background: rgba(148, 163, 184, 0.15);
-    color: #cbd5e1;
-}
-
-.hl-title {
-    color: #e2e8f0;
-    font-size: 0.88rem;
-    line-height: 1.4;
-    word-break: break-word;
-}
-
-.hl-summary {
-    margin-top: 0.2rem;
-    color: #94a3b8;
-    font-size: 0.78rem;
-    line-height: 1.45;
-}
-
-.settings-card :deep(.form-group) {
-    margin-bottom: 1rem;
-}
-
-.settings-card-plain :deep(.form-group) {
-    margin-bottom: 1rem;
-}
-
-.settings-card-plain :deep(.form-group-label) {
-    margin-bottom: 0;
-}
-
-.settings-card-plain :deep(.form-group .form-label) {
-    margin-bottom: 0.4rem;
-    color: #94a3b8;
-    font-size: 0.8rem;
-}
-
-.settings-card :deep(label) {
-    display: block;
-    margin-bottom: 0.4rem;
-    color: #94a3b8;
-    font-size: 0.8rem;
-}
-
-.toggle-label-row {
-    margin-bottom: 0.4rem;
-}
-
-.label-helper {
-    color: #6b7280;
-    font-weight: 400;
-}
-
-.settings-group {
-    margin-bottom: 1rem;
-}
-
-.settings-group-tight {
-    margin-bottom: 1rem;
-}
-
-.settings-group-tight:last-of-type {
-    margin-bottom: 0;
-}
-
-.toggle-row {
-    display: flex;
+.ai-news-disabled-badge {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-    padding-bottom: 0.25rem;
+    gap: 0.4rem;
+    padding: 0.25rem 0.7rem;
+    border-radius: 50rem;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(220, 53, 69, 0.55);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
 }
 
-.toggle-label {
-    color: #e2e8f0;
-    font-weight: 600;
+.ai-news-disabled-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background-color: var(--bs-danger);
 }
 
-.toggle-helper,
-.field-note,
-.save-status {
-    color: #94a3b8;
-    font-size: 0.8rem;
+.ai-news-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.7rem;
+    border-radius: 50rem;
+    background-color: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
 }
 
-.field-note {
-    margin-top: 0.4rem;
-    line-height: 1.45;
-}
-
-.toggle {
+.ai-news-live-dot {
     position: relative;
-    flex: 0 0 auto;
-    width: 48px;
-    height: 26px;
-    cursor: pointer;
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
 }
 
-.toggle input {
-    width: 0;
-    height: 0;
-    opacity: 0;
-}
-
-.slider {
+.ai-news-live-dot::before,
+.ai-news-live-dot::after {
+    content: '';
     position: absolute;
     inset: 0;
-    border-radius: 999px;
-    background: #374151;
-    transition: background 0.2s ease;
+    border-radius: 50%;
+    background-color: #fff;
 }
 
-.slider::before {
-    content: "";
-    position: absolute;
-    left: 4px;
-    bottom: 4px;
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    background: #fff;
-    transition: transform 0.2s ease;
+.ai-news-live-dot::before {
+    z-index: 1;
+    animation: ai-news-live-glow 1.3s ease-in-out infinite;
 }
 
-.toggle input:checked + .slider {
-    background: #4f8ef7;
+.ai-news-live-dot::after {
+    z-index: 0;
+    animation: ai-news-live-ping 1.3s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-.toggle input:checked + .slider::before {
-    transform: translateX(22px);
-}
-
-.form-control-dark {
-    border: 1px solid #2a2d3e;
-    background: #0f1117;
-    color: #e2e8f0;
-}
-
-.form-control-dark:focus {
-    border-color: #4f8ef7;
-    background: #0f1117;
-    color: #e2e8f0;
-    box-shadow: 0 0 0 0.2rem rgba(79, 142, 247, 0.15);
-}
-
-.form-control-dark:disabled {
-    background: #111827;
-    color: #94a3b8;
-    opacity: 1;
-}
-
-.ai-news-time-picker {
-    width: 100%;
-}
-
-.ai-news-time-picker :deep(.dp__main),
-.ai-news-time-picker :deep(.dp__input_wrap) {
-    width: 100%;
-}
-
-.ai-news-time-picker :deep(.dp__input_icon),
-.ai-news-time-picker :deep(.dp--time-overlay-btn) {
-    display: none;
-}
-
-.ai-news-time-picker :deep(.dp__input),
-.ai-news-time-picker :deep(.dp__input_icon_pad) {
-    width: 100%;
-    padding-left: 0.75rem !important;
-    border: 1px solid #2a2d3e;
-    background: #0f1117;
-    color: #e2e8f0;
-}
-
-.ai-news-time-picker :deep(.dp__input:focus) {
-    border-color: #4f8ef7;
-    box-shadow: 0 0 0 0.2rem rgba(79, 142, 247, 0.15);
-}
-
-.ai-news-time-picker :deep(.dp__theme_dark) {
-    --dp-background-color: #111827;
-    --dp-text-color: #e2e8f0;
-    --dp-hover-color: #1f2937;
-    --dp-hover-text-color: #e2e8f0;
-    --dp-primary-color: #4f8ef7;
-    --dp-primary-text-color: #ffffff;
-    --dp-border-color: #2a2d3e;
-    --dp-menu-border-color: #2a2d3e;
-}
-
-.time-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-.time-field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-}
-
-.time-field-label {
-    margin-bottom: 0;
-    color: #94a3b8;
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.broadcast-slots {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin-top: 0.75rem;
-}
-
-.broadcast-slot-option {
-    display: inline-flex !important;
-    align-items: center;
-    gap: 0.55rem;
-    margin-bottom: 0;
-    color: #e2e8f0 !important;
-    font-size: 0.9rem !important;
-}
-
-.broadcast-slot-option .form-check-input {
-    margin: 0;
-}
-
-.source-card {
-    border: 1px solid #2a2d3e;
-    border-radius: 0.9rem;
-    background: #0f1117;
-    padding: 0.9rem 1rem;
-}
-
-.source-card.active {
-    border-color: rgba(79, 142, 247, 0.6);
-    box-shadow: inset 0 0 0 1px rgba(79, 142, 247, 0.18);
-}
-
-.source-card-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.35rem;
-}
-
-.source-card-label {
-    color: #e2e8f0;
-    font-size: 0.95rem;
-    font-weight: 600;
-}
-
-.source-card-status {
-    color: #4f8ef7;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.source-card-status.status-ok {
-    color: #34d399;
-}
-
-.source-card-status.status-empty {
-    color: #fbbf24;
-}
-
-.source-card-status.status-skipped {
-    color: #f87171;
-}
-
-.source-card-status.status-idle {
-    color: #94a3b8;
-}
-
-.source-card-url {
-    color: #94a3b8;
-    font-size: 0.8rem;
-    line-height: 1.45;
-    overflow-wrap: anywhere;
-}
-
-.source-card-meta,
-.source-card-count {
-    margin-top: 0.45rem;
-    color: #94a3b8;
-    font-size: 0.78rem;
-    line-height: 1.45;
-}
-
-.btn-row {
-    display: flex;
-    gap: 0.625rem;
-    margin-top: 1.25rem;
-}
-
-.save-status {
-    min-height: 1.25rem;
-    margin-top: 0.75rem;
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
+@media (prefers-reduced-motion: reduce) {
+    .ai-news-live-dot::before,
+    .ai-news-live-dot::after {
+        animation: none;
     }
 }
 
-@media (max-width: 900px) {
-    .status-grid,
-    .content-grid {
-        grid-template-columns: 1fr;
+@keyframes ai-news-live-glow {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0.35rem 0.05rem rgba(255, 255, 255, 0.9);
+    }
+    50% {
+        transform: scale(1.25);
+        box-shadow: 0 0 0.6rem 0.15rem rgba(255, 255, 255, 1);
     }
 }
 
-@media (max-width: 700px) {
-    .ai-news-topbar {
-        align-items: flex-start;
-        flex-direction: column;
-        padding: 1rem;
+@keyframes ai-news-live-ping {
+    0% {
+        transform: scale(1);
+        opacity: 0.7;
     }
-
-    .ai-news-container {
-        padding: 1rem;
-    }
-
-    .status-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .time-row,
-    .btn-row {
-        grid-template-columns: 1fr;
-        flex-direction: column;
-    }
-
-    .broadcast-slots {
-        flex-direction: column;
-        gap: 0.65rem;
+    75%, 100% {
+        transform: scale(2.6);
+        opacity: 0;
     }
 }
 </style>
-

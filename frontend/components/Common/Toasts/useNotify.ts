@@ -47,6 +47,20 @@ export const useNotify = defineStore(
                 return;
             }
 
+            // Avoid stacking duplicate toasts (e.g. several polling requests failing
+            // at once right after a background tab resumes, which would otherwise show
+            // the same generic error message multiple times in a row).
+            if (!Array.isArray(message)) {
+                const isDuplicate = toasts.value.some(
+                    (existing) => existing.message === message
+                        && existing.variant === options.variant
+                );
+
+                if (isDuplicate) {
+                    return;
+                }
+            }
+
             const toast: ToastProps = {
                 id: getRandomId(),
                 ...options

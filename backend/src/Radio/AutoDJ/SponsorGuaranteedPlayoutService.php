@@ -77,6 +77,12 @@ final class SponsorGuaranteedPlayoutService
     ): int {
         $dayStart = $localNow->startOfDay()->setTimezone(new DateTimeZone('UTC'));
 
+        // The (string) cast drops explicit tz info, and DateTimeImmutable's
+        // constructor then parses it using PHP's default timezone. This is
+        // only safe because AppFactory::boot() calls
+        // date_default_timezone_set('UTC') globally, matching the UTC
+        // conversion above. If that global ever changes, this needs an
+        // explicit `new DateTimeZone('UTC')` second constructor argument.
         return (int)$this->em->createQuery(
             <<<'DQL'
                 SELECT COUNT(sh.id)
@@ -97,6 +103,17 @@ final class SponsorGuaranteedPlayoutService
         // Round down slightly (0.9x) so a sponsor isn't flagged "behind" over
         // ordinary minute-to-minute timing noise -- only genuine, meaningful
         // pace gaps trigger a forced play.
+        //
+        // NOTE: because this multiplies the full-day fraction (which only
+        // reaches ~0.99999 at 23:59:59) by 0.9, expectedPlaysByNow never
+        // actually reaches the full sponsor_guaranteed_plays_per_day value,
+        // even one second before midnight. A sponsor sitting at exactly 90%
+        // of their guaranteed plays will never be flagged "behind pace" and
+        // the last ~10% of a day's guarantee is never force-enforced by this
+        // mechanism. That's a real gap against the "real, enforced guarantee"
+        // description above -- intentional slack for noise tolerance, but
+        // worth a deliberate decision (e.g. a separate end-of-day hard check)
+        // if sponsors are contractually expecting the full 100%.
         return $playlist->sponsor_guaranteed_plays_per_day * $fractionOfDayElapsed * 0.9;
     }
 }

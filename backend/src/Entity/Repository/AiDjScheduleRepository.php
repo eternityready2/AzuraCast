@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity\Repository;
 
+use App\Entity\AiDj;
 use App\Entity\AiDjSchedule;
 use App\Doctrine\Repository;
 
@@ -19,7 +20,7 @@ final class AiDjScheduleRepository extends Repository
      */
     public function findOneBy(array $criteria): ?AiDjSchedule
     {
-        return $this->repository->findOneBy($criteria);
+        return $this->getRepository()->findOneBy($criteria);
     }
 
     /**
@@ -136,5 +137,13 @@ final class AiDjScheduleRepository extends Repository
             ->orderBy('schedule.start_time', 'ASC')
             ->getQuery()
             ->getResult();
+    }
+
+    public function findForDj(int $scheduleId, AiDj $dj): ?AiDjSchedule
+    {
+        return $this->getRepository()->findOneBy([
+            'id' => $scheduleId,
+            'ai_dj' => $dj,
+        ]);
     }
 }

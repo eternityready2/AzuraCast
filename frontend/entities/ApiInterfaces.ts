@@ -200,6 +200,14 @@ export enum PlaylistTypes {
 export enum PlaylistSources {
   Songs = "songs",
   RemoteUrl = "remote_url",
+  Playlists = "playlists",
+  Requests = "requests",
+}
+
+export enum PlaylistGroupAllowedRequests {
+  Any = "any",
+  Playlist = "playlist",
+  None = "none",
 }
 
 export enum PlaylistRemoteTypes {
@@ -2244,7 +2252,15 @@ export interface StationBackendConfiguration {
   record_streams_format?: string;
   record_streams_bitrate?: number;
   use_manual_autodj?: boolean;
+  /**
+   * Reset the internal queue of sequential playlists when the station is restarted or its configuration is rewritten.
+   * @example false
+   */
+  reset_sequential_queues_on_restart?: boolean;
   autodj_queue_length?: number;
+  autodj_queue_lookahead_minutes?: number;
+  linear_log_enabled?: boolean;
+  linear_log_hours?: number;
   dj_mount_point?: string;
   dj_buffer?: number;
   audio_processing_method?: string;
@@ -2323,6 +2339,7 @@ export interface StationFrontendConfiguration {
   streamer_pw?: string;
   port?: number | null;
   max_listeners?: number | null;
+  trusted_proxy_address?: string | null;
   banned_ips?: string | null;
   banned_user_agents?: string | null;
   banned_countries?: string[] | null;
@@ -2461,10 +2478,20 @@ export type StationPlaylist = HasAutoIncrementId & {
    * @example true
    */
   include_in_on_demand?: boolean;
+  /**
+   * Whether this playlist carries spoken-word programming (a show, sermon or syndicated episode) rather than music. Programme content is exempt from the DMCA performance complement, which only governs sound recordings.
+   * @example false
+   */
+  is_programme?: boolean;
   /** @example "interrupt,loop_once,single_track,merge" */
   backend_options?: string[];
   /** @example true */
   avoid_duplicates?: boolean;
+  /**
+   * Don't reset this playlist's queue when the station is restarted or its configuration is rewritten.
+   * @example false
+   */
+  preserve_queue_on_restart?: boolean;
   smart_shuffle_distance?: number | null;
   /** Minimum days between repeats of the same track (positive rotation goal). */
   rotation_goal_days?: number | null;
@@ -2473,6 +2500,78 @@ export type StationPlaylist = HasAutoIncrementId & {
   schedule_items?: any[];
   /** Podcast> */
   podcasts?: any[];
+  /** If this is a Playlist Group, its ordered member playlists. */
+  playlists?: StationPlaylistGroupMember[];
+  /** The Playlist Groups (if any) this playlist is currently a member of. */
+  playlist_groups?: StationPlaylistGroupMember[];
+  /** Smart Block: whether this playlist's membership is auto-managed by criteria. */
+  is_smart_block?: boolean;
+  /** Smart Block: whether ALL or ANY criteria rows must match a track. */
+  smart_block_match_type?: SmartBlockMatchType;
+  /** Smart Block: optional cap on the number of matching tracks kept as members. */
+  smart_block_limit?: number | null;
+  /** Smart Block: whether smart_block_limit is measured in tracks or seconds. */
+  smart_block_limit_type?: SmartBlockLimitType;
+  /** Smart Block: Static (generate once, hand-editable) or Dynamic (always kept in sync). */
+  smart_block_type?: SmartBlockType;
+  /** Smart Block: the filter rules, if is_smart_block is enabled. */
+  smart_block_criteria?: StationPlaylistSmartBlockCriterion[];
+};
+
+export enum SmartBlockCriteriaField {
+  Genre = "genre",
+  Category = "category",
+  Artist = "artist",
+  Album = "album",
+  Title = "title",
+  Duration = "duration",
+  CustomField = "custom_field",
+  LastPlayed = "last_played_days_ago",
+}
+
+export enum SmartBlockCriteriaComparison {
+  Is = "is",
+  IsNot = "is_not",
+  Contains = "contains",
+  NotContains = "not_contains",
+  GreaterThan = "greater_than",
+  LessThan = "less_than",
+  Between = "between",
+}
+
+export enum SmartBlockMatchType {
+  All = "all",
+  Any = "any",
+}
+
+export enum SmartBlockLimitType {
+  Tracks = "tracks",
+  Duration = "duration",
+}
+
+export enum SmartBlockType {
+  Static = "static",
+  Dynamic = "dynamic",
+}
+
+export type StationPlaylistSmartBlockCriterion = {
+  id?: number;
+  field?: SmartBlockCriteriaField;
+  custom_field_id?: number | null;
+  custom_field_name?: string | null;
+  comparison?: SmartBlockCriteriaComparison;
+  value?: string | null;
+  value2?: string | null;
+  weight?: number;
+};
+
+export type StationPlaylistGroupMember = {
+  id?: number;
+  name?: string;
+  weight?: number;
+  consecutive_plays?: number;
+  play_full_cycle?: boolean;
+  allowed_requests?: PlaylistGroupAllowedRequests;
 };
 
 export type StationRemote = HasAutoIncrementId & {

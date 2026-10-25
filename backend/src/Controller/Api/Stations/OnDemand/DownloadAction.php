@@ -6,6 +6,8 @@ namespace App\Controller\Api\Stations\OnDemand;
 
 use App\Controller\SingleActionInterface;
 use App\Entity\Repository\StationMediaRepository;
+use App\Entity\StationPlaylistMedia;
+use App\Exception\NotFoundException;
 use App\Flysystem\StationFilesystems;
 use App\Http\Response;
 use App\Http\ServerRequest;
@@ -54,6 +56,22 @@ final readonly class DownloadAction implements SingleActionInterface
         $station = $request->getStation();
 
         $media = $this->mediaRepo->requireByUniqueId($mediaId, $station);
+
+        // Check if the media is associated with an on-demand playlist. This endpoint
+        // is unauthenticated, so without this check any station media file could be
+        // downloaded once its unique ID is known/guessed, regardless of whether it
+        // was ever intended for public on-demand download.
+        $isValid = array_any(
+            $media->playlists->toArray(),
+            function (StationPlaylistMedia $spm) {
+                $playlist = $spm->playlist;
+                return $playlist->is_enabled && $playlist->include_in_on_demand;
+            }
+        );
+
+        if (!$isValid) {
+            throw NotFoundException::file();
+        }
 
         $fsMedia = $this->stationFilesystems->getMediaFilesystem($station);
 

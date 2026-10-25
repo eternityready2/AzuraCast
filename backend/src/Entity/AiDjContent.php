@@ -129,4 +129,16 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
     {
         $this->station = $station;
     }
+
+    public function api(): array
+    {
+        return [
+            'id' => $this->id,
+            'type' => $this->type,
+            'content' => $this->content,
+            'reference' => $this->reference,
+            'is_enabled' => $this->is_enabled,
+            'is_global' => $this->is_global,
+        ];
+    }
 }

@@ -62,7 +62,7 @@ final class StationStreamerBroadcastRepository extends Repository
      */
     public function getActiveBroadcasts(Station $station): array
     {
-        return $this->repository->findBy([
+        return $this->getRepository()->findBy([
             'station' => $station,
             'timestampEnd' => null,
         ]);
@@ -70,7 +70,7 @@ final class StationStreamerBroadcastRepository extends Repository
 
     public function findByPath(Station $station, string $path): ?StationStreamerBroadcast
     {
-        return $this->repository->findOneBy([
+        return $this->getRepository()->findOneBy([
             'station' => $station,
             'recordingPath' => $path,
         ]);

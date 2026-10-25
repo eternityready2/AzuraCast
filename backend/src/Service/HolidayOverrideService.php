@@ -11,6 +11,7 @@ use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -37,7 +38,7 @@ final class HolidayOverrideService
                 AND h.is_active = 1
             DQL
         )->setParameter('station', $station)
-            ->setParameter('date', $localDate->toDateTimeImmutable())
+            ->setParameter('date', $localDate->toDateTimeImmutable(), Types::DATE_IMMUTABLE)
             ->setMaxResults(1)
             ->getOneOrNullResult();
 

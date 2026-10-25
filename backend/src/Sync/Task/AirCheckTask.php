@@ -1,0 +1,89 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Sync\Task;
+
+use App\Controller\Api\Stations\Features\FeatureSuiteController;
+use App\Entity\Station;
+use App\Service\AirCheckDiagnosticsRecorder;
+use App\Service\AirCheckHealthMonitor;
+use App\Service\AirCheckHistoryRetention;
+use App\Service\AirCheckLiquidsoapRecovery;
+use Psr\SimpleCache\CacheInterface;
+
+final class AirCheckTask extends AbstractTask
+{
+    private const int HEALTH_STATE_TTL = 604800;
+
+    public function __construct(
+        private readonly FeatureSuiteController $featureSuiteController,
+        private readonly AirCheckLiquidsoapRecovery $liquidsoapRecovery,
+        private readonly AirCheckHistoryRetention $historyRetention,
+        private readonly AirCheckDiagnosticsRecorder $diagnosticsRecorder,
+        private readonly AirCheckHealthMonitor $healthMonitor,
+        private readonly CacheInterface $cache,
+    ) {
+    }
+
+    public static function getSchedulePattern(): string
+    {
+        return self::SCHEDULE_EVERY_MINUTE;
+    }
+
+    public function run(bool $force = false): void
+    {
+        // Not iterateStations(): its transaction would hold one snapshot for the
+        // whole check, which takes seconds. A song change writes the station row
+        // meanwhile, and saving the check's result over that snapshot fails with
+        // "Record has changed since last read" (10:39pm Oct 12).
+        /** @var Station[] $stations */
+        $stations = $this->em->createQuery(
+            <<<'DQL'
+                SELECT s FROM App\Entity\Station s
+            DQL
+        )->getResult();
+
+        foreach ($stations as $station) {
+            // Each station as it is when its turn comes, not as read at the start.
+            $this->em->refresh($station);
+            if (!$force && !$station->backend_config->aircheck_enabled) {
+                continue;
+            }
+
+            $result = $this->featureSuiteController->runAirCheck($station);
+            if (!($result['checked'] ?? false)) {
+                continue;
+            }
+
+            $result = $this->liquidsoapRecovery->recover($station, $result);
+            $this->historyRetention->trim($station);
+            $this->diagnosticsRecorder->recordRecoveryResult($station, $result);
+
+            $health = $this->healthMonitor->getSnapshot($station);
+            foreach ((array)($health['system_services'] ?? []) as $service) {
+                if (!is_array($service)) {
+                    continue;
+                }
+
+                $key = (string)($service['key'] ?? 'unknown');
+                $running = $service['running'] ?? null;
+                if (!is_bool($running)) {
+                    continue;
+                }
+
+                $cacheKey = sprintf('aircheck_system_health_%d_%s', $station->id, $key);
+                $previousState = $this->cache->get($cacheKey);
+                $previousState = is_bool($previousState) ? $previousState : null;
+
+                $this->diagnosticsRecorder->recordSystemServiceTransition(
+                    $station,
+                    $service,
+                    $previousState
+                );
+
+                $this->cache->set($cacheKey, $running, self::HEALTH_STATE_TTL);
+            }
+        }
+    }
+}

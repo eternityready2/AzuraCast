@@ -40,6 +40,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         private readonly ScheduleConflictChecker $conflictChecker,
         private readonly ClockWheelEventLogger $eventLogger,
         private readonly HolidayOverrideService $holidayOverrideService,
+        private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
     ) {
     }
 
@@ -56,6 +57,11 @@ final class ClockWheelScheduler implements EventSubscriberInterface
     public function buildFromClockWheel(BuildQueue $event): void
     {
         if (!empty($event->getNextSongs())) {
+            return;
+        }
+
+        // The saved linear log already holds this hour's clock-wheel items.
+        if ($this->linearLogPlayout->ownsSelection($event)) {
             return;
         }
 

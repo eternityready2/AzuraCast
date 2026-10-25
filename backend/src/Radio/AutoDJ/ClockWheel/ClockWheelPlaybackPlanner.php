@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ\ClockWheel;
 
+use App\Entity\AdOrder;
 use App\Entity\Api\StationPlaylistQueue;
 use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Enums\ClockWheelScheduleMode;
@@ -11,20 +12,22 @@ use App\Entity\Enums\ClockWheelSlotAlgorithms;
 use App\Entity\Enums\ClockWheelSlotPoolModes;
 use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Enums\StationMediaTypes;
-use App\Entity\StationPlaylist;
-use App\Entity\StationSchedule;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
+use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
+use App\Entity\StationSchedule;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
+use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use DateTimeInterface;
 use DateTimeZone;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -55,6 +58,7 @@ final class ClockWheelPlaybackPlanner
         private readonly ClockWheelEventLogger $eventLogger,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly QueueBuilder $queueBuilder,
+        private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
     ) {
@@ -93,6 +97,22 @@ final class ClockWheelPlaybackPlanner
         $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
         $minWindow = $this->getMinWindowSeconds($activeSlot);
 
+        // A top-of-hour legal ID airs once. Its slot stays "active" by time until
+        // the next slot's position, and every pick in that span used to queue the
+        // ID again: nine IDs in a row at 6:00 for a template whose next slot sat
+        // at 5:00 (2026-10-05). Once this hour's ID is in, move on to the next slot.
+        while (
+            ClockWheelSlotTypes::isMandatoryTopOfHourSlot($activeSlot->type, $activeSlot->position_seconds)
+            && isset($slots[$activeIndex + 1])
+            && $this->isLegalIdInThisHour($station, $activeSlot, $recentHistory, $expectedPlayTime)
+        ) {
+            $activeIndex++;
+            $activeSlot = $slots[$activeIndex];
+            $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
+            $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
+            $minWindow = $this->getMinWindowSeconds($activeSlot);
+        }
+
         $this->logger->info('Clock Wheel slot selection.', [
             'clock_wheel_id' => $wheel->id,
             'seconds_into_hour' => $secondsIntoHour,
@@ -116,6 +136,7 @@ final class ClockWheelPlaybackPlanner
                 $station,
                 $expectedPlayTime,
                 $secondsIntoHour,
+                $availableSeconds,
             );
         }
 
@@ -314,11 +335,25 @@ final class ClockWheelPlaybackPlanner
         return $this->getNextAnchorSeconds($slots, $activeIndex) >= HourBoundaryPlanner::HOUR_SECONDS;
     }
 
+    /**
+     * The top of the hour a legal-ID slot belongs to: this hour within 30s of
+     * :00, otherwise the next one. HourBoundaryPlanner's method of the same name
+     * was deleted with the legacy TOH planner (11f44590a) while this call stayed,
+     * so the first wheel with a :00 legal-ID slot to be scheduled (a daypart,
+     * 2026-10-05) failed every Linear Log build with "Call to undefined method".
+     */
     private function resolveTopOfHourExpectedPlayAt(
         Station $station,
         DateTimeImmutable $expectedPlayTime,
     ): DateTimeImmutable {
-        return $this->hourBoundaryPlanner->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
+        $local = CarbonImmutable::instance($expectedPlayTime)->setTimezone($station->getTimezoneObject());
+        $hourStart = $local->startOf('hour');
+
+        if ($local->getTimestamp() - $hourStart->getTimestamp() > 30) {
+            return $hourStart->addHour()->toDateTimeImmutable();
+        }
+
+        return $hourStart->toDateTimeImmutable();
     }
 
     /**
@@ -369,6 +404,32 @@ final class ClockWheelPlaybackPlanner
                 $secondsIntoHour,
                 $isEndOfHour,
             );
+        }
+
+        // An Ad slot with no pinned playlist serves the Advertising page's bookings:
+        // approved orders inside their dates that still have plays left today, the one
+        // furthest behind its daily count first. Pinning a playlist on the slot keeps
+        // the old meaning, and with no live bookings the slot falls through to media
+        // typed "ad", exactly as before.
+        if (
+            ClockWheelSlotTypes::Ad === $type
+            && ($playlistId === null || $playlistId <= 0)
+        ) {
+            $fromOrders = $this->resolveAdSlotFromOrders(
+                $wheel,
+                $slot,
+                $recentHistory,
+                $availableSeconds,
+                $scheduleMode,
+                $station,
+                $expectedPlayTime,
+                $secondsIntoHour,
+                $isEndOfHour,
+            );
+
+            if (null !== $fromOrders) {
+                return $fromOrders;
+            }
         }
 
         $params = ['storageLocation' => $station->media_storage_location];
@@ -474,8 +535,14 @@ final class ClockWheelPlaybackPlanner
             $mediaQueue[] = $q;
         }
 
-        $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
-        $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
+        // Nothing fits the window: filterByDuration() returned the candidates
+        // shortest first, and that order is the choice -- the slot's algorithm
+        // would put a long song first and the cap would cut most of it.
+        $noneFit = $candidates[0]->getCalculatedLength() > $maxDuration;
+        if (!$noneFit) {
+            $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
+            $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
+        }
 
         $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
             ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
@@ -554,6 +621,46 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
+     * True when an ID from this slot's pool has already aired or been queued in
+     * the hour $expectedPlayTime falls in (history includes queued rows).
+     *
+     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
+     */
+    private function isLegalIdInThisHour(
+        Station $station,
+        StationClockWheelSlot $slot,
+        array $recentHistory,
+        DateTimeImmutable $expectedPlayTime,
+    ): bool {
+        $hourStart = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime)->getTimestamp();
+        if ($hourStart > $expectedPlayTime->getTimestamp()) {
+            // Past :00:30 the helper points at the next hour; this hour started one earlier.
+            $hourStart -= HourBoundaryPlanner::HOUR_SECONDS;
+        }
+
+        $idSongs = [];
+        foreach ($this->loadStationIdCandidates($station, $slot) as $media) {
+            $idSongs[$media->song_id] = true;
+        }
+
+        foreach ($recentHistory as $row) {
+            if (!isset($idSongs[$row['song_id'] ?? ''])) {
+                continue;
+            }
+            $played = $row['timestamp_played'] ?? null;
+            $playedTs = $played instanceof DateTimeInterface
+                ? $played->getTimestamp()
+                : (is_string($played) ? (int)strtotime($played) : 0);
+            // The ID may start a moment before :00 (the station ID lane fires at :59:59).
+            if ($playedTs >= $hourStart - 60) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Mandatory legal_id at top of hour — never returns null; promo fallback if needed.
      *
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
@@ -566,6 +673,7 @@ final class ClockWheelPlaybackPlanner
         Station $station,
         DateTimeImmutable $expectedPlayTime,
         int $secondsIntoHour,
+        int $availableSeconds,
     ): ?StationQueue {
         $legalIdExpectedAt = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime);
         $usedSubstitute = false;
@@ -597,7 +705,12 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
 
-        $maxDuration = $this->resolveMaxDuration($slot, max(1, 120));
+        // A mandatory legal ID/promo still must not overrun into the next anchor
+        // slot. Use the real window before the next anchor (with a small floor
+        // so a very tight window doesn't reject every candidate outright); was
+        // previously hardcoded to 120s regardless of actual available time,
+        // which could let a >availableSeconds clip bleed into the next slot.
+        $maxDuration = $this->resolveMaxDuration($slot, max(self::MIN_SHORT_FORM_WINDOW_SECONDS, $availableSeconds));
         $allCandidates = $candidates;
         $candidates = $this->filterByDuration($allCandidates, $maxDuration, $slot, true, false);
 
@@ -694,7 +807,15 @@ final class ClockWheelPlaybackPlanner
     /**
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
      */
-    private function resolveSlotViaPlaylistRotation(
+    /**
+     * The spots sold on the Advertising page, offered to an Ad slot. Only approved
+     * orders inside their dates with plays still owed today are considered; anyone
+     * behind the day's pace goes first, so the guarantee holds inside wheel hours
+     * the same way it does outside them. Delegating to the rotation path keeps the
+     * play attributed to the order's playlist, which is what the pace tracker and
+     * the Sponsor Plays report both count.
+     */
+    private function resolveAdSlotFromOrders(
         StationClockWheel $wheel,
         StationClockWheelSlot $slot,
         array $recentHistory,
@@ -705,8 +826,124 @@ final class ClockWheelPlaybackPlanner
         int $secondsIntoHour,
         bool $isEndOfHour = false,
     ): ?StationQueue {
+        $now = CarbonImmutable::instance($expectedPlayTime);
+
+        /** @var AdOrder[] $orders */
+        $orders = $this->em->createQuery(
+            <<<'DQL'
+                SELECT o, p FROM App\Entity\AdOrder o
+                JOIN o.playlist p
+                WHERE o.station = :station
+                AND o.status = 'approved'
+                AND o.is_live_read = 0
+                AND o.media IS NOT NULL
+                AND p.is_enabled = 1
+                AND (o.starts_at IS NULL OR o.starts_at <= :now)
+                AND (o.ends_at IS NULL OR o.ends_at >= :now)
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('now', $now->getTimestamp())
+            ->getResult();
+
+        $orders = array_filter($orders, static fn (AdOrder $o) => $o->getEffectiveSpotsPerDay() > 0);
+
+        if ([] === $orders) {
+            return null;
+        }
+
+        // Plays each order's playlist already has today, station-local midnight onward.
+        $dayStartUtc = $now->setTimezone($station->getTimezoneObject())
+            ->startOfDay()
+            ->setTimezone(new DateTimeZone('UTC'));
+
+        $playlistIds = array_map(static fn (AdOrder $o) => $o->playlist->id, $orders);
+        $playCounts = [];
+        $countRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT IDENTITY(sh.playlist) AS pid, COUNT(sh.id) AS plays
+                FROM App\Entity\SongHistory sh
+                WHERE sh.playlist IN (:playlists)
+                AND sh.timestamp_start >= :dayStart
+                GROUP BY sh.playlist
+            DQL
+        )->setParameter('playlists', $playlistIds)
+            ->setParameter('dayStart', $dayStartUtc->getTimestamp())
+            ->getArrayResult();
+        foreach ($countRows as $row) {
+            $playCounts[(int)$row['pid']] = (int)$row['plays'];
+        }
+
+        $remaining = [];
+        foreach ($orders as $order) {
+            $left = $order->getEffectiveSpotsPerDay() - ($playCounts[$order->playlist->id] ?? 0);
+            if ($left > 0) {
+                $remaining[$order->playlist->id] = ['order' => $order, 'left' => $left];
+            }
+        }
+
+        if ([] === $remaining) {
+            // Every booking already got its day. The slot owes nobody anything, so it
+            // falls through to the station's own ad-typed media or the wheel's fallback.
+            return null;
+        }
+
+        $behindPace = [];
+        foreach ($this->sponsorGuarantee->getPlaylistsBehindPace($station, $expectedPlayTime) as $behind) {
+            $behindPace[$behind->id] = true;
+        }
+
+        $pool = array_filter(
+            $remaining,
+            static fn (array $r, int $pid) => isset($behindPace[$pid]),
+            ARRAY_FILTER_USE_BOTH
+        );
+        if ([] === $pool) {
+            $pool = $remaining;
+        }
+
+        // The most owed goes first; a tie goes to whoever has aired less today.
+        uasort($pool, static function (array $a, array $b): int {
+            $aired = static fn (array $r): int => $r['order']->getEffectiveSpotsPerDay() - $r['left'];
+
+            return [$b['left'], $aired($a)] <=> [$a['left'], $aired($b)];
+        });
+
+        foreach ($pool as $entry) {
+            $row = $this->resolveSlotViaPlaylistRotation(
+                $wheel,
+                $slot,
+                $recentHistory,
+                $availableSeconds,
+                $scheduleMode,
+                $station,
+                $expectedPlayTime,
+                $secondsIntoHour,
+                $isEndOfHour,
+                $entry['order']->playlist,
+            );
+
+            if (null !== $row) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveSlotViaPlaylistRotation(
+        StationClockWheel $wheel,
+        StationClockWheelSlot $slot,
+        array $recentHistory,
+        int $availableSeconds,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        int $secondsIntoHour,
+        bool $isEndOfHour = false,
+        ?StationPlaylist $playlistOverride = null,
+    ): ?StationQueue {
         $type = $slot->type;
-        $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
+        $playlist = $playlistOverride ?? $this->em->find(StationPlaylist::class, $slot->playlist_id);
         if (!$playlist instanceof StationPlaylist || $playlist->station->id !== $station->id) {
             $this->eventLogger->recordFallback(
                 $station,
@@ -741,7 +978,9 @@ final class ClockWheelPlaybackPlanner
                 continue;
             }
 
-            if ($type !== null && $media->type !== $type->value) {
+            // An override playlist comes from an ad order, which already vouches for the
+            // file; order spots are stored as ordinary music, so the type gate stands down.
+            if (null === $playlistOverride && $type !== null && $media->type !== $type->value) {
                 $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
                 continue;
             }
@@ -991,6 +1230,10 @@ final class ClockWheelPlaybackPlanner
             return [];
         }
 
+        // Every candidate, shortest first, so duplicate prevention takes the
+        // shortest one that has not just played. Returning the shortest alone
+        // left it no choice: the same 2-minute song filled every tight slot of
+        // the "Test" wheel, three times in a row at Sun 2026-10-04 21:00.
         usort(
             $candidates,
             static fn (StationMedia $a, StationMedia $b): int =>
@@ -1012,7 +1255,7 @@ final class ClockWheelPlaybackPlanner
             ]
         );
 
-        return [$shortest];
+        return $candidates;
     }
 
     /**
@@ -1042,7 +1285,7 @@ final class ClockWheelPlaybackPlanner
         foreach ($recentHistory as $h) {
             $songId = $h['song_id'];
             $ts = $h['timestamp_played'];
-            if ($ts instanceof \DateTimeInterface) {
+            if ($ts instanceof DateTimeInterface) {
                 $ts = $ts->getTimestamp();
             }
             $ts = (int)$ts;

@@ -8,21 +8,29 @@ use App\Container\LoggerAwareTrait;
 use Psr\SimpleCache\CacheInterface;
 
 /**
- * Fetches artist history/trivia from MusicBrainz (free, no API key) and builds a
- * spoken "fun fact" line about an artist for DJ segments.
+ * Fetches artist history/trivia from Wikipedia and MusicBrainz (both free, no API
+ * key) and builds a spoken "fun fact" line about an artist for DJ segments.
  *
- * Safe-by-design: short network timeout + long cache + fully fail-open. It must
- * NEVER stall queue building (that was the cause of the earlier "up next" error),
- * so any failure just returns null and the caller falls back to a content liner.
+ * Safe-by-design: short network timeout, long-lived cache, and fully fail-open.
+ * This must never stall queue building, so any failure simply returns null and
+ * the caller falls back to a content liner.
  */
 final class AiDjArtistHistoryService
 {
     use LoggerAwareTrait;
 
     private const string MUSICBRAINZ_URL = 'https://musicbrainz.org/ws/2/artist';
+    private const string WIKIPEDIA_SUMMARY_URL = 'https://en.wikipedia.org/api/rest_v1/page/summary/%s?redirect=true';
     private const string USER_AGENT = 'AzuraCast-AiDj/1.0 (https://azuracast.com)';
-    private const int CACHE_TTL = 604800;   // 7 days
-    private const int HTTP_TIMEOUT = 4;      // keep short so it can't stall the stream
+
+    private const int CACHE_TTL = 604800; // 7 days
+    private const int NEGATIVE_CACHE_TTL = 86400; // 1 day
+    private const string NEGATIVE_CACHE_VALUE = 'none';
+
+    /** Keep the request timeout short so a slow upstream can never stall the stream. */
+    private const int HTTP_TIMEOUT = 4;
+
+    private const int MUSICBRAINZ_MIN_SCORE = 85;
 
     public function __construct(
         private readonly CacheInterface $cache,
@@ -32,18 +40,22 @@ final class AiDjArtistHistoryService
     /**
      * Get a spoken artist-history segment, or null if unavailable.
      */
-    public function getArtistHistory(string $artist, string $djName, string $stationName): ?string
-    {
+    public function getArtistHistory(
+        string $artist,
+        string $djName,
+        string $stationName,
+        bool $identify = true,
+    ): ?string {
         $artist = trim($artist);
         if ($artist === '' || $artist === 'this artist' || $artist === 'that artist') {
             return null;
         }
 
-        // Prefer a richer Wikipedia summary (free, no key). Fall back to the
-        // thinner MusicBrainz facts if Wikipedia has nothing usable.
-        $wiki = $this->fetchWikipediaSummary($artist);
-        if ($wiki !== null) {
-            return $this->buildWikipediaScript($wiki, $djName, $stationName);
+        // Prefer a richer Wikipedia summary; fall back to the thinner MusicBrainz
+        // facts if Wikipedia has nothing usable.
+        $wikiSummary = $this->fetchWikipediaSummary($artist);
+        if ($wikiSummary !== null) {
+            return $this->buildWikipediaScript($wikiSummary, $djName, $stationName, $identify);
         }
 
         $info = $this->fetchArtistInfo($artist);
@@ -51,55 +63,48 @@ final class AiDjArtistHistoryService
             return null;
         }
 
-        return $this->buildArtistScript($info, $djName, $stationName);
+        return $this->buildArtistScript($info, $djName, $stationName, $identify);
     }
 
     /**
-     * Fetch a short, real artist bio from Wikipedia (free, no API key). Returns
-     * ~2 sentences, only if the page clearly describes a musical act. Cached +
-     * fail-open + short timeout so it can never stall the stream.
+     * Fetch a short, real artist bio from Wikipedia. Returns roughly two sentences,
+     * only if the page clearly describes a musical act.
      */
     private function fetchWikipediaSummary(string $artist): ?string
     {
         $cacheKey = 'ai_dj_wiki_' . md5(strtolower($artist));
-        $cached = $this->cache->get($cacheKey);
-        if (is_string($cached)) {
-            return $cached === 'none' ? null : $cached;
+        $cached = $this->getCached($cacheKey);
+        if ($cached !== false) {
+            return is_string($cached) ? $cached : null;
         }
 
         $title = rawurlencode(str_replace(' ', '_', $artist));
-        $url = 'https://en.wikipedia.org/api/rest_v1/page/summary/' . $title . '?redirect=true';
+        $url = sprintf(self::WIKIPEDIA_SUMMARY_URL, $title);
 
-        $context = stream_context_create([
-            'http' => [
-                'header' => 'User-Agent: ' . self::USER_AGENT . "\r\nAccept: application/json\r\n",
-                'timeout' => self::HTTP_TIMEOUT,
-                'ignore_errors' => true,
-            ],
-        ]);
-
-        $response = @file_get_contents($url, false, $context);
-        if ($response === false) {
-            $this->cache->set($cacheKey, 'none', 86400);
+        $response = $this->fetchUrl($url);
+        if ($response === null) {
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
         $data = json_decode($response, true);
-        $extract = (is_array($data) && isset($data['extract']) && is_string($data['extract'])) ? $data['extract'] : '';
+        $extract = (is_array($data) && is_string($data['extract'] ?? null)) ? $data['extract'] : '';
+        $type = is_array($data) ? ($data['type'] ?? '') : '';
 
-        // Guard against disambiguation pages and wrong (non-music) matches.
-        $type = (is_array($data) ? ($data['type'] ?? '') : '');
-        if ($type === 'disambiguation' || strlen($extract) < 40) {
-            $this->cache->set($cacheKey, 'none', 86400);
-            return null;
-        }
-        if (!preg_match('/\b(singer|songwriter|musician|band|music|worship|gospel|rapper|vocal|recording artist|group|duo|choir|hymn|Christian)\b/i', $extract)) {
-            $this->cache->set($cacheKey, 'none', 86400);
+        // Guard against disambiguation pages and non-music matches.
+        $looksLikeMusicAct = preg_match(
+            '/\b(singer|songwriter|musician|band|music|worship|gospel|rapper|vocal|recording artist|group|duo|choir|hymn|Christian)\b/i',
+            $extract
+        );
+
+        if ($type === 'disambiguation' || strlen($extract) < 40 || !$looksLikeMusicAct) {
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
         $summary = $this->firstSentences($extract, 2);
         $this->cache->set($cacheKey, $summary, self::CACHE_TTL);
+
         return $summary;
     }
 
@@ -109,17 +114,29 @@ final class AiDjArtistHistoryService
         if (!is_array($parts) || count($parts) <= $count) {
             return trim($text);
         }
+
         return trim(implode(' ', array_slice($parts, 0, $count)));
     }
 
-    private function buildWikipediaScript(string $summary, string $djName, string $stationName): string
+    private function buildWikipediaScript(string $summary, string $djName, string $stationName, bool $identify): string
     {
+        if (!$identify) {
+            $templates = [
+                "Here's a little something about that artist. %s. Let's keep the music going.",
+                "A quick bit of history on the artist you just heard. %s. Stay with us.",
+                "Let me tell you a bit about them. %s. More great music coming up.",
+            ];
+
+            return sprintf($templates[array_rand($templates)], $summary);
+        }
+
         $templates = [
             "Here's a little something about that artist. %s. This is %s on %s, let's keep the music going.",
             "You know, I love sharing these. %s. That's your music moment with %s, here on %s. Stay with us.",
             "A quick bit of history on the artist you just heard. %s. I'm %s, and you're listening to %s.",
             "Let me tell you a bit about them. %s. This is %s on %s, more great music coming up.",
         ];
+
         return sprintf($templates[array_rand($templates)], $summary, $djName, $stationName);
     }
 
@@ -129,13 +146,9 @@ final class AiDjArtistHistoryService
     private function fetchArtistInfo(string $artist): ?array
     {
         $cacheKey = 'ai_dj_artist_' . md5(strtolower($artist));
-        $cached = $this->cache->get($cacheKey);
-        if (is_array($cached)) {
-            return $cached;
-        }
-        // Negative cache: remember "not found" for a day so we don't re-hit the API.
-        if ($cached === 'none') {
-            return null;
+        $cached = $this->getCached($cacheKey);
+        if ($cached !== false) {
+            return is_array($cached) ? $cached : null;
         }
 
         $url = self::MUSICBRAINZ_URL . '?' . http_build_query([
@@ -144,83 +157,106 @@ final class AiDjArtistHistoryService
             'limit' => 1,
         ]);
 
-        $context = stream_context_create([
-            'http' => [
-                'header' => 'User-Agent: ' . self::USER_AGENT . "\r\nAccept: application/json\r\n",
-                'timeout' => self::HTTP_TIMEOUT,
-                'ignore_errors' => true,
-            ],
-        ]);
-
-        $response = @file_get_contents($url, false, $context);
-        if ($response === false) {
+        $response = $this->fetchUrl($url);
+        if ($response === null) {
             $this->logger->debug('AI DJ Artist: MusicBrainz request failed for: ' . $artist);
-            $this->cache->set($cacheKey, 'none', 86400);
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
         $data = json_decode($response, true);
         if (!is_array($data) || empty($data['artists'][0])) {
-            $this->cache->set($cacheKey, 'none', 86400);
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
-        $mb = $data['artists'][0];
+        $match = $data['artists'][0];
 
-        // MusicBrainz search is fuzzy and ranks by score, so a query for a Christian
-        // artist can return a high-scoring but WRONG act (e.g. "Steve Green" -> "Green
-        // Day", score 100). Only trust a result whose name matches the artist playing.
-        $normName = static function (string $s): string {
-            $s = (string) preg_replace('/^the\\s+/', '', strtolower(trim($s)));
-            return (string) preg_replace('/[^a-z0-9]+/', '', $s);
-        };
-        if ($normName($artist) === '' || $normName((string)($mb['name'] ?? '')) !== $normName($artist)) {
-            $this->logger->debug('AI DJ Artist: MusicBrainz name mismatch for "' . $artist . '" -> "' . ($mb['name'] ?? '') . '"');
-            $this->cache->set($cacheKey, 'none', 86400);
+        // MusicBrainz search is fuzzy and ranks by score, so a query for one artist
+        // can return a high-scoring but unrelated act with a similar name. Only trust
+        // a result whose normalized name actually matches the artist playing, and
+        // whose match score clears a reasonably strict threshold.
+        $normalizedQuery = $this->normalizeArtistName($artist);
+        $normalizedMatch = $this->normalizeArtistName((string) ($match['name'] ?? ''));
+
+        if ($normalizedQuery === '' || $normalizedMatch !== $normalizedQuery) {
+            $this->logger->debug(sprintf(
+                'AI DJ Artist: MusicBrainz name mismatch for "%s" -> "%s"',
+                $artist,
+                $match['name'] ?? ''
+            ));
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
-        // Only trust a strong match.
-        if ((int)($mb['score'] ?? 0) < 85) {
-            $this->cache->set($cacheKey, 'none', 86400);
+        if ((int) ($match['score'] ?? 0) < self::MUSICBRAINZ_MIN_SCORE) {
+            $this->cacheNegativeResult($cacheKey);
             return null;
         }
 
         $result = [
-            'name' => $mb['name'] ?? $artist,
-            'type' => $mb['type'] ?? null,
-            'country' => $this->resolveCountryName($mb['area']['name'] ?? $mb['country'] ?? null),
-            'begin_year' => $this->extractYear($mb['life-span']['begin'] ?? null),
-            'end_year' => $this->extractYear($mb['life-span']['end'] ?? null),
-            'active' => (($mb['life-span']['ended'] ?? false) === false),
-            'tags' => $this->extractTopTags($mb['tags'] ?? []),
+            'name' => $match['name'] ?? $artist,
+            'type' => $match['type'] ?? null,
+            'country' => $match['area']['name'] ?? $match['country'] ?? null,
+            'begin_year' => $this->extractYear($match['life-span']['begin'] ?? null),
+            'end_year' => $this->extractYear($match['life-span']['end'] ?? null),
+            'active' => (($match['life-span']['ended'] ?? false) === false),
+            'tags' => $this->extractTopTags($match['tags'] ?? []),
         ];
 
         $this->cache->set($cacheKey, $result, self::CACHE_TTL);
+
         return $result;
+    }
+
+    private function normalizeArtistName(string $name): string
+    {
+        $name = (string) preg_replace('/^the\s+/', '', strtolower(trim($name)));
+
+        return (string) preg_replace('/[^a-z0-9]+/', '', $name);
     }
 
     /**
      * @param array<string, mixed> $info
      */
-    private function buildArtistScript(array $info, string $djName, string $stationName): string
+    private function buildArtistScript(array $info, string $djName, string $stationName, bool $identify): string
     {
         $name = $info['name'];
         $parts = [];
 
         if ($info['type'] === 'Group' && $info['begin_year']) {
             if ($info['active']) {
-                $years = (int)date('Y') - (int)$info['begin_year'];
-                $parts[] = sprintf('%s have been making music since %d, that is %d years of incredible artistry', $name, $info['begin_year'], $years);
+                $years = (int) date('Y') - (int) $info['begin_year'];
+                $parts[] = sprintf(
+                    '%s have been making music since %d, that is %d years of incredible artistry',
+                    $name,
+                    $info['begin_year'],
+                    $years
+                );
             } else {
-                $parts[] = sprintf('%s were active from %d to %d', $name, $info['begin_year'], $info['end_year'] ?? (int)date('Y'));
+                $parts[] = sprintf(
+                    '%s were active from %d to %d',
+                    $name,
+                    $info['begin_year'],
+                    $info['end_year'] ?? (int) date('Y')
+                );
             }
         } elseif ($info['begin_year']) {
             if ($info['active']) {
-                $years = (int)date('Y') - (int)$info['begin_year'];
-                $parts[] = sprintf('%s has been performing since %d, bringing us %d years of music', $name, $info['begin_year'], $years);
+                $years = (int) date('Y') - (int) $info['begin_year'];
+                $parts[] = sprintf(
+                    '%s has been performing since %d, bringing us %d years of music',
+                    $name,
+                    $info['begin_year'],
+                    $years
+                );
             } else {
-                $parts[] = sprintf('%s graced us with their talent from %d to %d', $name, $info['begin_year'], $info['end_year'] ?? (int)date('Y'));
+                $parts[] = sprintf(
+                    '%s graced us with their talent from %d to %d',
+                    $name,
+                    $info['begin_year'],
+                    $info['end_year'] ?? (int) date('Y')
+                );
             }
         }
 
@@ -233,9 +269,16 @@ final class AiDjArtistHistoryService
             $parts[] = sprintf('known for their %s sound', $tagStr);
         }
 
+        if (!$identify) {
+            return empty($parts)
+                ? sprintf('You just heard %s, one of those artists who really know how to touch your soul. Stay with us.', $name)
+                : sprintf("Here's a fun fact about the artist you just heard. %s. More music coming your way.", ucfirst(implode(', ', $parts)) . '.');
+        }
+
         if (empty($parts)) {
             return sprintf(
-                "This is %s on %s. You just heard %s, one of those artists who really know how to touch your soul with their music. Stay with us for more.",
+                'This is %s on %s. You just heard %s, one of those artists who really know how '
+                . 'to touch your soul with their music. Stay with us for more.',
                 $djName,
                 $stationName,
                 $name
@@ -258,7 +301,9 @@ final class AiDjArtistHistoryService
         if ($date === null || $date === '') {
             return null;
         }
-        $year = (int)substr($date, 0, 4);
+
+        $year = (int) substr($date, 0, 4);
+
         return $year > 1800 ? $year : null;
     }
 
@@ -272,19 +317,53 @@ final class AiDjArtistHistoryService
             return [];
         }
 
-        usort($tags, static fn($a, $b): int => ((int)($b['count'] ?? 0)) <=> ((int)($a['count'] ?? 0)));
+        usort($tags, static fn($a, $b): int => ((int) ($b['count'] ?? 0)) <=> ((int) ($a['count'] ?? 0)));
 
         return array_values(array_filter(array_map(
-            static fn($t): string => (string)($t['name'] ?? ''),
+            static fn($tag): string => (string) ($tag['name'] ?? ''),
             array_slice($tags, 0, 3)
         )));
     }
 
-    private function resolveCountryName(?string $area): ?string
+    /**
+     * GET a URL with a short timeout and a descriptive user agent, tolerating any
+     * network or HTTP-level failure by returning null instead of throwing.
+     */
+    private function fetchUrl(string $url): ?string
     {
-        if ($area === null || $area === '') {
-            return null;
+        $context = stream_context_create([
+            'http' => [
+                'header' => 'User-Agent: ' . self::USER_AGENT . "\r\nAccept: application/json\r\n",
+                'timeout' => self::HTTP_TIMEOUT,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        $response = @file_get_contents($url, false, $context);
+
+        return $response !== false ? $response : null;
+    }
+
+    /**
+     * @return string|array<string, mixed>|null|false The cached value; null if a
+     *     negative-cache marker is stored under this key; false on a cache miss.
+     */
+    private function getCached(string $cacheKey): string|array|null|false
+    {
+        $cached = $this->cache->get($cacheKey);
+        if ($cached === null) {
+            return false;
         }
-        return $area;
+
+        return $cached === self::NEGATIVE_CACHE_VALUE ? null : $cached;
+    }
+
+    /**
+     * Remember a "not found" / "not usable" result for a day so repeated requests
+     * for the same artist don't keep re-hitting the upstream API.
+     */
+    private function cacheNegativeResult(string $cacheKey): void
+    {
+        $this->cache->set($cacheKey, self::NEGATIVE_CACHE_VALUE, self::NEGATIVE_CACHE_TTL);
     }
 }

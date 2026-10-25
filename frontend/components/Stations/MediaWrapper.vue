@@ -16,9 +16,11 @@ import {useApiRouter} from "~/functions/useApiRouter.ts";
 const {getStationApiUrl} = useApiRouter();
 const propsUrl = getStationApiUrl('/vue/files');
 
-const {axios} = useAxios();
+const {axios, axiosSilent} = useAxios();
 
 type FilesProps = StationsVueFilesPropsRequired
+
+let hasLoaded = false;
 
 const {data: props, isLoading: propsLoading} = useQuery<FilesProps>({
     queryKey: queryKeyWithStation(
@@ -28,8 +30,13 @@ const {data: props, isLoading: propsLoading} = useQuery<FilesProps>({
         ]
     ),
     queryFn: async ({signal}) => {
-        const {data} = await axios.get<FilesProps>(propsUrl.value, {signal});
+        // Background refreshes stay quiet; only the first load reports errors.
+        const client = hasLoaded ? axiosSilent : axios;
+        const {data} = await client.get<FilesProps>(propsUrl.value, {signal});
+        hasLoaded = true;
         return data;
-    }
+    },
+    // Playlists are often created in another tab; pick them up on return.
+    refetchOnWindowFocus: true,
 });
 </script>

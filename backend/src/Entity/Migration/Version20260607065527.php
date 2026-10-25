@@ -10,7 +10,7 @@ final class Version20260607065527 extends AbstractMigration
 {
     public function getDescription(): string
     {
-        return '';
+        return 'Create ai_dj, ai_dj_content, and ai_dj_schedules tables; sync clock wheel and station schema changes.';
     }
 
     public function up(Schema $schema): void

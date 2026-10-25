@@ -52,9 +52,9 @@ final class DeleteAction implements SingleActionInterface
         $station = $request->getStation();
         $djId = (int)($params['id'] ?? 0);
 
-        $dj = $this->aiDjRepository->find($djId);
+        $dj = $this->aiDjRepository->findForStation($djId, $station->id);
 
-        if (null === $dj || $dj->getStationId() !== $station->id) {
+        if (null === $dj) {
             return $response->withStatus(404)->withJson([
                 'error' => 'AI DJ not found.',
             ]);

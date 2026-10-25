@@ -63,6 +63,104 @@
                 {{ $gettext('No playlist plays in this date range.') }}
             </p>
         </fieldset>
+
+        <template v-if="state">
+            <fieldset class="mt-4">
+                <legend>{{ $gettext('Repeats') }}</legend>
+                <p class="small text-muted">
+                    {{ $gettext('Songs that aired again within the station\'s %{m}-minute repeat window.', {m: String(state.repeat_window_minutes)}) }}
+                </p>
+                <div
+                    v-if="state.repeats.length > 0"
+                    class="table-responsive"
+                >
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ $gettext('Song') }}</th>
+                                <th>{{ $gettext('First') }}</th>
+                                <th>{{ $gettext('Again') }}</th>
+                                <th class="text-end">{{ $gettext('Minutes apart') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="(row, i) in state.repeats"
+                                :key="i"
+                            >
+                                <td>{{ row.text }}</td>
+                                <td class="text-nowrap">{{ formatTimestampAsDateTime(Math.round(Number(row.first_at))) }}</td>
+                                <td class="text-nowrap">{{ formatTimestampAsDateTime(Math.round(Number(row.again_at))) }}</td>
+                                <td class="text-end fw-semibold">{{ row.minutes_apart }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p
+                    v-else
+                    class="text-success mb-0"
+                >
+                    {{ $gettext('No repeats in this date range.') }}
+                </p>
+            </fieldset>
+
+            <fieldset class="mt-4">
+                <legend>{{ $gettext('Most-played songs') }}</legend>
+                <div class="table-responsive">
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ $gettext('Song') }}</th>
+                                <th>{{ $gettext('Playlist') }}</th>
+                                <th class="text-end">{{ $gettext('Plays') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="row in state.over_played"
+                                :key="row.media_id"
+                            >
+                                <td>{{ row.text }}</td>
+                                <td>{{ row.playlist ?? '—' }}</td>
+                                <td class="text-end fw-semibold">{{ row.plays }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </fieldset>
+
+            <fieldset class="mt-4">
+                <legend>{{ $gettext('Never played') }}</legend>
+                <p class="small text-muted">
+                    {{ $gettext('%{n} songs in enabled music playlists did not air at all in this date range.', {n: String(state.never_played_count)}) }}
+                    <template v-if="state.never_played_count > state.never_played.length">
+                        {{ $gettext('First %{n} shown.', {n: String(state.never_played.length)}) }}
+                    </template>
+                </p>
+                <div
+                    v-if="state.never_played.length > 0"
+                    class="table-responsive"
+                >
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>{{ $gettext('Song') }}</th>
+                                <th>{{ $gettext('Playlist') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="row in state.never_played"
+                                :key="row.media_id"
+                            >
+                                <td>{{ row.artist }} – {{ row.title }}</td>
+                                <td>{{ row.playlist }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </fieldset>
+        </template>
     </loading>
 </template>
 
@@ -74,6 +172,7 @@ import {useLuxon} from "~/vendor/luxon";
 import {DateRange} from "~/components/Stations/Reports/Overview/CommonMetricsView.vue";
 import {useQuery} from "@tanstack/vue-query";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
+import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 
 const props = defineProps<{
     dateRange: DateRange,
@@ -83,6 +182,7 @@ const props = defineProps<{
 const dateRange = toRef(props, 'dateRange');
 const {axios} = useAxios();
 const {DateTime} = useLuxon();
+const {formatTimestampAsDateTime} = useStationDateTimeFormatter();
 
 type PlaylistPerformanceData = {
     playlists: Array<{
@@ -97,6 +197,11 @@ type PlaylistPerformanceData = {
         max_track_plays: number | null,
         rotation_goal_days: number | null,
     }>,
+    over_played: Array<{media_id: number, text: string, plays: number, playlist: string | null}>,
+    never_played_count: number,
+    never_played: Array<{media_id: number, artist: string | null, title: string | null, playlist: string}>,
+    repeats: Array<{text: string, first_at: string, again_at: string, minutes_apart: string}>,
+    repeat_window_minutes: number,
 };
 
 const {data: state, isLoading} = useQuery<PlaylistPerformanceData>({
@@ -115,7 +220,14 @@ const {data: state, isLoading} = useQuery<PlaylistPerformanceData>({
         });
         return data;
     },
-    placeholderData: () => ({playlists: []}),
+    placeholderData: () => ({
+        playlists: [],
+        over_played: [],
+        never_played_count: 0,
+        never_played: [],
+        repeats: [],
+        repeat_window_minutes: 120,
+    }),
 });
 
 function formatNullable(value: number | null): string {

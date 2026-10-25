@@ -62,10 +62,75 @@ final class MimeType
         $fileMimeType = self::getMimeTypeDetector()->detectMimeTypeFromFile($path);
 
         if ('application/octet-stream' === $fileMimeType) {
+            // Some valid MP3 files have a large ID3v2 tag before the first MPEG audio frame.
+            // libmagic/finfo can classify these extensionless temporary downloads as generic
+            // octet-stream. Verify the ID3 tag and locate a real MPEG frame before accepting it.
+            if (self::looksLikeMp3WithId3Tag($path)) {
+                return 'audio/mpeg';
+            }
+
             $fileMimeType = null;
         }
 
         return $fileMimeType ?? self::getMimeTypeFromPath($path);
+    }
+
+    private static function looksLikeMp3WithId3Tag(string $path): bool
+    {
+        $handle = @fopen($path, 'rb');
+        if (false === $handle) {
+            return false;
+        }
+
+        try {
+            $header = fread($handle, 10);
+            if (false === $header || strlen($header) < 10 || substr($header, 0, 3) !== 'ID3') {
+                return false;
+            }
+
+            // ID3v2 stores its payload size as four 7-bit (synchsafe) bytes.
+            $tagSize = ((ord($header[6]) & 0x7F) << 21)
+                | ((ord($header[7]) & 0x7F) << 14)
+                | ((ord($header[8]) & 0x7F) << 7)
+                | (ord($header[9]) & 0x7F);
+            $audioOffset = 10 + $tagSize;
+
+            // ID3v2.4 can include a 10-byte footer after the payload.
+            if ((ord($header[5]) & 0x10) !== 0) {
+                $audioOffset += 10;
+            }
+
+            if (0 !== fseek($handle, $audioOffset)) {
+                return false;
+            }
+
+            // Allow normal tag padding before the first audio frame.
+            $probe = fread($handle, 4096);
+            if (false === $probe) {
+                return false;
+            }
+
+            $probeLength = strlen($probe);
+            for ($i = 0; $i + 1 < $probeLength; ++$i) {
+                $first = ord($probe[$i]);
+                $second = ord($probe[$i + 1]);
+
+                if ($first !== 0xFF || ($second & 0xE0) !== 0xE0) {
+                    continue;
+                }
+
+                // Exclude reserved MPEG version and layer bit patterns.
+                $versionBits = ($second >> 3) & 0x03;
+                $layerBits = ($second >> 1) & 0x03;
+                if ($versionBits !== 0x01 && $layerBits !== 0x00) {
+                    return true;
+                }
+            }
+
+            return false;
+        } finally {
+            fclose($handle);
+        }
     }
 
     public static function getMimeTypeFromPath(string $path): string

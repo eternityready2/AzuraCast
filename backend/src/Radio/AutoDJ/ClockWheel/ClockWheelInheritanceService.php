@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Doctrine\ReloadableEntityManagerInterface;
+use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\StationClockDaypart;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelTemplate;
+use App\Entity\StationSchedule;
 
 /**
  * Propagates template slots to wheels and materializes daypart hour instances (PR10).
@@ -79,6 +81,8 @@ final class ClockWheelInheritanceService
                 $this->slotWriter->copyTemplateSlotsToWheel($template, $wheel);
             }
 
+            $this->scheduleDaypartWheel($daypart, $wheel, $hour);
+
             $synced[] = $wheel;
         }
 
@@ -93,6 +97,33 @@ final class ClockWheelInheritanceService
         }
 
         return $synced;
+    }
+
+    /**
+     * A daypart's hourly wheel airs in its own hour on the daypart's days.
+     *
+     * Generated wheels used to get no schedule row, so a daypart never reached
+     * the air (or the linear log) unless each wheel was scheduled by hand. The
+     * daypart owns this row: one per wheel, kept in step on every save.
+     * Scheduled shows still win over a wheel during their own window.
+     */
+    private function scheduleDaypartWheel(StationClockDaypart $daypart, StationClockWheel $wheel, int $hour): void
+    {
+        $schedule = null;
+        foreach ($wheel->schedule_items as $item) {
+            if (null === $schedule) {
+                $schedule = $item;
+            } else {
+                $this->em->remove($item);
+            }
+        }
+
+        $schedule ??= new StationSchedule($wheel);
+        $schedule->start_time = $hour * 100;
+        $schedule->end_time = (($hour + 1) % 24) * 100;
+        $schedule->days = $daypart->days;
+        $schedule->clock_wheel_mode ??= ClockWheelScheduleMode::Flexible;
+        $this->em->persist($schedule);
     }
 
     /**

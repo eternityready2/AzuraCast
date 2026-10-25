@@ -7,6 +7,9 @@ import {
     PlaylistRemoteTypes,
     PlaylistSources,
     PlaylistTypes,
+    SmartBlockLimitType,
+    SmartBlockMatchType,
+    SmartBlockType,
     StationPlaylist
 } from "~/entities/ApiInterfaces.ts";
 
@@ -17,7 +20,10 @@ export type StationPlaylistsRecord = Required<
         | 'podcasts'
     >
 > & {
-    id: number | null
+    id: number | null,
+    is_sponsor: boolean,
+    sponsor_name: string | null,
+    sponsor_guaranteed_plays_per_day: number | null,
 }
 
 export const useStationsPlaylistsForm = defineStore(
@@ -41,11 +47,25 @@ export const useStationsPlaylistsForm = defineStore(
             play_per_minutes: 0,
             play_per_hour_minute: 0,
             include_in_requests: true,
+            is_programme: false,
             avoid_duplicates: true,
+            preserve_queue_on_restart: false,
+            smart_shuffle_distance: null,
             rotation_goal_days: null as number | null,
             crossfade_profile: null as string | null,
             backend_options: [],
-            schedule_items: []
+            schedule_items: [],
+            playlists: [],
+            playlist_groups: [],
+            is_smart_block: false,
+            smart_block_match_type: SmartBlockMatchType.All,
+            smart_block_limit: null as number | null,
+            smart_block_limit_type: SmartBlockLimitType.Tracks,
+            smart_block_type: SmartBlockType.Dynamic,
+            smart_block_criteria: [],
+            is_sponsor: false,
+            sponsor_name: null,
+            sponsor_guaranteed_plays_per_day: null,
         });
 
         const {r$} = useAppScopedRegle(
@@ -72,12 +92,21 @@ export const useStationsPlaylistsForm = defineStore(
                         fields.play_per_minutes,
                         fields.play_per_hour_minute,
                         fields.include_in_requests,
+                        fields.is_programme,
                         fields.avoid_duplicates,
+                        fields.preserve_queue_on_restart,
                         fields.rotation_goal_days,
                         fields.crossfade_profile,
+                        fields.is_smart_block,
+                        fields.smart_block_match_type,
+                        fields.smart_block_limit,
+                        fields.smart_block_limit_type,
                     ],
                     advancedTab: [
-                        fields.backend_options
+                        fields.backend_options,
+                        fields.is_sponsor,
+                        fields.sponsor_name,
+                        fields.sponsor_guaranteed_plays_per_day,
                     ]
                 })
             }

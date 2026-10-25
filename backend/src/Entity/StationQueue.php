@@ -14,7 +14,8 @@ use Doctrine\ORM\Mapping as ORM;
     ORM\Index(name: 'idx_is_played', columns: ['is_played']),
     ORM\Index(name: 'idx_timestamp_played', columns: ['timestamp_played']),
     ORM\Index(name: 'idx_sent_to_autodj', columns: ['sent_to_autodj']),
-    ORM\Index(name: 'idx_timestamp_cued', columns: ['timestamp_cued'])
+    ORM\Index(name: 'idx_timestamp_cued', columns: ['timestamp_cued']),
+    ORM\UniqueConstraint(name: 'uniq_station_toh_boundary', columns: ['station_id', 'top_of_hour_boundary_at'])
 ]
 final class StationQueue implements
     Interfaces\SongInterface,
@@ -129,9 +130,19 @@ final class StationQueue implements
     #[ORM\Column]
     public bool $clock_wheel_legal_id_substitute = false;
 
-    /** True when queued by station-wide top-of-hour protection (v0.29). */
+    /** True when this row is the automatic station-wide Top-of-Hour Station ID. */
     #[ORM\Column]
     public bool $top_of_hour_legal_id = false;
+
+    /** Exact station-local hour boundary this automatic ID owns. */
+    #[ORM\Column(type: 'datetime_immutable', precision: 6, nullable: true)]
+    public ?DateTimeImmutable $top_of_hour_boundary_at = null {
+        set (DateTimeImmutable|string|null $value) => Time::toNullableUtcCarbonImmutable($value);
+    }
+
+    /** The saved linear-log line this row plays, when the log controls playout. */
+    #[ORM\Column(nullable: true)]
+    public ?int $log_entry_id = null;
 
     /** Whether AnnotateNextSong should apply a cue_out cap for hour-boundary protection. */
     #[ORM\Column]
@@ -140,6 +151,15 @@ final class StationQueue implements
     /** Max on-air seconds for hour-boundary playback cap. */
     #[ORM\Column(nullable: true)]
     public ?int $hour_boundary_max_play_seconds = null;
+
+    /**
+     * Ordered list of Playlist Group names (outermost to innermost) this track was played
+     * through, e.g. ["Simple Group", "Sub Group 1"]. Null if played directly (not via a group).
+     *
+     * @var string[]|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    public ?array $playlist_chain = null;
 
     public function __construct(Station $station, Interfaces\SongInterface $song)
     {

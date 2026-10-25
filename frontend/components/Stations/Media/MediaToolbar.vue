@@ -1,87 +1,181 @@
 <template>
+    <!-- Extra tools: song details and file tools for the ticked files. -->
+    <div
+        class="station-toolbar"
+        role="toolbar"
+        :aria-label="$gettext('Media tools')"
+    >
+        <div class="station-toolbar-rows">
+            <div class="station-toolbar-row">
+                <div
+                    class="station-toolbar-selection"
+                    :class="{'is-active': selectedItems.all.length > 0}"
+                >
+                    <icon-ic-check-box class="station-toolbar-selection-icon" />
+                    <span v-if="selectedItems.all.length > 0">
+                        {{ $gettext('%{count} selected', {count: String(selectedItems.all.length)}) }}
+                    </span>
+                    <span v-else>
+                        {{ $gettext('Tick files to use these tools') }}
+                    </span>
+                </div>
+
+                <div class="station-toolbar-section">
+                    <span class="station-toolbar-label">
+                        {{ $gettext('Song Details') }}
+                    </span>
+                    <div class="station-toolbar-controls">
+                        <select
+                            id="bulk_media_type"
+                            class="form-select form-select-sm bulk-classify-select"
+                            :disabled="!hasSelectedClassifyItems || classifyPending"
+                            :title="$gettext('Set type on selected files')"
+                            @change="onBulkTypeChange"
+                        >
+                            <option
+                                value=""
+                                selected
+                                disabled
+                                hidden
+                            >
+                                {{ $gettext('Set type…') }}
+                            </option>
+                            <option
+                                v-for="opt in mediaTypeOptions"
+                                :key="opt.value"
+                                :value="opt.value"
+                            >
+                                {{ opt.shortLabel }}
+                            </option>
+                        </select>
+
+                        <select
+                            id="bulk_media_category"
+                            class="form-select form-select-sm bulk-classify-select"
+                            :disabled="!hasSelectedClassifyItems || classifyPending"
+                            :title="$gettext('Set category on selected files')"
+                            @change="onBulkCategoryChange"
+                        >
+                            <option
+                                value=""
+                                selected
+                                disabled
+                                hidden
+                            >
+                                {{ $gettext('Set category…') }}
+                            </option>
+                            <option value="none">
+                                {{ $gettext('No category') }}
+                            </option>
+                            <option
+                                v-for="cat in mediaCategories"
+                                :key="cat.id"
+                                :value="String(cat.id)"
+                            >
+                                {{ cat.name }}
+                            </option>
+                        </select>
+
+                        <div class="input-group input-group-sm bulk-genre-group">
+                            <input
+                                id="bulk_media_genre"
+                                v-model="bulkGenre"
+                                type="text"
+                                class="form-control"
+                                :disabled="!hasSelectedClassifyItems || classifyPending"
+                                :title="$gettext('Set genre on selected files')"
+                                :placeholder="$gettext('Set genre…')"
+                                @keyup.enter="onBulkGenreApply"
+                            >
+
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                :disabled="!hasSelectedClassifyItems || classifyPending || bulkGenre.trim() === ''"
+                                @click="onBulkGenreApply"
+                            >
+                                {{ $gettext('Apply Genre') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="station-toolbar-row">
+                <div class="station-toolbar-section">
+                    <span class="station-toolbar-label">
+                        {{ $gettext('Tools') }}
+                    </span>
+                    <div class="station-toolbar-controls">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            @click="downloadFromUrl"
+                        >
+                            <icon-ic-cloud-download/>
+                            <span>
+                                {{ $gettext('Download from URL') }}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!hasSelectedClassifyItems"
+                            :title="$gettext('Find the album, record label, year, genre, ISRC, songwriters and cover art online for the songs you ticked. You review what was found before anything is saved.')"
+                            @click="lookUpSelected"
+                        >
+                            <icon-ic-travel-explore/>
+
+                            <span>
+                                {{ $gettext('Find Song Info Online') }}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!canJoin"
+                            :title="$gettext('Tick two or more files, such as the parts of a program, to combine them into one new file. The original files are kept.')"
+                            @click="joinFiles"
+                        >
+                            <icon-ic-merge/>
+
+                            <span>
+                                {{ $gettext('Join Files into One') }}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!hasSelectedClassifyItems"
+                            :title="$gettext('Create or populate playlists from the MP3 genre of selected files')"
+                            @click="createGenrePlaylists"
+                        >
+                            <icon-ic-playlist-add/>
+
+                            <span>
+                                {{ $gettext('Create Playlists from Genre') }}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stock AzuraCast row: file actions on the left, New Folder on the right. -->
     <div
         id="app-toolbar"
-        class="d-flex pt-4"
+        class="d-flex pt-2"
     >
         <div class="flex-fill buttons d-flex align-items-center">
             <span>
                 {{ $gettext('With selected:') }}
             </span>
 
-            <select
-                id="bulk_media_type"
-                class="form-select form-select-sm bulk-classify-select"
-                :disabled="!hasSelectedClassifyItems || classifyPending"
-                :title="$gettext('Set type on selected files')"
-                @change="onBulkTypeChange"
-            >
-                <option
-                    value=""
-                    selected
-                    disabled
-                    hidden
-                >
-                    {{ $gettext('Set type…') }}
-                </option>
-                <option
-                    v-for="opt in mediaTypeOptions"
-                    :key="opt.value"
-                    :value="opt.value"
-                >
-                    {{ opt.shortLabel }}
-                </option>
-            </select>
-
-            <select
-                id="bulk_media_category"
-                class="form-select form-select-sm bulk-classify-select"
-                :disabled="!hasSelectedClassifyItems || classifyPending"
-                :title="$gettext('Set category on selected files')"
-                @change="onBulkCategoryChange"
-            >
-                <option
-                    value=""
-                    selected
-                    disabled
-                    hidden
-                >
-                    {{ $gettext('Set category…') }}
-                </option>
-                <option value="none">
-                    {{ $gettext('No category') }}
-                </option>
-                <option
-                    v-for="cat in mediaCategories"
-                    :key="cat.id"
-                    :value="String(cat.id)"
-                >
-                    {{ cat.name }}
-                </option>
-            </select>
-
-            <input
-                id="bulk_media_genre"
-                v-model="bulkGenre"
-                type="text"
-                class="form-control form-control-sm bulk-classify-select"
-                :disabled="!hasSelectedClassifyItems || classifyPending"
-                :title="$gettext('Set genre on selected files')"
-                :placeholder="$gettext('Set genre…')"
-                @keyup.enter="onBulkGenreApply"
-            >
-
-            <button
-                type="button"
-                class="btn btn-sm btn-primary"
-                :disabled="!hasSelectedClassifyItems || classifyPending || bulkGenre.trim() === ''"
-                @click="onBulkGenreApply"
-            >
-                {{ $gettext('Apply Genre') }}
-            </button>
-
-            <div
-                class="btn-group btn-group-sm dropdown allow-focus"
-            >
+            <div class="btn-group btn-group-sm dropdown allow-focus">
                 <div class="dropdown">
                     <button
                         ref="$playlistDropdown"
@@ -280,6 +374,30 @@
             </button>
         </div>
     </div>
+
+    <genre-playlists-modal
+        ref="$genrePlaylistsModal"
+        :selected-items="selectedItems"
+        :current-directory="currentDirectory"
+        :batch-url="batchUrl"
+        @relist="emit('relist')"
+        @add-playlist="(playlist) => emit('add-playlist', playlist)"
+    />
+
+    <join-files-modal
+        ref="$joinFilesModal"
+        :selected-items="selectedItems"
+        :current-directory="currentDirectory"
+        :batch-url="batchUrl"
+        @relist="emit('relist')"
+    />
+
+    <metadata-lookup-modal
+        ref="$metadataLookupModal"
+        :current-directory="currentDirectory"
+        :batch-url="batchUrl"
+        @relist="emit('relist')"
+    />
 </template>
 
 <script setup lang="ts">
@@ -293,12 +411,20 @@ import {useNotify} from "~/components/Common/Toasts/useNotify.ts";
 import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
 import type {MediaInitialPlaylist, MediaSelectedItems} from "~/components/Stations/Media.vue";
 import {ApiStationMediaPlaylist} from "~/entities/ApiInterfaces";
+import IconIcCheckBox from "~icons/ic/baseline-check-box";
 import IconIcClearAll from "~icons/ic/baseline-clear-all";
+import IconIcCloudDownload from "~icons/ic/baseline-cloud-download";
 import IconIcDelete from "~icons/ic/baseline-delete";
 import IconIcFolder from "~icons/ic/baseline-folder";
+import IconIcMerge from "~icons/ic/baseline-merge";
+import IconIcTravelExplore from "~icons/ic/baseline-travel-explore";
 import IconIcMoreHoriz from "~icons/ic/baseline-more-horiz";
 import IconIcOpenWith from "~icons/ic/baseline-open-with";
+import IconIcPlaylistAdd from "~icons/ic/baseline-playlist-add";
 import {formatMediaType, getMediaTypeOptions} from "~/functions/mediaTypes.ts";
+import GenrePlaylistsModal from "~/components/Stations/Media/GenrePlaylistsModal.vue";
+import JoinFilesModal from "~/components/Stations/Media/JoinFilesModal.vue";
+import MetadataLookupModal from "~/components/Stations/Media/MetadataLookupModal.vue";
 
 const props = defineProps<{
     currentDirectory: string,
@@ -313,7 +439,8 @@ const emit = defineEmits<{
     (e: 'relist'): void,
     (e: 'add-playlist', playlist: any): void,
     (e: 'move-files'): void,
-    (e: 'create-directory'): void
+    (e: 'create-directory'): void,
+    (e: 'download-from-url'): void
 }>();
 
 const {$gettext} = useTranslate();
@@ -323,6 +450,12 @@ const selectedItems = toRef(props, 'selectedItems');
 const hasSelectedItems = computed(() => {
     return selectedItems.value.all.length > 0;
 });
+
+// Joining is for media files only: at least two, and no folders.
+const canJoin = computed(
+    () => selectedItems.value.directories.length === 0
+        && selectedItems.value.all.filter((row) => !!row.media).length >= 2
+);
 
 const hasSelectedClassifyItems = computed(
     () => selectedItems.value.files.length > 0 || selectedItems.value.directories.length > 0
@@ -577,12 +710,168 @@ const moveFiles = () => {
 const createDirectory = () => {
     emit('create-directory');
 }
+
+const downloadFromUrl = () => {
+    emit('download-from-url');
+}
+
+const $genrePlaylistsModal = useTemplateRef('$genrePlaylistsModal');
+
+const $joinFilesModal = useTemplateRef('$joinFilesModal');
+
+const joinFiles = () => {
+    $joinFilesModal.value?.open();
+};
+
+const $metadataLookupModal = useTemplateRef('$metadataLookupModal');
+
+const lookUpSelected = () => {
+    void $metadataLookupModal.value?.open(selectedItems.value.files, selectedItems.value.directories);
+};
+
+// One track, from its edit box.
+const lookUp = (path: string) => {
+    void $metadataLookupModal.value?.open([path], []);
+};
+
+defineExpose({lookUp});
+
+const createGenrePlaylists = () => {
+    void $genrePlaylistsModal.value?.open();
+};
 </script>
 
 <style lang="scss" scoped>
+// Same look and layout as the Playlists toolbar.
+// Neutral gray panel with the same 1px border and corners as the search box.
+// The panel hugs its tools (no empty space on the right) and sits centered.
+.station-toolbar {
+    width: fit-content;
+    max-width: calc(100% - 2rem);
+    margin: 0 auto 0.75rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-tertiary-bg);
+}
+
+.station-toolbar-selection {
+    display: inline-flex;
+    align-self: center;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 1.75rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &.is-active {
+        border-color: var(--bs-primary);
+        color: var(--bs-primary-text-emphasis);
+    }
+}
+
+.station-toolbar-selection-icon {
+    font-size: 1rem;
+}
+
+.station-toolbar-label {
+    display: block;
+    color: var(--bs-secondary-color);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+}
+
+// Two rows: the panel is as wide as the longer row, so no empty space is
+// left on the sides; a row wraps only when the screen is too narrow for it.
+.station-toolbar-rows {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.station-toolbar-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.25rem;
+}
+
+.station-toolbar-section {
+    flex: 0 1 auto;
+    min-width: 0;
+    // Groups have no box of their own: the labels and spacing separate them.
+    padding: 0.15rem 0.1rem;
+
+    > .station-toolbar-label {
+        margin-bottom: 0.3rem;
+    }
+}
+
+.station-toolbar-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.station-toolbar .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.85rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: var(--bs-border-radius);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+// Disabled buttons still show their hover hint
+// but cannot be clicked: the native disabled attribute blocks clicks.
+.station-toolbar .btn:disabled {
+    pointer-events: auto;
+    cursor: not-allowed;
+}
+
+@media (max-width: 767.98px) {
+    .station-toolbar {
+        width: auto;
+        max-width: none;
+        margin: 0 0.5rem 0.75rem;
+        padding: 0.4rem;
+    }
+
+    .station-toolbar-section {
+        flex: 1 1 100%;
+    }
+}
+
 .bulk-classify-select {
     width: auto;
-    min-width: 8.5rem;
-    max-width: 11rem;
+    min-width: 8.25rem;
+    max-width: 10.75rem;
+}
+
+.bulk-genre-group {
+    width: auto;
+    min-width: 15rem;
+    max-width: 18rem;
+}
+
+@media (max-width: 767.98px) {
+    .bulk-classify-select,
+    .bulk-genre-group {
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+    }
 }
 </style>

@@ -12,10 +12,13 @@ return [
     Message\AddNewMediaMessage::class => App\Media\MediaProcessor::class,
     Message\ReprocessMediaMessage::class => App\Media\MediaProcessor::class,
     Message\ProcessCoverArtMessage::class => App\Media\MediaProcessor::class,
+    Message\JoinMediaMessage::class => App\Media\MediaJoiner::class,
+    Message\LookupMediaMetadataMessage::class => App\Media\MetadataLookup::class,
 
     Message\WritePlaylistFileMessage::class => Liquidsoap\PlaylistFileWriter::class,
 
     Message\BackupMessage::class => Task\RunBackupTask::class,
+    Message\BuildLinearLogMessage::class => App\Radio\AutoDJ\LinearLogBuilder::class,
 
     Message\GenerateAcmeCertificate::class => App\Service\Acme::class,
 

@@ -74,7 +74,16 @@ import IconIcCloudUpload from "~icons/ic/baseline-cloud-upload";
 
 export interface UploadResponseBody {
     originalFilename: string,
-    uploadedPath: string
+    uploadedPath: string,
+    media?: {id: number, unique_id: string, path: string} | null
+}
+
+export interface QueuedUploadFile {
+    uniqueIdentifier: string,
+    name: string,
+    size: number,
+    relativePath: string,
+    file?: File
 }
 
 interface FlowFile {
@@ -85,13 +94,16 @@ interface FlowFile {
     progressPercent: number,
     error?: string,
     size: string,
-    targetUrl: string
+    targetUrl: string,
+    held: boolean
 }
 
-interface OriginalFlowFile {
+export interface OriginalFlowFile {
     uniqueIdentifier: string,
     name: string,
     size: number,
+    relativePath?: string,
+    file?: File,
 
     progress(): number
 }
@@ -103,10 +115,13 @@ const props = withDefaults(
         directoryMode?: boolean,
         validMimeTypes?: string[],
         flowConfiguration?: object,
+        // Wait for startUpload() instead of uploading as soon as files are picked.
+        holdUpload?: boolean,
     }>(),
     {
         allowMultiple: false,
         directoryMode: false,
+        holdUpload: false,
         validMimeTypes: () => ['*'],
         flowConfiguration: () => ({}),
     }
@@ -116,6 +131,7 @@ const emit = defineEmits<{
     (e: 'complete'): void,
     (e: 'success', file: OriginalFlowFile, message: UploadResponseBody | null): void,
     (e: 'error', file: OriginalFlowFile, message: string | null): void,
+    (e: 'queued', files: QueuedUploadFile[]): void,
 }>();
 
 let flow: Flow | null = null;
@@ -135,7 +151,8 @@ const files = reactive<{
             name: file.name,
             uniqueIdentifier: file.uniqueIdentifier,
             size: formatFileSize(file.size),
-            isVisible: true,
+            isVisible: !props.holdUpload,
+            held: props.holdUpload,
             isCompleted: false,
             progressPercent: 0,
             targetUrl: props.targetUrl
@@ -213,8 +230,19 @@ onMounted(() => {
         return true;
     });
 
-    flow.on('filesSubmitted', () => {
-        flow?.upload();
+    flow.on('filesSubmitted', (submitted: OriginalFlowFile[]) => {
+        if (!props.holdUpload) {
+            flow?.upload();
+            return;
+        }
+
+        emit('queued', submitted.map((file) => ({
+            uniqueIdentifier: file.uniqueIdentifier,
+            name: file.name,
+            size: file.size,
+            relativePath: file.relativePath ?? file.name,
+            file: file.file
+        })));
     });
 
     flow.on('fileProgress', (file: OriginalFlowFile) => {
@@ -263,6 +291,68 @@ onMounted(() => {
 
         emit('complete');
     });
+});
+
+const findFlowFile = (uniqueIdentifier: string): OriginalFlowFile | undefined =>
+    (flow?.files as unknown as OriginalFlowFile[] | undefined)?.find(
+        (file) => file.uniqueIdentifier === uniqueIdentifier
+    );
+
+/** Upload held files, adding each one's own query params (by uniqueIdentifier) to its upload URL. */
+const startUpload = (
+    paramsByFile: Record<string, Record<string, string>> = {},
+    order: string[] = []
+) => {
+    // Upload in the order picked in the upload box.
+    if (order.length > 0 && flow) {
+        const rank = (file: OriginalFlowFile) => {
+            const index = order.indexOf(file.uniqueIdentifier);
+            return index === -1 ? order.length : index;
+        };
+        (flow.files as unknown as OriginalFlowFile[]).sort((x, y) => rank(x) - rank(y));
+    }
+
+    forEach(files.value, (file: FlowFile) => {
+        if (!file.held) {
+            return;
+        }
+
+        const url = new URL(props.targetUrl, document.location.href);
+        forEach(paramsByFile[file.uniqueIdentifier] ?? {}, (value: string, key: string) => {
+            url.searchParams.set(key, value);
+        });
+
+        file.targetUrl = url.toString();
+        file.isVisible = true;
+        file.held = false;
+    });
+
+    flow?.upload();
+};
+
+/** Drop a held file without uploading it. */
+const removeFile = (uniqueIdentifier: string) => {
+    const file = findFlowFile(uniqueIdentifier);
+    if (file) {
+        // @ts-expect-error FlowJS typing wants its own FlowFile type.
+        flow?.removeFile(file);
+    }
+    delete files.value[uniqueIdentifier];
+};
+
+/** Drop every held (not yet started) file. */
+const cancelHeld = () => {
+    forEach({...files.value}, (file: FlowFile) => {
+        if (file.held) {
+            removeFile(file.uniqueIdentifier);
+        }
+    });
+};
+
+defineExpose({
+    startUpload,
+    removeFile,
+    cancelHeld
 });
 
 onUnmounted(() => {

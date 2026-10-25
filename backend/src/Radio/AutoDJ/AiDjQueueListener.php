@@ -14,13 +14,13 @@ use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\Adapters;
-use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
 use App\Entity\AiDjContent;
 use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
 use Psr\SimpleCache\CacheInterface;
@@ -41,6 +41,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
         AiDjContent::TYPE_JOKE,
         AiDjContent::TYPE_ENCOURAGEMENT,
         AiDjContent::TYPE_INSPIRATION,
+        AiDjContent::TYPE_TESTIMONY,
+        AiDjContent::TYPE_STORY,
+    ];
+
+    /**
+     * Content too long for a combo break, which airs only as a standalone liner.
+     * A combo cuts each half to complete sentences within its budget, so a
+     * testimony or story would lose its ending there.
+     */
+    private const array STANDALONE_ONLY_TYPES = [
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
     ];
@@ -72,6 +82,12 @@ final class AiDjQueueListener implements EventSubscriberInterface
      */
     private const int COMBO_PROBABILITY_PCT = 50;
 
+    /** Keep cadence credit through a full shift, but let it naturally reset overnight. */
+    private const int TALK_CADENCE_TTL_SECONDS = 12 * 3600;
+
+    /** A recorded break must be over this long before the hour's speech cutoff. */
+    private const int RECORDING_END_MARGIN_SECONDS = 10;
+
     public function __construct(
         private readonly AiDjScheduler $scheduler,
         private readonly AiDjGenerator $generator,
@@ -80,8 +96,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly ReloadableEntityManagerInterface $em,
         private readonly CacheInterface $cache,
         private readonly StationQueueRepository $stationQueueRepo,
-        private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly AiDjArtistHistoryService $artistHistoryService,
+        private readonly LinearLogPreviewContext $linearLogPreviewContext,
+        private readonly AiDjRecordings $recordings,
     ) {
     }
 
@@ -96,6 +113,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
     public function onBuildQueue(BuildQueue $event): void
     {
+        if ($this->linearLogPreviewContext->isActive()) {
+            $this->logger->debug('AI DJ: Skipped - Linear Log preview is read-only.');
+            return;
+        }
+
         $station = $event->getStation();
 
         if ($event->isInterrupting()) {
@@ -116,16 +138,21 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::Requests);
+        // Check the dedicated AI DJ speech lane. A clip already waiting or
+        // prefetched in that lane means it is not yet safe to queue another.
+        // Using the AiDj queue (not Requests) avoids a false positive: listener
+        // requests live in Requests and must not block AI DJ generation.
+        $queueEmpty = $backend->isQueueEmpty($station, LiquidsoapQueues::AiDj);
 
         if (!$queueEmpty) {
-            $this->logger->debug('AI DJ: Skipped - Liquidsoap requests queue is not empty.');
+            $this->logger->debug('AI DJ: Skipped - AI DJ speech lane is not empty.');
             return;
         }
 
-        // Cooldown: minimum gap between DJ talk breaks so she does not talk on
-        // consecutive songs (was 60s, which allowed back-to-back chatter).
-        $cooldownKey = 'ai_dj_cooldown_' . $station->id;
+        // This key is deliberately owned only by ordinary AI DJ speech. Lifecycle
+        // schedule checks use separate state and must never make a skipped attempt
+        // look like a DJ actually spoke.
+        $cooldownKey = 'ai_dj_talk_cooldown_' . $station->id;
         $lastGenTime = $this->cache->get($cooldownKey);
         if ($lastGenTime && (time() - $lastGenTime) < 180) {
             $this->logger->debug('AI DJ: Skipped - cooldown active.', ['elapsed' => time() - $lastGenTime]);
@@ -142,54 +169,91 @@ final class AiDjQueueListener implements EventSubscriberInterface
             return;
         }
 
-        $expectedPlayTime = $event->getExpectedPlayTime();
-
-        // Skip if top-of-hour protection is active and we're in the lookahead zone.
-        // This uses the station's configured lookahead window instead of hardcoded minutes,
-        // so DJ clips never compete with legal IDs or news at the top of hour.
-        if ($this->hourBoundaryPlanner->isInLookaheadZone($station, $expectedPlayTime)) {
-            $this->logger->debug('AI DJ: Skipped - in top-of-hour lookahead zone.');
+        // At least one song between breaks: a clip queued now airs at the next
+        // boundary, i.e. straight after DJ speech if that is what is on air.
+        if ($this->isDjSpeechOnAir($station)) {
+            $this->logger->debug('AI DJ: Skipped - DJ speech is on air; waiting for a song in between.');
             return;
         }
 
-        // Also skip the first 3 minutes after the hour to let legal IDs and news finish.
+        // Speech is not in the queue's timing plan. Once every song before the
+        // upcoming Top-of-Hour ID is already locked into Liquidsoap, the swap can no
+        // longer re-pick one to absorb a break, so any speech now pushes the final
+        // song into the ID and forces a fade-cut (2026-09-23 3pm: two breaks made
+        // "I Exalt Thee" start 56s late).
+        if ($this->isFinalStretchLocked($station)) {
+            $this->logger->debug('AI DJ: Skipped - songs before the Top-of-Hour ID are locked in.');
+            return;
+        }
+
+        // AI DJ audio goes directly to Liquidsoap's track-sensitive Requests queue.
+        // Its useful scheduling clock is therefore the boundary where that request
+        // can actually air, normally the end of the song currently on air. The
+        // database queue's expectedPlayTime can be several songs ahead after queue
+        // projection/Linear Log work and must not decide which DJ speaks or whether
+        // the direct request is inside a protected window.
         $now = new DateTimeImmutable('now', $station->getTimezoneObject());
-        $minute = (int) $now->format('i');
-        if ($minute <= 3) {
+        $directAirTime = $this->resolveDirectRequestAirTime($station, $now);
+
+        // The lifecycle listener owns a separate wind-down marker once the concrete
+        // sign-off has actually been queued. It carries only the shift end timestamp
+        // and never touches the ordinary talk cooldown. Expired state is removed lazily
+        // so a following shift is never suppressed by the previous DJ's goodbye.
+        $winddownKey = 'ai_dj_shift_winddown_until_' . $station->id;
+        $winddownUntil = (int)($this->cache->get($winddownKey) ?? 0);
+        if ($winddownUntil > 0) {
+            if ($directAirTime->getTimestamp() < $winddownUntil) {
+                $this->logger->debug('AI DJ: Skipped - scheduled shift is in sign-off wind-down.');
+                return;
+            }
+
+            $this->cache->delete($winddownKey);
+        }
+
+        // Do not use the station's configurable Top-of-Hour LOOKAHEAD horizon as a
+        // speech blackout. That horizon is for queue planning and can be 10-30
+        // minutes long; production Bella timelines showed the resulting large silent
+        // gap after roughly :25/:30. Real speech protection is enforced below using
+        // the actual direct-air boundary: the first 3 minutes after the hour, AI News
+        // windows and the final :54:30-to-:00 exclusion remain authoritative.
+
+        // Quiet right after the hour so legal IDs and news finish (AI DJ page setting).
+        $minute = (int)$now->format('i');
+        if ($minute < AiDjTalkRules::quietAfterHourMinutes($station)) {
             $this->logger->debug('AI DJ: Skipped - post-hour buffer (minute ' . $minute . ').');
             return;
         }
 
-        // DJ QUIET WINDOW (client request): keep a DJ off the air before the top of the
-        // hour so she never steps on the station ID / news. A DJ clip is enqueued AHEAD
-        // and airs when the current (or a queued) song ends, which can be several minutes
-        // after it's decided - a 7-minute song once pushed a break to :55:48, a long song
-        // once to :58. Because that drift can exceed a single song, she WINDS DOWN at :50
-        // (stops STARTING new breaks); we ALSO block on the queue's estimate and on the
-        // current song's real end time. Net effect: nothing airs in :55-:00.
-        $playMinute = (int) $expectedPlayTime->setTimezone($station->getTimezoneObject())->format('i');
-        $songEnd = $this->getCurrentSongEndTime($station);
-        $endSecOfHour = -1;
-        if ($songEnd !== null) {
-            $endLocal = $songEnd->setTimezone($station->getTimezoneObject());
-            $endSecOfHour = ((int) $endLocal->format('i')) * 60 + (int) $endLocal->format('s');
-        }
-        // A DJ clip airs when the current song ends and then runs ~15-30s. To keep even
-        // the clip's TAIL out of the :55-:00 window, block from :54:30 (3270s into the
-        // hour) onward - a break that aired at :54:55 once bled ~19s past :55.
-        if ($minute >= 50 || $playMinute >= 55 || $endSecOfHour >= 3270) {
+        // Quiet window: a DJ request airs at the current-song boundary. Protect the
+        // actual expected airtime rather than a broad wall-clock minute range. This
+        // allows safe speech at :50-:54 while still blocking a request whose boundary
+        // is at/after :54:30 or crosses into the next hour.
+        $playMinute = (int)$directAirTime->format('i');
+        $playSecond = (int)$directAirTime->format('s');
+        $airSecondsIntoHour = ($playMinute * 60) + $playSecond;
+        $crossesHour = $directAirTime->format('Y-m-d H') !== $now->format('Y-m-d H');
+
+        // A DJ clip airs when the current song ends and then runs ~15-30s. To keep
+        // even the clip's tail out of the :55-:00 window, block from :54:30 onward.
+        // Speech is not in the queue's timing plan, so a break in the final
+        // stretch pushes the hour's last song into the Station ID (2026-09-23 3pm:
+        // breaks at :49 and :52 caused a fade-cut). Quiet window set on the AI DJ page.
+        if ($crossesHour || $airSecondsIntoHour >= AiDjTalkRules::speechCutoffSecondsIntoHour($station)) {
             $this->logger->debug('AI DJ: Skipped - DJ winding down before top of hour.', [
-                'now_min' => $minute, 'queue_min' => $playMinute, 'song_end_sec' => $endSecOfHour,
+                'air_time' => $directAirTime->format(DATE_ATOM),
+                'air_seconds_into_hour' => $airSecondsIntoHour,
+                'crosses_hour' => $crossesHour,
             ]);
             return;
         }
 
-        // Coordinate with AI Newscaster: avoid minutes around news bulletin times.
-        if ($this->isNearNewsBulletin($station, $minute)) {
+        // Coordinate with AI Newscaster at the time this request is likely to air.
+        if ($this->isNearNewsBulletin($station, $playMinute)) {
             $this->logger->debug('AI DJ: Skipped - near AI Newscaster bulletin time.');
             return;
         }
-        $dj = $this->scheduler->findActiveDj($station->id, $expectedPlayTime);
+
+        $dj = $this->scheduler->findActiveDj($station->id, $directAirTime);
 
         // Track DJ shift transitions for outro firing
         $cacheKey = 'ai_dj_last_active_' . $station->id;
@@ -198,42 +262,54 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         $this->cache->set($cacheKey, $currentDjId, 3600);
 
-        // NOTE: the previous DJ's sign-off (pushOutroClip) is intentionally NOT
-        // fired here. It only ever triggered on a shift change — the very same
-        // cycle that queues the new DJ's welcome below — so the two clips always
-        // aired back-to-back with no song between them (the client's "talked
-        // twice between songs" report at a shift boundary). Keeping only the
-        // welcome guarantees a break is always a single clip.
+        // The outgoing DJ's sign-off (pushOutroClip) is intentionally not fired here.
+        // It only ever triggered on a shift change, the same cycle that queues the new
+        // DJ's welcome below, so the two clips would air back-to-back with no song
+        // between them. Keeping only the welcome guarantees a break is always a single
+        // clip.
 
-        // Fire shift intro when a new DJ block begins. Only ONE clip per break.
+        // Fire the shift intro when a new DJ block begins. Only one clip per break.
         if ($currentDjId !== null && $previousDjId !== $currentDjId && $dj instanceof AiDj) {
-            // STRICT SCHEDULE: the queue is built several minutes ahead, so
-            // $expectedPlayTime can cross a shift boundary before the clip actually
-            // airs. That made a DJ welcome herself EARLY (client: "Bella welcomes 6
-            // min early"). Require the shift to have ACTUALLY begun in real time
-            // before welcoming; if not, revert the transition marker and wait so
-            // nothing airs before the DJ's appointed start. The welcome then fires
-            // on a later build cycle once the shift has truly started.
-            $djNow = $this->scheduler->findActiveDj($station->id, new \DateTimeImmutable('now'));
+            // The direct request can be prepared before a shift boundary, but a welcome
+            // must never air before the scheduled shift has actually begun. If the
+            // direct-airtime DJ differs from the DJ active right now, wait for a later
+            // BuildQueue cycle rather than announcing the next DJ early.
+            $djNow = $this->scheduler->findActiveDj($station->id, $now);
             if (!$djNow instanceof AiDj || $djNow->getId() !== $currentDjId) {
                 $this->cache->set($cacheKey, $previousDjId, 3600);
                 $this->trackCurrentSong($station);
                 return;
             }
 
-            // WELCOME ONCE PER SHIFT. 'ai_dj_last_active' (3600s TTL) is only
+            // Welcome once per shift. The 'ai_dj_last_active' key (3600s TTL) is only
             // refreshed when this listener runs on a BuildQueue event. During a long
-            // single-file PROGRAM (~59-min CMS block) no track is requested, no
-            // BuildQueue fires, the key EXPIRES, and on music-resume $previousDjId
-            // reads null while the SAME DJ is still on shift -> the welcome would
-            // fire a 2nd time (the confirmed 10:59 / 12:18 duplicate). This per-DJ
-            // guard survives that gap; a genuine DJ change (different id) has a
-            // different, absent key and so still welcomes.
+            // single-file program (e.g. a ~59-minute block) no track is requested, no
+            // BuildQueue fires, the key expires, and on music-resume $previousDjId reads
+            // null while the same DJ is still on shift, which would cause a duplicate
+            // welcome. This per-DJ guard survives that gap; a genuine DJ change (different
+            // id) has a different, absent key and so still welcomes.
             $welcomedKey = 'ai_dj_welcomed_' . $station->id . '_' . $currentDjId;
             if (null === $this->cache->get($welcomedKey)) {
-                // 6h: longer than any single program gap, shorter than the 24h loop
-                // so the same DJ's next-day shift still gets a fresh welcome.
-                $this->cache->set($welcomedKey, time(), 72000);
+                // Compute a shift-scoped TTL once so the same DJ can welcome again at
+                // the start of their NEXT shift (e.g. Onyx 12am-6am every night — a
+                // flat 72000s key would suppress the following night's welcome).
+                $welcomeSchedule = $this->scheduler->findActiveSchedule($station->id, $now);
+                $shiftTtl = $welcomeSchedule !== null
+                    ? max(3600, $this->scheduler->getShiftWindow($station, $welcomeSchedule, $now)['ends_at']->getTimestamp() - $now->getTimestamp() + 3600)
+                    : 3600;
+
+                // AiDjShiftLifecycleListener (priority 2, same event) runs before this
+                // listener (priority 1) and may have already queued a welcome clip in the
+                // dedicated AI DJ lane. If a clip is pending, defer to it rather than
+                // stacking a second welcome. Mark the key so we don't retry next event.
+                if (!$backend->isQueueEmpty($station, LiquidsoapQueues::AiDj)) {
+                    $this->cache->set($welcomedKey, time(), $shiftTtl);
+                    $this->trackCurrentSong($station);
+                    return;
+                }
+
+                // No clip pending — queue the welcome ourselves.
+                $this->cache->set($welcomedKey, time(), $shiftTtl);
                 $this->pushIntroShiftClip($dj, $station, $backend);
                 $this->cache->set($cooldownKey, time(), 300);
                 $this->trackCurrentSong($station);
@@ -244,31 +320,69 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
 
         if (null === $dj) {
-            $this->logger->debug('AI DJ: No active DJ for this time slot.');
+            $this->logger->debug('AI DJ: No active DJ for direct request airtime.');
             return;
         }
 
         $this->logger->info('AI DJ: Active DJ found.', ['dj_name' => $dj->getName()]);
 
-        // Check talk frequency
+        // Treat talk_frequency as the share of ELIGIBLE song boundaries that should
+        // contain a DJ break. The previous independent random roll could produce long
+        // unlucky silent streaks (and materially under-deliver over a single shift).
+        // Fractional credit keeps the same configured percentage while making the
+        // cadence stable: 0.5 => about every second eligible boundary; 0.75 => about
+        // three of every four. Safety windows and the 3-minute cooldown still win.
         $frequency = $dj->getTalkFrequency();
-        if ($frequency < 1.0 && (mt_rand(1, 100) / 100) > $frequency) {
-            $this->logger->debug('AI DJ: Skipped by talk frequency.', ['frequency' => $frequency]);
-            // Still track current song for post-song use even when skipping
+        if ($frequency <= 0.0) {
+            $this->logger->debug('AI DJ: Skipped - talk frequency is zero.');
             $this->trackCurrentSong($station);
             return;
         }
 
-        // NAME THE CURRENT SONG ONLY WHEN THE CLIP WILL AIR RIGHT AFTER IT.
-        // The clip goes to the track_sensitive "requests" queue, but the station's
-        // crossfade (enable_crossfade, default_fade ~2s) prefetches the NEXT music
-        // track a couple seconds before a boundary. If this break fires inside that
-        // prefetch window, the next song is already locked in, so the clip airs AFTER
-        // it and "that was <current>" is one song stale (the client's "wrong song"
-        // report). getCurrentSongIfSafeToName() returns the current song ONLY when it
-        // has comfortably more time left than the prefetch window (clip wins the
-        // boundary -> name is correct); otherwise null -> we play a liner below, so
-        // the DJ is never confidently wrong about a song name.
+        $cadenceKey = 'ai_dj_talk_cadence_' . $station->id . '_' . $dj->getId();
+        $cadenceCredit = (float)($this->cache->get($cadenceKey) ?? 0.0) + $frequency;
+
+        // One of the DJ's own recorded breaks, when one is due, airs here as an
+        // extra: it is never in place of an AI break. It spends none of the talk
+        // credit, and the boundary after it (recording into song, where no AI
+        // break may air) is credited now, so the shift has as many AI breaks as
+        // it would without the recording. The time comes from the music.
+        if ($this->pushRecordedBreak($dj, $station, $backend, $now, $directAirTime)) {
+            $this->cache->set($cadenceKey, $cadenceCredit + $frequency, self::TALK_CADENCE_TTL_SECONDS);
+            $this->trackCurrentSong($station);
+            return;
+        }
+
+        if ($cadenceCredit < 1.0) {
+            $this->cache->set($cadenceKey, $cadenceCredit, self::TALK_CADENCE_TTL_SECONDS);
+            $this->logger->debug('AI DJ: Skipped by talk cadence.', [
+                'frequency' => $frequency,
+                'credit' => $cadenceCredit,
+            ]);
+            $this->trackCurrentSong($station);
+            return;
+        }
+
+        // Reserve this eligible break before synchronous TTS starts. This keeps the
+        // original anti-parallel behavior: another queue request arriving while a clip
+        // is rendering sees the cooldown and cannot generate a second adjacent DJ clip.
+        $this->cache->set(
+            $cadenceKey,
+            max(0.0, $cadenceCredit - 1.0),
+            self::TALK_CADENCE_TTL_SECONDS,
+        );
+        $this->cache->set($cooldownKey, time(), 300);
+
+        // Name the current song only when the clip will air right after it. The clip
+        // goes to the track_sensitive "requests" queue, but the station's crossfade
+        // (enable_crossfade, default_fade ~2s) prefetches the next music track a couple
+        // seconds before a boundary. If this break fires inside that prefetch window,
+        // the next song is already locked in, so the clip airs after it and "that was
+        // <current>" would be one song stale. getCurrentSongIfSafeToName() returns the
+        // current song only when it has comfortably more time left than the prefetch
+        // window (the clip wins the boundary, so the name is correct); otherwise it
+        // returns null and a liner is played below, so the DJ is never confidently wrong
+        // about a song name.
         $currentSong = $this->getCurrentSongIfSafeToName($station);
         $curArtist = $currentSong['artist'] ?? null;
         $curTitle = $currentSong['title'] ?? null;
@@ -279,9 +393,6 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $nextArtist = $nextMusicEntry?->artist;
         $nextTitle = $nextMusicEntry?->title;
 
-        // Record cooldown BEFORE generation to prevent parallel attempts
-        $this->cache->set($cooldownKey, time(), 300);
-
         $roll = mt_rand(1, 100);
         $wantCombo = (mt_rand(1, 100) <= self::COMBO_PROBABILITY_PCT);
 
@@ -291,19 +402,31 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // introduction). Fails open to the single-segment paths on any error.
             $this->pushComboClip($dj, $curArtist, $curTitle, $station, $backend);
         } elseif ($curArtist !== null && $curArtist !== '') {
-            // Announce ONLY the song that just played — one song per break for a clean,
-            // natural flow. Never pass a "next" song, so the DJ can't chain several
-            // song names together in a single break (the "mentioned 3 songs" problem).
-            if ($roll <= 45) {
+            // Announce only the song that just played, one song per break for a clean,
+            // natural flow. Never pass a "next" song, so the DJ never chains several
+            // song names together in a single break.
+            if ($roll <= 40) {
                 $this->pushPostSongClip($dj, $curArtist, $curTitle, null, null, $station, $backend);
-            } elseif ($roll <= 65) {
+            } elseif ($roll <= 45) {
+                // A testimony or a story. They air only as standalone liners, and the
+                // short liners added on 2026-09-24 took their share from that slot
+                // (35 of every 100 of these breaks down to 25), which cut them by about
+                // a third. These 5 give it back. They come from the song mention, the
+                // most frequent break by far (about 28 a day), so no library content
+                // and no short liner airs less.
+                $this->pushContentLiner($dj, $station, $backend, self::STANDALONE_ONLY_TYPES);
+            } elseif ($roll <= 60) {
                 // A short fun fact about the artist that just played. Fetched
                 // safely (short timeout + cache); falls back to a content liner
                 // if nothing is found so it never delays or stalls playback.
                 $this->pushArtistHistoryClip($dj, $curArtist, $station, $backend);
+            } elseif ($roll <= 75) {
+                $this->pushShortLiner($dj, $station, $backend);
             } else {
                 $this->pushContentLiner($dj, $station, $backend);
             }
+        } elseif ($roll <= 30) {
+            $this->pushShortLiner($dj, $station, $backend);
         } else {
             // No reliably known song — play a content liner, never a generic filler.
             $this->pushContentLiner($dj, $station, $backend);
@@ -359,11 +482,11 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return null;
             }
 
-            // A PROGRAM is not a song and must never be named as one — even a
-            // short episode. Detect it exactly the way the Liquidsoap config does
+            // A program is not a song and must never be named as one, even a short
+            // episode. Detect it exactly the way the Liquidsoap config does
             // (ConfigWriter: remote-URL feed, "play single track", or merged
-            // block). This is the confirmed CMS / Altered Stories / Faith Horizons
-            // case and needs no station-specific playlist-ID list.
+            // block), so this works generically without a station-specific
+            // playlist-ID list.
             $playlist = $last->playlist;
             if (
                 null !== $playlist
@@ -392,7 +515,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $elapsed = time() - $last->timestamp_start->getTimestamp();
-            $remaining = $last->duration - (float) $elapsed;
+            $remaining = $last->duration - (float)$elapsed;
 
             if ($remaining <= self::NAME_SAFE_MIN_REMAINING_SECONDS) {
                 $this->logger->debug(
@@ -452,23 +575,48 @@ final class AiDjQueueListener implements EventSubscriberInterface
     }
 
     /**
+     * Resolve when a track-sensitive Liquidsoap request is actually likely to air.
+     * If the current song has a trustworthy future end, that boundary is the request
+     * airtime. Otherwise fail open to now rather than a projected DB queue slot.
+     */
+    private function resolveDirectRequestAirTime(
+        Station $station,
+        DateTimeImmutable $now,
+    ): DateTimeImmutable {
+        $currentSongEnd = $this->getCurrentSongEndTime($station);
+
+        if ($currentSongEnd instanceof DateTimeImmutable && $currentSongEnd > $now) {
+            return $currentSongEnd;
+        }
+
+        return $now;
+    }
+
+    /**
      * Projected end time (= break airtime) of the song currently on air. A DJ clip
      * enqueues to Requests and airs when the current song finishes, so this is the
      * most accurate estimate of when the clip is actually heard - more reliable than
-     * the queue's expectedPlayTime, which under-estimates and once let a clip air at
-     * :58 inside the quiet window. Null when timing is unknown (caller then relies on
-     * the clock-minute + expectedPlayTime checks).
+     * the queue's expectedPlayTime, which can be far ahead of the direct request.
      */
     private function getCurrentSongEndTime(Station $station): ?\DateTimeImmutable
     {
         try {
+            // Prefer a media-linked song (AutoDJ queue path) for the most accurate
+            // duration, but fall back to any visible on-air item with a positive
+            // duration. During a strict scheduled playlist (e.g. Hymns & Favorites)
+            // songs are played by a native Liquidsoap source and arrive via Liquidsoap
+            // feedback without a media_id; their SongHistory rows have media = NULL but
+            // do carry a duration from the Liquidsoap track metadata. Excluding them
+            // caused directAirTime to always collapse to $now, making the TOH window
+            // math inaccurate and compounding the welcome-recovery deadlock.
+            // AI DJ clip rows have no duration and are excluded by the duration > 0
+            // guard below, so they never anchor the timing clock.
             /** @var \App\Entity\SongHistory|null $last */
             $last = $this->em->createQuery(
                 <<<'DQL'
                     SELECT sh FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
                     AND sh.is_visible = 1
-                    AND sh.media IS NOT NULL
                     ORDER BY sh.timestamp_start DESC
                 DQL
             )->setParameter('station', $station)
@@ -479,7 +627,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return null;
             }
 
-            $endTs = $last->timestamp_start->getTimestamp() + (int) ceil($last->duration);
+            $endTs = $last->timestamp_start->getTimestamp() + (int)ceil($last->duration);
             return (new \DateTimeImmutable('@' . $endTs))->setTimezone($station->getTimezoneObject());
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: song-end timing check failed: %s', $e->getMessage()));
@@ -541,9 +689,131 @@ final class AiDjQueueListener implements EventSubscriberInterface
     }
 
     /**
+     * The station's liner types, narrowed to $onlyTypes when it has any of them.
+     *
+     * @param string[]|null $onlyTypes
+     * @return non-empty-array<int, string>
+     */
+    private function linerTypesAmong(Station $station, ?array $onlyTypes): array
+    {
+        $linerTypes = $this->getLinerTypes($station);
+        if (null === $onlyTypes) {
+            return $linerTypes;
+        }
+
+        $narrowed = array_values(array_intersect($linerTypes, $onlyTypes));
+
+        return [] !== $narrowed ? $narrowed : $linerTypes;
+    }
+
+    /**
      * True if an AI DJ clip is already queued (unplayed) and waiting to air.
      * DJ clips have no media and their custom URI points at the station's ai_dj dir.
      */
+    private function isFinalStretchLocked(Station $station): bool
+    {
+        try {
+            $idTime = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT MIN(sq.timestamp_played) FROM App\Entity\StationQueue sq
+                    WHERE sq.station = :station
+                    AND sq.is_played = 0
+                    AND sq.top_of_hour_legal_id = 1
+                    AND sq.timestamp_played <= :horizon
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('horizon', new DateTimeImmutable('+1 hour'))
+                ->getSingleScalarResult();
+
+            if (null === $idTime) {
+                return false;
+            }
+
+            $swappableBeforeId = (int)$this->em->createQuery(
+                <<<'DQL'
+                    SELECT COUNT(sq.id) FROM App\Entity\StationQueue sq
+                    WHERE sq.station = :station
+                    AND sq.is_played = 0
+                    AND sq.sent_to_autodj = 0
+                    AND sq.top_of_hour_legal_id = 0
+                    AND sq.media IS NOT NULL
+                    AND sq.timestamp_played < :idTime
+                DQL
+            )->setParameter('station', $station)
+                ->setParameter('idTime', $idTime)
+                ->getSingleScalarResult();
+
+            return 0 === $swappableBeforeId;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * True when the most recent item on air is itself an AI DJ speech clip, so a
+     * new break must wait for a song (or any non-speech item) in between.
+     *
+     * Read straight from SongHistory, which is the only durable proof a clip
+     * reached air. The previous implementation cross-checked a StationQueue row
+     * for the clip, but createQueueEntry() writes those rows already marked
+     * is_played, so they are pruned soon after the clip airs. Once pruned, the
+     * count was zero and this returned false, letting a second break queue
+     * immediately behind the first -- exactly the back-to-back speech the guard
+     * exists to stop (2026-09-27 1:25pm: Bella "Joke + Bible Verse" then
+     * "Testimony" 22s apart, no song between).
+     *
+     * A DJ clip is a media-less history row whose artist is one of this station's
+     * AI DJ names (matched the same way the cadence watchdog matches, allowing an
+     * optional "<prefix> - <name>" form). Real songs and promos carry a media_id
+     * and so release the guard.
+     */
+    private function isDjSpeechOnAir(Station $station): bool
+    {
+        try {
+            /** @var \App\Entity\SongHistory|null $last */
+            $last = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT sh FROM App\Entity\SongHistory sh
+                    WHERE sh.station = :station
+                    ORDER BY sh.id DESC
+                DQL
+            )->setParameter('station', $station)
+                ->setMaxResults(1)
+                ->getOneOrNullResult();
+
+            if (null === $last || null !== $last->media_id) {
+                return false;
+            }
+
+            $lastArtist = strtolower(trim((string)($last->artist ?? '')));
+            if ('' === $lastArtist) {
+                return false;
+            }
+
+            $djNames = $this->em->createQuery(
+                <<<'DQL'
+                    SELECT dj.name FROM App\Entity\AiDj dj
+                    WHERE dj.station = :station
+                DQL
+            )->setParameter('station', $station)
+                ->getSingleColumnResult();
+
+            foreach ($djNames as $name) {
+                $name = strtolower(trim((string)$name));
+                if ('' === $name) {
+                    continue;
+                }
+                if ($lastArtist === $name || str_ends_with($lastArtist, ' - ' . $name)) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     private function hasUpcomingDjClip(Station $station): bool
     {
         foreach ($this->stationQueueRepo->getUnplayedQueue($station) as $entry) {
@@ -572,7 +842,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $track = sprintf('annotate:title="AI DJ Intro",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath);
 
             $this->logger->info(sprintf(
@@ -594,9 +864,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
         Station $station,
         Liquidsoap $backend
     ): void {
-        // Never announce the same song twice in a row (this caused "she named
-        // the same song 2-3 times"). If it would repeat, use a generic liner
-        // with no song name instead of restating a stale/duplicate title.
+        // Never announce the same song twice in a row. If it would repeat, use a
+        // generic liner with no song name instead of restating a stale/duplicate title.
         if ($prevArtist !== null && $prevArtist !== '') {
             $namedKey = 'ai_dj_last_named_' . $station->id;
             $songKey = strtolower(trim($prevArtist . ' - ' . ($prevTitle ?? '')));
@@ -623,9 +892,12 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ');
+            // Keep the semantic break type in both the Liquidsoap metadata and the
+            // StationQueue row so Past Playout History can distinguish this from liners.
+            $title = 'Song Commentary';
+            $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued post-song clip for DJ "%s" (clip: %s)',
@@ -647,10 +919,12 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $queueEntry = new StationQueue($station, $song);
             $queueEntry->is_visible = true;
             $queueEntry->autodj_custom_uri = $clipPath;
-            // Already played via the Requests queue (enqueue above) -> mark sent/played
-            // so the main next_song queue does NOT play it a SECOND time (client's "said
-            // the same Bible verse twice" duplicate). Still visible for now-playing/history.
+            // Mark the row consumed so the normal AutoDJ queue does not also
+            // play this clip. Clear timestamp_played immediately after the setter
+            // stamps it: only SongHistory is the authoritative proof that the clip
+            // actually reached air, not the StationQueue submission timestamp.
             $queueEntry->is_played = true;
+            $queueEntry->timestamp_played = null;
 
             $this->em->persist($queueEntry);
             $this->em->flush();
@@ -674,7 +948,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
             $historyText = $this->artistHistoryService->getArtistHistory(
                 $artist,
                 $this->generator->getSpokenName($dj->getName()),
-                $station->name
+                $station->name,
+                $this->generator->claimIdentification($station, $dj),
             );
             if ($historyText === null) {
                 // Nothing found — fall back to a content liner so she still talks.
@@ -689,7 +964,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $dj->getVoiceModelPath(),
                 $outputPath,
                 $dj->getVoiceSpeed(),
-                $dj->useBackgroundAudio()
+                $this->generator->usesSyntheticPad($dj),
+                AiDjGenerator::MOOD_WARM
             );
 
             if ($clipPath === null) {
@@ -698,7 +974,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $track = sprintf('annotate:title="Artist Spotlight",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Artist Spotlight');
 
             $this->logger->info(sprintf(
@@ -715,25 +991,46 @@ final class AiDjQueueListener implements EventSubscriberInterface
     /**
      * Pick one enabled liner content item, optionally excluding a type so the two
      * halves of a combo are different categories. Returns null if none available.
+     *
+     * $withIntro: whether the segment may carry the station intro, which makes its
+     * spoken text longer.
      */
-    private function selectLinerContent(AiDj $dj, Station $station, ?string $excludeType): ?AiDjContent
-    {
+    private function selectLinerContent(
+        AiDj $dj,
+        Station $station,
+        ?string $excludeType,
+        bool $withIntro,
+    ): ?AiDjContent {
         $linerTypes = $this->getLinerTypes($station);
-        // Keep LONG, self-contained content OUT of combos. Testimonies avg ~270 chars,
-        // stories ~410, but a combo segment is capped at COMBO_SEGMENT_CHARS (230) and
-        // truncateForTts then drops the payoff - it aired "Jim Vaus, wiretapper for
-        // Mickey Cohen" and cut the conversion before the joke, same failure as artist
-        // history. These still air FULL as standalone liners; combos use short content.
-        $comboExcluded = [AiDjContent::TYPE_TESTIMONY, AiDjContent::TYPE_STORY];
+        // Keep long, self-contained content out of combos. Testimonies and stories average
+        // well over the per-segment budget (COMBO_SEGMENT_CHARS = 230), and truncateForTts
+        // only keeps complete sentences, so a truncated testimony or story can lose its
+        // payoff mid-narrative. These content types still air in full as standalone liners;
+        // combos are built from shorter content only.
         $linerTypes = array_values(array_filter(
             $linerTypes,
-            static fn(string $t): bool => !in_array($t, $comboExcluded, true) && $t !== $excludeType
+            static fn(string $t): bool => !in_array($t, self::STANDALONE_ONLY_TYPES, true) && $t !== $excludeType
         ));
         if ($linerTypes === []) {
             return null;
         }
         $type = $linerTypes[array_rand($linerTypes)];
-        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
+
+        // A Bible verse is read whole or not at all. 13,508 of 31,086 run past the
+        // segment budget, and one with no full stop inside it was dropped entirely,
+        // leaving only "Here's a scripture from ..." (1 Kings 8:48, 2026-10-07). A combo
+        // takes only a verse whose whole spoken text fits; the longer ones air as
+        // standalone liners. Scripture stays in combos, where most of it airs.
+        $accept = AiDjContent::TYPE_BIBLE_VERSE === $type
+            ? fn(AiDjContent $content): bool => $this->generator->fitsComboSegment(
+                $dj,
+                $content,
+                $station,
+                $withIntro
+            )
+            : null;
+
+        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id, $accept);
     }
 
     /**
@@ -754,6 +1051,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         try {
             $introText = null;
             $usedType = null;
+            $segment1Title = 'Song Commentary';
             $haveSong = ($curArtist !== null && $curArtist !== '');
 
             // Segment 1, option A: post-song mention (respect the "don't name the
@@ -763,45 +1061,70 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $songKey = strtolower(trim($curArtist . ' - ' . ($curTitle ?? '')));
                 if ($this->cache->get($namedKey) !== $songKey) {
                     $this->cache->set($namedKey, $songKey, 1800);
-                    $introText = $this->generator->buildPostSongText($dj, $curArtist, $curTitle, null, null, $station);
+                    $introText = $this->generator->buildPostSongText(
+                        $dj,
+                        $curArtist,
+                        $curTitle,
+                        null,
+                        null,
+                        $station,
+                        $this->generator->claimIdentification($station, $dj),
+                    );
                 }
             }
 
             // Segment 1, fallback: an intro-bearing content liner.
-            // NOTE: artist history is deliberately NOT used as a combo segment. Its
-            // full script (intro + facts + closer) runs ~250-320 chars, over the
-            // per-segment budget, and truncateForTts keeps only COMPLETE sentences -
-            // so the long facts sentence gets dropped and only the bare "here's a
-            // little music history for you" PROMISE survives, with no history behind
-            // it, followed by an unrelated payload. That is exactly the client's
-            // "said music history but gave none, then encouragement" bug. Artist
-            // history stays a full STANDALONE break (pushArtistHistoryClip), where it
-            // airs untruncated with the real facts intact.
+            // Artist history is deliberately not used as a combo segment. Its full script
+            // (intro + facts + closer) runs well over the per-segment budget, and
+            // truncateForTts only keeps complete sentences, so the facts sentence would be
+            // dropped and only the opening promise of a fact would survive with no fact
+            // behind it. Artist history stays a full standalone break (pushArtistHistoryClip)
+            // where it airs untruncated with the real facts intact.
             if ($introText === null) {
-                $c1 = $this->selectLinerContent($dj, $station, null);
+                $c1 = $this->selectLinerContent($dj, $station, null, true);
                 if ($c1 === null) {
                     $this->pushContentLiner($dj, $station, $backend);
                     return;
                 }
-                $introText = $this->generator->buildLinerText($dj, $c1, $station, true);
+                $introText = $this->generator->buildLinerText(
+                    $dj,
+                    $c1,
+                    $station,
+                    $this->generator->claimIdentification($station, $dj),
+                );
                 $usedType = $c1->type;
+                $segment1Title = $this->getLinerTitle($c1->type);
             }
 
             // Segment 2: a DIFFERENT liner type, rendered intro-free. If none is
             // available the combo degrades to a valid single-segment clip.
-            $c2 = $this->selectLinerContent($dj, $station, $usedType);
+            $c2 = $this->selectLinerContent($dj, $station, $usedType, false);
             $payloadText = $c2 !== null ? $this->generator->buildLinerText($dj, $c2, $station, false) : '';
+            $segment2Title = $c2 !== null ? $this->getLinerTitle($c2->type) : null;
+            $title = $segment2Title !== null && $segment2Title !== $segment1Title
+                ? $segment1Title . ' + ' . $segment2Title
+                : $segment1Title;
 
-            $clipPath = $this->generator->generateComboBreak($dj, $introText, $payloadText, $station);
+            $clipPath = $this->generator->generateComboBreak(
+                $dj,
+                $introText,
+                $payloadText,
+                $station,
+                $usedType !== null ? AiDjGenerator::moodForContentType($usedType) : AiDjGenerator::MOOD_WARM,
+                $c2 !== null ? AiDjGenerator::moodForContentType($c2->type) : null,
+                array_values(array_filter([$usedType, $c2?->type])),
+            );
             if (null === $clipPath) {
                 $this->pushContentLiner($dj, $station, $backend);
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            // Preserve both combo segment categories in the metadata. This is what
+            // Past Playout History receives from Liquidsoap feedback.
+            $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $enqueued = true;
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ');
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued COMBO clip for DJ "%s" (segment2: %s, clip: %s)',
@@ -811,21 +1134,58 @@ final class AiDjQueueListener implements EventSubscriberInterface
             ));
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to push combo clip: %s', $e->getMessage()));
-            // Only fail open if we never enqueued — otherwise a post-enqueue throw
-            // would air a SECOND clip (the "talked twice between songs" bug).
+            // Only fail open if nothing was enqueued yet; otherwise a post-enqueue
+            // throw here would result in a second clip airing for the same break.
             if (!$enqueued) {
                 $this->pushContentLiner($dj, $station, $backend);
             }
         }
     }
 
+    private function getLinerTitle(string $type): string
+    {
+        return match ($type) {
+            AiDjContent::TYPE_BIBLE_VERSE => 'Bible Verse',
+            AiDjContent::TYPE_JOKE => 'Joke',
+            AiDjContent::TYPE_ENCOURAGEMENT => 'Encouragement',
+            AiDjContent::TYPE_INSPIRATION => 'Inspiration',
+            AiDjContent::TYPE_TESTIMONY => 'Testimony',
+            AiDjContent::TYPE_STORY => 'Story',
+            default => ucwords(str_replace(['_', '-'], ' ', $type)),
+        };
+    }
+
+    private function pushShortLiner(AiDj $dj, Station $station, Liquidsoap $backend): void
+    {
+        try {
+            $clipPath = $this->generator->generateShortLiner($dj, $station);
+            if (null === $clipPath) {
+                $this->pushContentLiner($dj, $station, $backend);
+                return;
+            }
+
+            $title = 'Liner';
+            $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
+
+            $this->logger->info(sprintf('AI DJ: Queued short liner for DJ "%s" (clip: %s)', $dj->getName(), basename($clipPath)));
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to push short liner: %s', $e->getMessage()));
+        }
+    }
+
+    /**
+     * @param string[]|null $onlyTypes pick from these content types when the station has any of them
+     */
     private function pushContentLiner(
         AiDj $dj,
         Station $station,
-        Liquidsoap $backend
+        Liquidsoap $backend,
+        ?array $onlyTypes = null,
     ): void {
         try {
-            $linerTypes = $this->getLinerTypes($station);
+            $linerTypes = $this->linerTypesAmong($station, $onlyTypes);
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
@@ -840,18 +1200,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $title = match ($content->type) {
-                AiDjContent::TYPE_BIBLE_VERSE => 'Bible Verse',
-                AiDjContent::TYPE_JOKE => 'Joke',
-                AiDjContent::TYPE_ENCOURAGEMENT => 'Encouragement',
-                AiDjContent::TYPE_INSPIRATION => 'Inspiration',
-                AiDjContent::TYPE_TESTIMONY => 'Testimony',
-                AiDjContent::TYPE_STORY => 'Story',
-                default => 'AI DJ Liner',
-            };
+            $title = $this->getLinerTitle($content->type);
 
             $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
 
             $this->logger->info(sprintf(
@@ -866,6 +1218,88 @@ final class AiDjQueueListener implements EventSubscriberInterface
     }
 
     /**
+     * Queue one of the DJ's own recordings as an extra break. It runs for
+     * minutes, not seconds, so unlike an AI break it has to be OVER before the
+     * hour's speech cutoff. When none is short enough for the time left, or the
+     * boundary it would air at is not certain, nothing is queued here and the
+     * recording waits for a later boundary.
+     *
+     * @return bool whether a recording was queued
+     */
+    private function pushRecordedBreak(
+        AiDj $dj,
+        Station $station,
+        Liquidsoap $backend,
+        DateTimeImmutable $now,
+        DateTimeImmutable $directAirTime,
+    ): bool {
+        try {
+            $airsAt = $directAirTime->setTimezone($station->getTimezoneObject());
+            if (!$this->recordings->isDue($dj, $airsAt)) {
+                return false;
+            }
+
+            // The fit below is measured from the end of the song on air. Inside
+            // the prefetch window, or with no known end, the clip can air one
+            // whole song later than that, so the fit would mean nothing.
+            $untilBoundary = $airsAt->getTimestamp() - $now->getTimestamp();
+            if ($untilBoundary <= self::NAME_SAFE_MIN_REMAINING_SECONDS) {
+                return false;
+            }
+
+            $room = $this->roomForRecordedBreak($station, $airsAt);
+            $recording = $this->recordings->pick($dj, (float)$room);
+            if (null === $recording) {
+                $this->logger->debug('AI DJ: No recorded break fits in the time left.', ['room' => $room]);
+                return false;
+            }
+
+            $title = 'Recorded Break';
+            $track = sprintf(
+                'annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",'
+                . 'liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s',
+                $title,
+                $dj->getName(),
+                $recording['path']
+            );
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+            $this->createQueueEntry($station, $dj->getName(), $recording['path'], $title);
+            $this->recordings->markQueued($dj, $recording['name'], $airsAt);
+
+            $this->logger->info(sprintf(
+                'AI DJ: Queued a recorded break for DJ "%s" (%s, %ds)',
+                $dj->getName(),
+                $recording['name'],
+                (int)round($recording['seconds'])
+            ));
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('AI DJ: Failed to queue a recorded break: %s', $e->getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Seconds a recording airing at $airsAt may run: up to the hour's speech
+     * cutoff, or the next news window if that opens first.
+     */
+    private function roomForRecordedBreak(Station $station, DateTimeImmutable $airsAt): int
+    {
+        $minute = (int)$airsAt->format('i');
+        $endsBy = AiDjTalkRules::speechCutoffSecondsIntoHour($station);
+
+        for ($next = $minute + 1; $next * 60 < $endsBy; $next++) {
+            if ($this->isNearNewsBulletin($station, $next)) {
+                $endsBy = $next * 60;
+                break;
+            }
+        }
+
+        return $endsBy - ($minute * 60 + (int)$airsAt->format('s')) - self::RECORDING_END_MARGIN_SECONDS;
+    }
+
+    /**
      * Check if current time is near a scheduled AI Newscaster bulletin.
      * Avoids DJ speech 3 minutes before and after news times (:00 and/or :30).
      */
@@ -875,6 +1309,16 @@ final class AiDjQueueListener implements EventSubscriberInterface
 
         if (!$backendConfig->ai_news_enabled) {
             return false;
+        }
+
+        // Top-of-hour news: skip the last 3 minutes of the hour (:57-:59) and the
+        // first 3 minutes of the next hour (:00-:03). The AI DJ's separate
+        // post-hour buffer (minute <= 3, checked earlier in onBuildQueue) already
+        // covers :00-:03 incidentally, but this guard is what actually protects
+        // :57-:59, matching the symmetric 3-minutes-before/after behavior already
+        // applied to bottom-of-hour news below.
+        if ($backendConfig->ai_news_top_of_hour && ($minute >= 57 || $minute <= 3)) {
+            return true;
         }
 
         // Bottom-of-hour news: skip minutes 27-33
@@ -898,7 +1342,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $track = sprintf('annotate:title="AI DJ Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Welcome');
 
             $this->logger->info(sprintf(
@@ -924,7 +1368,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
             }
 
             $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
-            $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
+            $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Sign-off');
 
             $this->logger->info(sprintf(

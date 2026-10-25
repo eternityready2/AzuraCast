@@ -102,10 +102,17 @@
                                             {{ np.now_playing?.song?.text ?? '' }}
                                         </h6>
                                     </div>
-                                    <div v-if="np.now_playing?.playlist">
-                                        <small class="text-muted">
-                                            {{ $gettext('Playlist') }}
-                                            : {{ np.now_playing.playlist }}</small>
+                                    <div
+                                        v-if="np.now_playing?.playlist"
+                                        class="overflow-hidden"
+                                    >
+                                        <small class="text-muted d-block">
+                                            <playlist-source-badge
+                                                :playlist-name="np.now_playing.playlist"
+                                                :chain="np.now_playing.playlist_chain"
+                                                :source="np.now_playing.playlist_chain ? 'songs' : undefined"
+                                            />
+                                        </small>
                                     </div>
                                     <div v-if="np.now_playing?.clock_wheel">
                                         <small class="text-muted">
@@ -176,10 +183,17 @@
                                         </h6>
                                     </div>
 
-                                    <div v-if="np.playing_next.playlist">
-                                        <small class="text-muted">
-                                            {{ $gettext('Playlist') }}
-                                            : {{ np.playing_next.playlist }}</small>
+                                    <div
+                                        v-if="np.playing_next.playlist"
+                                        class="overflow-hidden"
+                                    >
+                                        <small class="text-muted d-block">
+                                            <playlist-source-badge
+                                                :playlist-name="np.playing_next.playlist"
+                                                :chain="np.playing_next.playlist_chain"
+                                                :source="np.playing_next.playlist_chain ? 'songs' : undefined"
+                                            />
+                                        </small>
                                     </div>
                                     <div v-if="np.playing_next.clock_wheel">
                                         <small class="text-muted">
@@ -277,6 +291,7 @@ import {toRefs} from "@vueuse/core";
 import IconIcHeadphones from "~icons/ic/baseline-headphones";
 import IconIcAssignment from "~icons/ic/baseline-assignment";
 import IconIcMic from "~icons/ic/baseline-mic";
+import PlaylistSourceBadge from "~/components/Stations/Common/PlaylistSourceBadge.vue";
 import IconIcMusicNote from "~icons/ic/baseline-music-note";
 import IconIcSkipNext from "~icons/ic/baseline-skip-next";
 import IconIcUpdate from "~icons/ic/baseline-update";

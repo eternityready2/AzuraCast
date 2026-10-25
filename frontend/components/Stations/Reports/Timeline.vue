@@ -31,6 +31,34 @@
                         class="btn-dark"
                     />
                 </div>
+                <div class="flex-shrink buttons ms-lg-2 mt-2 mt-lg-0">
+                    <select
+                        v-model="playlistFilter"
+                        class="form-select btn-dark"
+                        :aria-label="$gettext('Filter by Playlist')"
+                    >
+                        <option :value="null">
+                            {{ $gettext('All Playlists') }}
+                        </option>
+                        <option value="__via_group__">
+                            {{ $gettext('Played via Playlist Group') }}
+                        </option>
+                        <option
+                            v-for="group in groupFilterOptions"
+                            :key="`group-${group.id}`"
+                            :value="`group:${group.name}`"
+                        >
+                            {{ group.name }}
+                        </option>
+                        <option
+                            v-for="playlist in playlistFilterOptions"
+                            :key="`playlist-${playlist.id}`"
+                            :value="`playlist:${playlist.id}`"
+                        >
+                            {{ playlist.name }}
+                        </option>
+                    </select>
+                </div>
             </div>
         </div>
         <data-table
@@ -83,7 +111,14 @@
                 </template>
             </template>
             <template #cell(playlist)="row">
-                {{ row.item.playlist || '—' }}
+                <playlist-source-badge
+                    v-if="row.item.playlist"
+                    :playlist-name="row.item.playlist"
+                    :chain="row.item.playlist_chain"
+                />
+                <template v-else>
+                    &mdash;
+                </template>
             </template>
             <template #cell(clock_wheel)="row">
                 {{ row.item.clock_wheel || '—' }}
@@ -95,6 +130,7 @@
 <script setup lang="ts">
 import DataTable, {DataTableField} from "~/components/Common/DataTable.vue";
 import DateRangeDropdown from "~/components/Common/DateRangeDropdown.vue";
+import PlaylistSourceBadge from "~/components/Stations/Common/PlaylistSourceBadge.vue";
 import {computed, nextTick, ref, useTemplateRef, watch} from "vue";
 import {useTranslate} from "~/vendor/gettext";
 import useHasDatatable from "~/functions/useHasDatatable.ts";
@@ -108,6 +144,7 @@ import IconIcCloudDownload from "~icons/ic/baseline-cloud-download";
 import IconIcTrendingDown from "~icons/ic/baseline-trending-down";
 import IconIcTrendingUp from "~icons/ic/baseline-trending-up";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
+import {useAxios} from "~/vendor/axios";
 
 const {getStationApiUrl} = useApiRouter();
 const baseApiUrl = getStationApiUrl('/history');
@@ -195,6 +232,34 @@ const fields: DataTableField[] = [
     }
 ];
 
+const playlistFilter = ref<string | null>(null);
+const groupFilterOptions = ref<{ id: number, name: string }[]>([]);
+const playlistFilterOptions = ref<{ id: number, name: string }[]>([]);
+
+const {axios} = useAxios();
+
+const loadFilterOptions = async () => {
+    try {
+        const {data} = await axios.get(getStationApiUrl('/playlists').value, {
+            params: {rowCount: -1},
+        });
+
+        const rows: Record<string, unknown>[] = (data.rows as Record<string, unknown>[]) ?? [];
+
+        groupFilterOptions.value = rows
+            .filter((p) => p.source === 'group')
+            .map((p) => ({id: p.id as number, name: p.name as string}));
+
+        playlistFilterOptions.value = rows
+            .filter((p) => p.source !== 'group')
+            .map((p) => ({id: p.id as number, name: p.name as string}));
+    } catch {
+        // Non-critical -- the timeline still works without the filter options loaded.
+    }
+};
+
+void loadFilterOptions();
+
 const apiUrl = computed(() => {
     const apiUrl = new URL(baseApiUrl.value, document.location.href);
 
@@ -208,6 +273,14 @@ const apiUrl = computed(() => {
     const endDate = DateTime.fromJSDate(dateRange.value.endDate);
     if (endDate.isValid) {
         apiUrlParams.set('end', endDate.toISO());
+    }
+
+    if (playlistFilter.value === '__via_group__') {
+        apiUrlParams.set('filter_via_group', '1');
+    } else if (playlistFilter.value?.startsWith('group:')) {
+        apiUrlParams.set('filter_group', playlistFilter.value.slice('group:'.length));
+    } else if (playlistFilter.value?.startsWith('playlist:')) {
+        apiUrlParams.set('filter_playlist_id', playlistFilter.value.slice('playlist:'.length));
     }
 
     return apiUrl.toString();
@@ -227,7 +300,8 @@ const listItemProvider = useApiItemProvider(
     queryKeyWithStation([
         QueryKeys.StationReports,
         'timeline',
-        dateRange
+        dateRange,
+        playlistFilter
     ])
 );
 
@@ -239,4 +313,5 @@ const $dataTable = useTemplateRef('$dataTable');
 const {navigate} = useHasDatatable($dataTable);
 
 watch(dateRange, () => void nextTick(navigate));
+watch(playlistFilter, () => void nextTick(navigate));
 </script>

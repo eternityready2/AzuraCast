@@ -7,7 +7,9 @@ namespace App\Radio\Enums;
 enum LiquidsoapQueues: string
 {
     case Requests = 'requests';
+    case AiDj = 'ai_dj';
     case Interrupting = 'interrupting_requests';
+    case TopOfHour = 'top_of_hour_id';
 
     public static function default(): self
     {

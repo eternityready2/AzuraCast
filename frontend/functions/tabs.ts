@@ -7,6 +7,7 @@ type VueClass = string | Record<string, boolean> | VueClass[];
 export interface TabChildProps {
     id?: string | number,
     label: string,
+    badge?: string,
     itemHeaderClass?: VueClass
 }
 

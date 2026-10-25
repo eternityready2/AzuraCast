@@ -106,6 +106,7 @@ final class Acme
 
         // Account certificate registration.
         if (file_exists($acmeDir . '/account_key.pem')) {
+            $this->securePrivateKey($fs, $acmeDir . '/account_key.pem');
             $acme->loadAccountKey('file://' . $acmeDir . '/account_key.pem');
         } else {
             $accountKey = $acme->generateECKey();
@@ -117,12 +118,20 @@ final class Acme
                 $acme->register(true);
             }
             $fs->dumpFile($acmeDir . '/account_key.pem', $accountKey);
+            $this->securePrivateKey($fs, $acmeDir . '/account_key.pem');
         }
 
         $domains = array_map(
             'trim',
             explode(',', $acmeDomain)
         );
+
+        // Secure an already-existing certificate key before Icecast reloads or
+        // performs its startup mode checks. Icecast 2.5 warns about group/world
+        // readable private keys and may reject them in a future release.
+        if (file_exists($acmeDir . '/acme.key')) {
+            $this->securePrivateKey($fs, $acmeDir . '/acme.key');
+        }
 
         // Renewal check.
         if (
@@ -135,7 +144,11 @@ final class Acme
                 $this->reloadServices();
             }
 
-            throw new RuntimeException('Certificate does not need renewal.');
+            // This is the normal healthy path, not an error. Returning normally
+            // prevents scheduled ACME checks from logging exit code 1 every time
+            // a still-valid certificate is checked.
+            $this->logger->debug('ACME: Certificate does not need renewal.');
+            return;
         }
 
         $fs->mkdir($acmeDir . '/challenges');
@@ -159,6 +172,7 @@ final class Acme
         if (!file_exists($acmeDir . '/acme.key')) {
             $acmeKey = $acme->generateECKey();
             $fs->dumpFile($acmeDir . '/acme.key', $acmeKey);
+            $this->securePrivateKey($fs, $acmeDir . '/acme.key');
         }
 
         $fullchain = $acme->getCertificateChain(
@@ -176,9 +190,19 @@ final class Acme
         $this->logger->notice('ACME certificate process successful.');
     }
 
+    private function securePrivateKey(Filesystem $fs, string $path): void
+    {
+        if (file_exists($path)) {
+            $fs->chmod($path, 0o600);
+        }
+    }
+
     private function checkLinks(string $acmeDir): bool
     {
         $fs = new Filesystem();
+
+        // The symlink's target permissions are what Icecast validates.
+        $this->securePrivateKey($fs, $acmeDir . '/acme.key');
 
         if (
             $fs->readlink($acmeDir . '/ssl.crt', true) === $acmeDir . '/acme.crt'

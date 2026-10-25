@@ -11,6 +11,7 @@ use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\Lock\Lock;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 abstract class AbstractSyncRunnerCommand extends AbstractSyncCommand
@@ -41,7 +42,19 @@ abstract class AbstractSyncRunnerCommand extends AbstractSyncCommand
             }
 
             if ($process->isRunning()) {
-                continue;
+                try {
+                    $process->checkTimeout();
+                    continue;
+                } catch (ProcessTimedOutException $e) {
+                    $this->logger->error(
+                        sprintf('Sync process %s exceeded its timeout and will be stopped.', $processName),
+                        ['exception' => $e]
+                    );
+                    $process->stop(5);
+                    $lock->release();
+                    unset($this->processes[$processName]);
+                    continue;
+                }
             }
 
             $this->logger->debug(sprintf(
@@ -60,7 +73,8 @@ abstract class AbstractSyncRunnerCommand extends AbstractSyncCommand
         string $processKey,
         string $lockPrefix,
         array $consoleCommand,
-        int $timeout = 60
+        int $timeout = 60,
+        bool $yieldToPlayer = false
     ): bool {
         $lockName = $lockPrefix . '_' . $processKey;
 
@@ -72,8 +86,13 @@ abstract class AbstractSyncRunnerCommand extends AbstractSyncCommand
             return false;
         }
 
+        // Background work yields the CPU to the player. A dozen tasks start in the
+        // same second every minute, more every five; on this 3-core box Liquidsoap
+        // fell up to 7s behind real time in those bursts, and Now Playing showed
+        // the Station ID seconds before listeners heard it (Mon 2026-10-12, 1pm).
         $process = new Process(
             array_merge(
+                $yieldToPlayer ? ['nice', '-n', '10'] : [],
                 [
                     'php',
                     $this->environment->getBackendDirectory() . '/bin/console',

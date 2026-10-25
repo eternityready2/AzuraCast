@@ -1,0 +1,276 @@
+// Final visual pass for the approved Clock Wheel mockup.
+// Loaded after the base Clock Wheels stylesheet so these values win over
+// component-scoped defaults where necessary.
+
+.clock-wheels-page .clock-wheel-inline-editor {
+    width: 100% !important;
+    max-width: 1180px !important;
+    margin: 0 auto !important;
+    border: 1px solid var(--bs-border-color) !important;
+    border-radius: .7rem !important;
+    background: var(--bs-body-bg) !important;
+    box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .12) !important;
+    overflow: hidden !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-hero {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 1rem !important;
+    padding: 1rem 1.1rem !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--bs-border-color) !important;
+    border-radius: 0 !important;
+    background: var(--bs-body-bg) !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-title h2 {
+    margin: 0 !important;
+    font-size: 1.12rem !important;
+    font-weight: 700 !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-kicker,
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-title p,
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-back,
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-actions {
+    display: none !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-surface {
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--bs-body-bg) !important;
+    box-shadow: none !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-subtabs {
+    padding: .65rem 1rem 0 !important;
+    margin: 0 !important;
+    background: var(--bs-tertiary-bg) !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+    padding: 1rem !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-footer {
+    position: static !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: .7rem !important;
+    padding: .95rem 1rem !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-top: 1px solid var(--bs-border-color) !important;
+    border-radius: 0 !important;
+    background: var(--bs-body-bg) !important;
+    backdrop-filter: none !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-footer .btn {
+    min-width: 7.4rem !important;
+    min-height: 2.55rem !important;
+    font-weight: 600 !important;
+}
+
+.clock-wheels-page .clock-wheel-hour-distribution-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+.clock-wheels-page .clock-wheel-timeline > small {
+    display: block !important;
+    margin: 0 0 .9rem !important;
+    padding: .8rem .95rem !important;
+    border: 1px solid rgba(13, 202, 240, .45) !important;
+    border-radius: .35rem !important;
+    background: rgba(13, 202, 240, .12) !important;
+    color: var(--bs-body-color) !important;
+    font-size: .86rem !important;
+    line-height: 1.42 !important;
+}
+
+.clock-wheels-page .clock-wheel-timeline__track {
+    width: 100% !important;
+    height: 2.05rem !important;
+    margin-bottom: 1.35rem !important;
+}
+
+.clock-wheels-page .clock-wheel-entries-table + button.btn-outline-secondary {
+    min-height: 2.5rem !important;
+    padding-left: .9rem !important;
+    padding-right: .9rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+}
+
+.clock-wheels-page .clock-wheel-entries-table + button.btn-outline-secondary + button.btn-secondary {
+    min-height: 3rem !important;
+    border: 0 !important;
+    background: #6c757d !important;
+    font-weight: 700 !important;
+    text-align: left !important;
+    text-transform: uppercase !important;
+}
+
+@media (max-width: 575.98px) {
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-hero {
+        padding: .85rem .9rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+        padding: .85rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-footer {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: .55rem !important;
+        padding: .8rem .85rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-footer .btn {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody tr {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .72rem !important;
+        width: 100% !important;
+        padding: .2rem 0 .4rem !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: .3rem !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        text-align: left !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td::before {
+        content: attr(data-label) !important;
+        display: block !important;
+        color: var(--bs-body-color) !important;
+        font-size: .78rem !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+        letter-spacing: 0 !important;
+        text-transform: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td.drag-handle {
+        display: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td[colspan]::before {
+        content: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table :is(.form-control, .form-select) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 2.65rem !important;
+        font-size: .92rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table .btn-group {
+        display: flex !important;
+        width: auto !important;
+        justify-content: flex-start !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table .cw-action-btn {
+        flex: 0 0 3rem !important;
+        width: 3rem !important;
+        max-width: 3rem !important;
+        min-height: 2.75rem !important;
+    }
+}
+
+@media (min-width: 576px) and (max-width: 991.98px) {
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-tab-content {
+        padding: .9rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody tr {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: .75rem .85rem !important;
+        width: 100% !important;
+        padding: .2rem 0 .45rem !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        align-content: start !important;
+        gap: .3rem !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        text-align: left !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td::before {
+        content: attr(data-label) !important;
+        display: block !important;
+        color: var(--bs-body-color) !important;
+        font-size: .75rem !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+        letter-spacing: 0 !important;
+        text-transform: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td.drag-handle {
+        display: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td[colspan] {
+        grid-column: 1 / -1 !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table tbody td[colspan]::before {
+        content: none !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table :is(.form-control, .form-select) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 2.5rem !important;
+        font-size: .88rem !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table .btn-group {
+        display: flex !important;
+        width: auto !important;
+        justify-content: flex-start !important;
+    }
+
+    .clock-wheels-page .clock-wheel-entries-table .cw-action-btn {
+        flex: 0 0 3rem !important;
+        width: 3rem !important;
+        max-width: 3rem !important;
+        min-height: 2.55rem !important;
+    }
+}

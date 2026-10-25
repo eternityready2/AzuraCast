@@ -11,6 +11,7 @@ use App\Entity\Repository\UserRepository;
 use App\Entity\User;
 use App\Exception\Http\RateLimitExceededException;
 use App\Http\Response;
+use App\Http\Router;
 use App\Http\ServerRequest;
 use App\RateLimit;
 use App\Service\Mail;
@@ -70,10 +71,16 @@ final readonly class ForgotPasswordAction implements SingleActionInterface
                 );
 
                 $router = $request->getRouter();
-                $url = $router->named(
-                    routeName: 'account:login-token',
-                    routeParams: ['token' => $token],
-                    absolute: true
+
+                // Force this URL to use the settings-defined base URL, not the
+                // "Prefer Browser URL" behavior, which can be influenced by
+                // request headers. Matches upstream GHSA-gv7r-3mr9-h5x8.
+                $url = (string)Router::resolveUri(
+                    $router->buildBaseUrl(false),
+                    $router->named(
+                        routeName: 'account:login-token',
+                        routeParams: ['token' => $token]
+                    )
                 );
 
                 $email->text(

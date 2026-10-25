@@ -21,7 +21,7 @@ final class StationHlsStreamRepository extends AbstractStationBasedRepository
      */
     public function getDisplayNames(Station $station): array
     {
-        $streams = $this->repository->findBy(['station' => $station]);
+        $streams = $this->getRepository()->findBy(['station' => $station]);
 
         $displayNames = [];
 

@@ -274,6 +274,14 @@
                     </form-group-checkbox>
 
                     <form-group-checkbox
+                        id="edit_form_backend_config_reset_sequential_queues_on_restart"
+                        class="col-md-12"
+                        :field="r$.backend_config.reset_sequential_queues_on_restart"
+                        :label="$gettext('Reset Sequential Playlist Queues on Restart')"
+                        :description="$gettext('By default sequential playlists continue from their current position when the station is restarted or its configuration is rewritten. Enable this to reset their queues instead. Individual playlists can be excluded from the reset.')"
+                    />
+
+                    <form-group-checkbox
                         id="edit_form_backend_config_write_playlists_to_liquidsoap"
                         class="col-md-12"
                         :field="r$.backend_config.write_playlists_to_liquidsoap"
@@ -299,6 +307,16 @@
                         :input-attrs="{ min: '2', max: '25' }"
                         :label="$gettext('AutoDJ Queue Length')"
                         :description="$gettext('This determines how many songs in advance the AutoDJ will automatically fill the queue.')"
+                    />
+
+                    <form-group-field
+                        id="edit_form_backend_autodj_queue_lookahead_minutes"
+                        class="col-md-6"
+                        :field="r$.backend_config.autodj_queue_lookahead_minutes"
+                        input-type="number"
+                        :input-attrs="{ min: '0', max: '180' }"
+                        :label="$gettext('AutoDJ Queue Time Lookahead (Minutes)')"
+                        :description="$gettext('Optional. Keeps the queue built out at least this many minutes ahead in wall-clock time, regardless of the song-count queue length above, so clock wheels, schedules, and top-of-hour IDs are resolved well in advance instead of only a few tracks out. 0 disables this and uses the song-count queue length only.')"
                     />
 
                     <form-group-multi-check
@@ -336,7 +354,6 @@
                 </div>
             </form-fieldset>
 
-            <dmca-compliance-form v-model="form.backend_config" />
         </template>
     </tab>
 </template>
@@ -355,7 +372,6 @@ import {AudioProcessingMethods, BackendAdapters, CrossfadeModes, MasterMePresets
 import {storeToRefs} from "pinia";
 import {useAdminStationsForm} from "~/components/Admin/Stations/Form/form.ts";
 import {useFormTabClass} from "~/functions/useFormTabClass.ts";
-import DmcaComplianceForm from "~/components/Admin/Stations/Form/DmcaComplianceForm.vue";
 
 const props = defineProps<{
     isStereoToolInstalled: boolean

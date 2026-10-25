@@ -1,0 +1,29 @@
+// Workspace polish loaded after the mockup overrides.
+// Keeps the approved responsive slot layout while restoring clear navigation
+// for the inline editor experience.
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-back {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: .35rem !important;
+    margin-bottom: .55rem !important;
+    font-weight: 700 !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-title p {
+    display: block !important;
+    margin-top: .2rem !important;
+    max-width: 52rem !important;
+    font-size: .82rem !important;
+    line-height: 1.4 !important;
+}
+
+.clock-wheels-page .clock-wheel-inline-editor .clock-wheel-editor-hero {
+    align-items: flex-start !important;
+}
+
+@media (max-width: 575.98px) {
+    .clock-wheels-page .clock-wheel-inline-editor .clock-wheel-back {
+        min-height: 2.25rem !important;
+    }
+}

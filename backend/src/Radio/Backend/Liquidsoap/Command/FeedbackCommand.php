@@ -93,12 +93,46 @@ final class FeedbackCommand extends AbstractCommand
             throw new RuntimeException('Media ID does not exist for station.');
         }
 
-        if (!$this->historyRepo->isDifferentFromCurrentSong($station, $media)) {
-            throw new RuntimeException('Song is not different from current song.');
-        }
+        $sq = null;
+
+        // Whether the queue row itself proves this is a genuinely fresh instance
+        // (not yet played), which settles the "is this really a new airing"
+        // question on its own -- the same-song guard below only needs to run
+        // when there is no such row to ask.
+        $isFreshQueueRow = false;
 
         if (!empty($payload['sq_id'])) {
             $sq = $this->em->find(StationQueue::class, $payload['sq_id']);
+
+            if ($sq instanceof StationQueue && $sq->is_played) {
+                throw new RuntimeException(
+                    sprintf('Queue row #%s already aired; ignoring replayed metadata.', $sq->id)
+                );
+            } elseif ($sq instanceof StationQueue) {
+                // Fresh unplayed row: real new airing (e.g. same song starting
+                // over after the TOH ID). Skip the same-song guard so a
+                // back-to-back repeat is not swallowed.
+                $isFreshQueueRow = true;
+
+                // The player names what it is really playing. A row changed after
+                // it was handed over -- two re-checks of the hour's last song in
+                // the same second -- kept the later song while the player aired
+                // the one it was sent, and Now Playing, the history and the log
+                // named a song that never aired ("Build My Love" aired at 1:54pm,
+                // "God Is Able" was recorded; Mon 2026-10-12).
+                if ($sq->media?->id !== $media->id) {
+                    $sq->setSong($media);
+                    $sq->media = $media;
+                    $sq->duration = $media->getCalculatedLength();
+                    if (!empty($payload['playlist_id'])) {
+                        $playlist = $this->em->find(StationPlaylist::class, $payload['playlist_id']);
+                        if ($playlist instanceof StationPlaylist) {
+                            $sq->playlist = $playlist;
+                        }
+                    }
+                    $this->em->persist($sq);
+                }
+            }
         } else {
             $sq = $this->queueRepo->findRecentlyCuedSong($station, $media);
 
@@ -118,6 +152,10 @@ final class FeedbackCommand extends AbstractCommand
                 $this->em->persist($sq);
                 $this->em->flush();
             }
+        }
+
+        if (!$isFreshQueueRow && !$this->historyRepo->isDifferentFromCurrentSong($station, $media)) {
+            throw new RuntimeException('Song is not different from current song.');
         }
 
         if (null !== $sq) {

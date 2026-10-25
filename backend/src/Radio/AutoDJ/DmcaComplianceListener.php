@@ -9,6 +9,7 @@ use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Station;
 use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
+use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -21,6 +22,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *   1. No more than N plays of the same song in any rolling 3-hour window.
  *   2. No more than N consecutive plays of the same song.
  *   3. No more than N songs from the same album in any rolling 3-hour window.
+ *   3b. No more than 2 consecutive songs from the same album (statutory, fixed).
  *   4a. No more than N songs by the same artist in any rolling 3-hour window.
  *   4b. No more than N consecutive songs by the same artist.
  *
@@ -36,7 +38,7 @@ final class DmcaComplianceListener implements EventSubscriberInterface
 {
     use LoggerAwareTrait;
 
-    // Default DMCA statutory limits â€” overridden by station settings if configured.
+    // Default DMCA statutory limits — overridden by station settings if configured.
     public const int DEFAULT_WINDOW_MINUTES               = 180;
     public const int DEFAULT_MAX_SONG_PLAYS               = 3;
     public const int DEFAULT_MAX_CONSECUTIVE_SONG_PLAYS   = 2;
@@ -44,8 +46,12 @@ final class DmcaComplianceListener implements EventSubscriberInterface
     public const int DEFAULT_MAX_ARTIST_PLAYS             = 4;
     public const int DEFAULT_MAX_CONSECUTIVE_ARTIST_PLAYS = 3;
 
+    // Statutory (17 U.S.C. 114(j)(13)): no more than 2 consecutive tracks from one album.
+    public const int MAX_CONSECUTIVE_ALBUM_PLAYS = 2;
+
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
+        private readonly LinearLogPreviewContext $previewContext,
     ) {
     }
 
@@ -72,9 +78,13 @@ final class DmcaComplianceListener implements EventSubscriberInterface
         }
 
         foreach ($nextSongs as $queueEntry) {
-            if (!$this->isCompliant($queueEntry, $station, $event->getExpectedPlayTime())) {
+            if (!$this->isCompliant(
+                $queueEntry,
+                $station,
+                $event->getExpectedPlayTime(),
+                $this->previewContext->isActive(),
+            )) {
                 $event->setNextSongs(null); // clear selection so AutoDJ retries with a different track
-                $event->stopPropagation();
 
                 $this->logger->warning(
                     'DMCA Compliance: Rejected song — BuildQueue will retry with a different track.',
@@ -92,13 +102,35 @@ final class DmcaComplianceListener implements EventSubscriberInterface
         }
     }
 
+    /**
+     * True when $entry may air at $at within the station's DMCA limits, judged
+     * as a queue build judges a pick.
+     */
+    public function allows(StationQueue $entry, Station $station, DateTimeImmutable $at): bool
+    {
+        return !$station->backend_config->dmca_compliance_enabled
+            || $this->isCompliant($entry, $station, $at, false);
+    }
+
     private function isCompliant(
         StationQueue $entry,
         Station $station,
         \DateTimeImmutable $expectedPlayTime,
+        bool $isPreview,
     ): bool {
 
          if ($entry->media?->type !== 'music') { return true; }
+
+        // The DMCA performance complement governs sound recordings, not talk.
+        // A show chopped into episode files is still one programme, so its parts
+        // must not be counted against each other as if they were songs in
+        // rotation -- the AutoDJ would refuse the rest of the episode and fall
+        // back to music. Flagged per playlist, so a scheduled *music* block
+        // stays fully subject to the limits.
+        if ($entry->playlist?->is_programme) {
+            return true;
+        }
+
         $config = $station->backend_config;
 
         $windowMinutes           = $config->dmca_window_minutes           ?? self::DEFAULT_WINDOW_MINUTES;
@@ -109,11 +141,17 @@ final class DmcaComplianceListener implements EventSubscriberInterface
         $maxConsecutiveArtist    = $config->dmca_max_consecutive_artist    ?? self::DEFAULT_MAX_CONSECUTIVE_ARTIST_PLAYS;
 
         try {
-            $history = $this->queueRepo->getRecentlyPlayedByTimeRange(
-                $station,
-                $expectedPlayTime,
-                $windowMinutes
-            );
+            $history = $isPreview
+                ? $this->queueRepo->getProjectedMusicHistoryByTimeRange(
+                    $station,
+                    $expectedPlayTime,
+                    $windowMinutes
+                )
+                : $this->queueRepo->getPlayedMusicHistoryByTimeRange(
+                    $station,
+                    $expectedPlayTime,
+                    $windowMinutes
+                );
         } catch (\Throwable $e) {
             $this->logger->error(
                 'DMCA Compliance: Could not read play history — allowing song as fail-safe.',
@@ -177,6 +215,29 @@ final class DmcaComplianceListener implements EventSubscriberInterface
                 ]);
                 return false;
             }
+
+            // Rule 3b: Max consecutive songs from same album.
+            $consecutiveAlbum = 0;
+            foreach ($history as $row) {
+                $rowAlbum = $row['album'] ?? null;
+                if (!empty($rowAlbum) && strtolower($rowAlbum) === strtolower($album)) {
+                    $consecutiveAlbum++;
+                } else {
+                    break;
+                }
+            }
+
+            if ($consecutiveAlbum >= self::MAX_CONSECUTIVE_ALBUM_PLAYS) {
+                $this->logger->info('DMCA Compliance: Rejected — consecutive album play limit reached.', [
+                    'title' => $entry->title, 'album' => $album,
+                    'consecutive' => $consecutiveAlbum, 'limit' => self::MAX_CONSECUTIVE_ALBUM_PLAYS,
+                ]);
+                return false;
+            }
+        } else {
+            $this->logger->debug('DMCA Compliance: Rule 3 (album) skipped — no album tag on this track.', [
+                'title' => $entry->title, 'artist' => $artist,
+            ]);
         }
 
         // Rule 4a: Max plays by same artist in rolling window.
@@ -215,6 +276,10 @@ final class DmcaComplianceListener implements EventSubscriberInterface
                 ]);
                 return false;
             }
+        } else {
+            $this->logger->debug('DMCA Compliance: Rules 4a/4b (artist) skipped — no artist tag on this track.', [
+                'title' => $entry->title,
+            ]);
         }
 
         return true;

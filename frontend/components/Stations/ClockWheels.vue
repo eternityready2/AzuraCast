@@ -1,526 +1,601 @@
 <template>
+    <wheel-editor
+        v-if="editor?.kind === 'wheel' || editor?.kind === 'template'"
+        :key="editorKey"
+        :mode="editor.kind"
+        :create-url="editor.kind === 'template' ? templatesUrl : listUrl"
+        :record-url="editor.url"
+        :initial-view="editor.initialView ?? 'edit'"
+        @saved="onSaved"
+        @cancel="editor = null"
+    />
+
+    <daypart-inline-editor
+        v-else-if="editor?.kind === 'daypart'"
+        :key="editorKey"
+        :create-url="daypartsUrl"
+        :templates-url="templatesUrl"
+        :record-url="editor.url"
+        :preset-template-id="editor.presetTemplateId ?? null"
+        @saved="onSaved"
+        @changed="load"
+        @cancel="editor = null"
+    />
+
     <section
+        v-else
         class="card"
         role="region"
         aria-labelledby="hdr_clock_wheels"
     >
-        <div class="card-header text-bg-primary">
-            <div class="row align-items-center">
-                <div class="col-md-6">
-                    <h2
-                        id="hdr_clock_wheels"
-                        class="card-title"
-                    >
-                        {{ $gettext('Manage Clock Wheels') }}
-                    </h2>
-                </div>
-            </div>
+        <div class="card-header text-bg-primary d-flex align-items-center gap-2 flex-wrap">
+            <h2
+                id="hdr_clock_wheels"
+                class="card-title my-0 flex-fill"
+            >
+                {{ $gettext('Clock Wheels') }}
+            </h2>
+            <button
+                type="button"
+                class="btn btn-sm btn-light"
+                @click="openNew"
+            >
+                <icon-ic-add />
+                {{ newLabel }}
+            </button>
         </div>
 
         <div class="card-body">
             <tabs
-                nav-tabs-class="nav-tabs"
-                content-class="mt-3"
-                destroy-on-hide
+                v-model="activeTab"
+                nav-tabs-class="nav-tabs mb-3"
             >
-                <tab :label="$gettext('Wheels')">
-                    <div class="card-body-flush">
-                        <div class="card-body buttons d-flex flex-wrap align-items-center">
-                            <add-button
-                                :text="$gettext('Add Clock Wheel')"
-                                @click="doCreate"
-                            />
+                <tab
+                    id="wheels"
+                    :label="$gettext('Wheels')"
+                >
+                    <p class="text-muted">
+                        {{ $gettext('A clock wheel is the recipe for one hour: which kind of content plays at each point in the hour. Build a wheel here, then place it on the') }}
+                        <router-link :to="{name: 'stations:schedule:index'}">
+                            {{ $gettext('Schedule') }}
+                        </router-link>
+                        {{ $gettext('to choose when it airs.') }}
+                    </p>
+
+                    <loading :loading="isLoading">
+                        <div
+                            v-if="wheels.length === 0"
+                            class="text-center py-5"
+                        >
+                            <p class="text-muted mb-3">
+                                {{ $gettext('No clock wheels yet.') }}
+                            </p>
                             <button
                                 type="button"
-                                class="btn btn-secondary"
-                                @click="$generateModal?.open()"
+                                class="btn btn-primary"
+                                @click="openEditor('wheel', null)"
                             >
-                                {{ $gettext('Auto-Generate') }}
+                                {{ $gettext('Create your first Clock Wheel') }}
                             </button>
-                            <button
-                                type="button"
-                                class="btn btn-secondary"
-                                @click="triggerImport"
-                            >
-                                {{ $gettext('Import JSON') }}
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-danger"
-                                :disabled="!hasSelectedWheels"
-                                @click="doDeleteSelected"
-                            >
-                                {{ $gettext('Delete Selected') }}
-                            </button>
-                            <input
-                                ref="$importInput"
-                                type="file"
-                                accept="application/json,.json"
-                                class="d-none"
-                                @change="onImportFile"
-                            >
                         </div>
 
-                        <data-table
-                            id="station_clock_wheels"
-                            selectable
-                            paginated
-                            :fields="wheelFields"
-                            :provider="listItemProvider"
-                            @row-selected="onWheelRowSelected"
+                        <div
+                            v-else
+                            class="row g-3"
                         >
-                            <template #cell(actions)="{ item }">
+                            <div
+                                v-for="wheel in wheels"
+                                :key="wheel.id"
+                                class="col-sm-6 col-lg-4 col-xl-3"
+                            >
                                 <div
-                                    class="btn-group btn-group-sm"
-                                    @click.stop
+                                    class="card h-100 wheel-card"
+                                    :style="{borderTopColor: wheel.color || 'var(--bs-primary)'}"
                                 >
                                     <button
                                         type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Next hour preview')"
-                                        @click="openPreview(item)"
+                                        class="btn p-3 d-flex justify-content-center"
+                                        :aria-label="$gettext('Edit %{name}', {name: wheel.name})"
+                                        @click="openEditor('wheel', wheel.links.self)"
                                     >
-                                        {{ $gettext('Preview') }}
+                                        <wheel-dial
+                                            :slots="dialSlots(wheel.slots)"
+                                            :size="150"
+                                            :show-ticks="false"
+                                            :center-label="String(wheel.slots?.length ?? 0)"
+                                            :center-sub="$gettext('slots')"
+                                        />
                                     </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Audit analytics')"
-                                        @click="openAnalytics(item)"
-                                    >
-                                        {{ $gettext('Analytics') }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-outline-secondary"
-                                        :title="$gettext('Export JSON')"
-                                        @click="doExportJson(item)"
-                                    >
-                                        {{ $gettext('Export') }}
-                                    </button>
-                                </div>
-                            </template>
-                            <template #cell(name)="{ item }">
-                                <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="doEdit(item.links.self)"
-                                >
-                                    <h5 class="m-0 flex-grow-1">
-                                        {{ item.name }}
-                                        <span
-                                            v-if="item.inherits_template_slots"
-                                            class="badge text-bg-secondary ms-1"
+                                    <div class="card-body pt-0">
+                                        <div class="d-flex align-items-start justify-content-between gap-2">
+                                            <h3 class="h6 mb-1 text-break">
+                                                {{ wheel.name }}
+                                            </h3>
+                                            <span
+                                                class="badge"
+                                                :class="wheel.is_active ? 'text-bg-success' : 'text-bg-secondary'"
+                                            >
+                                                {{ wheel.is_active ? $gettext('Active') : $gettext('Inactive') }}
+                                            </span>
+                                        </div>
+                                        <div class="small text-muted">
+                                            {{ musicSummary(wheel.slots) }}
+                                        </div>
+                                        <div
+                                            v-if="wheel.daypart_id"
+                                            class="small mt-1"
                                         >
-                                            {{ $gettext('Template') }}
-                                        </span>
-                                    </h5>
-                                    <span
-                                        class="d-inline-block rounded flex-shrink-0"
-                                        style="width: 1.5rem; height: 1.5rem;"
-                                        :style="{backgroundColor: item.color ?? '#cccccc'}"
-                                    />
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
+                                            <span class="badge text-bg-light border">
+                                                {{ $gettext('Daypart: %{name}', {name: daypartName(wheel.daypart_id)}) }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="card-footer d-flex gap-2">
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-primary flex-fill"
+                                            @click="openEditor('wheel', wheel.links.self)"
+                                        >
+                                            {{ $gettext('Edit') }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-secondary flex-fill"
+                                            :disabled="!(wheel.slots?.length)"
+                                            @click="openPreview(wheel)"
+                                        >
+                                            {{ $gettext('Preview') }}
+                                        </button>
+                                    </div>
                                 </div>
-                            </template>
-                        </data-table>
-                    </div>
+                            </div>
+                        </div>
+                    </loading>
                 </tab>
 
-                <tab :label="$gettext('Templates')">
-                    <div class="card-body-flush">
-                        <div class="card-body buttons">
-                            <add-button
-                                :text="$gettext('Add Template')"
-                                @click="doCreateTemplate"
-                            />
+                <tab
+                    id="templates"
+                    :label="$gettext('Hour Templates')"
+                >
+                    <p class="text-muted">
+                        {{ $gettext('An hour template is a master clock wheel. It never airs by itself: a daypart puts it on air for a range of hours, and editing the template updates every wheel made from it.') }}
+                    </p>
+
+                    <loading :loading="isLoading">
+                        <div
+                            v-if="templates.length === 0"
+                            class="text-center py-5"
+                        >
+                            <p class="text-muted mb-3">
+                                {{ $gettext('No hour templates yet.') }}
+                            </p>
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                @click="openEditor('template', null)"
+                            >
+                                {{ $gettext('Create your first Hour Template') }}
+                            </button>
                         </div>
 
-                        <data-table
-                            id="station_clock_wheel_templates"
-                            paginated
-                            :fields="templateFields"
-                            :provider="templateListProvider"
+                        <div
+                            v-else
+                            class="row g-3"
                         >
-                            <template #cell(name)="{ item }">
+                            <div
+                                v-for="template in templates"
+                                :key="template.id"
+                                class="col-sm-6 col-lg-4 col-xl-3"
+                            >
                                 <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="doEditTemplate(item.links.self)"
-                                >
-                                    <h5 class="m-0 flex-grow-1">{{ item.name }}</h5>
-                                    <span
-                                        class="d-inline-block rounded flex-shrink-0"
-                                        style="width: 1.5rem; height: 1.5rem;"
-                                        :style="{backgroundColor: item.color ?? '#cccccc'}"
-                                    />
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
-                                </div>
-                            </template>
-                        </data-table>
-                    </div>
-                </tab>
-
-                <tab :label="$gettext('Dayparts')">
-                    <div class="card-body-flush">
-                        <div class="card-body buttons">
-                            <add-button
-                                :text="$gettext('Add Daypart')"
-                                @click="doCreateDaypart"
-                            />
-                        </div>
-
-                        <data-table
-                            id="station_clock_dayparts"
-                            paginated
-                            :fields="daypartFields"
-                            :provider="daypartListProvider"
-                        >
-                            <template #cell(actions)="{ item }">
-                                <div
-                                    class="btn-group btn-group-sm"
-                                    @click.stop
+                                    class="card h-100 wheel-card"
+                                    :style="{borderTopColor: template.color || 'var(--bs-primary)'}"
                                 >
                                     <button
                                         type="button"
-                                        class="btn btn-outline-secondary"
-                                        :disabled="syncingDaypartId === item.id"
-                                        :title="$gettext('Regenerate hourly wheels from this daypart')"
-                                        @click="doSyncDaypart(item)"
+                                        class="btn p-3 d-flex justify-content-center"
+                                        :aria-label="$gettext('Edit %{name}', {name: template.name})"
+                                        @click="openEditor('template', template.links.self)"
                                     >
-                                        {{ syncingDaypartId === item.id
-                                            ? $gettext('Syncing…')
-                                            : $gettext('Re-sync') }}
+                                        <wheel-dial
+                                            :slots="dialSlots(template.slots)"
+                                            :size="150"
+                                            :show-ticks="false"
+                                            :center-label="String(template.slots?.length ?? 0)"
+                                            :center-sub="$gettext('slots')"
+                                        />
                                     </button>
-                                </div>
-                            </template>
-                            <template #cell(name)="{ item }">
-                                <div
-                                    class="d-flex align-items-center gap-3 clock-wheel-row"
-                                    role="button"
-                                    style="cursor: pointer;"
-                                    @click="doEditDaypart(item.links.self)"
-                                >
-                                    <h5 class="m-0 flex-grow-1">
-                                        {{ item.name }}
-                                        <span
-                                            v-if="item.separation_override_enabled"
-                                            class="badge text-bg-info ms-1"
+                                    <div class="card-body pt-0">
+                                        <h3 class="h6 mb-1 text-break">
+                                            {{ template.name }}
+                                        </h3>
+                                        <div class="small text-muted">
+                                            {{ musicSummary(template.slots) }}
+                                        </div>
+                                        <div class="small text-muted mt-1">
+                                            {{ templateUsage(template.id) }}
+                                        </div>
+                                    </div>
+                                    <div class="card-footer d-flex gap-2">
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-primary flex-fill"
+                                            @click="openEditor('template', template.links.self)"
                                         >
-                                            {{ $gettext('Separation') }}
-                                        </span>
-                                    </h5>
-                                    <icon-bi-chevron-right class="clock-wheel-chevron text-muted flex-shrink-0" />
+                                            {{ $gettext('Edit') }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-primary"
+                                            :title="$gettext('Put this template on air with a new daypart')"
+                                            @click="openEditor('daypart', null, template.id)"
+                                        >
+                                            {{ $gettext('Use') }}
+                                        </button>
+                                    </div>
                                 </div>
-                            </template>
-                            <template #cell(hours)="{ item }">
-                                {{ formatHour(item.start_hour) }} – {{ formatHour(item.end_hour) }}
-                            </template>
-                            <template #cell(separation)="{ item }">
-                                <span v-if="item.separation_override_enabled && item.separation_enabled">
-                                    {{ item.separation_artist_minutes }}/{{ item.separation_title_minutes }} min
-                                </span>
-                                <span
-                                    v-else-if="item.separation_override_enabled"
-                                    class="text-muted"
+                            </div>
+                        </div>
+                    </loading>
+                </tab>
+
+                <tab
+                    id="dayparts"
+                    :label="$gettext('Dayparts')"
+                >
+                    <p class="text-muted">
+                        {{ $gettext('A daypart puts an hour template on air for a block of hours on the days you choose, such as Morning Drive 6 to 10 AM on weekdays. It creates and schedules one clock wheel per hour; scheduled shows still keep their own hours.') }}
+                    </p>
+
+                    <loading :loading="isLoading">
+                        <div
+                            v-if="dayparts.length === 0"
+                            class="text-center py-5"
+                        >
+                            <p class="text-muted mb-3">
+                                {{ templates.length ? $gettext('No dayparts yet.') : $gettext('Create an hour template first, then put it on air with a daypart.') }}
+                            </p>
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                @click="templates.length ? openEditor('daypart', null) : openEditor('template', null)"
+                            >
+                                {{ templates.length ? $gettext('Create your first Daypart') : $gettext('Create an Hour Template') }}
+                            </button>
+                        </div>
+
+                        <template v-else>
+                            <div class="card bg-body-tertiary mb-3">
+                                <div class="card-body">
+                                    <h3 class="h6 mb-3">
+                                        {{ $gettext('Your Day') }}
+                                    </h3>
+                                    <div
+                                        v-for="daypart in dayparts"
+                                        :key="daypart.id"
+                                        class="day-row mb-2"
+                                    >
+                                        <div class="day-row__label small text-truncate">
+                                            {{ daypart.name }}
+                                        </div>
+                                        <div class="hour-strip">
+                                            <span
+                                                v-for="hour in 24"
+                                                :key="hour"
+                                                class="hour-strip__cell"
+                                                :style="coversHour(daypart, hour - 1) ? {background: daypartColor(daypart), opacity: daypart.is_active ? 1 : .4} : {}"
+                                                :title="formatHourOfDayToAmPm(hour - 1)"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="day-row">
+                                        <div class="day-row__label" />
+                                        <div class="d-flex justify-content-between small text-muted">
+                                            <span>12 AM</span>
+                                            <span>6 AM</span>
+                                            <span>12 PM</span>
+                                            <span>6 PM</span>
+                                            <span>12 AM</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-3">
+                                <div
+                                    v-for="daypart in dayparts"
+                                    :key="daypart.id"
+                                    class="col-sm-6 col-lg-4"
                                 >
-                                    {{ $gettext('Off') }}
-                                </span>
-                                <span
-                                    v-else
-                                    class="text-muted"
-                                >—</span>
-                            </template>
-                        </data-table>
-                    </div>
-                </tab>
-
-                <tab :label="$gettext('Program Grid')">
-                    <program-grid-tab :grid-url="programGridUrl" />
-                </tab>
-
-                <tab :label="$gettext('Reconciliation')">
-                    <reconciliation-log-tab :log-url="reconciliationLogUrl" />
+                                    <div
+                                        class="card h-100 wheel-card"
+                                        :style="{borderTopColor: daypartColor(daypart)}"
+                                    >
+                                        <div class="card-body">
+                                            <div class="d-flex align-items-start justify-content-between gap-2">
+                                                <h3 class="h6 mb-1 text-break">
+                                                    {{ daypart.name }}
+                                                </h3>
+                                                <span
+                                                    class="badge"
+                                                    :class="daypart.is_active ? 'text-bg-success' : 'text-bg-secondary'"
+                                                >
+                                                    {{ daypart.is_active ? $gettext('Active') : $gettext('Inactive') }}
+                                                </span>
+                                            </div>
+                                            <div class="fw-semibold">
+                                                {{ daypartHours(daypart) }}
+                                            </div>
+                                            <div class="small text-muted mb-2">
+                                                {{ daypartDays(daypart) }}
+                                            </div>
+                                            <div class="small">
+                                                {{ $gettext('Template:') }}
+                                                <strong>{{ templateName(daypart.template_id) }}</strong>
+                                            </div>
+                                        </div>
+                                        <div class="card-footer d-flex gap-2">
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm btn-primary flex-fill"
+                                                @click="openEditor('daypart', daypart.links.self)"
+                                            >
+                                                {{ $gettext('Edit') }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </loading>
                 </tab>
             </tabs>
         </div>
+
+        <preview-modal ref="$previewModal" />
     </section>
-
-    <edit-modal
-        ref="$editModal"
-        :create-url="listUrl"
-        :templates-url="templatesUrl"
-        @relist="relistWheels"
-    />
-
-    <template-edit-modal
-        ref="$templateEditModal"
-        :create-url="templatesUrl"
-        @relist="relistTemplates"
-    />
-
-    <daypart-edit-modal
-        ref="$daypartEditModal"
-        :create-url="daypartsUrl"
-        :templates-url="templatesUrl"
-        @relist="relistDayparts"
-    />
-
-    <preview-modal ref="$previewModal" />
-    <analytics-modal ref="$analyticsModal" />
-    <generate-modal
-        ref="$generateModal"
-        :generate-url="generateUrl"
-        @generated="relistWheels"
-    />
 </template>
 
 <script setup lang="ts">
-import DataTable, {DataTableField} from '~/components/Common/DataTable.vue';
-import AddButton from '~/components/Common/AddButton.vue';
+import {computed, onMounted, ref, useTemplateRef} from 'vue';
+import {useRoute} from 'vue-router';
+import {useAxios} from '~/vendor/axios';
+import {useTranslate} from '~/vendor/gettext';
+import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
+import {useApiRouter} from '~/functions/useApiRouter.ts';
+import Loading from '~/components/Common/Loading.vue';
 import Tabs from '~/components/Common/Tabs.vue';
 import Tab from '~/components/Common/Tab.vue';
-import {useTranslate} from '~/vendor/gettext';
-import {computed, ref, shallowRef, useTemplateRef} from 'vue';
-import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
-import {useAxios} from '~/vendor/axios';
-import {useDialog} from '~/components/Common/Dialogs/useDialog.ts';
-import useHasEditModal from '~/functions/useHasEditModal';
-import {useApiItemProvider} from '~/functions/dataTable/useApiItemProvider.ts';
-import {QueryKeys, queryKeyWithStation} from '~/entities/Queries.ts';
-import {useApiRouter} from '~/functions/useApiRouter.ts';
-import EditModal from '~/components/Stations/ClockWheels/EditModal.vue';
-import TemplateEditModal from '~/components/Stations/ClockWheels/TemplateEditModal.vue';
-import DaypartEditModal from '~/components/Stations/ClockWheels/DaypartEditModal.vue';
+import WheelDial from '~/components/Stations/ClockWheels/WheelDial.vue';
+import WheelEditor from '~/components/Stations/ClockWheels/WheelEditor.vue';
+import DaypartInlineEditor from '~/components/Stations/ClockWheels/DaypartInlineEditor.vue';
 import PreviewModal from '~/components/Stations/ClockWheels/PreviewModal.vue';
-import AnalyticsModal from '~/components/Stations/ClockWheels/AnalyticsModal.vue';
-import GenerateModal from '~/components/Stations/ClockWheels/GenerateModal.vue';
-import ProgramGridTab from '~/components/Stations/ClockWheels/ProgramGridTab.vue';
-import ReconciliationLogTab from '~/components/Stations/ClockWheels/ReconciliationLogTab.vue';
-import IconBiChevronRight from '~icons/bi/chevron-right';
+import IconIcAdd from '~icons/ic/baseline-add';
+import {getClockWheelContentDensity} from '~/functions/clockWheelPosition.ts';
+import {mapApiSlotToEditorRow} from '~/functions/clockWheelSlotEditor.ts';
 import {formatHourOfDayToAmPm} from '~/functions/amPmTime.ts';
 
-const {getStationApiUrl} = useApiRouter();
-const listUrl = getStationApiUrl('/clock-wheels');
-const templatesUrl = getStationApiUrl('/clock-wheel-templates');
-const daypartsUrl = getStationApiUrl('/clock-dayparts');
-const programGridUrl = getStationApiUrl('/clock-wheels/program-grid');
-const reconciliationLogUrl = getStationApiUrl('/clock-wheels/reconciliation-log');
-const generateUrl = getStationApiUrl('/clock-wheels/generate');
-const importUrl = getStationApiUrl('/clock-wheels/import');
+type Slots = Record<string, unknown>[] | undefined;
 
-const $importInput = useTemplateRef('$importInput');
-
-const {$gettext, $ngettext} = useTranslate();
-const {notifySuccess, notifyError} = useNotify();
-const {axios} = useAxios();
-const {confirmDelete} = useDialog();
-const syncingDaypartId = ref<number | null>(null);
-
-type ClockWheelRow = {
+type WheelRow = {
     id: number;
     name: string;
     color?: string;
-    inherits_template_slots?: boolean;
+    is_active?: boolean;
+    daypart_id?: number | null;
+    template_id?: number | null;
+    slots?: Record<string, unknown>[];
     links: {self: string};
 };
 
 type TemplateRow = {
     id: number;
     name: string;
-    color?: string;
+    color?: string | null;
+    slots?: Record<string, unknown>[];
     links: {self: string};
 };
 
 type DaypartRow = {
     id: number;
     name: string;
+    template_id: number;
     start_hour: number;
     end_hour: number;
-    separation_override_enabled?: boolean;
-    separation_enabled?: boolean;
-    separation_artist_minutes?: number;
-    separation_title_minutes?: number;
+    days?: number[];
+    color?: string | null;
+    is_active: boolean;
     links: {self: string};
 };
 
-const selectedWheels = shallowRef<ClockWheelRow[]>([]);
-const hasSelectedWheels = computed(() => selectedWheels.value.length > 0);
-
-const onWheelRowSelected = (rows: ClockWheelRow[]) => {
-    selectedWheels.value = rows;
+type EditorState = {
+    kind: 'wheel' | 'template' | 'daypart';
+    url: string | null;
+    presetTemplateId?: number | null;
+    initialView?: 'edit' | 'preview' | 'aired';
 };
 
-const wheelFields: DataTableField<ClockWheelRow>[] = [
-    {key: 'actions', label: $gettext('Actions'), sortable: false, class: 'shrink'},
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
-];
+const {$gettext, $ngettext} = useTranslate();
+const {axios} = useAxios();
+const {notifyError} = useNotify();
+const {getStationApiUrl} = useApiRouter();
 
-const templateFields: DataTableField<TemplateRow>[] = [
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
-];
+const listUrl = getStationApiUrl('/clock-wheels');
+const templatesUrl = getStationApiUrl('/clock-wheel-templates');
+const daypartsUrl = getStationApiUrl('/clock-dayparts');
 
-const daypartFields: DataTableField<DaypartRow>[] = [
-    {key: 'actions', label: $gettext('Actions'), sortable: false},
-    {key: 'name', isRowHeader: true, label: $gettext('Name'), sortable: true},
-    {key: 'hours', label: $gettext('Hours'), sortable: false},
-    {key: 'separation', label: $gettext('Separation'), sortable: false},
-];
+const activeTab = ref('wheels');
+const wheels = ref<WheelRow[]>([]);
+const templates = ref<TemplateRow[]>([]);
+const dayparts = ref<DaypartRow[]>([]);
+const isLoading = ref(true);
+const editor = ref<EditorState | null>(null);
+const editorKey = ref(0);
 
-const listItemProvider = useApiItemProvider(
-    listUrl,
-    queryKeyWithStation([QueryKeys.StationPlaylists, 'clock_wheels'])
-);
+const asList = <T>(data: unknown): T[] => (Array.isArray(data) ? data as T[] : []);
 
-const templateListProvider = useApiItemProvider(
-    templatesUrl,
-    queryKeyWithStation([QueryKeys.StationPlaylists, 'clock_wheel_templates'])
-);
-
-const daypartListProvider = useApiItemProvider(
-    daypartsUrl,
-    queryKeyWithStation([QueryKeys.StationPlaylists, 'clock_dayparts'])
-);
-
-const relistWheels = () => {
-    void listItemProvider.refresh();
-};
-
-const relistTemplates = () => {
-    void templateListProvider.refresh();
-};
-
-const relistDayparts = () => {
-    void daypartListProvider.refresh();
-    void listItemProvider.refresh();
-};
-
-const $editModal = useTemplateRef('$editModal');
-const $templateEditModal = useTemplateRef('$templateEditModal');
-const $daypartEditModal = useTemplateRef('$daypartEditModal');
-const $previewModal = useTemplateRef('$previewModal');
-const $analyticsModal = useTemplateRef('$analyticsModal');
-const $generateModal = useTemplateRef('$generateModal');
-
-const {doCreate, doEdit} = useHasEditModal($editModal);
-const {doCreate: doCreateTemplate, doEdit: doEditTemplate} = useHasEditModal($templateEditModal);
-const {doCreate: doCreateDaypart, doEdit: doEditDaypart} = useHasEditModal($daypartEditModal);
-
-const formatHour = (hour: number) => formatHourOfDayToAmPm(hour);
-
-const openPreview = (item: ClockWheelRow) => {
-    const url = getStationApiUrl(`/clock-wheel/${item.id}/preview`).value;
-    void $previewModal.value?.open(item.name, url);
-};
-
-const openAnalytics = (item: ClockWheelRow) => {
-    const url = getStationApiUrl(`/clock-wheel/${item.id}/analytics`).value;
-    void $analyticsModal.value?.open(item.name, url);
-};
-
-const doDeleteSelected = async () => {
-    const count = selectedWheels.value.length;
-    if (count === 0) {
-        return;
-    }
-
-    const {value} = await confirmDelete({
-        title: $ngettext(
-            'Delete %{num} clock wheel?',
-            'Delete %{num} clock wheels?',
-            count,
-            {num: String(count)}
-        ),
-    });
-
-    if (!value) {
-        return;
-    }
-
+const load = async () => {
+    isLoading.value = true;
     try {
-        await Promise.all(
-            selectedWheels.value.map((item) => axios.delete(item.links.self))
-        );
-        notifySuccess(
-            $ngettext(
-                'Clock wheel deleted.',
-                'Clock wheels deleted.',
-                count
-            )
-        );
-        selectedWheels.value = [];
-        relistWheels();
+        const [w, t, d] = await Promise.all([
+            axios.get(listUrl.value),
+            axios.get(templatesUrl.value),
+            axios.get(daypartsUrl.value),
+        ]);
+        wheels.value = asList<WheelRow>(w.data);
+        templates.value = asList<TemplateRow>(t.data);
+        dayparts.value = asList<DaypartRow>(d.data);
     } catch {
-        notifyError($gettext('Could not delete selected clock wheels.'));
-        relistWheels();
-    }
-};
-
-const doExportJson = async (item: ClockWheelRow) => {
-    try {
-        const exportUrl = item.links.self.replace(/\/?$/, '') + '/export';
-        const {data} = await axios.get<Record<string, unknown>>(exportUrl);
-        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `${item.name || 'clock-wheel'}.json`;
-        anchor.click();
-        URL.revokeObjectURL(url);
-    } catch {
-        notifyError($gettext('Could not export clock wheel.'));
-    }
-};
-
-const doSyncDaypart = async (item: DaypartRow) => {
-    const syncUrl = getStationApiUrl(`/clock-daypart/${item.id}/sync`).value;
-    syncingDaypartId.value = item.id;
-
-    try {
-        await axios.post(syncUrl);
-        notifySuccess($gettext('Daypart hourly wheels re-synced from template.'));
-        relistDayparts();
-    } catch {
-        notifyError($gettext('Could not re-sync daypart wheels.'));
+        notifyError($gettext('Could not load clock wheels.'));
     } finally {
-        syncingDaypartId.value = null;
+        isLoading.value = false;
     }
 };
 
-const triggerImport = () => {
-    $importInput.value?.click();
+// Reports link straight to a wheel: ?wheel=<id>&view=aired opens that wheel
+// on its How it aired tab.
+const route = useRoute();
+onMounted(async () => {
+    await load();
+    const wheelId = Number(route.query.wheel);
+    const target = wheels.value.find((w) => w.id === wheelId);
+    if (target) {
+        const view = route.query.view;
+        editor.value = {
+            kind: 'wheel',
+            url: target.links.self,
+            initialView: view === 'aired' || view === 'preview' ? view : 'edit',
+        };
+        editorKey.value += 1;
+    }
+});
+
+// What the system has scheduled for a saved wheel's next airing, from the
+// Linear Log.
+const $previewModal = useTemplateRef('$previewModal');
+const openPreview = (wheel: {name: string; links: {self: string}}) => {
+    void $previewModal.value?.open(wheel.name, wheel.links.self + '/log');
 };
 
-const onImportFile = async (event: Event) => {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
+const openEditor = (kind: EditorState['kind'], url: string | null, presetTemplateId: number | null = null) => {
+    editor.value = {kind, url, presetTemplateId};
+    editorKey.value += 1;
+};
 
-    if (!file) {
-        return;
+const newLabel = computed(() => {
+    switch (activeTab.value) {
+        case 'templates':
+            return $gettext('New Hour Template');
+        case 'dayparts':
+            return $gettext('New Daypart');
+        default:
+            return $gettext('New Clock Wheel');
     }
+});
 
-    try {
-        const text = await file.text();
-        const payload = JSON.parse(text) as Record<string, unknown>;
-        await axios.post(importUrl.value, payload);
-        notifySuccess($gettext('Clock wheel imported.'));
-        relistWheels();
-    } catch {
-        notifyError($gettext('Could not import clock wheel JSON.'));
+const openNew = () => {
+    if (activeTab.value === 'templates') {
+        openEditor('template', null);
+    } else if (activeTab.value === 'dayparts') {
+        openEditor(templates.value.length ? 'daypart' : 'template', null);
+    } else {
+        openEditor('wheel', null);
     }
+};
+
+const onSaved = () => {
+    editor.value = null;
+    void load();
+};
+
+const rows = (slots: Slots) => (slots ?? []).map((s) => mapApiSlotToEditorRow(s));
+
+const dialSlots = (slots: Slots) =>
+    rows(slots).map((r) => ({position_seconds: r.position_seconds, type: r.type}));
+
+const musicSummary = (slots: Slots) => {
+    const list = rows(slots);
+    if (list.length === 0) {
+        return $gettext('No slots yet');
+    }
+    const d = getClockWheelContentDensity(list);
+    return $gettext('%{music}% music · %{talk}% talk · %{id}% IDs · %{promo}% promo/ad', {
+        music: String(d.musicPercent),
+        talk: String(d.talkPercent),
+        id: String(d.idPercent),
+        promo: String(d.promoAdPercent),
+    });
+};
+
+const templateName = (id: number | null | undefined) =>
+    templates.value.find((t) => t.id === id)?.name ?? $gettext('(missing template)');
+
+const daypartName = (id: number | null | undefined) =>
+    dayparts.value.find((d) => d.id === id)?.name ?? '';
+
+const templateUsage = (id: number) => {
+    const used = dayparts.value.filter((d) => d.template_id === id).length;
+    return used === 0
+        ? $gettext('Not on air yet')
+        : $ngettext('Used by %{n} daypart', 'Used by %{n} dayparts', used, {n: String(used)});
+};
+
+const daypartColor = (daypart: DaypartRow) =>
+    daypart.color || templates.value.find((t) => t.id === daypart.template_id)?.color || 'var(--bs-primary)';
+
+const coversHour = (daypart: DaypartRow, hour: number) => {
+    const {start_hour: start, end_hour: end} = daypart;
+    return start <= end
+        ? hour >= start && hour <= end
+        : hour >= start || hour <= end;
+};
+
+const daypartHours = (daypart: DaypartRow) => {
+    const count = ((daypart.end_hour - daypart.start_hour + 24) % 24) + 1;
+    return $gettext('%{start} – %{end} · %{n} hours', {
+        start: formatHourOfDayToAmPm(daypart.start_hour),
+        end: formatHourOfDayToAmPm((daypart.end_hour + 1) % 24),
+        n: String(count),
+    });
+};
+
+const daypartDays = (daypart: DaypartRow) => {
+    const days = daypart.days ?? [];
+    const names = [$gettext('Mon'), $gettext('Tue'), $gettext('Wed'), $gettext('Thu'), $gettext('Fri'), $gettext('Sat'), $gettext('Sun')];
+    if (days.length === 0 || days.length === 7) {
+        return $gettext('Every day');
+    }
+    if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) {
+        return $gettext('Weekdays');
+    }
+    if (days.length === 2 && days.includes(6) && days.includes(7)) {
+        return $gettext('Weekends');
+    }
+    return days.map((d) => names[d - 1]).join(', ');
 };
 </script>
 
 <style scoped>
-.clock-wheel-chevron {
-    opacity: 0;
-    transition: opacity 0.15s;
+.wheel-card {
+    border-top-width: 4px;
 }
 
-tr:hover .clock-wheel-chevron {
-    opacity: 1;
+.day-row {
+    display: grid;
+    grid-template-columns: minmax(6rem, 10rem) 1fr;
+    gap: .75rem;
+    align-items: center;
+}
+
+.hour-strip {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+}
+
+.hour-strip__cell {
+    height: 1.1rem;
+    border-radius: .2rem;
+    background: var(--bs-secondary-bg);
 }
 </style>

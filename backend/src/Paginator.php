@@ -49,6 +49,10 @@ final class Paginator implements IteratorAggregate, Countable
         private readonly Pagerfanta $paginator,
         ServerRequest $request
     ) {
+        // After deleting the last rows on a page, the list asks for a page that no longer
+        // exists; show the last page instead of failing.
+        $this->paginator->setNormalizeOutOfRangePages(true);
+
         $this->router = $request->getRouter();
 
         try {
