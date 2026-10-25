@@ -9,7 +9,6 @@ import IconIcLibraryMusic from "~icons/ic/baseline-library-music";
 import IconIcAssignment from "~icons/ic/baseline-assignment";
 import IconIcMic from "~icons/ic/baseline-mic";
 import IconIcQueueMusic from "~icons/ic/baseline-queue-music";
-import IconIcPodcasts from "~icons/ic/baseline-podcasts";
 import IconIcPublic from "~icons/ic/baseline-public";
 import IconIcInsertChart from "~icons/ic/baseline-insert-chart";
 import IconIcSettingsApplication from "~icons/ic/baseline-settings-applications";
@@ -18,7 +17,6 @@ import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
 import IconIcAttachMoney from "~icons/ic/baseline-attach-money";
 import IconIcGraphicEq from "~icons/ic/baseline-graphic-eq";
-import IconIcCategory from "~icons/ic/baseline-category";
 import IconIcList from "~icons/ic/baseline-list";
 import IconIcShield from "~icons/ic/baseline-shield";
 import {useUserAllowedForStation} from "~/functions/useUserallowedForStation.ts";
@@ -28,6 +26,9 @@ export function useStationsMenu() {
 
     const station = useStationData();
     const {userAllowedForStation} = useUserAllowedForStation();
+
+    const canManageMedia = () => userAllowedForStation(StationPermissions.Media)
+        && station.value.features.media;
 
     const fullMenu: RawMenuCategory[] = [
         {
@@ -160,6 +161,14 @@ export function useStationsMenu() {
                         name: 'stations:bulk-media'
                     },
                     visible: () => userAllowedForStation(StationPermissions.Media)
+                },
+                {
+                    key: 'media_categories',
+                    label: $gettext('Categories'),
+                    url: {
+                        name: 'stations:media_categories:index'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Media)
                 }
             ]
         },
@@ -177,8 +186,7 @@ export function useStationsMenu() {
             key: 'playlists',
             label: $gettext('Playlists & More'),
             icon: () => IconIcQueueMusic,
-            visible: () => userAllowedForStation(StationPermissions.Media)
-                && station.value.features.media,
+            // No group-level check: Podcasts lives here too, and the group hides itself when every item is hidden.
             items: [
                 {
                     key: 'playlists_index',
@@ -186,6 +194,7 @@ export function useStationsMenu() {
                     url: {
                         name: 'stations:playlists:index'
                     },
+                    visible: canManageMedia,
                 },
                 {
                     key: 'clock_wheels_sub',
@@ -193,6 +202,7 @@ export function useStationsMenu() {
                     url: {
                         name: 'stations:clock_wheels:index'
                     },
+                    visible: canManageMedia,
                 },
                 {
                     key: 'smart_blocks_sub',
@@ -200,6 +210,7 @@ export function useStationsMenu() {
                     url: {
                         name: 'stations:smart-blocks:index'
                     },
+                    visible: canManageMedia,
                 },
                 {
                     key: 'shows_sub',
@@ -207,7 +218,8 @@ export function useStationsMenu() {
                     url: {
                         name: 'stations:shows:index'
                     },
-                    visible: () => userAllowedForStation(StationPermissions.Broadcasting),
+                    visible: () => canManageMedia()
+                        && userAllowedForStation(StationPermissions.Broadcasting),
                 },
                 {
                     key: 'web_streams_sub',
@@ -215,6 +227,16 @@ export function useStationsMenu() {
                     url: {
                         name: 'stations:web_streams:index'
                     },
+                    visible: canManageMedia,
+                },
+                {
+                    key: 'podcasts_sub',
+                    label: $gettext('Podcasts & RSS'),
+                    url: {
+                        name: 'stations:podcasts:index'
+                    },
+                    visible: () => userAllowedForStation(StationPermissions.Podcasts)
+                        && station.value.features.podcasts,
                 },
             ]
         },
@@ -227,24 +249,6 @@ export function useStationsMenu() {
             },
             visible: () => userAllowedForStation(StationPermissions.Media)
                 && station.value.features.media,
-        },
-        {
-            key: 'podcasts',
-            label: $gettext('Podcasts & RSS'),
-            icon: () => IconIcPodcasts,
-            url: {
-                name: 'stations:podcasts:index'
-            },
-            visible: () => userAllowedForStation(StationPermissions.Podcasts)
-                && station.value.features.podcasts,
-        },
-        {
-            key: 'media_categories',
-            label: $gettext('Categories'),
-            icon: () => IconIcCategory,
-            url: {
-                name: 'stations:media_categories:index'
-            },
         },
         {
             key: 'streaming',
