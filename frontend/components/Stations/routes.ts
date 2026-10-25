@@ -44,6 +44,7 @@ export default function useStationsRoutes(): RouteRecordRaw[] {
                 {path: 'logs', name: 'stations:logs', redirect: {name: 'stations:logs_diag:logs'}},
                 {path: 'web-streams', component: () => import('~/components/Stations/WebStreams.vue'), name: 'stations:web_streams:index'},
                 {path: 'playlists', component: () => import('~/components/Stations/Playlists.vue'), name: 'stations:playlists:index'},
+                {path: 'ads', component: () => import('~/components/Stations/Ads.vue'), name: 'stations:ads:index'},
                 {path: 'playlist/new', component: () => import('~/components/Stations/PlaylistEditor.vue'), name: 'stations:playlists:new'},
                 {path: 'playlist/:playlist_id', component: () => import('~/components/Stations/PlaylistEditor.vue'), name: 'stations:playlists:edit'},
                 {path: 'shows', component: () => import('~/components/Stations/Shows.vue'), name: 'stations:shows:index'},

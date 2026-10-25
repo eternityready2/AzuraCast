@@ -187,6 +187,13 @@ export function useStationsMenu() {
                     },
                 },
                 {
+                    key: 'ads',
+                    label: $gettext('Advertising'),
+                    url: {
+                        name: 'stations:ads:index'
+                    },
+                },
+                {
                     key: 'clock_wheels_sub',
                     label: $gettext('Clock Wheels'),
                     url: {

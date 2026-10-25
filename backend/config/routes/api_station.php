@@ -750,6 +750,63 @@ return static function (RouteCollectorProxy $group) {
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
 
+                    // Ads: advertisers, the airtime they bought, and what it delivered.
+                    $group->group(
+                        '/ads',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/advertisers',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':listAction'
+                            )->setName('api:stations:ads:advertisers');
+
+                            $group->post(
+                                '/advertisers',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':getAction'
+                            )->setName('api:stations:ads:advertiser');
+
+                            $group->put(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':editAction'
+                            );
+
+                            $group->delete(
+                                '/advertiser/{id}',
+                                Controller\Api\Stations\Ads\AdvertisersController::class . ':deleteAction'
+                            );
+
+                            $group->get(
+                                '/orders',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':listAction'
+                            )->setName('api:stations:ads:orders');
+
+                            $group->post(
+                                '/orders',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':getAction'
+                            )->setName('api:stations:ads:order');
+
+                            $group->put(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':editAction'
+                            );
+
+                            $group->delete(
+                                '/order/{id}',
+                                Controller\Api\Stations\Ads\OrdersController::class . ':deleteAction'
+                            );
+                        }
+                    )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
+                        ->add(new Middleware\Permissions(StationPermissions::Media, true));
+
                     // Media Categories
                     $group->group(
                         '',
