@@ -109,6 +109,19 @@ final class AdvertisersController extends AbstractApiCrudController
         return $this->editRecord($data, $record);
     }
 
+    /**
+     * The edit screen posts the row back whole, so the read-only columns ride along
+     * (id, the order count, links). The serializer must never try to write those.
+     */
+    protected function editRecord(?array $data, ?object $record = null, array $context = []): object
+    {
+        if (null !== $data) {
+            unset($data['id'], $data['created_at'], $data['orders_count'], $data['links']);
+        }
+
+        return parent::editRecord($data, $record, $context);
+    }
+
     protected function getRecord(ServerRequest $request, array $params): ?object
     {
         $record = parent::getRecord($request, $params);
@@ -119,6 +132,18 @@ final class AdvertisersController extends AbstractApiCrudController
         }
 
         return $record;
+    }
+
+    protected function viewRecord(object $record, ServerRequest $request): mixed
+    {
+        /** @var AdAdvertiser $record */
+        $row = parent::viewRecord($record, $request);
+
+        if (is_array($row)) {
+            $row['orders_count'] = $record->orders->count();
+        }
+
+        return $row;
     }
 
     public function deleteAction(

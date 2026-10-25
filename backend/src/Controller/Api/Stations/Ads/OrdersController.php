@@ -169,6 +169,29 @@ final class OrdersController extends AbstractApiCrudController
     }
 
     /**
+     * The stored columns alone cannot tell the page who bought it or whether it is
+     * actually airing, so the row carries those answers with it.
+     */
+    protected function viewRecord(object $record, ServerRequest $request): mixed
+    {
+        /** @var AdOrder $record */
+        $row = parent::viewRecord($record, $request);
+
+        if (is_array($row)) {
+            $row['advertiser_id'] = $record->advertiser->id;
+            $row['advertiser_name'] = $record->advertiser->name;
+            $row['media_id'] = $record->media?->id;
+            $row['media_title'] = $record->getMediaTitle();
+            $row['playlist_id'] = $record->playlist?->id;
+            $row['spots_per_day_effective'] = $record->getEffectiveSpotsPerDay();
+            $row['is_on_air'] = $record->isOnAir();
+            $row['has_creative'] = $record->hasCreative();
+        }
+
+        return $row;
+    }
+
+    /**
      * Point the order at its uploaded spot. `media_id` comes from the station media library,
      * so it is checked against this station before being believed.
      */
