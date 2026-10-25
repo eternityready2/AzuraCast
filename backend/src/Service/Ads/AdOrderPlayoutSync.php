@@ -57,16 +57,28 @@ final class AdOrderPlayoutSync
         }
 
         $playlist = $order->playlist ?? $this->createPlaylist($order);
+        $spotsPerDay = $order->getEffectiveSpotsPerDay();
 
         $playlist->name = self::PLAYLIST_PREFIX . $order->name;
         $playlist->is_sponsor = true;
         $playlist->sponsor_name = $order->advertiser->name;
-        $playlist->sponsor_guaranteed_plays_per_day = $order->getEffectiveSpotsPerDay() ?: null;
+        $playlist->sponsor_guaranteed_plays_per_day = $spotsPerDay ?: null;
         $playlist->sponsor_contract_start = $order->getStartsAtDateTime();
         $playlist->sponsor_contract_end = $order->getEndsAtDateTime();
 
-        // Only an approved order inside its dates is allowed to make noise.
-        $playlist->is_enabled = $order->isOnAir();
+        // "8 a day" means 8 spread across the day, not 8 at random. Once-per-X-minutes
+        // spaces the plays evenly (8/day = one every 3 hours), and the sponsor guarantee
+        // forces catch-up plays when a live show or strict block squeezed some out.
+        $playlist->type = PlaylistTypes::OncePerXMinutes;
+        $playlist->play_per_minutes = $spotsPerDay > 0 ? max(15, intdiv(1440, $spotsPerDay)) : 0;
+
+        // Same treatment as the station's own promo playlists: jingle mode keeps the
+        // spot out of "now playing" metadata, and the top-of-hour fit logic skips
+        // jingle-mode tracks, so a paid spot is never tempo-stretched or squeezed.
+        $playlist->is_jingle = true;
+
+        // Only an approved order inside its dates, with a daily count, makes noise.
+        $playlist->is_enabled = $order->isOnAir() && $spotsPerDay > 0;
 
         $this->em->persist($playlist);
         $order->playlist = $playlist;
@@ -111,7 +123,6 @@ final class AdOrderPlayoutSync
     private function createPlaylist(AdOrder $order): StationPlaylist
     {
         $playlist = new StationPlaylist($order->station);
-        $playlist->type = PlaylistTypes::default();
         $playlist->source = PlaylistSources::Songs;
         $playlist->order = PlaylistOrders::Sequential;
         $playlist->include_in_requests = false;

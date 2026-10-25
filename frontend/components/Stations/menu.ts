@@ -16,6 +16,7 @@ import IconIcSettingsApplication from "~icons/ic/baseline-settings-applications"
 import IconIcPsychology from "~icons/ic/baseline-psychology";
 import IconBiBroadcast from "~icons/bi/broadcast";
 import IconIcSchedule from "~icons/ic/baseline-schedule";
+import IconIcAttachMoney from "~icons/ic/baseline-attach-money";
 import IconIcGraphicEq from "~icons/ic/baseline-graphic-eq";
 import IconIcCategory from "~icons/ic/baseline-category";
 import IconIcList from "~icons/ic/baseline-list";
@@ -187,13 +188,6 @@ export function useStationsMenu() {
                     },
                 },
                 {
-                    key: 'ads',
-                    label: $gettext('Advertising'),
-                    url: {
-                        name: 'stations:ads:index'
-                    },
-                },
-                {
                     key: 'clock_wheels_sub',
                     label: $gettext('Clock Wheels'),
                     url: {
@@ -223,6 +217,16 @@ export function useStationsMenu() {
                     },
                 },
             ]
+        },
+        {
+            key: 'ads',
+            label: $gettext('Advertising'),
+            icon: () => IconIcAttachMoney,
+            url: {
+                name: 'stations:ads:index'
+            },
+            visible: () => userAllowedForStation(StationPermissions.Media)
+                && station.value.features.media,
         },
         {
             key: 'podcasts',
