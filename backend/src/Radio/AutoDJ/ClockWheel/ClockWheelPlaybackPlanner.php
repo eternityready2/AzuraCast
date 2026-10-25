@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\AutoDJ\ClockWheel;
 
+use App\Entity\AdOrder;
 use App\Entity\Api\StationPlaylistQueue;
 use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Enums\ClockWheelScheduleMode;
@@ -23,6 +24,7 @@ use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
+use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeInterface;
@@ -56,6 +58,7 @@ final class ClockWheelPlaybackPlanner
         private readonly ClockWheelEventLogger $eventLogger,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly QueueBuilder $queueBuilder,
+        private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
     ) {
@@ -401,6 +404,32 @@ final class ClockWheelPlaybackPlanner
                 $secondsIntoHour,
                 $isEndOfHour,
             );
+        }
+
+        // An Ad slot with no pinned playlist serves the Advertising page's bookings:
+        // approved orders inside their dates that still have plays left today, the one
+        // furthest behind its daily count first. Pinning a playlist on the slot keeps
+        // the old meaning, and with no live bookings the slot falls through to media
+        // typed "ad", exactly as before.
+        if (
+            ClockWheelSlotTypes::Ad === $type
+            && ($playlistId === null || $playlistId <= 0)
+        ) {
+            $fromOrders = $this->resolveAdSlotFromOrders(
+                $wheel,
+                $slot,
+                $recentHistory,
+                $availableSeconds,
+                $scheduleMode,
+                $station,
+                $expectedPlayTime,
+                $secondsIntoHour,
+                $isEndOfHour,
+            );
+
+            if (null !== $fromOrders) {
+                return $fromOrders;
+            }
         }
 
         $params = ['storageLocation' => $station->media_storage_location];
@@ -778,7 +807,15 @@ final class ClockWheelPlaybackPlanner
     /**
      * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
      */
-    private function resolveSlotViaPlaylistRotation(
+    /**
+     * The spots sold on the Advertising page, offered to an Ad slot. Only approved
+     * orders inside their dates with plays still owed today are considered; anyone
+     * behind the day's pace goes first, so the guarantee holds inside wheel hours
+     * the same way it does outside them. Delegating to the rotation path keeps the
+     * play attributed to the order's playlist, which is what the pace tracker and
+     * the Sponsor Plays report both count.
+     */
+    private function resolveAdSlotFromOrders(
         StationClockWheel $wheel,
         StationClockWheelSlot $slot,
         array $recentHistory,
@@ -789,8 +826,120 @@ final class ClockWheelPlaybackPlanner
         int $secondsIntoHour,
         bool $isEndOfHour = false,
     ): ?StationQueue {
+        $now = CarbonImmutable::instance($expectedPlayTime);
+
+        /** @var AdOrder[] $orders */
+        $orders = $this->em->createQuery(
+            <<<'DQL'
+                SELECT o, p FROM App\Entity\AdOrder o
+                JOIN o.playlist p
+                WHERE o.station = :station
+                AND o.status = 'approved'
+                AND o.is_live_read = 0
+                AND o.media IS NOT NULL
+                AND p.is_enabled = 1
+                AND (o.starts_at IS NULL OR o.starts_at <= :now)
+                AND (o.ends_at IS NULL OR o.ends_at >= :now)
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('now', $now->getTimestamp())
+            ->getResult();
+
+        $orders = array_filter($orders, static fn (AdOrder $o) => $o->getEffectiveSpotsPerDay() > 0);
+
+        if ([] === $orders) {
+            return null;
+        }
+
+        // Plays each order's playlist already has today, station-local midnight onward.
+        $dayStartUtc = $now->setTimezone($station->getTimezoneObject())
+            ->startOfDay()
+            ->setTimezone(new DateTimeZone('UTC'));
+
+        $playlistIds = array_map(static fn (AdOrder $o) => $o->playlist->id, $orders);
+        $playCounts = [];
+        $countRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT IDENTITY(sh.playlist) AS pid, COUNT(sh.id) AS plays
+                FROM App\Entity\SongHistory sh
+                WHERE sh.playlist IN (:playlists)
+                AND sh.timestamp_start >= :dayStart
+                GROUP BY sh.playlist
+            DQL
+        )->setParameter('playlists', $playlistIds)
+            ->setParameter('dayStart', $dayStartUtc->getTimestamp())
+            ->getArrayResult();
+        foreach ($countRows as $row) {
+            $playCounts[(int)$row['pid']] = (int)$row['plays'];
+        }
+
+        $remaining = [];
+        foreach ($orders as $order) {
+            $left = $order->getEffectiveSpotsPerDay() - ($playCounts[$order->playlist->id] ?? 0);
+            if ($left > 0) {
+                $remaining[$order->playlist->id] = ['order' => $order, 'left' => $left];
+            }
+        }
+
+        if ([] === $remaining) {
+            // Every booking already got its day. The slot owes nobody anything, so it
+            // falls through to the station's own ad-typed media or the wheel's fallback.
+            return null;
+        }
+
+        $behindPace = [];
+        foreach ($this->sponsorGuarantee->getPlaylistsBehindPace($station, $expectedPlayTime) as $behind) {
+            $behindPace[$behind->id] = true;
+        }
+
+        $pool = array_filter($remaining, static fn (array $r, int $pid) => isset($behindPace[$pid]), ARRAY_FILTER_USE_BOTH);
+        if ([] === $pool) {
+            $pool = $remaining;
+        }
+
+        // The most owed goes first; a tie goes to whoever has aired less today.
+        uasort($pool, static function (array $a, array $b): int {
+            $aired = static fn (array $r): int => $r['order']->getEffectiveSpotsPerDay() - $r['left'];
+
+            return [$b['left'], $aired($a)] <=> [$a['left'], $aired($b)];
+        });
+
+        foreach ($pool as $entry) {
+            $row = $this->resolveSlotViaPlaylistRotation(
+                $wheel,
+                $slot,
+                $recentHistory,
+                $availableSeconds,
+                $scheduleMode,
+                $station,
+                $expectedPlayTime,
+                $secondsIntoHour,
+                $isEndOfHour,
+                $entry['order']->playlist,
+            );
+
+            if (null !== $row) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveSlotViaPlaylistRotation(
+        StationClockWheel $wheel,
+        StationClockWheelSlot $slot,
+        array $recentHistory,
+        int $availableSeconds,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        int $secondsIntoHour,
+        bool $isEndOfHour = false,
+        ?StationPlaylist $playlistOverride = null,
+    ): ?StationQueue {
         $type = $slot->type;
-        $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
+        $playlist = $playlistOverride ?? $this->em->find(StationPlaylist::class, $slot->playlist_id);
         if (!$playlist instanceof StationPlaylist || $playlist->station->id !== $station->id) {
             $this->eventLogger->recordFallback(
                 $station,
@@ -825,7 +974,9 @@ final class ClockWheelPlaybackPlanner
                 continue;
             }
 
-            if ($type !== null && $media->type !== $type->value) {
+            // An override playlist comes from an ad order, which already vouches for the
+            // file; order spots are stored as ordinary music, so the type gate stands down.
+            if (null === $playlistOverride && $type !== null && $media->type !== $type->value) {
                 $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
                 continue;
             }
