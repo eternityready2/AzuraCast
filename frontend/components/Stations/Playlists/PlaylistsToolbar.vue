@@ -4,202 +4,204 @@
         role="toolbar"
         :aria-label="$gettext('Playlist tools')"
     >
-        <div class="playlists-toolbar-heading">
-            <div
-                class="playlists-toolbar-selection"
-                :class="{'is-active': selected.length > 0}"
-            >
-                <icon-ic-check-box class="playlists-toolbar-selection-icon" />
-                <span v-if="selected.length > 0">
-                    {{ $gettext('%{count} selected', {count: String(selected.length)}) }}
-                </span>
-                <span v-else>
-                    {{ $gettext('Tick playlists to use these tools') }}
-                </span>
-            </div>
-        </div>
-
-        <div class="playlists-toolbar-sections">
-            <div
-                v-if="canStartOnAir"
-                class="playlists-toolbar-section playlists-toolbar-onair"
-            >
-                <span class="playlists-toolbar-label">
-                    {{ $gettext('On Air') }}
-                </span>
-                <div class="playlists-toolbar-controls">
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-primary"
-                        :disabled="!onAirPlaylist || busy"
-                        :title="$gettext('Stop the current song and start this playlist now. Tick one enabled song-based playlist.')"
-                        @click="startOnAir('play_now')"
-                    >
-                        <icon-ic-play-arrow />
-                        <span>{{ $gettext('Play Now') }}</span>
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!onAirPlaylist || busy"
-                        :title="$gettext('Play this whole playlist right after the current song. Tick one enabled song-based playlist.')"
-                        @click="startOnAir('queue_next')"
-                    >
-                        <icon-ic-queue-play-next />
-                        <span>{{ $gettext('Queue Next') }}</span>
-                    </button>
+        <div class="playlists-toolbar-rows">
+            <div class="playlists-toolbar-row">
+                <div
+                    class="playlists-toolbar-selection"
+                    :class="{'is-active': selected.length > 0}"
+                >
+                    <icon-ic-check-box class="playlists-toolbar-selection-icon" />
+                    <span v-if="selected.length > 0">
+                        {{ $gettext('%{count} selected', {count: String(selected.length)}) }}
+                    </span>
+                    <span v-else>
+                        {{ $gettext('Tick playlists to use these tools') }}
+                    </span>
                 </div>
-            </div>
 
-            <div class="playlists-toolbar-section">
-                <span class="playlists-toolbar-label">
-                    {{ $gettext('Playlist') }}
-                </span>
-                <div class="playlists-toolbar-controls">
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-success"
-                        :disabled="toEnable.length === 0 || busy"
-                        :title="$gettext('Turn the ticked playlists on.')"
-                        @click="toggleAll(toEnable, true)"
-                    >
-                        {{ $gettext('Enable') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-warning"
-                        :disabled="toDisable.length === 0 || busy"
-                        :title="$gettext('Turn the ticked playlists off.')"
-                        @click="toggleAll(toDisable, false)"
-                    >
-                        {{ $gettext('Disable') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="toReshuffle.length === 0 || busy"
-                        :title="$gettext('Shuffle the play order of the ticked playlists again.')"
-                        @click="reshuffleAll"
-                    >
-                        {{ $gettext('Reshuffle') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!single || busy"
-                        :title="$gettext('Make a copy of the ticked playlist. Tick one playlist.')"
-                        @click="single && emit('clone', single)"
-                    >
-                        {{ $gettext('Duplicate') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-danger"
-                        :disabled="toEmpty.length === 0 || busy"
-                        :title="$gettext('Remove all songs from the ticked playlists. The song files stay in the library.')"
-                        @click="emptyAll"
-                    >
-                        {{ $gettext('Empty') }}
-                    </button>
-                </div>
-            </div>
-
-            <div class="playlists-toolbar-section">
-                <span class="playlists-toolbar-label">
-                    {{ $gettext('Songs & Order') }}
-                </span>
-                <div class="playlists-toolbar-controls">
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!canReorder || busy"
-                        :title="$gettext('Set the play order of a sequential playlist. Tick one playlist.')"
-                        @click="single && emit('reorder', single)"
-                    >
-                        {{ $gettext('Reorder') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!single?.links.queue || busy"
-                        :title="$gettext('See the order AutoDJ will play this playlist\'s songs. Tick one playlist.')"
-                        @click="single && emit('queue', single)"
-                    >
-                        {{ $gettext('Playback Queue') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!single?.links.import || busy"
-                        :title="$gettext('Add songs to this playlist from a PLS or M3U file. Tick one playlist.')"
-                        @click="single && emit('import', single)"
-                    >
-                        {{ $gettext('Import from PLS/M3U') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="!single?.links.applyto || busy"
-                        :title="$gettext('Add this playlist to media folders. Tick one playlist.')"
-                        @click="single && emit('apply-to', single)"
-                    >
-                        {{ $gettext('Apply to Folders') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        :disabled="single?.source !== 'playlists' || busy"
-                        :title="$gettext('Open Playlist Grouping. Tick one playlist group.')"
-                        @click="emit('grouping')"
-                    >
-                        {{ $gettext('Playlist Grouping') }}
-                    </button>
-                </div>
-            </div>
-
-            <div class="playlists-toolbar-section">
-                <span class="playlists-toolbar-label">
-                    {{ $gettext('Export') }}
-                </span>
-                <div class="playlists-toolbar-controls">
-                    <div class="dropdown">
+                <div
+                    v-if="canStartOnAir"
+                    class="playlists-toolbar-section"
+                >
+                    <span class="playlists-toolbar-label">
+                        {{ $gettext('On Air') }}
+                    </span>
+                    <div class="playlists-toolbar-controls">
                         <button
-                            class="btn btn-sm btn-secondary dropdown-toggle"
                             type="button"
-                            data-bs-toggle="dropdown"
-                            aria-expanded="false"
-                            :disabled="!single"
-                            :title="$gettext('Download the ticked playlist. Tick one playlist.')"
+                            class="btn btn-sm btn-primary"
+                            :disabled="!onAirPlaylist || busy"
+                            :title="$gettext('Stop the current song and start this playlist now. Tick one enabled song-based playlist.')"
+                            @click="startOnAir('play_now')"
                         >
-                            <icon-bi-cloud-download />
-                            <span>{{ $gettext('Export') }}</span>
+                            <icon-ic-play-arrow />
+                            <span>{{ $gettext('Play Now') }}</span>
                         </button>
-                        <!-- The menu stays mounted: Bootstrap keeps a reference to it. -->
-                        <ul class="dropdown-menu">
-                            <template v-if="single && single.source !== 'playlists'">
-                                <li
-                                    v-for="format in ['pls', 'm3u']"
-                                    :key="format"
-                                >
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!onAirPlaylist || busy"
+                            :title="$gettext('Play this whole playlist right after the current song. Tick one enabled song-based playlist.')"
+                            @click="startOnAir('queue_next')"
+                        >
+                            <icon-ic-queue-play-next />
+                            <span>{{ $gettext('Queue Next') }}</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="playlists-toolbar-section">
+                    <span class="playlists-toolbar-label">
+                        {{ $gettext('Playlist') }}
+                    </span>
+                    <div class="playlists-toolbar-controls">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-success"
+                            :disabled="toEnable.length === 0 || busy"
+                            :title="$gettext('Turn the ticked playlists on.')"
+                            @click="toggleAll(toEnable, true)"
+                        >
+                            {{ $gettext('Enable') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-warning"
+                            :disabled="toDisable.length === 0 || busy"
+                            :title="$gettext('Turn the ticked playlists off.')"
+                            @click="toggleAll(toDisable, false)"
+                        >
+                            {{ $gettext('Disable') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="toReshuffle.length === 0 || busy"
+                            :title="$gettext('Shuffle the play order of the ticked playlists again.')"
+                            @click="reshuffleAll"
+                        >
+                            {{ $gettext('Reshuffle') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!single || busy"
+                            :title="$gettext('Make a copy of the ticked playlist. Tick one playlist.')"
+                            @click="single && emit('clone', single)"
+                        >
+                            {{ $gettext('Duplicate') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-danger"
+                            :disabled="toEmpty.length === 0 || busy"
+                            :title="$gettext('Remove all songs from the ticked playlists. The song files stay in the library.')"
+                            @click="emptyAll"
+                        >
+                            {{ $gettext('Empty') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="playlists-toolbar-row">
+                <div class="playlists-toolbar-section">
+                    <span class="playlists-toolbar-label">
+                        {{ $gettext('Songs & Order') }}
+                    </span>
+                    <div class="playlists-toolbar-controls">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!canReorder || busy"
+                            :title="$gettext('Set the play order of a sequential playlist. Tick one playlist.')"
+                            @click="single && emit('reorder', single)"
+                        >
+                            {{ $gettext('Reorder') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!single?.links.queue || busy"
+                            :title="$gettext('See the order AutoDJ will play this playlist\'s songs. Tick one playlist.')"
+                            @click="single && emit('queue', single)"
+                        >
+                            {{ $gettext('Playback Queue') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!single?.links.import || busy"
+                            :title="$gettext('Add songs to this playlist from a PLS or M3U file. Tick one playlist.')"
+                            @click="single && emit('import', single)"
+                        >
+                            {{ $gettext('Import from PLS/M3U') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="!single?.links.applyto || busy"
+                            :title="$gettext('Add this playlist to media folders. Tick one playlist.')"
+                            @click="single && emit('apply-to', single)"
+                        >
+                            {{ $gettext('Apply to Folders') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            :disabled="single?.source !== 'playlists' || busy"
+                            :title="$gettext('Open Playlist Grouping. Tick one playlist group.')"
+                            @click="emit('grouping')"
+                        >
+                            {{ $gettext('Playlist Grouping') }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="playlists-toolbar-section">
+                    <span class="playlists-toolbar-label">
+                        {{ $gettext('Export') }}
+                    </span>
+                    <div class="playlists-toolbar-controls">
+                        <div class="dropdown">
+                            <button
+                                class="btn btn-sm btn-secondary dropdown-toggle"
+                                type="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                                :disabled="!single"
+                                :title="$gettext('Download the ticked playlist. Tick one playlist.')"
+                            >
+                                <icon-bi-cloud-download />
+                                <span>{{ $gettext('Export') }}</span>
+                            </button>
+                            <!-- The menu stays mounted: Bootstrap keeps a reference to it. -->
+                            <ul class="dropdown-menu">
+                                <template v-if="single && single.source !== 'playlists'">
+                                    <li
+                                        v-for="format in ['pls', 'm3u']"
+                                        :key="format"
+                                    >
+                                        <a
+                                            class="dropdown-item"
+                                            :href="single.links.export[format]"
+                                            target="_blank"
+                                        >
+                                            {{ $gettext('Export %{format}', {format: format.toUpperCase()}) }}
+                                        </a>
+                                    </li>
+                                </template>
+                                <li v-if="single">
                                     <a
                                         class="dropdown-item"
-                                        :href="single.links.export[format]"
+                                        :href="exportConfigUrl(single.id)"
                                         target="_blank"
                                     >
-                                        {{ $gettext('Export %{format}', {format: format.toUpperCase()}) }}
+                                        {{ $gettext('Export JSON') }}
                                     </a>
                                 </li>
-                            </template>
-                            <li v-if="single">
-                                <a
-                                    class="dropdown-item"
-                                    :href="exportConfigUrl(single.id)"
-                                    target="_blank"
-                                >
-                                    {{ $gettext('Export JSON') }}
-                                </a>
-                            </li>
-                        </ul>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -395,42 +397,35 @@ const startOnAir = async (mode: 'play_now' | 'queue_next') => {
 </script>
 
 <style lang="scss" scoped>
-// Same look as the Media page toolbar.
+// Neutral gray panel with the same 1px border and corners as the search box.
+// The panel hugs its tools (no empty space on the right) and sits centered.
 .playlists-toolbar {
-    margin: 0 1rem 1rem;
-    padding: 0.75rem;
-    border-radius: 1.1rem;
-    background:
-        linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.14), transparent 42%),
-        var(--bs-secondary-bg);
-    box-shadow:
-        0 1rem 2.5rem rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.045);
-}
-
-.playlists-toolbar-heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0 0.2rem 0.65rem;
+    width: fit-content;
+    max-width: calc(100% - 2rem);
+    margin: 0 auto 0.75rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-tertiary-bg);
 }
 
 .playlists-toolbar-selection {
     display: inline-flex;
+    align-self: center;
     align-items: center;
     gap: 0.4rem;
-    min-height: 2rem;
-    padding: 0 0.75rem;
-    border-radius: 999px;
-    background: var(--bs-tertiary-bg);
+    min-height: 1.75rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
     color: var(--bs-secondary-color);
-    font-size: 0.8rem;
+    font-size: 0.76rem;
     font-weight: 600;
     white-space: nowrap;
 
     &.is-active {
-        background: rgba(var(--bs-primary-rgb), 0.14);
+        border-color: var(--bs-primary);
         color: var(--bs-primary-text-emphasis);
     }
 }
@@ -442,79 +437,77 @@ const startOnAir = async (mode: 'play_now' | 'queue_next') => {
 .playlists-toolbar-label {
     display: block;
     color: var(--bs-secondary-color);
-    font-size: 0.69rem;
+    font-size: 0.64rem;
     font-weight: 700;
     letter-spacing: 0.075em;
     text-transform: uppercase;
 }
 
-.playlists-toolbar-sections {
+// Two fixed rows: the panel is as wide as the longer row, so no empty
+// space is left on the sides (a wrapping row would stretch it full width).
+.playlists-toolbar-rows {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.playlists-toolbar-row {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: 1.25rem;
 }
 
 .playlists-toolbar-section {
     flex: 0 1 auto;
     min-width: 0;
-    padding: 0.65rem 0.75rem 0.75rem;
-    border-radius: 0.85rem;
-    background: var(--bs-body-bg);
-    box-shadow:
-        0 0.3rem 0.9rem rgba(0, 0, 0, 0.09),
-        inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    // Groups have no box of their own: the labels and spacing separate them.
+    padding: 0.15rem 0.1rem;
 
     > .playlists-toolbar-label {
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.3rem;
     }
-}
-
-.playlists-toolbar-onair {
-    background:
-        linear-gradient(120deg, rgba(var(--bs-primary-rgb), 0.08), transparent 55%),
-        var(--bs-body-bg);
 }
 
 .playlists-toolbar-controls {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.35rem;
 }
 
 .playlists-toolbar .btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    min-height: 2.15rem;
-    border-radius: 0.58rem;
+    gap: 0.25rem;
+    min-height: 1.85rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: var(--bs-border-radius);
     font-weight: 600;
     letter-spacing: 0.01em;
-    box-shadow: 0 0.22rem 0.55rem rgba(0, 0, 0, 0.11);
-    transition:
-        transform 120ms ease,
-        box-shadow 120ms ease,
-        filter 120ms ease;
-}
-
-.playlists-toolbar .btn:not(:disabled):hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0.4rem 0.9rem rgba(0, 0, 0, 0.14);
-    filter: brightness(1.035);
 }
 
 // Disabled buttons still show their hover hint ("Tick one playlist")
 // but cannot be clicked: the native disabled attribute blocks clicks.
 .playlists-toolbar .btn:disabled {
-    box-shadow: none;
     pointer-events: auto;
     cursor: not-allowed;
 }
 
+// Narrower screens: let a row wrap rather than push the page sideways.
+@media (max-width: 1199.98px) {
+    .playlists-toolbar-row {
+        flex-wrap: wrap;
+    }
+}
+
 @media (max-width: 767.98px) {
     .playlists-toolbar {
-        margin: 0 0.5rem 1rem;
-        padding: 0.5rem;
+        width: auto;
+        max-width: none;
+        margin: 0 0.5rem 0.75rem;
+        padding: 0.4rem;
     }
 
     .playlists-toolbar-section {
