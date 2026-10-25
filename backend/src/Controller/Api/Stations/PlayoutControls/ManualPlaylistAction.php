@@ -11,7 +11,6 @@ use App\Entity\Enums\PlaylistSources;
 use App\Entity\Repository\StationPlaylistMediaRepository;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
-use App\Entity\StationSchedule;
 use App\Event\Radio\AnnotateNextSong;
 use App\Exception\ValidationException;
 use App\Http\Response;
@@ -19,7 +18,6 @@ use App\Http\ServerRequest;
 use App\Radio\Adapters;
 use App\Radio\Backend\Liquidsoap;
 use App\Radio\Enums\LiquidsoapQueues;
-use Carbon\CarbonImmutable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -59,10 +57,6 @@ final class ManualPlaylistAction implements SingleActionInterface
             throw new ValidationException(__('Manual playlist start currently supports song-based playlists only.'));
         }
 
-        if ('schedule_once' === $mode) {
-            return $this->scheduleOnce($response, $playlist, $body);
-        }
-
         if (!in_array($mode, ['queue_next', 'play_now'], true)) {
             throw new ValidationException(__('Invalid manual playlist action.'));
         }
@@ -75,7 +69,7 @@ final class ManualPlaylistAction implements SingleActionInterface
         if (count($queue) > self::MAX_MANUAL_TRACKS) {
             throw new ValidationException(
                 sprintf(
-                    __('This playlist has more than %d tracks. Use a scheduled one-time start for very large playlists.'),
+                    __('This playlist has more than %d tracks, too many to queue at once. Schedule it from the playlist\'s Schedule tab instead.'),
                     self::MAX_MANUAL_TRACKS
                 )
             );
@@ -118,68 +112,6 @@ final class ManualPlaylistAction implements SingleActionInterface
                 'play_now' === $mode
                     ? sprintf(__('Playlist started now with %d queued track(s).'), $queued)
                     : sprintf(__('Playlist queued next with %d track(s).'), $queued)
-            )
-        );
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function scheduleOnce(
-        Response $response,
-        StationPlaylist $playlist,
-        array $body
-    ): ResponseInterface {
-        $startAt = trim((string)($body['start_at'] ?? ''));
-        if ('' === $startAt) {
-            throw new ValidationException(__('A start date and time are required.'));
-        }
-
-        $durationMinutes = (int)($body['duration_minutes'] ?? 60);
-        if ($durationMinutes < 1 || $durationMinutes > 1440) {
-            throw new ValidationException(__('One-time playlist duration must be between 1 and 1440 minutes.'));
-        }
-
-        $timezone = $playlist->station->getTimezoneObject();
-        try {
-            $start = CarbonImmutable::parse($startAt, $timezone);
-        } catch (\Throwable) {
-            throw new ValidationException(__('The one-time playlist start date/time is invalid.'));
-        }
-
-        if ($start->lessThanOrEqualTo(CarbonImmutable::now($timezone))) {
-            throw new ValidationException(__('The one-time playlist start must be in the future.'));
-        }
-
-        $end = $start->addMinutes($durationMinutes);
-
-        $schedule = new StationSchedule($playlist);
-        $schedule->start_time = (int)$start->format('Hi');
-        $schedule->end_time = (int)$end->format('Hi');
-        $schedule->start_date = $start->format('Y-m-d');
-        $schedule->end_date = $end->format('Y-m-d');
-        $schedule->days = [];
-        $schedule->loop_once = true;
-        $schedule->strict_start = (bool)($body['strict_start'] ?? true);
-
-        $this->em->persist($schedule);
-
-        $station = $playlist->station;
-        if ($station->backend_config->use_manual_autodj) {
-            $station->needs_restart = true;
-            $this->em->persist($station);
-        }
-
-        $this->em->flush();
-
-        return $response->withJson(
-            new Status(
-                true,
-                sprintf(
-                    __('Playlist scheduled once for %s (%d minutes).'),
-                    $start->format('Y-m-d H:i'),
-                    $durationMinutes
-                )
             )
         );
     }

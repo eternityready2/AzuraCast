@@ -39,13 +39,6 @@ return static function (RouteCollectorProxy $group): void {
                 ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
                 ->add(Middleware\RequireLogin::class);
 
-            $group->post(
-                '/features/playout/stop-current',
-                Controller\Api\Stations\PlayoutControls\StopCurrentAction::class
-            )->setName('api:stations:playout:stop-current')
-                ->add(new Middleware\Permissions(StationPermissions::Broadcasting, true))
-                ->add(Middleware\RequireLogin::class);
-
             $group->get(
                 '/diagnostics',
                 Controller\Api\Stations\Diagnostics\ViewAction::class

@@ -57,12 +57,26 @@
                             </div>
                         </div>
 
+                        <playlists-toolbar
+                            :selected="selectedPlaylists"
+                            :refresh="refreshAll"
+                            @needs-restart="mayNeedRestart"
+                            @clone="(p) => doClone(p.name, p.links.clone, p.source === 'playlists')"
+                            @reorder="(p) => p.links.order ? doReorder(p.links.order) : doGroupReorder(p.links.members!)"
+                            @queue="(p) => doQueue(p.links.queue!)"
+                            @import="(p) => doImport(p.links.import!)"
+                            @apply-to="(p) => doApplyTo(p.links.applyto!)"
+                            @grouping="activeTab = 'playlist_grouping'"
+                        />
+
                         <data-table
                             id="station_playlists"
                             paginated
+                            selectable
                             :fields="fields"
                             :provider="listItemProvider"
                             detailed
+                            @row-selected="onRowSelected"
                         >
                             <template #cell(name)="row">
                                 <h5 class="m-0">
@@ -359,7 +373,7 @@
 
 <script setup lang="ts">
 import {toRefs} from "@vueuse/core";
-import {ref, useTemplateRef} from "vue";
+import {ref, shallowRef, useTemplateRef} from "vue";
 import {useRouter} from "vue-router";
 import {EventImpl} from "@fullcalendar/core/internal";
 import AddButton from "~/components/Common/AddButton.vue";
@@ -378,8 +392,10 @@ import PlaylistGroupingTab from "~/components/Stations/Playlists/PlaylistGroupin
 import PlaylistGroupReorderModal from "~/components/Stations/Playlists/PlaylistGroupReorderModal.vue";
 import QueueModal from "~/components/Stations/Playlists/QueueModal.vue";
 import ReorderModal from "~/components/Stations/Playlists/ReorderModal.vue";
+import PlaylistsToolbar, {ToolbarPlaylist} from "~/components/Stations/Playlists/PlaylistsToolbar.vue";
 import {QueryKeys, queryKeyWithStation} from "~/entities/Queries.ts";
 import {useApiItemProvider} from "~/functions/dataTable/useApiItemProvider.ts";
+import {DataTableRow} from "~/functions/useHasDatatable.ts";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
 import useConfirmAndDelete from "~/functions/useConfirmAndDelete";
 import {useMayNeedRestart} from "~/functions/useMayNeedRestart";
@@ -426,11 +442,20 @@ const formatLength = (length: number) => {
     return Duration.fromMillis(length * 1000).rescale().toHuman();
 };
 
+const selectedPlaylists = shallowRef<ToolbarPlaylist[]>([]);
+const onRowSelected = (rows: DataTableRow[]) => {
+    selectedPlaylists.value = rows as ToolbarPlaylist[];
+};
+
 const $scheduleTab = useTemplateRef('$scheduleTab');
 
-const relist = () => {
-    void listItemProvider.refresh();
+const refreshAll = async () => {
     $scheduleTab.value?.refresh();
+    await listItemProvider.refresh();
+};
+
+const relist = () => {
+    void refreshAll();
 };
 
 const doCreate = () => router.push({name: 'stations:playlists:new'});
