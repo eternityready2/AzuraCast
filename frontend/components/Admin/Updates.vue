@@ -206,7 +206,8 @@ const langReleaseChannel = computed(() => {
 });
 
 const needsUpdates = computed(() => {
-    const updateInfo = props.value?.initialUpdateInfo ?? updates.value ?? {};
+    // A check run on this page is newer than what the page loaded with.
+    const updateInfo = updates.value ?? props.value?.initialUpdateInfo ?? {};
 
     if (props.value?.releaseChannel === 'stable') {
         return updateInfo?.needs_release_update ?? false;
