@@ -6,6 +6,11 @@ intro and post-song templates, Bible verses, jokes, encouragement,
 inspiration, testimonies and stories. A category is filled once, only while
 the station has nothing of its own in it.
 
+A station that still has the King James Bible older versions loaded, exactly
+as loaded, gets the World English Bible in its place
+(`AiDjDefaultContent::replaceLegacyBible()`); one with any verse changed keeps
+its own.
+
 Format: `{"version": 1, "types": {"<type>": [{"content": "...",
 "reference": "...", "is_global": false}]}}`; `reference` is optional and
 `is_global` defaults to true.
