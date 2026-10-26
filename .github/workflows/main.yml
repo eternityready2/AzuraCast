@@ -1,6 +1,11 @@
 name: Build Custom AzuraCast
 on:
   workflow_dispatch:
+    inputs:
+      multiarch_test:
+        description: 'Run the release (amd64 + arm64) build, but publish only to :multiarch-test (no release, :stable untouched)'
+        type: boolean
+        default: false
   push:
     branches: [ main, dev ]
     tags: [ 'v*' ]
@@ -9,9 +14,55 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE: ghcr.io/eternityready2/azuracast_custom
+
 jobs:
+  # main (:latest) and dev (:rolling) are amd64-only for fast builds.
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.multiarch_test }}
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Version File
+        run: echo "$(git rev-parse --short HEAD)" > .version
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and Push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          target: final
+          tags: ${{ env.IMAGE }}:${{ github.ref_name == 'main' && 'latest' || github.ref_name == 'dev' && 'rolling' || github.ref_name }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+  # v* release tags publish :vX.Y.Z and :stable for amd64 and arm64, so ARM64
+  # hosts (e.g. Oracle Ampere A1) pulling :stable get a multi-arch image. Each
+  # architecture builds at the same time on its own native runner -- arm64 under
+  # QEMU emulation took about an hour -- and merge-release joins the two.
+  # arm64 keeps its own cache: the amd64 main/dev builds overwrite :buildcache.
+  build-release:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.multiarch_test }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            cache: buildcache
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            cache: buildcache-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Create Version File
@@ -21,10 +72,6 @@ jobs:
           else
             echo "$(git rev-parse --short HEAD)" > .version
           fi
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
@@ -33,19 +80,56 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Only v* release tags build arm64 (emulated arm64 takes ~1 hour) and only
-      # they publish :stable, so ARM64 hosts (e.g. Oracle Ampere A1) pulling
-      # :stable always get a multi-arch image. main (:latest) and dev
-      # (:rolling) are amd64-only for fast builds.
-      - name: Build and Push (multi-arch)
+      - name: Build and Push by digest (${{ matrix.platform }})
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: ${{ matrix.platform }}
           target: final
-          tags: |
-            ghcr.io/eternityready2/azuracast_custom:${{ github.ref_name == 'main' && 'latest' || github.ref_name == 'dev' && 'rolling' || github.ref_name }}
-            ${{ startsWith(github.ref, 'refs/tags/') && 'ghcr.io/eternityready2/azuracast_custom:stable' || '' }}
-          cache-from: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache
-          cache-to: type=registry,ref=ghcr.io/eternityready2/azuracast_custom:buildcache,mode=max
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:${{ matrix.cache }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:${{ matrix.cache }},mode=max
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.runner }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-release:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.multiarch_test }}
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            tags="-t ${IMAGE}:${{ github.ref_name }} -t ${IMAGE}:stable"
+          else
+            tags="-t ${IMAGE}:multiarch-test"
+          fi
+          docker buildx imagetools create $tags $(printf "${IMAGE}@sha256:%s " *)
+      - name: Inspect
+        run: docker buildx imagetools inspect "${IMAGE}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'multiarch-test' }}"
