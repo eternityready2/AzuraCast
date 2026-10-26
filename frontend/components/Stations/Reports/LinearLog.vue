@@ -199,7 +199,7 @@
                             {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
                         </div>
                         <div class="small mt-1">
-                            {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced up to five minutes (never past the top of the hour) and kept calculating instead of silently truncating the day.') }}
+                            {{ $gettext('Nothing is planned for these minutes. Usually a show\'s audio is shorter than its time slot, or nothing is allowed to play there. Check the setup problems above; they often fix it.') }}
                         </div>
                     </div>
 
@@ -224,7 +224,7 @@
                             </li>
                         </ul>
                         <div v-if="gapsAhead.some((gap) => gap.projected)" class="small">
-                            {{ $gettext('A projected gap is more than three hours away. The log is still topped up and re-timed before then, so it may close by itself.') }}
+                            {{ $gettext('Gaps marked PROJECTED are more than 3 hours away and often close by themselves before then.') }}
                         </div>
                     </div>
 
