@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Doctrine;
 
 use App\Container\EntityManagerAwareTrait;
+use App\Entity\Interfaces\IdentifiableEntityInterface;
 use App\Exception\NotFoundException;
 use Closure;
 use DI\Attribute\Inject;
+use Doctrine\ORM\Query;
 use Doctrine\Persistence\ObjectRepository;
 
 /**
@@ -20,22 +22,24 @@ class Repository
     /** @var class-string<TEntity> */
     protected string $entityClass;
 
-    /** @var ObjectRepository<TEntity> */
-    protected ObjectRepository $repository;
-
     #[Inject]
     public function setEntityManager(ReloadableEntityManagerInterface $em): void
     {
         $this->em = $em;
-        $this->repository = $em->getRepository($this->entityClass);
     }
 
     /**
+     * Resolved on every call. Stored once, it stayed bound to the EntityManager
+     * that existed at injection; after open() replaced a closed one, lookups
+     * still returned entities from the dead manager, and the next flush failed
+     * with "A new entity was found through the relationship
+     * ClockWheelEvent#station" (Linear Log build retry).
+     *
      * @return ObjectRepository<TEntity>
      */
     public function getRepository(): ObjectRepository
     {
-        return $this->repository;
+        return $this->em->getRepository($this->entityClass);
     }
 
     public function getEntityManager(): ReloadableEntityManagerInterface
@@ -61,6 +65,40 @@ class Repository
             throw NotFoundException::generic();
         }
         return $record;
+    }
+
+    /**
+     * Re-hydrates managed entities in the Doctrine identity map after bulk DQL updates.
+     *
+     * @template T of IdentifiableEntityInterface
+     *
+     * @param class-string<T> $entityClass
+     * @param callable(T): bool $matcher
+     */
+    protected function resyncManagedEntities(string $entityClass, callable $matcher): void
+    {
+        $unitOfWork = $this->em->getUnitOfWork();
+        $staleIds = [];
+
+        /** @var T $entity */
+        foreach ($unitOfWork->getIdentityMap()[$entityClass] ?? [] as $entity) {
+            if (!$unitOfWork->isUninitializedObject($entity) && $matcher($entity)) {
+                $staleIds[] = $entity->id;
+            }
+        }
+
+        if ([] === $staleIds) {
+            return;
+        }
+
+        $this->em->createQueryBuilder()
+            ->select('e')
+            ->from($entityClass, 'e')
+            ->where('e.id IN (:ids)')
+            ->setParameter('ids', $staleIds)
+            ->getQuery()
+            ->setHint(Query::HINT_REFRESH, true)
+            ->execute();
     }
 
     /**

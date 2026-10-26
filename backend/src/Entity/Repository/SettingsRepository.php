@@ -29,13 +29,13 @@ final class SettingsRepository extends Repository
         static $settingsId = null;
 
         if (null !== $settingsId) {
-            $settings = $this->repository->find($settingsId);
+            $settings = $this->getRepository()->find($settingsId);
             if ($settings instanceof Settings) {
                 return $settings;
             }
         }
 
-        $settings = $this->repository->findOneBy([]);
+        $settings = $this->getRepository()->findOneBy([]);
 
         if (!($settings instanceof Settings)) {
             $settings = new Settings();

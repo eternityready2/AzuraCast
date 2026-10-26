@@ -58,16 +58,16 @@ final class TestAction implements SingleActionInterface
         $station = $request->getStation();
         $djId = (int)($params['dj_id'] ?? 0);
 
-        $dj = $this->aiDjRepository->find($djId);
+        $dj = $this->aiDjRepository->findForStation($djId, $station->id);
 
-        if (null === $dj || $dj->getStationId() !== $station->id) {
+        if (null === $dj) {
             return $response->withStatus(404)->withJson([
                 'error' => 'AI DJ not found.',
             ]);
         }
 
-        // Use the real current/just-played song so the test reflects live
-        // behavior instead of a generic "this song by this artist" placeholder.
+        // Use the real current/just-played song so the test reflects live behavior
+        // instead of a generic "this song by this artist" placeholder.
         $current = $this->getCurrentPlayingSong($station);
         $clipPath = $this->aiDjGenerator->generateSongIntro(
             $dj,

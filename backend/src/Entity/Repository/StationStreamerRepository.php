@@ -75,7 +75,7 @@ final class StationStreamerRepository extends AbstractStationBasedRepository
         }
 
         /** @var StationStreamer|null $streamer */
-        $streamer = $this->repository->findOneBy($criteria);
+        $streamer = $this->getRepository()->findOneBy($criteria);
 
         return $streamer;
     }

@@ -4,6 +4,7 @@ import {glob} from "glob";
 import {resolve} from "path";
 import eslintPlugin from "@nabla/vite-plugin-eslint";
 import Icons from 'unplugin-icons/vite';
+import pageSearchIndex from './frontend/pageSearchIndex.mjs';
 
 const inputs = {};
 
@@ -136,5 +137,6 @@ export default defineConfig({
             },
         }),
         eslintPlugin(),
+        pageSearchIndex(frontendBaseDir),
     ],
 })

@@ -1,0 +1,6 @@
+actor: null
+suite_namespace: \PureUnit
+modules:
+  enabled: []
+
+error_level: "E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED"

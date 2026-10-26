@@ -12,6 +12,8 @@ use App\Entity\Repository\ListenerRepository;
 use App\Entity\Song;
 use App\Entity\Station;
 use App\Entity\ApiGenerator\SongApiGenerator;
+use App\Entity\StationClockWheel;
+use App\Radio\AutoDJ\ClockWheel\ClockWheelAnalyticsService;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Utilities\DateRange;
 use Carbon\CarbonImmutable;
@@ -27,6 +29,7 @@ final class StationReportsAnalyticsService
         private readonly ListenerRepository $listenerRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly SongApiGenerator $songApiGenerator,
+        private readonly ClockWheelAnalyticsService $wheelAnalytics,
     ) {
     }
 
@@ -147,6 +150,49 @@ final class StationReportsAnalyticsService
             $tolerance,
         );
 
+        // Scorecard columns per wheel, from the same analytics as the wheel's
+        // own How it aired tab, plus how much of what it put in the Linear Log
+        // aired as planned.
+        $days = max(1, (int)ceil(($dateRange->end->getTimestamp() - $since->getTimestamp()) / 86400));
+        foreach ($byWheel as &$row) {
+            $wheelId = $row['wheel_id'] ?? null;
+            $wheel = null !== $wheelId ? $this->em->find(StationClockWheel::class, (int)$wheelId) : null;
+            if (!$wheel instanceof StationClockWheel) {
+                continue;
+            }
+
+            $a = $this->wheelAnalytics->getForWheel($wheel, $days);
+            $row['avg_drift'] = $a->avg_drift_seconds;
+            $row['legal_id_compliance_percent'] = $a->legal_id_compliance_percent;
+            $row['effectiveness_score'] = $a->effectiveness_score;
+            $row['effectiveness_grade'] = $a->effectiveness_grade;
+            $row['avg_listeners'] = $a->avg_listeners;
+            $reasons = $a->fallback_reasons;
+            arsort($reasons);
+            $row['top_fallback_reason'] = array_key_first($reasons);
+
+            $log = $this->em->getConnection()->fetchAssociative(
+                'SELECT COUNT(DISTINCT FLOOR(planned_at / 3600)) AS hours,
+                    SUM(status = ? AND (note IS NULL OR note NOT LIKE ?)) AS as_planned,
+                    SUM(status IN (?, ?, ?) AND (note IS NULL OR note NOT LIKE ?)) AS planned
+                FROM station_log_entries
+                WHERE station_id = ? AND planned_at >= ? AND planned_at < ?
+                AND JSON_VALUE(payload, ?) = ?',
+                [
+                    'aired', 'Live:%',
+                    'aired', 'swapped', 'replaced', 'Live:%',
+                    $station->id, $since->getTimestamp(), min(time(), $dateRange->end->getTimestamp()),
+                    '$.clock_wheel_id', (string)$wheel->id,
+                ]
+            ) ?: [];
+            $planned = (int)($log['planned'] ?? 0);
+            $row['hours_aired'] = (int)($log['hours'] ?? 0);
+            $row['log_compliance_percent'] = $planned > 0
+                ? round(100 * (int)$log['as_planned'] / $planned, 1)
+                : null;
+        }
+        unset($row);
+
         return [
             'summary' => $summary,
             'wheels' => $byWheel,
@@ -232,7 +278,81 @@ final class StationReportsAnalyticsService
             ];
         }
 
-        return ['playlists' => $playlists];
+        return [
+            'playlists' => $playlists,
+            ...$this->getRotationHealth($station, $dateRange),
+        ];
+    }
+
+    /**
+     * Music-director view of rotation: the most-played songs, songs in active
+     * music playlists that never aired, and repeats inside the station's
+     * duplicate-prevention window, from what actually aired.
+     *
+     * @return array{over_played: list<array<string, mixed>>, never_played_count: int, never_played: list<array<string, mixed>>, repeats: list<array<string, mixed>>, repeat_window_minutes: int}
+     */
+    private function getRotationHealth(Station $station, DateRange $dateRange): array
+    {
+        $conn = $this->em->getConnection();
+        $from = $dateRange->start->utc()->format('Y-m-d H:i:s');
+        $to = $dateRange->end->utc()->format('Y-m-d H:i:s');
+
+        $overPlayed = $conn->fetchAllAssociative(
+            'SELECT h.media_id, MAX(h.text) AS text, COUNT(*) AS plays, MAX(p.name) AS playlist
+            FROM song_history h
+            JOIN station_media m ON m.id = h.media_id AND m.type = ?
+            LEFT JOIN station_playlists p ON p.id = h.playlist_id
+            WHERE h.station_id = ? AND h.timestamp_start BETWEEN ? AND ?
+            GROUP BY h.media_id
+            ORDER BY plays DESC
+            LIMIT 15',
+            ['music', $station->id, $from, $to]
+        );
+
+        $neverSql = 'FROM station_playlist_media spm
+            JOIN station_playlists p ON p.id = spm.playlist_id
+            JOIN station_media m ON m.id = spm.media_id AND m.type = ?
+            WHERE p.station_id = ? AND p.is_enabled = 1 AND p.is_jingle = 0
+            AND NOT EXISTS (
+                SELECT 1 FROM song_history h
+                WHERE h.station_id = p.station_id AND h.media_id = m.id
+                AND h.timestamp_start BETWEEN ? AND ?
+            )';
+        $neverArgs = ['music', $station->id, $from, $to];
+        $neverCount = (int)$conn->fetchOne('SELECT COUNT(DISTINCT m.id) ' . $neverSql, $neverArgs);
+        $neverPlayed = $conn->fetchAllAssociative(
+            'SELECT m.id AS media_id, MAX(m.artist) AS artist, MAX(m.title) AS title, MAX(p.name) AS playlist '
+            . $neverSql . ' GROUP BY m.id ORDER BY MAX(m.artist), MAX(m.title) LIMIT 25',
+            $neverArgs
+        );
+
+        $window = max(1, $station->backend_config->duplicate_prevention_time_range);
+        $repeats = $conn->fetchAllAssociative(
+            'SELECT a.text, UNIX_TIMESTAMP(a.timestamp_start) AS first_at, UNIX_TIMESTAMP(b.timestamp_start) AS again_at,
+                ROUND((UNIX_TIMESTAMP(b.timestamp_start) - UNIX_TIMESTAMP(a.timestamp_start)) / 60) AS minutes_apart
+            FROM song_history a
+            JOIN song_history b ON b.station_id = a.station_id AND b.media_id = a.media_id
+                AND b.timestamp_start > a.timestamp_start
+                AND b.timestamp_start <= a.timestamp_start + INTERVAL ? MINUTE
+            JOIN station_media m ON m.id = a.media_id AND m.type = ?
+            WHERE a.station_id = ? AND a.timestamp_start BETWEEN ? AND ?
+            AND NOT EXISTS (
+                SELECT 1 FROM song_history c
+                WHERE c.station_id = a.station_id AND c.media_id = a.media_id
+                AND c.timestamp_start > a.timestamp_start AND c.timestamp_start < b.timestamp_start
+            )
+            ORDER BY a.timestamp_start DESC
+            LIMIT 50',
+            [$window, 'music', $station->id, $from, $to]
+        );
+
+        return [
+            'over_played' => $overPlayed,
+            'never_played_count' => $neverCount,
+            'never_played' => $neverPlayed,
+            'repeats' => $repeats,
+            'repeat_window_minutes' => $window,
+        ];
     }
 
     /**

@@ -22,7 +22,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
 
             // Load app-specific route configuration.
             $container = $event->getContainer();
-
             /** @var Environment $environment */
             $environment = $container->get(Environment::class);
 
@@ -41,7 +40,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             $app->add(Middleware\InjectRouter::class);
             $app->add(Middleware\InjectRateLimit::class);
 
-            // System middleware for routing and body parsing.
             $app->addBodyParsingMiddleware();
             $app->addRoutingMiddleware();
 
@@ -50,7 +48,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             $app->add(new Middleware\RemoveSlashes());
             $app->add(new Middleware\ApplyXForwarded());
 
-            // Add an error handler for most in-controller/task situations.
             $errorMiddleware = $app->addErrorMiddleware(
                 $environment->showDetailedErrors(),
                 true,
@@ -67,6 +64,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
         function (App\Event\GetSyncTasks $e) {
             $e->addTasks([
                 App\Sync\Task\CheckFolderPlaylistsTask::class,
+                App\Sync\Task\CheckSmartBlockPlaylistsTask::class,
                 App\Sync\Task\CheckMediaTask::class,
                 App\Sync\Task\CheckPodcastPlaylistsTask::class,
                 App\Sync\Task\ImportPodcastFeedsTask::class,
@@ -87,6 +85,12 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 App\Sync\Task\UpdateGeoLiteTask::class,
                 App\Sync\Task\UpdateStorageLocationSizesTask::class,
                 App\Sync\Task\AiDjCleanupTask::class,
+                App\Sync\Task\AiDjDefaultContentTask::class,
+                App\Sync\Task\AiDjShiftLifecycleRuntimeTask::class,
+                App\Sync\Task\BuildLinearLogTask::class,
+                App\Sync\Task\ReconcileLinearLogTask::class,
+                App\Sync\Task\AirCheckTask::class,
+                App\Sync\Task\StationDiagnosticsRuntimeReconcileTask::class,
             ]);
         }
     );
@@ -107,6 +111,10 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
     $dispatcher->addCallableListener(
         Event\GetNotifications::class,
         App\Notification\Check\SyncTaskCheck::class
+    );
+    $dispatcher->addCallableListener(
+        Event\GetNotifications::class,
+        App\Notification\Check\LinearLogCheck::class
     );
     $dispatcher->addCallableListener(
         Event\GetNotifications::class,
@@ -151,13 +159,31 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
             App\Console\ErrorHandler::class,
             App\Nginx\ConfigWriter::class,
             App\Radio\AutoDJ\ClockWheelScheduler::class,
+            // Saved linear log playout: listed before QueueBuilder so it takes
+            // the priority-0 slot first when the log controls playout.
+            App\Radio\AutoDJ\LinearLog\LinearLogPlayout::class,
             App\Radio\AutoDJ\QueueBuilder::class,
+            App\Radio\AutoDJ\StrictProgrammeHold::class,
+            App\Radio\AutoDJ\ProgrammeParts::class,
+            App\Radio\AutoDJ\LinearLog\LinearLogHourGuard::class,
+            App\Radio\AutoDJ\ScheduleWindowGuard::class,
+            App\Radio\AutoDJ\QueuedRepeatGuard::class,
+            App\Radio\AutoDJ\BroadcastClockQueueTimingSubscriber::class,
+            App\Radio\AutoDJ\StretchSqueezeQueueTiming::class,
+            App\Radio\AutoDJ\StationDiagnosticsRuntimeSubscriber::class,
             App\Radio\AutoDJ\Annotations::class,
+            App\Radio\AutoDJ\ContentTypeCrossfadeAnnotator::class,
             App\Radio\AutoDJ\ClockWheel\ClockWheelAnnotator::class,
-            App\Radio\AutoDJ\TopOfHourIdScheduler::class,
+            // AI DJ speech injection: fire on every real song boundary so breaks
+            // happen at natural track transitions, not only on the 1-minute cron.
+            // The runtime task (AiDjShiftLifecycleRuntimeTask) continues as the
+            // wall-clock driver for strict playlists where BuildQueue does not fire.
+            App\Radio\AutoDJ\AiDjShiftLifecycleListener::class,
+            App\Radio\AutoDJ\AiDjCadenceWatchdogSubscriber::class,
             App\Radio\AutoDJ\AiDjQueueListener::class,
             App\Radio\AutoDJ\DmcaComplianceListener::class,
             App\Radio\Backend\Liquidsoap\ConfigWriter::class,
+            App\Radio\Backend\Liquidsoap\TopOfHourAiNewsConfigurationGuard::class,
             App\Radio\Backend\Liquidsoap\PlaylistFileWriter::class,
             App\Sync\NowPlaying\Task\NowPlayingTask::class,
         ]

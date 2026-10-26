@@ -1,11 +1,31 @@
 import {useTranslate} from "~/vendor/gettext.ts";
 import {filterMenu, RawMenuCategory} from "~/functions/filterMenu.ts";
+import {MenuSearchSource} from "~/functions/menuSearch.ts";
 import {GlobalPermissions} from "~/entities/ApiInterfaces.ts";
 import IconIcGroup from "~icons/ic/baseline-group";
 import IconIcRadio from "~icons/ic/baseline-radio";
 import IconIcRouter from "~icons/ic/baseline-router";
 import IconIcWidgets from "~icons/ic/baseline-widgets";
 import {useUserAllowed} from "~/functions/useUserAllowed.ts";
+
+// The admin home isn't in the sidebar menu, but search should still reach it.
+export function useAdminSearchSource(): MenuSearchSource {
+    const {$gettext} = useTranslate();
+    const menu = useAdminMenu();
+    const section = $gettext('Administration');
+
+    if (menu.length === 0) {
+        return {section, menu};
+    }
+
+    return {
+        section,
+        menu: [
+            {key: 'admin_home', label: section, url: {name: 'admin:index'}},
+            ...menu,
+        ],
+    };
+}
 
 export function useAdminMenu() {
     const {$gettext} = useTranslate();

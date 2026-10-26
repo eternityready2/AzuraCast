@@ -24,7 +24,7 @@ abstract class AbstractSplitTokenRepository extends Repository
     {
         $userSuppliedToken = SplitToken::fromKeyString($key);
 
-        $tokenEntity = $this->repository->find($userSuppliedToken->identifier);
+        $tokenEntity = $this->getRepository()->find($userSuppliedToken->identifier);
 
         if ($tokenEntity instanceof SplitTokenEntityInterface) {
             return ($tokenEntity->verify($userSuppliedToken))

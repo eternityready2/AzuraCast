@@ -8,6 +8,10 @@ use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
+use App\Entity\Enums\SmartBlockLimitType;
+use App\Entity\Enums\SmartBlockMatchType;
+use App\Entity\Enums\SmartBlockSortOrder;
+use App\Entity\Enums\SmartBlockType;
 use App\Utilities\File;
 use App\Utilities\Time;
 use Azura\Normalizer\Attributes\DeepNormalize;
@@ -43,6 +47,7 @@ final class StationPlaylist implements
     public const string OPTION_PLAY_SINGLE_TRACK = 'single_track';
     public const string OPTION_MERGE = 'merge';
     public const string OPTION_PRIORITIZE_OVER_REQUESTS = 'prioritize';
+    public const string OPTION_ALLOW_OVERRUN = 'allow_overrun';
 
     #[
         ORM\ManyToOne(inversedBy: 'playlists'),
@@ -58,6 +63,12 @@ final class StationPlaylist implements
     /* TODO Remove direct identifier access. */
     #[ORM\Column(nullable: false, insertable: false, updatable: false)]
     public private(set) int $station_id;
+
+    /** Doctrine does not re-fetch `insertable: false` columns after an INSERT. */
+    public function syncReadOnlyForeignKeys(): void
+    {
+        $this->station_id = $this->station->id;
+    }
 
     #[
         OA\Property(example: "Test Playlist"),
@@ -91,7 +102,7 @@ final class StationPlaylist implements
         set {
             $this->source = $value;
 
-            if (PlaylistSources::RemoteUrl === $value) {
+            if (PlaylistSources::RemoteUrl === $value || PlaylistSources::Requests === $value) {
                 $this->type = PlaylistTypes::Standard;
             }
         }
@@ -103,20 +114,13 @@ final class StationPlaylist implements
     ]
     public PlaylistOrders $order;
 
-    /**
-     * @deprecated Unused — Smart Shuffle removed; kept for existing DB rows.
-     * NULL uses the default (5).
-     */
+    /** @deprecated Unused; retained for existing database rows. */
     #[
         OA\Property(example: 5, nullable: true),
         ORM\Column(nullable: true)
     ]
     public ?int $smart_shuffle_distance = null;
 
-    /**
-     * Minimum days between repeats of the same track from this playlist (positive rotation goal).
-     * NULL disables rotation goal enforcement.
-     */
     #[
         OA\Property(example: 7, nullable: true),
         ORM\Column(nullable: true)
@@ -127,16 +131,11 @@ final class StationPlaylist implements
                 $this->rotation_goal_days = null;
                 return;
             }
-
             $days = (int)$value;
             $this->rotation_goal_days = $days > 0 ? $days : null;
         }
     }
 
-    /**
-     * Library Aging: gradually boosts a track's selection priority the longer
-     * it goes unplayed, rather than Rotation Goal's hard floor. NULL disables it.
-     */
     #[
         OA\Property(example: 14, nullable: true),
         ORM\Column(nullable: true)
@@ -147,15 +146,11 @@ final class StationPlaylist implements
                 $this->aging_threshold_days = null;
                 return;
             }
-
             $days = (int)$value;
             $this->aging_threshold_days = $days > 0 ? $days : null;
         }
     }
 
-    /**
-     * Optional named crossfade profile (see station crossfade_profiles in backend_config).
-     */
     #[
         OA\Property(example: 'quick_id', nullable: true),
         ORM\Column(length: 50, nullable: true)
@@ -188,10 +183,7 @@ final class StationPlaylist implements
     ]
     public int $remote_buffer = 0;
 
-    #[
-        OA\Property(example: true),
-        ORM\Column
-    ]
+    #[OA\Property(example: true), ORM\Column]
     public bool $is_enabled = true;
 
     #[
@@ -203,12 +195,6 @@ final class StationPlaylist implements
     ]
     public bool $is_jingle = false;
 
-    /**
-     * Sponsor guaranteed playout: when enabled, this playlist represents a paid
-     * sponsor spot that MUST air its guaranteed number of plays per day --
-     * never silently skipped by normal rotation/fallback logic, same class of
-     * guarantee as the Top of Hour legal ID. Reused for the Sponsor Play Report.
-     */
     #[
         OA\Property(example: false),
         ORM\Column(options: ['default' => false])
@@ -223,7 +209,6 @@ final class StationPlaylist implements
         set => $this->truncateNullableString($value, 255);
     }
 
-    /** Guaranteed plays per day for this sponsor. NULL = no guarantee tracked. */
     #[
         OA\Property(example: 4, nullable: true),
         ORM\Column(nullable: true)
@@ -239,35 +224,24 @@ final class StationPlaylist implements
         }
     }
 
-    /** Optional contract window -- outside this range, the guarantee is not enforced. */
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     public ?\DateTimeImmutable $sponsor_contract_start = null;
 
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     public ?\DateTimeImmutable $sponsor_contract_end = null;
 
-    #[
-        OA\Property(example: 5),
-        ORM\Column(type: 'smallint')
-    ]
+    #[OA\Property(example: 5), ORM\Column(type: 'smallint')]
     public int $play_per_songs = 0;
 
-    #[
-        OA\Property(example: 120),
-        ORM\Column(type: 'smallint')
-    ]
+    #[OA\Property(example: 120), ORM\Column(type: 'smallint')]
     public int $play_per_minutes = 0;
 
-    #[
-        OA\Property(example: 15),
-        ORM\Column(type: 'smallint')
-    ]
+    #[OA\Property(example: 15), ORM\Column(type: 'smallint')]
     public int $play_per_hour_minute = 0 {
         set {
             if ($value > 59 || $value < 0) {
                 $value = 0;
             }
-
             $this->play_per_hour_minute = $value;
         }
     }
@@ -284,10 +258,7 @@ final class StationPlaylist implements
         get => ($this->weight >= 1) ? $this->weight : self::DEFAULT_WEIGHT;
     }
 
-    #[
-        OA\Property(example: true),
-        ORM\Column
-    ]
+    #[OA\Property(example: true), ORM\Column]
     public bool $include_in_requests = true;
 
     #[
@@ -299,13 +270,21 @@ final class StationPlaylist implements
     ]
     public bool $include_in_on_demand = false;
 
+    #[
+        OA\Property(
+            description: "Whether this playlist carries spoken-word programming (a show, sermon or syndicated "
+            . "episode) rather than music. Programme content is exempt from the DMCA performance complement, "
+            . "which only governs sound recordings.",
+            example: false
+        ),
+        ORM\Column
+    ]
+    public bool $is_programme = false;
+
     #[ORM\Column(name: 'backend_options', length: 255, nullable: true)]
     private ?string $backend_options_raw = '';
 
-    #[OA\Property(
-        items: new OA\Items(type: 'string'),
-        example: "interrupt,loop_once,single_track,merge"
-    )]
+    #[OA\Property(items: new OA\Items(type: 'string'), example: "interrupt,loop_once,single_track,merge")]
     public array $backend_options {
         get => explode(',', $this->backend_options_raw ?? '');
         set {
@@ -313,8 +292,19 @@ final class StationPlaylist implements
         }
     }
 
+    /**
+     * The playlist-wide interrupt flag is a legacy behavior for unscheduled
+     * playlists. Once a playlist has schedule rows, those rows own start
+     * behavior through strict_start/emergency. Treating the legacy option as
+     * active for scheduled playlists creates a second native Liquidsoap
+     * interrupt lane that can contradict a row configured as Flexible.
+     */
     public function backendInterruptOtherSongs(): bool
     {
+        if ($this->schedule_items->count() > 0) {
+            return false;
+        }
+
         return in_array(self::OPTION_INTERRUPT_OTHER_SONGS, $this->backend_options, true);
     }
 
@@ -333,11 +323,88 @@ final class StationPlaylist implements
         return in_array(self::OPTION_PRIORITIZE_OVER_REQUESTS, $this->backend_options, true);
     }
 
+    public function backendAllowOverrun(): bool
+    {
+        return in_array(self::OPTION_ALLOW_OVERRUN, $this->backend_options, true);
+    }
+
+    #[OA\Property(example: true), ORM\Column]
+    public bool $avoid_duplicates = true;
+
     #[
-        OA\Property(example: true),
+        OA\Property(
+            description: "Don't reset this playlist's queue when the station is restarted or its configuration is rewritten.",
+            example: false
+        ),
         ORM\Column
     ]
-    public bool $avoid_duplicates = true;
+    public bool $preserve_queue_on_restart = false;
+
+    /**
+     * Whether a station restart or configuration rewrite should reset this
+     * playlist's queue (upstream parity: per-playlist opt-out, and sequential
+     * playlists only when the station setting asks for it).
+     */
+    public function resetsQueueOnRestart(): bool
+    {
+        if ($this->preserve_queue_on_restart) {
+            return false;
+        }
+
+        return PlaylistOrders::Sequential !== $this->order
+            || $this->station->backend_config->reset_sequential_queues_on_restart;
+    }
+
+    #[
+        OA\Property(example: false),
+        ORM\Column(options: ['default' => false])
+    ]
+    public bool $is_smart_block = false;
+
+    #[
+        OA\Property(example: 'all'),
+        ORM\Column(type: 'string', length: 10, enumType: SmartBlockMatchType::class, options: ['default' => 'all'])
+    ]
+    public SmartBlockMatchType $smart_block_match_type = SmartBlockMatchType::All;
+
+    #[
+        OA\Property(example: 50, nullable: true),
+        ORM\Column(nullable: true)
+    ]
+    public ?int $smart_block_limit = null {
+        set (int|string|null $value) {
+            if (null === $value || '' === $value) {
+                $this->smart_block_limit = null;
+                return;
+            }
+            $limit = (int)$value;
+            $this->smart_block_limit = $limit > 0 ? $limit : null;
+        }
+    }
+
+    #[
+        OA\Property(example: 'tracks'),
+        ORM\Column(type: 'string', length: 10, enumType: SmartBlockLimitType::class, options: ['default' => 'tracks'])
+    ]
+    public SmartBlockLimitType $smart_block_limit_type = SmartBlockLimitType::Tracks;
+
+    #[
+        OA\Property(example: 'dynamic'),
+        ORM\Column(type: 'string', length: 10, enumType: SmartBlockType::class, options: ['default' => 'dynamic'])
+    ]
+    public SmartBlockType $smart_block_type = SmartBlockType::Dynamic;
+
+    #[
+        OA\Property(example: 'random'),
+        ORM\Column(type: 'string', length: 20, enumType: SmartBlockSortOrder::class, options: ['default' => 'random'])
+    ]
+    public SmartBlockSortOrder $smart_block_sort_order = SmartBlockSortOrder::Random;
+
+    #[
+        OA\Property(example: true),
+        ORM\Column(options: ['default' => true])
+    ]
+    public bool $smart_block_avoid_duplicates = true;
 
     #[
         ORM\Column(type: 'datetime_immutable', precision: 6, nullable: true),
@@ -363,10 +430,24 @@ final class StationPlaylist implements
     public private(set) Collection $media_items;
 
     /** @var Collection<int, StationPlaylistFolder> */
-    #[
-        ORM\OneToMany(targetEntity: StationPlaylistFolder::class, mappedBy: 'playlist', fetch: 'EXTRA_LAZY')
-    ]
+    #[ORM\OneToMany(targetEntity: StationPlaylistFolder::class, mappedBy: 'playlist', fetch: 'EXTRA_LAZY')]
     public private(set) Collection $folders;
+
+    /** @var Collection<int, StationPlaylistSmartBlockCriteria> */
+    #[
+        OA\Property(type: "array", items: new OA\Items()),
+        ORM\OneToMany(
+            targetEntity: StationPlaylistSmartBlockCriteria::class,
+            mappedBy: 'playlist',
+            fetch: 'EXTRA_LAZY',
+            cascade: ['persist', 'remove'],
+            orphanRemoval: true
+        ),
+        ORM\OrderBy(['weight' => 'ASC']),
+        DeepNormalize(true),
+        Serializer\MaxDepth(1)
+    ]
+    public private(set) Collection $smart_block_criteria;
 
     /** @var Collection<int, StationSchedule> */
     #[
@@ -386,6 +467,46 @@ final class StationPlaylist implements
     ]
     public private(set) Collection $podcasts;
 
+    /**
+     * Upstream playlist-group members. Each row points to a member playlist and stores
+     * its group playback state/settings. This replaces the custom flat member entity.
+     *
+     * @var Collection<int, StationPlaylistGroup>
+     */
+    #[
+        OA\Property(type: "array", items: new OA\Items()),
+        ORM\OneToMany(targetEntity: StationPlaylistGroup::class, mappedBy: 'playlist_group', fetch: 'EXTRA_LAZY'),
+        ORM\OrderBy(['weight' => 'ASC']),
+        DeepNormalize(true),
+        Serializer\MaxDepth(1)
+    ]
+    public private(set) Collection $playlists;
+
+    /** @var Collection<int, StationPlaylistGroup> */
+    #[
+        ORM\OneToMany(targetEntity: StationPlaylistGroup::class, mappedBy: 'playlist', fetch: 'EXTRA_LAZY'),
+        ORM\OrderBy(['weight' => 'ASC'])
+    ]
+    public private(set) Collection $playlist_groups;
+
+    /**
+     * Kept only as a compatibility column for existing installations. The official
+     * upstream group queue stores progress on StationPlaylistGroup rows instead.
+     */
+    #[ORM\Column(type: 'smallint', options: ['unsigned' => true, 'default' => 0])]
+    public int $group_next_position = 0;
+
+    /** Compatibility aliases for custom fork code while it is rebased. */
+    #[Serializer\Ignore]
+    public Collection $group_members {
+        get => $this->playlists;
+    }
+
+    #[Serializer\Ignore]
+    public Collection $group_memberships {
+        get => $this->playlist_groups;
+    }
+
     public function __construct(Station $station)
     {
         $this->station = $station;
@@ -397,26 +518,30 @@ final class StationPlaylist implements
 
         $this->media_items = new ArrayCollection();
         $this->folders = new ArrayCollection();
+        $this->smart_block_criteria = new ArrayCollection();
         $this->schedule_items = new ArrayCollection();
         $this->podcasts = new ArrayCollection();
+        $this->playlists = new ArrayCollection();
+        $this->playlist_groups = new ArrayCollection();
     }
 
-    /**
-     * Indicates whether this playlist can be used as a valid source of requestable media.
-     */
     public function isRequestable(): bool
     {
         return ($this->is_enabled && $this->include_in_requests);
     }
 
-    /**
-     * Indicates whether a playlist is enabled and has content which can be scheduled by an AutoDJ scheduler.
-     *
-     * @param bool $interrupting Whether determining "playability" for an interrupting queue or a regular one.
-     */
     public function isPlayable(bool $interrupting = false): bool
     {
         if (!$this->is_enabled) {
+            return false;
+        }
+
+        // A scheduled playlist's interrupt behavior belongs to its schedule row
+        // (strict_start), not the legacy playlist-wide interrupt option. Keeping
+        // scheduled playlists out of legacy interrupt eligibility prevents a
+        // Flexible programme from being selected by the Smart Duck queue before
+        // QueueInterruptingTracks can validate it.
+        if ($interrupting && $this->schedule_items->count() > 0) {
             return false;
         }
 
@@ -424,12 +549,24 @@ final class StationPlaylist implements
             return false;
         }
 
+        if (PlaylistSources::Requests === $this->source) {
+            return true;
+        }
+
+        if (PlaylistSources::Playlists === $this->source) {
+            return $this->playlists->count() > 0;
+        }
+
         if (PlaylistSources::Songs === $this->source) {
             return $this->media_items->count() > 0;
         }
 
-        // Remote stream playlists aren't supported by the AzuraCast AutoDJ.
-        return PlaylistRemoteTypes::Playlist === $this->remote_type;
+        // Both remote subtypes are playable: QueueBuilder::getMediaFromRemoteUrl
+        // resolves a "playlist" URL into songs and hands a "stream" URL straight
+        // to Liquidsoap as a custom URI. Requiring the "playlist" subtype here
+        // made a scheduled web stream ineligible for the AutoDJ, so ordinary
+        // rotation music filled its window instead.
+        return null !== $this->remote_url;
     }
 
     public function __clone()
@@ -439,8 +576,12 @@ final class StationPlaylist implements
 
         $this->media_items = new ArrayCollection();
         $this->folders = new ArrayCollection();
+        $this->smart_block_criteria = new ArrayCollection();
         $this->schedule_items = new ArrayCollection();
         $this->podcasts = new ArrayCollection();
+        $this->playlists = new ArrayCollection();
+        $this->playlist_groups = new ArrayCollection();
+        $this->group_next_position = 0;
     }
 
     public function __toString(): string

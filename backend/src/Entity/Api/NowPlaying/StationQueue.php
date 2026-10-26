@@ -40,6 +40,16 @@ class StationQueue
     public ?string $playlist = null;
 
     #[OA\Property(
+        description: 'Ordered list of Playlist Group names (outermost to innermost) this track '
+            . 'was played through, if it was played via a Playlist Group. Null otherwise.',
+        type: 'array',
+        items: new OA\Items(type: 'string'),
+        example: ['Simple Group', 'Sub Group 1']
+    )]
+    public ?array $playlist_chain = null;
+
+
+    #[OA\Property(
         description: 'Indicates the clock wheel that queued the song, if available, or empty string if not.',
         example: 'Morning Drive'
     )]

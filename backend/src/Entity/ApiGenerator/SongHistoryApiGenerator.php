@@ -46,6 +46,7 @@ final readonly class SongHistoryApiGenerator
         } else {
             $response->playlist = '';
         }
+        $response->playlist_chain = $record->playlist_chain;
 
         if ($record->clock_wheel instanceof StationClockWheel) {
             $response->clock_wheel = $record->clock_wheel->name;

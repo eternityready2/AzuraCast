@@ -80,9 +80,7 @@ class LogsAction implements SingleActionInterface
     ): ResponseInterface {
         /** @var string|null $log */
         $log = $params['log'] ?? null;
-
         $station = $request->getStation();
-
         $logTypes = $this->getStationLogs($station);
 
         if (null === $log) {
@@ -90,6 +88,7 @@ class LogsAction implements SingleActionInterface
             return $response->withJson(
                 array_map(
                     function (LogType $row) use ($router, $station): LogType {
+                        $this->hydrateLogMetadata($row);
                         $row->links = [
                             'self' => $router->named(
                                 'api:stations:log',
@@ -114,6 +113,28 @@ class LogsAction implements SingleActionInterface
 
         $logType = $logTypes[$log];
 
+        $queryParams = $request->getQueryParams();
+        if (!empty($queryParams['download'])) {
+            $filePath = $logType->path;
+            if (!is_file($filePath) || !is_readable($filePath)) {
+                throw new Exception('Log file is not available for download.');
+            }
+
+            $fileName = basename($filePath);
+            $contents = file_get_contents($filePath);
+            $filteredContents = str_replace(
+                $station->getFilteredPasswords(),
+                '(PASSWORD)',
+                $contents ?: ''
+            );
+
+            $response->getBody()->write($filteredContents);
+
+            return $response
+                ->withHeader('Content-Type', 'text/plain; charset=utf-8')
+                ->withHeader('Content-Disposition', 'attachment; filename="' . $fileName . '"');
+        }
+
         return $this->streamLogToResponse(
             $request,
             $response,
@@ -123,12 +144,35 @@ class LogsAction implements SingleActionInterface
         );
     }
 
+    protected function hydrateLogMetadata(LogType $logType): void
+    {
+        clearstatcache(true, $logType->path);
+        $logType->exists = is_file($logType->path) && is_readable($logType->path);
+
+        if (!$logType->exists) {
+            $logType->size = 0;
+            $logType->modified_at = null;
+            return;
+        }
+
+        $size = @filesize($logType->path);
+        $modifiedAt = @filemtime($logType->path);
+        $logType->size = false === $size ? 0 : max(0, (int)$size);
+        $logType->modified_at = false === $modifiedAt ? null : (int)$modifiedAt;
+    }
+
     /**
      * @return LogType[]
      */
     protected function getStationLogs(Station $station): array
     {
         return [
+            new LogType(
+                'custom_diagnostics',
+                __('Custom Feature Event Log'),
+                $station->getRadioConfigDir() . '/custom_diagnostics.log',
+                true
+            ),
             ...$this->adapters->getBackendAdapter($station)?->getLogTypes($station) ?? [],
             ...$this->adapters->getFrontendAdapter($station)?->getLogTypes($station) ?? [],
             new LogType(

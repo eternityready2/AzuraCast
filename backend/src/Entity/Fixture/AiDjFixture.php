@@ -49,7 +49,7 @@ final class AiDjFixture extends AbstractFixture implements DependentFixtureInter
         $schedule->setIsEnabled(true);
         $dj->addSchedule($schedule);
 
-        // --- Content library (production samples; song intros unchanged). ---
+        // Starter content library, based on production sample exports.
 
         /** @var list<string> $songIntros */
         $songIntros = [

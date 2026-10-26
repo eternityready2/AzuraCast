@@ -5,52 +5,63 @@ declare(strict_types=1);
 namespace App\Controller\Api\Stations\AiDj\Schedules;
 
 use App\Controller\SingleActionInterface;
-use App\Entity\Api\Status;
 use App\Entity\Repository\AiDjRepository;
 use App\Entity\Repository\AiDjScheduleRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
+use App\OpenApi;
+use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
-#[\OpenApi\Attributes\Get(
+#[OA\Get(
     path: '/station/{station_id}/ai-dj/{dj_id}/schedules/{schedule_id}',
     operationId: 'getAiDjSchedule',
-    summary: 'Get a single AI DJ schedule',
-    tags: ['Station Broadcasting'],
+    summary: 'Get a single AI DJ schedule.',
+    tags: [OpenApi::TAG_STATIONS_BROADCASTING],
     parameters: [
-        new \OpenApi\Attributes\Parameter(ref: '#/components/parameters/station_id_required'),
-        new \OpenApi\Attributes\Parameter(name: 'dj_id', description: 'AI DJ ID', in: 'path', required: true, schema: new \OpenApi\Attributes\Schema(type: 'integer')),
-        new \OpenApi\Attributes\Parameter(name: 'schedule_id', description: 'Schedule ID', in: 'path', required: true, schema: new \OpenApi\Attributes\Schema(type: 'integer')),
+        new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+        new OA\Parameter(
+            name: 'dj_id',
+            description: 'AI DJ ID',
+            in: 'path',
+            required: true,
+            schema: new OA\Schema(type: 'integer')
+        ),
+        new OA\Parameter(
+            name: 'schedule_id',
+            description: 'Schedule ID',
+            in: 'path',
+            required: true,
+            schema: new OA\Schema(type: 'integer')
+        ),
     ],
     responses: [
-        new \OpenApi\Attributes\Response(response: 200, description: 'Success'),
-        new \OpenApi\Attributes\Response(response: 404, description: 'Schedule not found'),
+        new OpenApi\Response\Success(),
+        new OpenApi\Response\AccessDenied(),
+        new OpenApi\Response\NotFound(),
     ]
 )]
-final readonly class GetAction implements SingleActionInterface
+final class GetAction implements SingleActionInterface
 {
     public function __construct(
-        private AiDjRepository $djRepo,
-        private AiDjScheduleRepository $scheduleRepo
+        private readonly AiDjRepository $djRepo,
+        private readonly AiDjScheduleRepository $scheduleRepo,
     ) {
     }
 
     public function __invoke(ServerRequest $request, Response $response, array $params): ResponseInterface
     {
         $station = $request->getStation();
-        $dj = $this->djRepo->find((int)$params['dj_id']);
+        $dj = $this->djRepo->findForStation((int) $params['dj_id'], $station->id);
 
-        if (null === $dj || $dj->getStationId() !== $station->id) {
-            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found']);
+        if (null === $dj) {
+            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found.']);
         }
 
-        $schedule = $this->scheduleRepo->findOneBy([
-            'id' => (int)$params['schedule_id'],
-            'ai_dj' => $dj,
-        ]);
+        $schedule = $this->scheduleRepo->findForDj((int) $params['schedule_id'], $dj);
 
         if (null === $schedule) {
-            return $response->withStatus(404)->withJson(['error' => 'Schedule not found']);
+            return $response->withStatus(404)->withJson(['error' => 'Schedule not found.']);
         }
 
         return $response->withJson($schedule->api());

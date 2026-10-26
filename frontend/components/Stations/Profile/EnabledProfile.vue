@@ -68,3 +68,22 @@ const hasActiveBackend = computed(() => {
     return stationData.value.backendType !== BackendAdapters.None;
 });
 </script>
+
+<style scoped>
+/*
+ * .col-lg-7 / .col-lg-5 are Bootstrap flex items and default to
+ * min-width: auto, meaning they can grow past their assigned width to fit
+ * unbreakable content (like a long playlist source badge inside
+ * NowPlayingPanel) instead of shrinking -- letting the left column spill
+ * into the right column's card. min-width: 0 forces each column to
+ * actually respect its assigned width.
+ */
+.row {
+    min-width: 0;
+}
+
+.col-lg-7,
+.col-lg-5 {
+    min-width: 0;
+}
+</style>

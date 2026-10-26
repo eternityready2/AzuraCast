@@ -27,8 +27,8 @@ final class StationRepository extends Repository
     public function findByIdentifier(string $identifier): ?Station
     {
         return is_numeric($identifier)
-            ? $this->repository->find($identifier)
-            : $this->repository->findOneBy(['short_name' => $identifier]);
+            ? $this->getRepository()->find($identifier)
+            : $this->getRepository()->findOneBy(['short_name' => $identifier]);
     }
 
     public function getActiveCount(): int

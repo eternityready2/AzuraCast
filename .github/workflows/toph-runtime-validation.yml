@@ -1,0 +1,323 @@
+name: TOH Runtime Validation
+
+on:
+  push:
+    branches:
+      - 'fix/toh-*'
+      - 'fix/bounded-*'
+      - 'feature/top-of-hour-plugin-rebuild'
+      - dev
+    paths:
+      - 'plugins/top_of_hour/**'
+      - 'util/docker/stations/liquidsoap/azuracast.liq'
+      - 'backend/config/events.php'
+      - 'backend/src/Event/Radio/ResolveQueueClockConstraint.php'
+      - 'backend/src/Radio/AutoDJ/Queue.php'
+      - 'backend/src/Radio/AutoDJ/TopOfHour/**'
+      - 'backend/src/Radio/AutoDJ/BroadcastClockPlanner.php'
+      - 'backend/src/Radio/Backend/Liquidsoap/TopOfHourAiNewsConfigurationGuard.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'tests/Unit/BroadcastClockPlannerTest.php'
+      - 'tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
+      - 'tests/Unit/TopOfHourClockTest.php'
+      - 'tests/Unit/TopOfHourQueueClockConstraintTest.php'
+      - 'tests/Unit/TopOfHourRuntimeConfigurationTest.php'
+      - '.github/workflows/toph-runtime-validation.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'plugins/top_of_hour/**'
+      - 'util/docker/stations/liquidsoap/azuracast.liq'
+      - 'backend/config/events.php'
+      - 'backend/src/Event/Radio/ResolveQueueClockConstraint.php'
+      - 'backend/src/Radio/AutoDJ/Queue.php'
+      - 'backend/src/Radio/AutoDJ/TopOfHour/**'
+      - 'backend/src/Radio/AutoDJ/BroadcastClockPlanner.php'
+      - 'backend/src/Radio/Backend/Liquidsoap/TopOfHourAiNewsConfigurationGuard.php'
+      - 'backend/src/Sync/Task/StageTopOfHourStationIdTask.php'
+      - 'tests/Unit/**TopOfHour**'
+      - 'tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php'
+      - 'tests/Unit/RigidScheduleRuntimeConfigurationTest.php'
+      - '.github/workflows/toph-runtime-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate plugin ownership and single-authority handoff architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+
+          test -f plugins/top_of_hour/events.php
+          test -f plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          test -f plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          test -f plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          test -f plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
+          test -f backend/src/Event/Radio/ResolveQueueClockConstraint.php
+
+          test ! -e backend/src/Radio/Backend/Liquidsoap/RigidScheduleRuntimeConfiguration.php
+          test ! -e backend/src/Radio/Backend/Liquidsoap/TopOfHourRuntimeConfiguration.php
+          ! grep -q 'RigidScheduleRuntimeConfiguration' backend/config/events.php
+          ! grep -q 'TopOfHourRuntimeConfiguration' backend/config/events.php
+
+          grep -q 'StageTopOfHourStationIdTask' plugins/top_of_hour/events.php
+          grep -q 'FlexibleScheduleRuntimeConfiguration::class' plugins/top_of_hour/events.php
+          grep -q 'RigidScheduleRuntimeConfiguration::class' plugins/top_of_hour/events.php
+          grep -q 'TopOfHourQueueClockConstraint::class' plugins/top_of_hour/events.php
+          grep -q 'TopOfHourRuntimeConfiguration::class' plugins/top_of_hour/events.php
+
+          # Bounded flexible scheduling must remain registered, preserve its
+          # 60-second grace contract, and return a float from recurrent callbacks.
+          grep -q 'FLEXIBLE_GRACE_SECONDS = 60' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q 'thread.run.recurrent(delay=0.25' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q '^                0.25$' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+          grep -q 'azuracast.discard_autodj_current_cleanly()' plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php
+
+          # The failed quarantine architecture is gone. It created a competing
+          # state machine and could recycle freshly sent rows back to unsent.
+          test ! -e plugins/top_of_hour/src/AutoDjRetirementRuntimeConfiguration.php
+          test ! -e plugins/top_of_hour/src/RetiredSongQueueGuard.php
+          test ! -e backend/src/Radio/AutoDJ/AutoDjRetirementService.php
+          ! grep -q 'AutoDjRetirementRuntimeConfiguration' plugins/top_of_hour/events.php
+          ! grep -q 'RetiredSongQueueGuard' plugins/top_of_hour/events.php
+          ! grep -q 'AutoDjRetirementService' backend/src/Radio/AutoDJ/Annotations.php
+          ! grep -q 'AutoDjRetirementService' backend/src/Radio/Backend/Liquidsoap/Command/NextSongCommand.php
+          ! grep -q 'AutoDjRetirementService' backend/src/Radio/Backend/Liquidsoap/Command/FeedbackCommand.php
+
+          # One wall-clock authority: the plugin switch owns the deadline while
+          # the shared AutoDJ request.dynamic/cross pair owns destructive track
+          # retirement. The cross operator must be explicitly aware of the one
+          # forced clean-cut boundary or its buffered old tail can reappear.
+          grep -q 'let azuracast.autodj_clean_cut_pending = ref(false)' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'def azuracast.discard_autodj_current_cleanly()' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'azuracast.autodj_clean_cut_pending := true' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'source.skip(azuracast.autodj_transport())' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'if azuracast.autodj_clean_cut_pending() then' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'Broadcast-clock clean cut: discarded buffered old crossfade tail.' util/docker/stations/liquidsoap/azuracast.liq
+          grep -q 'def top_of_hour_id_enter(_, new)' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          grep -q 'azuracast.discard_autodj_current_cleanly()' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          grep -q 'def rigid_schedule_enter(_, new)' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          grep -q 'azuracast.discard_autodj_current_cleanly()' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'broadcast_clock_retire_outgoing' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          ! grep -q 'broadcast_clock_retire_outgoing' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+
+          # The delayed inner gate seen in the live log must never return.
+          ! grep -q 'broadcast_clock_autodj_gate' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'broadcast_clock_autodj_blocked' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'fallback.skip(' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'source.available(' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'broadcast_clock_release_when_fresh' plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php
+          ! grep -q 'broadcast_clock_prefetch_autodj' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+
+          # HARD TOH keeps the same authoritative lane selected through :00.
+          grep -q 'top_of_hour_hard_hold = blank' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          grep -q '\[top_of_hour_id, top_of_hour_news, top_of_hour_hard_hold\]' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          grep -q 'boundary > 0.0 and now < boundary' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+          ! grep -q 'top_of_hour_hard_release_epoch' plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php
+
+          # Core has one generic forecast seam. TOH policy remains plugin-owned,
+          # and TOH must never hard-cap a future ordinary queue row.
+          grep -q 'ResolveQueueClockConstraint' backend/src/Radio/AutoDJ/Queue.php
+          grep -q 'top_of_hour_station_id' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
+          grep -q 'if (!\$this->clock->isEnabled(\$station))' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
+          grep -q 'if (null !== \$event->getQueueRow())' plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php
+          ! grep -q 'TopOfHourClock' backend/src/Radio/AutoDJ/Queue.php
+
+          # Existing duplicate prevention from the normal queue remains intact.
+          grep -q 'getPlayedMusicHistoryByTimeRange' backend/src/Radio/AutoDJ/Queue.php
+          grep -q '\$nextSongs\[0\]->song_id === \$lastSongId' backend/src/Radio/AutoDJ/Queue.php
+
+      - name: PHP syntax check changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only origin/dev...HEAD -- '*.php' | while read -r f; do test -f "$f" && echo "$f"; done)
+          for file in "${files[@]}"; do php -l "$file"; done
+
+      - name: Liquidsoap 2.4.5 common-runtime parse
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint liquidsoap \
+            -v "$PWD/util/docker/stations/liquidsoap:/liq:ro" \
+            -w /liq savonet/liquidsoap:v2.4.5 --check azuracast.liq
+
+      - name: Liquidsoap 2.4.5 bounded flexible recurrent smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/bounded-flexible-smoke.liq <<'EOF'
+          init.daemon := false
+
+          bounded_flexible_triggered = ref(false)
+          deadline_active = ref(false)
+
+          def bounded_flexible_check() =
+            if deadline_active() then
+              if not bounded_flexible_triggered() then
+                bounded_flexible_triggered := true
+              end
+            else
+              bounded_flexible_triggered := false
+            end
+          end
+
+          thread.run.recurrent(delay=0.25, {
+            bounded_flexible_check()
+            0.25
+          })
+
+          output.dummy(blank())
+          EOF
+          docker run --rm --entrypoint liquidsoap \
+            -v /tmp/bounded-flexible-smoke.liq:/tmp/bounded-flexible-smoke.liq:ro \
+            savonet/liquidsoap:v2.4.5 --check /tmp/bounded-flexible-smoke.liq
+
+      - name: Liquidsoap 2.4.5 synchronous handoff smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/toh-handoff-smoke.liq <<'EOF'
+          init.daemon := false
+
+          live_enabled = ref(false)
+          hard = ref(true)
+          active = ref(false)
+          boundary = ref(time() + 60.)
+
+          music = blank(id="processed_music")
+          id_source = blank(id="legal_id", duration=1.)
+          hard_hold = blank(id="hard_hold")
+          id_lane = fallback(
+            id="id_lane",
+            track_sensitive=false,
+            transition_length=0.,
+            [id_source, hard_hold]
+          )
+
+          def retire_outgoing(s) =
+            if not live_enabled() then source.skip(s) end
+          end
+
+          def should_play() =
+            if active() and hard() then time() < boundary()
+            else false
+            end
+          end
+
+          def enter(old, new) =
+            active := true
+            retire_outgoing(old)
+            new
+          end
+
+          def leave(_, new) =
+            active := false
+            new
+          end
+
+          radio = switch(
+            id="toh_switch",
+            track_sensitive=false,
+            replay_metadata=true,
+            transition_length=0.,
+            transitions=[enter, leave],
+            [({should_play()}, id_lane), ({true}, music)]
+          )
+          output.dummy(radio)
+          EOF
+          docker run --rm --entrypoint liquidsoap \
+            -v /tmp/toh-handoff-smoke.liq:/tmp/toh-handoff-smoke.liq:ro \
+            savonet/liquidsoap:v2.4.5 --check /tmp/toh-handoff-smoke.liq
+
+      - name: Install PHP analysis dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-reqs
+
+      - name: Prepare AzuraCast test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /var/azuracast/www/plugins
+          sudo chown -R "$USER":"$(id -gn)" /var/azuracast
+
+      - name: Execute TOH unit and live-incident regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendor/bin/codecept run tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php
+          vendor/bin/codecept run tests/Unit/RigidScheduleRuntimeConfigurationTest.php
+          vendor/bin/codecept run tests/Unit/TopOfHourRuntimeConfigurationTest.php
+          vendor/bin/codecept run tests/Unit/TopOfHourQueueClockConstraintTest.php
+
+      - name: PHPStan TOH integration
+        shell: bash
+        run: |
+          cat > phpstan.toph.neon <<'EOF'
+          includes:
+            - phpstan.neon
+          parameters:
+            reportUnmatchedIgnoredErrors: false
+          EOF
+          vendor/bin/phpstan analyze -c phpstan.toph.neon --memory-limit=-1 --no-progress \
+            backend/src/Event/Radio/ResolveQueueClockConstraint.php \
+            backend/src/Radio/AutoDJ/Queue.php \
+            backend/src/Radio/AutoDJ/TopOfHour \
+            plugins/top_of_hour/events.php \
+            plugins/top_of_hour/src/FlexibleScheduleRuntimeConfiguration.php \
+            plugins/top_of_hour/src/RigidScheduleRuntimeConfiguration.php \
+            plugins/top_of_hour/src/TopOfHourQueueClockConstraint.php \
+            plugins/top_of_hour/src/TopOfHourRuntimeConfiguration.php \
+            tests/Unit/FlexibleScheduleRuntimeConfigurationTest.php \
+            tests/Unit/RigidScheduleRuntimeConfigurationTest.php \
+            tests/Unit/TopOfHourClockTest.php \
+            tests/Unit/TopOfHourQueueClockConstraintTest.php \
+            tests/Unit/TopOfHourRuntimeConfigurationTest.php
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check TOH frontend
+        run: |
+          cat > tsconfig.toph.json <<'EOF'
+          {
+            "extends": "./tsconfig.json",
+            "include": [
+              "frontend/**/*.d.ts",
+              "frontend/components/Stations/TopOfHour.vue",
+              "frontend/entities/TopOfHour.ts"
+            ],
+            "exclude": ["node_modules"]
+          }
+          EOF
+          npx vue-tsc -p tsconfig.toph.json --noEmit
+
+      - name: Lint TOH frontend
+        run: npx eslint frontend/components/Stations/TopOfHour.vue frontend/entities/TopOfHour.ts

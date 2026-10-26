@@ -293,7 +293,8 @@
 
 <script setup lang="ts" generic="Row extends DataTableRow = DataTableRow">
 import {filter, forEach, get, isEmpty, some} from "es-toolkit/compat";
-import {computed, ref, shallowRef, toRaw, watch} from "vue";
+import {computed, inject, ref, shallowRef, toRaw, watch} from "vue";
+import {routeLocationKey, routerKey} from "vue-router";
 import {watchDebounced} from "@vueuse/core";
 import FormMultiCheck from "~/components/Form/FormMultiCheck.vue";
 import FormCheckbox from "~/components/Form/FormCheckbox.vue";
@@ -398,7 +399,17 @@ watch(selectedRows, (newRows: Row[]) => {
     emit('row-selected', newRows);
 });
 
-const searchPhrase = ref<string>(DATATABLE_DEFAULT_CONTEXT.searchPhrase);
+// `?search=` pre-fills the first table on a page, then is dropped so popups opened later don't inherit it.
+const route = inject(routeLocationKey, null);
+const router = inject(routerKey, null);
+const initialSearch = typeof route?.query.search === 'string' ? route.query.search : null;
+
+if (initialSearch !== null && route && router) {
+    const {search: _search, ...query} = route.query;
+    void router.replace({query});
+}
+
+const searchPhrase = ref<string>(initialSearch ?? DATATABLE_DEFAULT_CONTEXT.searchPhrase);
 const currentPage = ref<number>(DATATABLE_DEFAULT_CONTEXT.currentPage);
 
 const sortField = ref<DataTableField<Row> | null>(null);

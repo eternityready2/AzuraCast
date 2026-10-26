@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Console\Command;
 
 use App\Container\EntityManagerAwareTrait;
-use App\Entity\Station;
 use App\Service\AiNewsGenerator;
+use App\Service\StationDiagnostics;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -22,9 +22,11 @@ use Throwable;
 final class GenerateAiNewsCommand extends CommandAbstract
 {
     use EntityManagerAwareTrait;
+    use ResolvesStationArgumentTrait;
 
     public function __construct(
         private readonly AiNewsGenerator $generator,
+        private readonly StationDiagnostics $diagnostics,
     ) {
         parent::__construct();
     }
@@ -79,17 +81,53 @@ final class GenerateAiNewsCommand extends CommandAbstract
                 continue;
             }
 
-            $io->text(
-                $force && !$backendConfig->ai_news_enabled
-                    ? '<comment>Force mode: ignoring disabled state.</comment>'
-                    : ''
-            );
+            if ($force && !$backendConfig->ai_news_enabled) {
+                $io->text('<comment>Force mode: ignoring disabled state.</comment>');
+            }
+
+            $previousGeneratedAt = $station->ai_news_last_generation_time?->getTimestamp();
 
             try {
                 $this->generator->generate($station, $force);
+                $currentGeneratedAt = $station->ai_news_last_generation_time?->getTimestamp();
+
+                if (null !== $currentGeneratedAt && $currentGeneratedAt !== $previousGeneratedAt) {
+                    $this->diagnostics->info(
+                        $station,
+                        'ai news',
+                        'AI News bulletin generation completed.',
+                        [
+                            'forced' => $force,
+                            'generation_time' => $currentGeneratedAt,
+                            'status' => $station->ai_news_last_generation_status,
+                        ]
+                    );
+                } else {
+                    $this->diagnostics->info(
+                        $station,
+                        'ai news',
+                        'AI News generation was checked but intentionally skipped.',
+                        [
+                            'forced' => $force,
+                            'status' => $station->ai_news_last_generation_status,
+                        ]
+                    );
+                }
+
                 $io->text('<info>Generation succeeded.</info>');
                 $successCount++;
             } catch (Throwable $e) {
+                $error = str_replace($station->getFilteredPasswords(), '(PASSWORD)', $e->getMessage());
+                $this->diagnostics->error(
+                    $station,
+                    'ai news',
+                    'AI News bulletin generation failed.',
+                    [
+                        'forced' => $force,
+                        'error' => $error,
+                    ]
+                );
+
                 $io->error(sprintf('Failed: %s', $e->getMessage()));
                 return 1;
             }
@@ -105,22 +143,5 @@ final class GenerateAiNewsCommand extends CommandAbstract
         );
 
         return 0;
-    }
-
-    /**
-     * @return Station[]
-     */
-    private function resolveStations(?string $stationName): array
-    {
-        $repo = $this->em->getRepository(Station::class);
-
-        if (null !== $stationName) {
-            $station = $repo->findOneBy(['short_name' => $stationName])
-                ?? $repo->find($stationName);
-
-            return (null !== $station) ? [$station] : [];
-        }
-
-        return $repo->findAll();
     }
 }

@@ -14,7 +14,9 @@ use Doctrine\ORM\Mapping as ORM;
     ORM\Table(name: 'song_history'),
     ORM\Index(name: 'idx_is_visible', columns: ['is_visible']),
     ORM\Index(name: 'idx_timestamp_start', columns: ['timestamp_start']),
-    ORM\Index(name: 'idx_timestamp_end', columns: ['timestamp_end'])
+    ORM\Index(name: 'idx_timestamp_end', columns: ['timestamp_end']),
+    ORM\Index(name: 'idx_station_visible_id', columns: ['station_id', 'is_visible', 'id']),
+    ORM\Index(name: 'idx_station_timestamps', columns: ['station_id', 'timestamp_end', 'timestamp_start'])
 ]
 final class SongHistory implements
     Interfaces\SongInterface,
@@ -86,6 +88,15 @@ final class SongHistory implements
     /* TODO Remove direct identifier access. */
     #[ORM\Column(nullable: true, insertable: false, updatable: false)]
     public private(set) ?int $request_id = null;
+
+    /**
+     * Ordered list of Playlist Group names (outermost to innermost) this track was played
+     * through. Null if played directly (not via a group). Mirrors StationQueue::$playlist_chain.
+     *
+     * @var string[]|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    public ?array $playlist_chain = null;
 
     #[ORM\Column(type: 'datetime_immutable', precision: 6)]
     public readonly DateTimeImmutable $timestamp_start;
@@ -229,6 +240,7 @@ final class SongHistory implements
         $sh->request = $queue->request;
         $sh->playlist = $queue->playlist;
         $sh->clock_wheel = $queue->clock_wheel;
+        $sh->playlist_chain = $queue->playlist_chain;
         $sh->duration = $queue->duration;
         $sh->updateVisibility();
 

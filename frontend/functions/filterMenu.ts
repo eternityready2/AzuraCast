@@ -2,12 +2,13 @@ import {Component} from "vue";
 
 export type MenuRouteBasedUrl = {
     name: string,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    query?: Record<string, string>
 }
 
 export type MenuRouteUrl = string | MenuRouteBasedUrl;
 
-type MenuBase = {
+export type MenuBase = {
     key: string,
     label: string,
     icon?: () => Component,

@@ -45,7 +45,7 @@ let settings.azuracast.fallback_path = settings.make(
 )
 
 let settings.azuracast.temp_path = settings.make(
-    description="A temporary path to write ephemeral files (like recordings and HLS segments).",
+    description="The path to write temporary files.",
     "/tmp"
 )
 
@@ -85,7 +85,7 @@ let settings.azuracast.crossfade_smart_medium = settings.make(
 )
 
 let settings.azuracast.crossfade_smart_margin = settings.make(
-    description="Smart crossfade: the dB difference above which two tracks are considered too different to overlap.",
+    description="The dB difference above which two tracks are considered too different to overlap.",
     8.0
 )
 
@@ -109,6 +109,21 @@ let settings.azuracast.apply_amplify = settings.make(
     true
 )
 
+let settings.azuracast.smart_duck_enabled = settings.make(
+    description="When true, interrupting voiceover content smoothly ducks the underlying music bed.",
+    false
+)
+
+let settings.azuracast.smart_duck_attenuation = settings.make(
+    description="How much to lower the music bed while ducking (fraction of full volume, e.g. 0.2 = -14dB-ish).",
+    0.2
+)
+
+let settings.azuracast.smart_duck_delay = settings.make(
+    description="Reserved fade timing for smart ducking when supported by the active Liquidsoap smooth_add implementation.",
+    3.0
+)
+
 #<-----
 Variables
 ----->#
@@ -120,6 +135,32 @@ let azuracast.autodj_is_loading = ref(true)
 
 # Number of attempts that have been made to ping the AutoDJ for the next song.
 let azuracast.autodj_ping_attempts = ref(0)
+
+# Whether the AzuraCast AutoDJ queue currently contains at least one unplayed item.
+let azuracast.autodj_queue_ready = ref(false)
+
+# Direct handle to the request.dynamic source that owns ordinary AutoDJ music.
+# TOH/rigid clock events use this instead of trying to discover the source
+# through temporary switch/crossfade wrappers. The placeholder is never aired.
+let azuracast.autodj_transport = ref(blank(id="autodj_transport_placeholder", duration=0.))
+let azuracast.autodj_transport_ready = ref(false)
+# Seconds request.dynamic waits after a refused/empty nextsong before asking
+# again. The Top-of-Hour lane shortens it while it holds the air so music
+# resumes within ~1s of the ID/news releasing instead of up to 10s later.
+let azuracast.autodj_retry_delay = ref(10.)
+# While true, AutoDJ items are not pulled at all: a held item waits, unplayed,
+# instead of running silently under a broadcast-clock lane (e.g. the TOH ID).
+let azuracast.autodj_hold = ref(false)
+
+# One-shot marker consumed by the cross operator after a broadcast-clock cut.
+# Normal track transitions never set this flag and keep their configured fade.
+let azuracast.autodj_clean_cut_pending = ref(false)
+
+# request.dynamic exposes fetch(), but the generic source reference above does
+# not retain that specialized method in its type. Publish a tiny callback so a
+# broadcast-clock owner can prepare the fresh request while its audio gate stays
+# closed. The default no-op is replaced when AutoDJ is initialized.
+let azuracast.autodj_fetch_next = ref(fun () -> ())
 
 # The username/display name of the last authenticated DJ.
 let azuracast.last_authenticated_dj = ref("")
@@ -183,15 +224,17 @@ end
 API Utilities
 ----->#
 
-def azuracast.api_call(~timeout=null, endpoint_url, payload) =
+def azuracast.api_call(~timeout=null, ~log_response=true, endpoint_url, payload) =
     timeout = timeout ?? settings.azuracast.http_timeout()
     full_url = "#{settings.azuracast.api_url()}/#{endpoint_url}"
 
-    log(
-        level=3,
-        label="azuracast.api",
-        "API #{endpoint_url} - Sending POST request to '#{full_url}' with body: #{payload}"
-    )
+    if log_response then
+        log(
+            level=3,
+            label="azuracast.api",
+            "API #{endpoint_url} - Sending POST request to '#{full_url}' with body: #{payload}"
+        )
+    end
 
     try
         response = http.post(full_url,
@@ -204,11 +247,13 @@ def azuracast.api_call(~timeout=null, endpoint_url, payload) =
             data=payload
         )
 
-        log(
-            level=3,
-            label="azuracast.api",
-            "API #{endpoint_url} - Response (#{response.status_code}): #{response}"
-        )
+        if log_response then
+            log(
+                level=3,
+                label="azuracast.api",
+                "API #{endpoint_url} - Response (#{response.status_code}): #{response}"
+            )
+        end
 
         if response.status_code != 200 then
             null
@@ -332,7 +377,7 @@ def azuracast.autocue(
 
         let autocue_result = autocue.internal.implementation(
             request_metadata=request_metadata, 
-            file_metadata=file_metadata, 
+            file_metadata=file_metadata,
             filename
         )
 
@@ -359,7 +404,29 @@ def azuracast.autocue(
             thread.run(fast=false, f)
         end
 
-        autocue_result
+        # A computed AutoCue ignores AzuraCast's own cue-out, which carries the
+        # Top-of-Hour / Clock Wheel play cap. Clamp to it (the cache above keeps
+        # the natural values) so a capped song fades out before the ID instead
+        # of running its natural length into the ID's cut.
+        cap = float_of_string(default=0.0, list.assoc(default="", "autocue_cue_out", request_metadata))
+        if cap > 0.0 and null.defined(autocue_result) then
+            r = null.get(autocue_result)
+            if cap < r.cue_out then
+                cue_out = max(r.cue_in + 1.0, cap)
+                fade_out = min(r.fade_out, cue_out - r.cue_in)
+                start_next = min(r?.start_next ?? (cue_out - fade_out), cue_out - fade_out)
+                log(
+                    level=3,
+                    label=label,
+                    "Applied AzuraCast cue-out cap: #{r.cue_out}s -> #{cue_out}s."
+                )
+                null({...r, cue_out = cue_out, fade_out = fade_out, start_next = start_next})
+            else
+                autocue_result
+            end
+        else
+            autocue_result
+        end
     else
         null
     end
@@ -405,6 +472,39 @@ def azuracast.autodj_next_song() =
     end
 end
 
+# Cache AutoDJ queue readiness for source-selection predicates.
+# On API or JSON errors, retain the last known state to avoid source flapping.
+def azuracast.update_autodj_queue_status() =
+    try
+        api_response = azuracast.api_call(
+            timeout=2.0,
+            log_response=false,
+            "queuestatus",
+            ""
+        )
+
+        if null.defined(api_response) then
+            let json.parse (
+                {
+                    ready,
+                } : {
+                    ready: bool,
+                }
+            ) = null.get(api_response)
+
+            azuracast.autodj_queue_ready := ready
+        end
+    catch err do
+        log(
+            level=2,
+            label="azuracast.autodj",
+            "ERROR updating AutoDJ queue status: #{error.kind(err)} - #{error.message(err)}"
+        )
+    end
+
+    1.0
+end
+
 # Delayed ping for AutoDJ Next Song
 def azuracast.wait_for_next_song(autodj) = 
     azuracast.autodj_ping_attempts := azuracast.autodj_ping_attempts() + 1
@@ -432,19 +532,70 @@ def azuracast.wait_for_next_song(autodj) =
     end
 end
 
+# Permanently discard the ordinary AutoDJ request that is currently playing.
+# This direct handle is deliberately below fallbacks, switches and crossfades,
+# so a broadcast-clock interruption cannot accidentally skip only a wrapper and
+# leave the same request parked to resume later.
+def azuracast.discard_autodj_current() =
+    if azuracast.autodj_transport_ready() then
+        source.skip(azuracast.autodj_transport())
+        log(level=2, label="azuracast.autodj", "Discarded current AutoDJ transport request.")
+    end
+end
+
+# Broadcast-clock discard. Arm the cross operator before skipping the real
+# request.dynamic leaf. The next cross boundary must omit old.source entirely;
+# otherwise Liquidsoap deliberately overlaps the buffered old tail with the new
+# request and the interrupted song becomes audible again after the clock item.
+# The pending guard also prevents TOH->rigid handoff from skipping two songs.
+def azuracast.discard_autodj_current_cleanly() =
+    if azuracast.autodj_transport_ready() and not azuracast.autodj_clean_cut_pending() then
+        azuracast.autodj_clean_cut_pending := true
+        source.skip(azuracast.autodj_transport())
+        log(level=2, label="azuracast.autodj", "Armed clean cross boundary and discarded current AutoDJ transport request.")
+    end
+end
+
+# Prepare a fresh AutoDJ request without opening the broadcast-clock audio gate.
+# This is intentionally explicit rather than globally enabling request.dynamic
+# prefetch, which could pull a song across unrelated programme boundaries.
+def azuracast.prefetch_autodj_next() =
+    if azuracast.autodj_transport_ready() then
+        fetch_next = azuracast.autodj_fetch_next()
+        fetch_next()
+        log(level=2, label="azuracast.autodj", "Prefetch requested for fresh AutoDJ transport request.")
+    end
+end
+
+# True only when the direct AutoDJ transport has a request ready to produce.
+def azuracast.autodj_fresh_ready() =
+    azuracast.autodj_transport_ready() and source.is_ready(azuracast.autodj_transport())
+end
+
 def azuracast.enable_autodj(s) =
     dynamic = request.dynamic(
         id="next_song", 
         timeout=settings.azuracast.request_timeout(), 
-        retry_delay=10., 
+        retry_delay={azuracast.autodj_retry_delay()}, 
         azuracast.autodj_next_song
     )
+
+    # Publish the real request.dynamic transport for broadcast-clock controls.
+    # Anything faded/cut by TOH or a rigid programme can now be destroyed at
+    # the source instead of relying on source.effective() through wrappers.
+    azuracast.autodj_transport := dynamic
+    azuracast.autodj_transport_ready := true
+    azuracast.autodj_fetch_next := fun () -> dynamic.fetch()
 
     dynamic_startup = fallback(
         id = "dynamic_startup",
         track_sensitive = false,
         [
-            dynamic,
+            source.available(dynamic, {not azuracast.autodj_hold()}),
+            source.available(
+                blank(id = "autodj_hold_blank"),
+                {azuracast.autodj_hold()}
+            ),
             source.available(
                 blank(id = "autodj_startup_blank", duration = 120.),
                 predicate.activates({azuracast.autodj_is_loading()})
@@ -572,7 +723,16 @@ def azuracast.live_aware_crossfade_impl(old, new) =
         metadata.cover.remove(new.metadata)
     )
 
-    if azuracast.to_live() then
+    if azuracast.autodj_clean_cut_pending() then
+        # A broadcast-clock owner already faded the old programme to zero and
+        # directly skipped its request.dynamic request. `cross` normally retains
+        # and overlaps the buffered old tail at this boundary, which is exactly
+        # what makes a cut song briefly reappear after TOH. Consume the one-shot
+        # marker and expose only the fresh source. No old frames are mixed.
+        azuracast.autodj_clean_cut_pending := false
+        log.info(label="azuracast.crossfade", "Broadcast-clock clean cut: discarded buffered old crossfade tail.")
+        new.source
+    elsif azuracast.to_live() then
         # If going to the live show, play a simple sequence
         # fade out AutoDJ, do (almost) not fade in streamer
         log.info(label="azuracast.crossfade", "Fading to live...")
@@ -620,6 +780,27 @@ def azuracast.live_aware_crossfade_impl(old, new) =
 end
 
 def azuracast.apply_crossfade(s) =
+    # While the Top-of-Hour lane holds AutoDJ, the underlay plays a silent hold
+    # track, and metadata replayed onto it carries the last song's
+    # liq_cross_end_duration. cross cannot see a hold track's end coming, so it
+    # buffered that many seconds of silence and the new hour opened ~6s late
+    # (6pm-8pm 2026-09-24). Nothing seen during the hold gets a crossfade.
+    s = metadata.map(
+        id="autodj_hold_cross_reset",
+        update=true,
+        fun (_) ->
+            if azuracast.autodj_hold() then
+                [
+                    ("liq_cross_end_duration", "0."),
+                    ("liq_cross_start_duration", "0."),
+                    ("liq_cross_max_start_duration", "0.")
+                ]
+            else
+                []
+            end,
+        s
+    )
+
     cross(
         duration=settings.azuracast.default_cross(),
         azuracast.live_aware_crossfade_impl,
@@ -697,6 +878,29 @@ def azuracast.apply_amplify(s) =
         (amplify(1., s) : source)
     else
         s
+    end
+end
+
+#<-----
+Smart Ducking
+----->#
+
+# Ducks `music` under interrupting `voiceover` content using smooth_add.
+# The music bed is lowered for the duration of the special source and then
+# smoothly returns to full volume. This is a generic playout feature; it has
+# no dependency on the Top-of-Hour Station ID engine.
+def azuracast.duck(~id="duck", ~voiceover, music) =
+    if settings.azuracast.smart_duck_enabled() then
+        # This Liquidsoap version's smooth_add does not expose configurable
+        # fade timing. smart_duck_delay is kept as an operator-facing reserve
+        # for versions that add that capability.
+        smooth_add(
+            p=settings.azuracast.smart_duck_attenuation(),
+            normal=music,
+            special=voiceover
+        )
+    else
+        fallback(id=id, track_sensitive=false, [voiceover, music])
     end
 end
 

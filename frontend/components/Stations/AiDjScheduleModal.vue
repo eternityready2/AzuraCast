@@ -1,286 +1,261 @@
 <template>
-    <div
-        v-if="isOpen"
-        class="schedule-overlay"
-        role="dialog"
-        aria-modal="true"
-        :aria-labelledby="'sched-title-' + activeDjId"
-        @keydown.esc="close"
+    <modal
+        id="ai_dj_schedule_modal"
+        ref="$modal"
+        size="lg"
+        :title="modalTitle"
+        :busy="isLoadingSchedules"
+        @hidden="handleHidden"
     >
-        <div
-            class="schedule-panel"
-            tabindex="-1"
-        >
-            <!-- Header -->
-            <div class="schedule-panel-header">
-                <div>
-                    <h3
-                        :id="'sched-title-' + activeDjId"
-                        class="schedule-panel-title"
-                    >
-                        {{ $gettext('Schedules') }}
-                        <span
-                            v-if="activeDjName"
-                            class="schedule-dj-name"
-                        >— {{ activeDjName }}</span>
-                    </h3>
-                    <p class="schedule-panel-sub mb-0">
-                        {{ $gettext('Manage when this DJ is active.') }}
-                    </p>
-                </div>
+        <template #default>
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <span class="text-muted small">
+                    {{ scheduleCountText }}
+                </span>
                 <button
                     type="button"
-                    class="schedule-close-btn"
-                    :aria-label="$gettext('Close')"
-                    @click="close"
+                    class="btn btn-primary btn-sm"
+                    :disabled="schedEditorOpen"
+                    @click="openSchedCreate"
                 >
-                    ✕
+                    <icon-ic-baseline-add />
+                    {{ $gettext('Add Schedule') }}
                 </button>
             </div>
 
-            <loading
-                :loading="isLoadingSchedules"
-                lazy
+            <p
+                v-if="schedules.length === 0 && !schedEditorOpen"
+                class="text-muted text-center py-4 mb-0"
             >
-                <!-- Schedule list -->
-                <div class="schedule-list-header">
-                    <span class="schedule-count">
-                        {{ schedules.length }}
-                        {{ schedules.length === 1 ? $gettext('schedule') : $gettext('schedules') }}
-                    </span>
-                    <button
-                        type="button"
-                        class="btn btn-primary btn-sm"
-                        :disabled="schedEditorOpen"
-                        @click="openSchedCreate"
-                    >
-                        + {{ $gettext('Add Schedule') }}
-                    </button>
-                </div>
+                {{ $gettext('No schedules yet. Add one to control when this DJ is active.') }}
+            </p>
 
-                <div
-                    v-if="schedules.length === 0 && !schedEditorOpen"
-                    class="schedule-empty"
-                >
-                    {{ $gettext('No schedules yet. Add one to control when this DJ is active.') }}
-                </div>
-
-                <div
+            <ul
+                v-else
+                class="list-group mb-3"
+            >
+                <li
                     v-for="sched in schedules"
                     :key="sched.id"
-                    class="schedule-row"
-                    :class="{'schedule-row--disabled': !sched.is_enabled}"
+                    class="list-group-item d-flex align-items-center justify-content-between gap-3"
+                    :class="{'opacity-50': !sched.is_enabled}"
                 >
-                    <div class="schedule-row-info">
-                        <div class="schedule-row-name">
+                    <div class="min-width-0">
+                        <div class="fw-semibold">
                             {{ sched.name }}
                             <span
-                                class="sched-status-badge"
-                                :class="sched.is_enabled ? 'sched-on' : 'sched-off'"
+                                class="badge ms-1"
+                                :class="sched.is_enabled ? 'text-bg-success' : 'text-bg-secondary'"
                             >
                                 {{ sched.is_enabled ? $gettext('On') : $gettext('Off') }}
                             </span>
                         </div>
-                        <div class="schedule-row-meta">
-                            <span class="sched-time">{{ formatTime(sched) }}</span>
-                            <span class="sched-sep">·</span>
-                            <span class="sched-days">{{ formatDays(sched) }}</span>
+                        <div class="text-muted small">
+                            {{ formatTime(sched) }} &middot; {{ formatDays(sched) }}
                         </div>
                     </div>
-                    <div class="schedule-row-actions">
+                    <div class="d-flex gap-2 flex-shrink-0">
                         <button
                             type="button"
-                            class="btn btn-secondary btn-xs"
+                            class="btn btn-secondary btn-sm"
                             @click="openSchedEdit(sched)"
                         >
                             {{ $gettext('Edit') }}
                         </button>
                         <button
                             type="button"
-                            class="btn btn-danger btn-xs"
+                            class="btn btn-danger btn-sm"
                             @click="confirmSchedDelete(sched)"
                         >
                             {{ $gettext('Delete') }}
                         </button>
                     </div>
+                </li>
+            </ul>
+
+            <div
+                v-if="schedEditorOpen"
+                class="card card-body bg-body-tertiary mb-3"
+            >
+                <h3 class="h6">
+                    {{ editingSched ? $gettext('Edit Schedule') : $gettext('New Schedule') }}
+                </h3>
+
+                <div
+                    v-if="overlapError"
+                    class="alert alert-danger"
+                    role="alert"
+                >
+                    {{ overlapError }}
                 </div>
 
-                <!-- Schedule Editor -->
-                <div
-                    v-if="schedEditorOpen"
-                    class="sched-editor-card"
-                >
-                    <div class="sched-editor-title">
-                        {{ editingSched ? $gettext('Edit Schedule') : $gettext('New Schedule') }}
+                <form @submit.prevent="saveSched">
+                    <div class="mb-3">
+                        <label
+                            class="form-label"
+                            :for="`sched_name_${activeDjId}`"
+                        >
+                            {{ $gettext('Name') }}
+                            <span class="text-danger">*</span>
+                        </label>
+                        <input
+                            :id="`sched_name_${activeDjId}`"
+                            v-model="schedForm.name"
+                            class="form-control"
+                            type="text"
+                            :placeholder="$gettext('e.g. Morning Shift')"
+                            required
+                        >
                     </div>
 
-                    <div
-                        v-if="overlapError"
-                        class="sched-error"
-                        role="alert"
-                    >
-                        {{ overlapError }}
-                    </div>
-
-                    <form @submit.prevent="saveSched">
-                        <!-- Name -->
-                        <div class="sched-field">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
                             <label
-                                class="sched-label"
-                                :for="'sched-name-' + activeDjId"
+                                class="form-label"
+                                :for="`sched_start_${activeDjId}`"
                             >
-                                {{ $gettext('Name') }}
-                                <span class="text-danger">*</span>
+                                {{ $gettext('Start Time') }}
                             </label>
                             <input
-                                :id="'sched-name-' + activeDjId"
-                                v-model="schedForm.name"
-                                class="form-control form-control-dark"
-                                type="text"
-                                :placeholder="$gettext('e.g. Morning Shift')"
-                                required
+                                :id="`sched_start_${activeDjId}`"
+                                v-model="schedForm.start_time"
+                                class="form-control"
+                                type="time"
+                                step="60"
                             >
                         </div>
-
-                        <!-- Time row -->
-                        <div class="sched-time-row">
-                            <div class="sched-field sched-field--half">
-                                <label
-                                    class="sched-label"
-                                    :for="'sched-start-' + activeDjId"
-                                >
-                                    {{ $gettext('Start Time') }}
-                                </label>
-                                <input
-                                    :id="'sched-start-' + activeDjId"
-                                    v-model="schedForm.start_time"
-                                    class="form-control form-control-dark"
-                                    type="time"
-                                    step="60"
-                                >
-                            </div>
-                            <div class="sched-field sched-field--half">
-                                <label
-                                    class="sched-label"
-                                    :for="'sched-end-' + activeDjId"
-                                >
-                                    {{ $gettext('End Time') }}
-                                </label>
-                                <input
-                                    :id="'sched-end-' + activeDjId"
-                                    v-model="schedForm.end_time"
-                                    class="form-control form-control-dark"
-                                    type="time"
-                                    step="60"
-                                >
-                            </div>
+                        <div class="col-md-6">
+                            <label
+                                class="form-label"
+                                :for="`sched_end_${activeDjId}`"
+                            >
+                                {{ $gettext('End Time') }}
+                            </label>
+                            <input
+                                :id="`sched_end_${activeDjId}`"
+                                v-model="schedForm.end_time"
+                                class="form-control"
+                                type="time"
+                                step="60"
+                            >
                         </div>
+                    </div>
 
-                        <!-- Loop Days -->
-                        <div class="sched-field">
-                            <div class="sched-label">
-                                {{ $gettext('Active Days') }}
-                            </div>
-                            <div class="day-checkboxes">
-                                <label
-                                    v-for="(dayLabel, idx) in DAY_LABELS"
-                                    :key="idx"
-                                    class="day-check"
-                                    :class="{'day-check--active': schedForm.loop_days.includes(idx + 1)}"
+                    <div class="mb-3">
+                        <label class="form-label d-block">
+                            {{ $gettext('Active Days') }}
+                        </label>
+                        <div
+                            class="btn-group flex-wrap"
+                            role="group"
+                            :aria-label="$gettext('Active Days')"
+                        >
+                            <template
+                                v-for="(dayLabel, idx) in DAY_LABELS"
+                                :key="idx"
+                            >
+                                <input
+                                    :id="`sched_day_${activeDjId}_${idx}`"
+                                    type="checkbox"
+                                    class="btn-check"
+                                    autocomplete="off"
+                                    :checked="schedForm.loop_days.includes(idx + 1)"
+                                    @change="toggleDay(idx + 1)"
                                 >
-                                    <input
-                                        type="checkbox"
-                                        class="visually-hidden"
-                                        :value="idx + 1"
-                                        :checked="schedForm.loop_days.includes(idx + 1)"
-                                        @change="toggleDay(idx + 1)"
-                                    >
+                                <label
+                                    class="btn btn-outline-primary btn-sm"
+                                    :for="`sched_day_${activeDjId}_${idx}`"
+                                >
                                     {{ dayLabel }}
                                 </label>
-                            </div>
-                            <div class="sched-helper">
-                                {{ $gettext('Leave all unchecked to run every day.') }}
-                            </div>
+                            </template>
                         </div>
-
-                        <!-- Enabled toggle -->
-                        <div class="toggle-row mb-3">
-                            <div>
-                                <div class="toggle-label">
-                                    {{ $gettext('Enabled') }}
-                                </div>
-                            </div>
-                            <label class="toggle">
-                                <input
-                                    v-model="schedForm.is_enabled"
-                                    type="checkbox"
-                                >
-                                <span class="slider" />
-                            </label>
+                        <div class="form-text">
+                            {{ $gettext('Leave all unchecked to run every day.') }}
                         </div>
-
-                        <div class="btn-row">
-                            <button
-                                type="submit"
-                                class="btn btn-primary"
-                                :disabled="isSchedSaving"
-                            >
-                                {{ isSchedSaving ? $gettext('Saving…') : $gettext('Save Schedule') }}
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-secondary"
-                                @click="closeSchedEditor"
-                            >
-                                {{ $gettext('Cancel') }}
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Delete Confirm -->
-                <div
-                    v-if="schedDeleteTarget"
-                    class="sched-delete-card"
-                >
-                    <div class="sched-editor-title">
-                        {{ $gettext('Confirm Delete') }}
                     </div>
-                    <p>
-                        {{ $gettext('Delete schedule "%{name}"? This cannot be undone.', { name: schedDeleteTarget.name }) }}
-                    </p>
-                    <div class="btn-row">
-                        <button
-                            type="button"
-                            class="btn btn-danger"
-                            :disabled="isSchedDeleting"
-                            @click="doSchedDelete"
+
+                    <div class="form-check form-switch mb-3">
+                        <input
+                            :id="`sched_enabled_${activeDjId}`"
+                            v-model="schedForm.is_enabled"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
                         >
-                            {{ isSchedDeleting ? $gettext('Deleting…') : $gettext('Delete') }}
+                        <label
+                            class="form-check-label"
+                            :for="`sched_enabled_${activeDjId}`"
+                        >
+                            {{ $gettext('Enabled') }}
+                        </label>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button
+                            type="submit"
+                            class="btn btn-primary"
+                            :disabled="isSchedSaving"
+                        >
+                            {{ isSchedSaving ? $gettext('Saving…') : $gettext('Save Schedule') }}
                         </button>
                         <button
                             type="button"
                             class="btn btn-secondary"
-                            @click="schedDeleteTarget = null"
+                            @click="closeSchedEditor"
                         >
                             {{ $gettext('Cancel') }}
                         </button>
                     </div>
+                </form>
+            </div>
+
+            <div
+                v-if="schedDeleteTarget"
+                class="card card-body border-danger mb-3"
+            >
+                <p class="mb-3">
+                    {{ $gettext('Delete schedule "%{name}"? This cannot be undone.', { name: schedDeleteTarget.name }) }}
+                </p>
+                <div class="d-flex gap-2">
+                    <button
+                        type="button"
+                        class="btn btn-danger"
+                        :disabled="isSchedDeleting"
+                        @click="doSchedDelete"
+                    >
+                        {{ isSchedDeleting ? $gettext('Deleting…') : $gettext('Delete') }}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-secondary"
+                        @click="schedDeleteTarget = null"
+                    >
+                        {{ $gettext('Cancel') }}
+                    </button>
                 </div>
-            </loading>
-        </div>
-    </div>
+            </div>
+        </template>
+
+        <template #modal-footer>
+            <button
+                type="button"
+                class="btn btn-secondary"
+                @click="close"
+            >
+                {{ $gettext('Close') }}
+            </button>
+        </template>
+    </modal>
 </template>
 
 <script setup lang="ts">
-import {ref} from 'vue';
+import {computed, ref, useTemplateRef} from 'vue';
 import {useGettext} from 'vue3-gettext';
-import Loading from '~/components/Common/Loading.vue';
+import Modal from '~/components/Common/Modal.vue';
 import {useAxios} from '~/vendor/axios';
 import {useNotify} from '~/components/Common/Toasts/useNotify.ts';
 import {useApiRouter} from '~/functions/useApiRouter.ts';
-
-// --- Types ---
 
 interface AiDjSchedule {
     id: number;
@@ -299,8 +274,6 @@ interface SchedForm {
     is_enabled: boolean;
 }
 
-// --- Setup ---
-
 const {$gettext} = useGettext();
 const {axios} = useAxios();
 const {notifySuccess, notifyError} = useNotify();
@@ -316,9 +289,8 @@ const DAY_LABELS = [
     $gettext('Sun'),
 ];
 
-// --- State ---
+const $modal = useTemplateRef('$modal');
 
-const isOpen = ref(false);
 const activeDjId = ref<number | null>(null);
 const activeDjName = ref<string>('');
 const isLoadingSchedules = ref(false);
@@ -340,7 +312,17 @@ const emptyForm = (): SchedForm => ({
 });
 const schedForm = ref<SchedForm>(emptyForm());
 
-// --- URL helpers ---
+const modalTitle = computed(() => {
+    return activeDjName.value
+        ? `${$gettext('Schedules')} — ${activeDjName.value}`
+        : $gettext('Schedules');
+});
+
+const scheduleCountText = computed(() => {
+    return schedules.value.length === 1
+        ? $gettext('1 schedule')
+        : $gettext('%{count} schedules', {count: schedules.value.length});
+});
 
 const schedulesUrl = () =>
     getStationApiUrl(`/ai-dj/${activeDjId.value}/schedules`).value;
@@ -348,34 +330,42 @@ const schedulesUrl = () =>
 const scheduleUrl = (id: number) =>
     getStationApiUrl(`/ai-dj/${activeDjId.value}/schedules/${id}`).value;
 
-// --- Formatters ---
-
-// Render a 24h "HH:MM" backend time as 12-hour "h:MM AM/PM" so the schedule
-// surface matches the rest of the UI (client asked for no military time).
+/** Schedules are stored as 24-hour "HH:MM"; the UI always renders 12-hour times. */
 const to12Hour = (t: string): string => {
-    const m = /^(\d{1,2}):(\d{2})/.exec(t);
-    if (!m) return t;
-    let h = parseInt(m[1], 10);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12;
-    if (h === 0) h = 12;
-    return `${h}:${m[2]} ${ampm}`;
+    const match = /^(\d{1,2}):(\d{2})/.exec(t);
+    if (!match) {
+        return t;
+    }
+
+    let hours = parseInt(match[1], 10);
+    const meridiem = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) {
+        hours = 12;
+    }
+
+    return `${hours}:${match[2]} ${meridiem}`;
 };
 
-const formatTime = (s: AiDjSchedule): string => {
-    if (s.start_time && s.end_time) return `${to12Hour(s.start_time)} – ${to12Hour(s.end_time)}`;
+const formatTime = (schedule: AiDjSchedule): string => {
+    if (schedule.start_time && schedule.end_time) {
+        return `${to12Hour(schedule.start_time)} – ${to12Hour(schedule.end_time)}`;
+    }
     return $gettext('All day');
 };
 
-const formatDays = (s: AiDjSchedule): string => {
-    if (!s.loop_days || s.loop_days.length === 0) return $gettext('Every day');
-    return s.loop_days.map((d) => DAY_LABELS[d - 1] ?? String(d)).join(', ');
+const formatDays = (schedule: AiDjSchedule): string => {
+    if (!schedule.loop_days || schedule.loop_days.length === 0) {
+        return $gettext('Every day');
+    }
+    return schedule.loop_days.map((day) => DAY_LABELS[day - 1] ?? String(day)).join(', ');
 };
 
-// --- API ---
-
 const loadSchedules = async (): Promise<void> => {
-    if (!activeDjId.value) return;
+    if (!activeDjId.value) {
+        return;
+    }
+
     isLoadingSchedules.value = true;
     try {
         const resp = await axios.get<AiDjSchedule[]>(schedulesUrl());
@@ -387,8 +377,6 @@ const loadSchedules = async (): Promise<void> => {
     }
 };
 
-// --- Editor ---
-
 const openSchedCreate = (): void => {
     editingSched.value = null;
     schedForm.value = emptyForm();
@@ -397,14 +385,14 @@ const openSchedCreate = (): void => {
     schedEditorOpen.value = true;
 };
 
-const openSchedEdit = (s: AiDjSchedule): void => {
-    editingSched.value = s;
+const openSchedEdit = (schedule: AiDjSchedule): void => {
+    editingSched.value = schedule;
     schedForm.value = {
-        name: s.name,
-        start_time: s.start_time ?? '',
-        end_time: s.end_time ?? '',
-        loop_days: [...(s.loop_days ?? [])],
-        is_enabled: s.is_enabled,
+        name: schedule.name,
+        start_time: schedule.start_time ?? '',
+        end_time: schedule.end_time ?? '',
+        loop_days: [...(schedule.loop_days ?? [])],
+        is_enabled: schedule.is_enabled,
     };
     overlapError.value = null;
     schedDeleteTarget.value = null;
@@ -430,11 +418,13 @@ const toggleDay = (day: number): void => {
 const saveSched = async (): Promise<void> => {
     overlapError.value = null;
     isSchedSaving.value = true;
+
     const payload = {
         ...schedForm.value,
         start_time: schedForm.value.start_time || null,
         end_time: schedForm.value.end_time || null,
     };
+
     try {
         if (editingSched.value) {
             await axios.put(scheduleUrl(editingSched.value.id), payload);
@@ -458,15 +448,16 @@ const saveSched = async (): Promise<void> => {
     }
 };
 
-// --- Delete ---
-
-const confirmSchedDelete = (s: AiDjSchedule): void => {
-    schedDeleteTarget.value = s;
+const confirmSchedDelete = (schedule: AiDjSchedule): void => {
+    schedDeleteTarget.value = schedule;
     schedEditorOpen.value = false;
 };
 
 const doSchedDelete = async (): Promise<void> => {
-    if (!schedDeleteTarget.value) return;
+    if (!schedDeleteTarget.value) {
+        return;
+    }
+
     isSchedDeleting.value = true;
     try {
         await axios.delete(scheduleUrl(schedDeleteTarget.value.id));
@@ -480,8 +471,6 @@ const doSchedDelete = async (): Promise<void> => {
     }
 };
 
-// --- Public API ---
-
 const open = (djId: number, djName: string): void => {
     activeDjId.value = djId;
     activeDjName.value = djName;
@@ -489,12 +478,15 @@ const open = (djId: number, djName: string): void => {
     schedDeleteTarget.value = null;
     overlapError.value = null;
     schedules.value = [];
-    isOpen.value = true;
+    $modal.value?.show();
     void loadSchedules();
 };
 
 const close = (): void => {
-    isOpen.value = false;
+    $modal.value?.hide();
+};
+
+const handleHidden = (): void => {
     activeDjId.value = null;
     activeDjName.value = '';
     schedules.value = [];
@@ -503,317 +495,3 @@ const close = (): void => {
 
 defineExpose({open, close});
 </script>
-
-<style scoped lang="scss">
-.schedule-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1050;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 2rem 1rem;
-    overflow-y: auto;
-}
-
-.schedule-panel {
-    background: var(--bs-body-bg, #1a1d23);
-    border: 1px solid var(--bs-border-color, #2d3140);
-    border-radius: 10px;
-    width: 100%;
-    max-width: 560px;
-    padding: 1.5rem;
-    outline: none;
-}
-
-.schedule-panel-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
-}
-
-.schedule-panel-title {
-    font-size: 1.1rem;
-    font-weight: 700;
-    margin: 0 0 0.2rem;
-    color: var(--bs-body-color, #e0e0e0);
-}
-
-.schedule-dj-name {
-    font-weight: 400;
-    color: var(--bs-secondary-color, #888);
-}
-
-.schedule-panel-sub {
-    font-size: 0.82rem;
-    color: var(--bs-secondary-color, #888);
-}
-
-.schedule-close-btn {
-    background: none;
-    border: none;
-    color: var(--bs-secondary-color, #888);
-    font-size: 1.1rem;
-    cursor: pointer;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    line-height: 1;
-    flex-shrink: 0;
-
-    &:hover {
-        background: var(--bs-tertiary-bg, #22252e);
-        color: var(--bs-body-color, #e0e0e0);
-    }
-}
-
-.schedule-list-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-}
-
-.schedule-count {
-    font-size: 0.82rem;
-    color: var(--bs-secondary-color, #888);
-}
-
-.schedule-empty {
-    color: var(--bs-secondary-color, #888);
-    font-size: 0.88rem;
-    text-align: center;
-    padding: 1.5rem 0;
-}
-
-.schedule-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.65rem 0;
-    border-bottom: 1px solid var(--bs-border-color, #2d3140);
-
-    &:last-of-type {
-        border-bottom: none;
-    }
-
-    &--disabled {
-        opacity: 0.55;
-    }
-}
-
-.schedule-row-info {
-    min-width: 0;
-}
-
-.schedule-row-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.schedule-row-meta {
-    font-size: 0.8rem;
-    color: var(--bs-secondary-color, #aaa);
-    margin-top: 0.15rem;
-}
-
-.sched-sep {
-    margin: 0 0.3rem;
-}
-
-.sched-status-badge {
-    display: inline-block;
-    border-radius: 10px;
-    padding: 0.1rem 0.45rem;
-    font-size: 0.72rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-
-    &.sched-on {
-        background: rgba(40, 167, 69, 0.18);
-        color: #5cb85c;
-    }
-
-    &.sched-off {
-        background: rgba(108, 117, 125, 0.18);
-        color: var(--bs-secondary-color, #888);
-    }
-}
-
-.schedule-row-actions {
-    display: flex;
-    gap: 0.4rem;
-    flex-shrink: 0;
-}
-
-.btn-xs {
-    padding: 0.2rem 0.55rem;
-    font-size: 0.78rem;
-}
-
-.sched-editor-card {
-    margin-top: 1rem;
-    background: var(--bs-tertiary-bg, #22252e);
-    border: 1px solid var(--bs-primary, #5a7fd4);
-    border-radius: 8px;
-    padding: 1rem;
-}
-
-.sched-delete-card {
-    margin-top: 1rem;
-    background: var(--bs-tertiary-bg, #22252e);
-    border: 1px solid var(--bs-danger, #dc3545);
-    border-radius: 8px;
-    padding: 1rem;
-}
-
-.sched-editor-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin-bottom: 0.9rem;
-    color: var(--bs-body-color, #e0e0e0);
-}
-
-.sched-error {
-    background: rgba(220, 53, 69, 0.15);
-    border: 1px solid var(--bs-danger, #dc3545);
-    border-radius: 6px;
-    color: #e07070;
-    font-size: 0.85rem;
-    padding: 0.6rem 0.75rem;
-    margin-bottom: 0.9rem;
-}
-
-.sched-field {
-    margin-bottom: 0.9rem;
-}
-
-.sched-field--half {
-    flex: 1;
-}
-
-.sched-label {
-    display: block;
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: var(--bs-secondary-color, #aaa);
-    margin-bottom: 0.3rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.sched-time-row {
-    display: flex;
-    gap: 0.75rem;
-    margin-bottom: 0.9rem;
-}
-
-.sched-helper {
-    font-size: 0.78rem;
-    color: var(--bs-secondary-color, #888);
-    margin-top: 0.35rem;
-}
-
-.day-checkboxes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    margin-top: 0.3rem;
-}
-
-.day-check {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 2.4rem;
-    padding: 0.3rem 0.5rem;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    background: var(--bs-body-bg, #1a1d23);
-    border: 1px solid var(--bs-border-color, #2d3140);
-    color: var(--bs-secondary-color, #aaa);
-    user-select: none;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-
-    &--active {
-        background: var(--bs-primary, #5a7fd4);
-        border-color: var(--bs-primary, #5a7fd4);
-        color: #fff;
-    }
-
-    &:hover:not(.day-check--active) {
-        border-color: var(--bs-primary, #5a7fd4);
-        color: var(--bs-body-color, #e0e0e0);
-    }
-}
-
-.toggle-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-}
-
-.toggle-label {
-    font-weight: 600;
-    font-size: 0.9rem;
-}
-
-.toggle {
-    position: relative;
-    display: inline-block;
-    width: 44px;
-    height: 24px;
-    flex-shrink: 0;
-
-    input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-
-    .slider {
-        position: absolute;
-        inset: 0;
-        background: var(--bs-secondary, #6c757d);
-        border-radius: 24px;
-        cursor: pointer;
-        transition: background 0.2s;
-
-        &::before {
-            content: '';
-            position: absolute;
-            width: 18px;
-            height: 18px;
-            left: 3px;
-            top: 3px;
-            border-radius: 50%;
-            background: #fff;
-            transition: transform 0.2s;
-        }
-    }
-
-    input:checked + .slider {
-        background: var(--bs-primary, #5a7fd4);
-    }
-
-    input:checked + .slider::before {
-        transform: translateX(20px);
-    }
-}
-
-.btn-row {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-}
-</style>

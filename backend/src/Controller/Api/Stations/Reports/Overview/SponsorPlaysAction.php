@@ -57,6 +57,7 @@ final class SponsorPlaysAction extends AbstractReportAction
             return $response->withJson([
                 'sponsors' => [],
                 'plays' => [],
+                'promo_delivery' => $this->getPromoDelivery($station->id, $dateRange->start, $dateRange->end),
             ]);
         }
 
@@ -116,6 +117,78 @@ final class SponsorPlaysAction extends AbstractReportAction
         return $response->withJson([
             'sponsors' => $sponsors,
             'plays' => $plays,
+            'promo_delivery' => $this->getPromoDelivery($station->id, $dateRange->start, $dateRange->end),
         ]);
+    }
+
+    /**
+     * How promos and ads actually reached air: how many aired, breaks where
+     * three or more ran back to back, and any the Top-of-Hour ID cut short.
+     * Song history closes an item when the next starts, so "cut" means it held
+     * the air clearly less than its own length and the ID came next.
+     *
+     * @return array<string, mixed>
+     */
+    private function getPromoDelivery(int $stationId, \DateTimeInterface $start, \DateTimeInterface $end): array
+    {
+        $rows = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT UNIX_TIMESTAMP(h.timestamp_start) AS started, UNIX_TIMESTAMP(h.timestamp_end) AS ended,
+                h.duration, h.text, m.type AS media_type
+            FROM song_history h
+            LEFT JOIN station_media m ON m.id = h.media_id
+            WHERE h.station_id = ? AND h.timestamp_start BETWEEN ? AND ?
+            ORDER BY h.timestamp_start',
+            [
+                $stationId,
+                gmdate('Y-m-d H:i:s', $start->getTimestamp()),
+                gmdate('Y-m-d H:i:s', $end->getTimestamp()),
+            ]
+        );
+
+        $isPromo = static fn(array $r): bool => in_array($r['media_type'], ['promo', 'ad'], true);
+        $isId = static fn(?array $r): bool => null !== $r
+            && (in_array($r['media_type'], ['id', 'legal_id'], true) || str_contains(strtolower((string)$r['text']), 'legal id'));
+
+        $aired = 0;
+        $stacks = [];
+        $cut = [];
+        $run = [];
+        $count = count($rows);
+        for ($i = 0; $i < $count; $i++) {
+            $row = $rows[$i];
+            $next = $rows[$i + 1] ?? null;
+
+            if (!$isPromo($row)) {
+                if (count($run) >= 3) {
+                    $stacks[] = ['at' => (int)round((float)$run[0]['started']), 'count' => count($run), 'items' => array_column($run, 'text')];
+                }
+                $run = [];
+                continue;
+            }
+
+            $aired++;
+            $run[] = $row;
+
+            $length = (float)($row['duration'] ?? 0);
+            if ($length > 0 && null !== $row['ended'] && $isId($next)) {
+                $held = (float)$row['ended'] - (float)$row['started'];
+                if ($held < $length - 5) {
+                    $cut[] = [
+                        'at' => (int)round((float)$row['started']),
+                        'text' => (string)$row['text'],
+                        'cut_seconds' => (int)round($length - $held),
+                    ];
+                }
+            }
+        }
+        if (count($run) >= 3) {
+            $stacks[] = ['at' => (int)round((float)$run[0]['started']), 'count' => count($run), 'items' => array_column($run, 'text')];
+        }
+
+        return [
+            'aired' => $aired,
+            'stacks' => array_reverse($stacks),
+            'cut_at_id' => array_reverse($cut),
+        ];
     }
 }

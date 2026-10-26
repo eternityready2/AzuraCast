@@ -177,10 +177,17 @@ final class Liquidsoap extends AbstractLocalAdapter
         Station $station,
         LiquidsoapQueues $queue
     ): bool {
+        // AI DJ speech always shares the Requests queue (see enqueue()), so its
+        // emptiness is the Requests queue's emptiness.
+        if (LiquidsoapQueues::AiDj === $queue) {
+            $queue = LiquidsoapQueues::Requests;
+        }
+
         $queueResult = $this->command(
             $station,
             sprintf('%s.queue', $queue->value)
         );
+
         return empty($queueResult[0]);
     }
 
@@ -192,6 +199,13 @@ final class Liquidsoap extends AbstractLocalAdapter
         LiquidsoapQueues $queue,
         string $musicFile
     ): array {
+        // AI DJ speech always airs through the Requests queue, never the dedicated
+        // ai_dj Liquidsoap lane: that lane's fallback never selected queued speech,
+        // so every clip pushed into it (2026-09-22 17:51 onward) silently never aired.
+        if (LiquidsoapQueues::AiDj === $queue) {
+            $queue = LiquidsoapQueues::Requests;
+        }
+
         return $this->command(
             $station,
             sprintf('%s.push %s', $queue->value, $musicFile)

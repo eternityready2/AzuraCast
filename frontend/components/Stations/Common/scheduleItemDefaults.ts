@@ -5,6 +5,10 @@ export interface PlaylistScheduleRow {
     end_date: string,
     days: number[],
     loop_once: boolean,
+    /** Reset this playlist's internal rotation queue when the schedule window starts. */
+    reset_queue_at_start?: boolean,
+    /** Playlist Groups only: recursively reset nested groups/member playlist queues too. */
+    reset_queue_recursive?: boolean,
     /** When true, this window overrides clock wheel AutoDJ. */
     is_emergency?: boolean,
     /** Playlist schedule only: holds rigidly to start time, cutting the current track if needed. */
@@ -31,13 +35,20 @@ export function todayDate(): string {
 }
 
 export function createScheduleItemDefaults(): PlaylistScheduleRow {
+    const startDate = todayDate();
+
     return {
         start_time: 800,
         end_time: 900,
-        start_date: todayDate(),
-        end_date: '',
+        start_date: startDate,
+        // One-time events are locked to a single day; default End Date to match
+        // Start Date immediately rather than leaving it blank until something
+        // else (e.g. buildSchedulePayload's fallback) patches it in later.
+        end_date: startDate,
         days: [],
         loop_once: false,
+        reset_queue_at_start: false,
+        reset_queue_recursive: false,
         is_emergency: false,
         strict_start: false,
         clock_wheel_mode: 'flexible',

@@ -48,28 +48,14 @@ final class GetAction implements SingleActionInterface
         $station = $request->getStation();
         $djId = (int)($params['id'] ?? 0);
 
-        $dj = $this->aiDjRepository->find($djId);
+        $dj = $this->aiDjRepository->findForStation($djId, $station->id);
 
-        if (null === $dj || $dj->getStationId() !== $station->id) {
+        if (null === $dj) {
             return $response->withStatus(404)->withJson([
                 'error' => 'AI DJ not found.',
             ]);
         }
 
-        return $response->withJson([
-            'id' => $dj->id,
-            'name' => $dj->getName(),
-            'is_enabled' => $dj->isEnabled(),
-            'voice_model_path' => $dj->getVoiceModelPath(),
-            'shift_intro_template' => $dj->getShiftIntroTemplate(),
-            'shift_outro_template' => $dj->getShiftOutroTemplate(),
-            'talk_frequency' => $dj->getTalkFrequency(),
-            'voice_speed' => $dj->getVoiceSpeed(),
-            'use_background_audio' => $dj->useBackgroundAudio(),
-            'schedules' => array_map(
-                static fn(\App\Entity\AiDjSchedule $s): array => $s->api(),
-                $dj->getSchedules()->toArray()
-            ),
-        ]);
+        return $response->withJson($dj->api());
     }
 }

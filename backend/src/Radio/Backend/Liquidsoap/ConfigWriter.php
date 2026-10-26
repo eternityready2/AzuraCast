@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Radio\Backend\Liquidsoap;
 
+use App\Container\EntityManagerAwareTrait;
 use App\Container\EnvironmentAwareTrait;
 use App\Container\SettingsAwareTrait;
 use App\Entity\Enums\PlaylistOrders;
@@ -11,7 +12,9 @@ use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Enums\StationBackendPerformanceModes;
+use App\Entity\Station;
 use App\Entity\StationBackendConfiguration;
+use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
 use App\Entity\StationStreamerBroadcast;
@@ -37,6 +40,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 final class ConfigWriter implements EventSubscriberInterface
 {
+    use EntityManagerAwareTrait;
     use EnvironmentAwareTrait;
     use SettingsAwareTrait;
 
@@ -121,6 +125,14 @@ final class ConfigWriter implements EventSubscriberInterface
             $backendConfig->live_broadcast_text
         );
 
+        $smartDuckEnabled = $backendConfig->playout_smart_duck_enabled ? 'true' : 'false';
+        $smartDuckAttenuation = self::toFloat($backendConfig->playout_smart_duck_attenuation);
+        $smartDuckDelay = self::toFloat($backendConfig->playout_smart_duck_delay);
+
+        // General interrupting-audio ducking. This is deliberately independent
+        // from the Top-of-Hour ID master switch.
+        $duckEnabled = $backendConfig->playout_smart_duck_enabled;
+
         $fallbackPath = self::toRawString(
             $this->fallbackFile->getFallbackPathForStation($station)
         );
@@ -159,12 +171,18 @@ final class ConfigWriter implements EventSubscriberInterface
             settings.azuracast.crossfade_smart_margin := {$crossfadeSmartMargin}
             
             settings.azuracast.live_broadcast_text := {$liveBroadcastText}
-            
-            # Start HTTP API Server
-            azuracast.start_http_api()
-            
             LIQ
         );
+
+        if ($duckEnabled) {
+            $event->appendLines([
+                "settings.azuracast.smart_duck_enabled := {$smartDuckEnabled}",
+                "settings.azuracast.smart_duck_attenuation := {$smartDuckAttenuation}",
+                "settings.azuracast.smart_duck_delay := {$smartDuckDelay}",
+            ]);
+        }
+
+        $event->appendLines(['azuracast.start_http_api()']);
 
         $perfMode = $backendConfig->getPerformanceModeEnum();
         if ($perfMode !== StationBackendPerformanceModes::Disabled) {
@@ -190,6 +208,9 @@ final class ConfigWriter implements EventSubscriberInterface
     public function writePlaylistConfiguration(WriteLiquidsoapConfiguration $event): void
     {
         $station = $event->getStation();
+        $backendConfig = $event->getBackendConfig();
+
+        $duckEnabled = $backendConfig->playout_smart_duck_enabled;
 
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_PRE_PLAYLISTS);
 
@@ -208,6 +229,7 @@ final class ConfigWriter implements EventSubscriberInterface
         ];
 
         $scheduleSwitches = [];
+        $scheduleSwitchesStrict = [];
         $scheduleSwitchesInterrupting = [];
         $scheduleSwitchesRemoteUrl = [];
 
@@ -218,7 +240,29 @@ final class ConfigWriter implements EventSubscriberInterface
                 continue;
             }
 
+            if (PlaylistSources::Playlists === $playlist->source) {
+                continue;
+            }
+
             if (!self::shouldWritePlaylist($event, $playlist)) {
+                continue;
+            }
+
+            $scheduleItems = $playlist->schedule_items;
+
+            // Unscheduled Playlist Group members are owned by their parent group's slot.
+            // A group member with its own schedule is deliberately written here too, so
+            // manual AutoDJ/Liquidsoap mode can play it independently outside the parent
+            // group's active schedule, matching upstream Playlist Group scheduling rules.
+            if (count($playlist->group_memberships) > 0 && $scheduleItems->count() === 0) {
+                continue;
+            }
+
+            // Playlist Groups (source = group) and Request Queue playlists (source = requests)
+            // have no static content Liquidsoap can read natively -- which member/request plays
+            // next is a runtime decision made by QueueBuilder and pushed to Liquidsoap via the
+            // AutoDJ "next song" queue mechanism, not via a native `playlist()` rotation object.
+            if (PlaylistSources::Playlists === $playlist->source || PlaylistSources::Requests === $playlist->source) {
                 continue;
             }
 
@@ -227,8 +271,6 @@ final class ConfigWriter implements EventSubscriberInterface
             if (in_array($playlistVarName, $playlistVarNames, true)) {
                 $playlistVarName .= '_' . $playlist->id;
             }
-
-            $scheduleItems = $playlist->schedule_items;
 
             $playlistVarNames[] = $playlistVarName;
             $playlistConfigLines = [];
@@ -274,14 +316,20 @@ final class ConfigWriter implements EventSubscriberInterface
                     default => 'input.ffmpeg'
                 };
 
-                $remoteUrlFunc = 'mksafe(buffer(buffer=' . $buffer . '., '
-                    . $inputFunc . '(' . self::toRawString($remoteUrl) . ')))';
+                $remoteUrlFunc = 'buffer(buffer=' . $buffer . '., '
+                    . $inputFunc . '(' . self::toRawString($remoteUrl) . '))';
 
                 if (0 === $scheduleItems->count()) {
                     $fallbackRemoteUrl = $remoteUrlFunc;
                     continue;
                 }
 
+                // No mksafe(): it fills a dropped feed with silence, which kept the
+                // schedule switch on this source and put dead air on the station
+                // (Nightsounds, Sun 2026-10-04 23:28-23:30: 94s). Left fallible,
+                // an empty buffer lets the switch fall through to the AutoDJ while
+                // input.http keeps reconnecting, and the switch returns to the
+                // programme as soon as the feed refills the buffer.
                 $playlistConfigLines[] = $playlistVarName . ' = ' . $remoteUrlFunc;
                 $event->appendLines($playlistConfigLines);
 
@@ -316,8 +364,10 @@ final class ConfigWriter implements EventSubscriberInterface
 
                             if ($playlist->backendInterruptOtherSongs()) {
                                 $scheduleSwitchesInterrupting[] = $scheduleTiming;
-                            } else {
+                            } elseif ($playlist->backendAllowOverrun()) {
                                 $scheduleSwitches[] = $scheduleTiming;
+                            } else {
+                                $scheduleSwitchesStrict[] = $scheduleTiming;
                             }
                         }
                     } else {
@@ -348,8 +398,10 @@ final class ConfigWriter implements EventSubscriberInterface
 
                             if ($playlist->backendInterruptOtherSongs()) {
                                 $scheduleSwitchesInterrupting[] = $scheduleTiming;
-                            } else {
+                            } elseif ($playlist->backendAllowOverrun()) {
                                 $scheduleSwitches[] = $scheduleTiming;
+                            } else {
+                                $scheduleSwitchesStrict[] = $scheduleTiming;
                             }
                         }
                     } else {
@@ -371,8 +423,10 @@ final class ConfigWriter implements EventSubscriberInterface
 
                             if ($playlist->backendInterruptOtherSongs()) {
                                 $scheduleSwitchesInterrupting[] = $scheduleTiming;
-                            } else {
+                            } elseif ($playlist->backendAllowOverrun()) {
                                 $scheduleSwitches[] = $scheduleTiming;
+                            } else {
+                                $scheduleSwitchesStrict[] = $scheduleTiming;
                             }
                         }
                     } else {
@@ -382,8 +436,10 @@ final class ConfigWriter implements EventSubscriberInterface
 
                         if ($playlist->backendInterruptOtherSongs()) {
                             $scheduleSwitchesInterrupting[] = $scheduleTiming;
-                        } else {
+                        } elseif ($playlist->backendAllowOverrun()) {
                             $scheduleSwitches[] = $scheduleTiming;
+                        } else {
+                            $scheduleSwitchesStrict[] = $scheduleTiming;
                         }
                     }
                     break;
@@ -415,7 +471,24 @@ final class ConfigWriter implements EventSubscriberInterface
                 $event->appendLines(
                     [
                         sprintf(
-                            'radio = switch(id="schedule_switch", track_sensitive=true, [ %s ])',
+                            'radio = switch(id="schedule_switch_playlists", track_sensitive=true, [ %s ])',
+                            implode(', ', $scheduleSwitchesChunk)
+                        ),
+                    ]
+                );
+            }
+        }
+
+        if (!empty($scheduleSwitchesStrict)) {
+            $event->appendLines(['# Strict-End Schedule Switches']);
+
+            foreach (array_chunk($scheduleSwitchesStrict, 168, true) as $scheduleSwitchesChunk) {
+                $scheduleSwitchesChunk[] = '({true}, radio)';
+
+                $event->appendLines(
+                    [
+                        sprintf(
+                            'radio = switch(id="schedule_switch_strict", track_sensitive=false, [ %s ])',
                             implode(', ', $scheduleSwitchesChunk)
                         ),
                     ]
@@ -439,7 +512,7 @@ final class ConfigWriter implements EventSubscriberInterface
                 $event->appendLines(
                     [
                         sprintf(
-                            'radio = switch(id="schedule_switch", track_sensitive=false, [ %s ])',
+                            'radio = switch(id="schedule_switch_interrupting", track_sensitive=false, [ %s ])',
                             implode(', ', $scheduleSwitchesChunk)
                         ),
                     ]
@@ -460,7 +533,15 @@ final class ConfigWriter implements EventSubscriberInterface
             $event->appendBlock(
                 <<< LIQ
                 remote_url = {$fallbackRemoteUrl}
-                radio = fallback(id="fallback_remote_url", track_sensitive = false, [remote_url, radio])
+                thread.run.recurrent(fast=false, delay=1.0, { azuracast.update_autodj_queue_status() })
+                radio = switch(
+                    id="fallback_remote_url",
+                    track_sensitive=false,
+                    [
+                        ({ azuracast.autodj_queue_ready() }, radio),
+                        ({ true }, remote_url)
+                    ]
+                )
                 LIQ
             );
         }
@@ -468,13 +549,23 @@ final class ConfigWriter implements EventSubscriberInterface
         $requestsQueueName = LiquidsoapQueues::Requests->value;
         $interruptingQueueName = LiquidsoapQueues::Interrupting->value;
 
+        if ($duckEnabled) {
+            $interruptingBlock = <<<LIQ
+            radio = azuracast.duck(id="interrupting_fallback", voiceover=interrupting_queue, radio)
+            LIQ;
+        } else {
+            $interruptingBlock = <<<LIQ
+            radio = fallback(id="interrupting_fallback", track_sensitive = false, [interrupting_queue, radio])
+            LIQ;
+        }
+
         $event->appendBlock(
             <<< LIQ
             requests = request.queue(id="{$requestsQueueName}", timeout=settings.azuracast.request_timeout())
             radio = fallback(id="requests_fallback", track_sensitive = true, [requests, radio])
 
             interrupting_queue = request.queue(id="{$interruptingQueueName}", timeout=settings.azuracast.request_timeout())
-            radio = fallback(id="interrupting_fallback", track_sensitive = false, [interrupting_queue, radio])
+            {$interruptingBlock}
             LIQ
         );
 
@@ -486,7 +577,7 @@ final class ConfigWriter implements EventSubscriberInterface
                 $event->appendLines(
                     [
                         sprintf(
-                            'radio = switch(id="schedule_switch", track_sensitive=false, [ %s ])',
+                            'radio = switch(id="schedule_switch_remote_url", track_sensitive=false, [ %s ])',
                             implode(', ', $scheduleSwitchesChunk)
                         ),
                     ]
@@ -540,7 +631,11 @@ final class ConfigWriter implements EventSubscriberInterface
 
         // Parse active_hours for Liquidsoap time check
         $activeHoursStr = $backendConfig->ai_news_active_hours ?? '';
-        $activeHoursCheck = self::buildActiveHoursCheck($activeHoursStr, $station->getTimezoneObject());
+        $activeHoursCheck = self::buildActiveHoursCheck(
+            $activeHoursStr,
+            $station->getTimezoneObject(),
+            $backendConfig->ai_news_active_days ?? []
+        );
 
         $newsBulletinQueueName = 'requests';
         $event->appendBlock(
@@ -572,19 +667,28 @@ final class ConfigWriter implements EventSubscriberInterface
     }
 
     /**
-     * Build Liquidsoap code to check if current time is within active_hours.
-     * Returns empty string if no active_hours configured (always active).
+     * Build Liquidsoap code to check whether now is inside the AI News window.
+     *
+     * Covers active days as well as hours. The hourly cron restricts days on its
+     * own, but when the Top-of-Hour ID is enabled that cron is replaced by the
+     * ID's release path, which called this and so checked hours only -- the
+     * station tried to stage a bulletin on days the schedule excluded (and the
+     * generator had correctly produced no file for).
      */
-    private static function buildActiveHoursCheck(?string $activeHours, DateTimeZone $timezone): string
-    {
-        if (empty($activeHours)) {
-            // No active_hours configured - always active
-            return 'def is_within_active_hours() = true end';
-        }
+    private static function buildActiveHoursCheck(
+        ?string $activeHours,
+        DateTimeZone $timezone,
+        array $activeDays = []
+    ): string {
+        $dayGuard = self::buildActiveDayGuard($activeDays, $timezone);
 
-        // Parse "HH:MM-HH:MM" format
-        if (!preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
-            return 'def is_within_active_hours() = true end';
+        if (empty($activeHours) || !preg_match('/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/', $activeHours, $matches)) {
+            return <<<LIQ
+def is_within_active_hours() =
+{$dayGuard}
+  is_active_day
+end
+LIQ;
         }
 
         $startHour = (int) $matches[1];
@@ -592,41 +696,84 @@ final class ConfigWriter implements EventSubscriberInterface
         $endHour = (int) $matches[3];
         $endMin = (int) $matches[4];
 
-        // Convert to minutes for easier comparison
         $startMinutes = $startHour * 60 + $startMin;
         $endMinutes = $endHour * 60 + $endMin;
 
-        // Liquidsoap's time() always returns UTC, so the embedded minute
-        // values must be adjusted from the station's local timezone to UTC.
-        $tzOffsetMinutes = (int)($timezone->getOffset(new \DateTimeImmutable('now', $timezone)) / 60);
-        $utcStart = ($startMinutes - $tzOffsetMinutes + 1440) % 1440;
-        $utcEnd   = ($endMinutes   - $tzOffsetMinutes + 1440) % 1440;
+        $comparison = ($startMinutes <= $endMinutes)
+            ? "current >= {$startMinutes} and current < {$endMinutes}"
+            : "current >= {$startMinutes} or current < {$endMinutes}";
+        $localOffset = self::buildLocalOffsetExpression($timezone);
 
-        if ($utcStart <= $utcEnd) {
-            // Normal range (e.g., 06:00-22:00)
-            return <<<LIQ
+        return <<<LIQ
 def is_within_active_hours() =
-  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
-  local_time = time()
+{$dayGuard}
+  # Station-local hour and minute (Liquidsoap time() is UTC).
+  local_time = time() + {$localOffset}
   hour = int_of_float(local_time / 3600.0) mod 24
   minute = int_of_float(local_time / 60.0) mod 60
   current = hour * 60 + minute
-  current >= {$utcStart} and current < {$utcEnd}
+  is_active_day and ({$comparison})
 end
 LIQ;
-        } else {
-            // Overnight range (e.g., 22:00-06:00, or TZ-adjusted wrap)
-            return <<<LIQ
-def is_within_active_hours() =
-  # Get current hour and minute in UTC (Liquidsoap time() returns UTC)
-  local_time = time()
-  hour = int_of_float(local_time / 3600.0) mod 24
-  minute = int_of_float(local_time / 60.0) mod 60
-  current = hour * 60 + minute
-  current >= {$utcStart} or current < {$utcEnd}
-end
-LIQ;
+    }
+
+    /**
+     * Liquidsoap lines binding `is_active_day` to whether the station-local
+     * weekday is one of the configured ISO days (1=Mon .. 7=Sun).
+     */
+    private static function buildActiveDayGuard(array $activeDays, DateTimeZone $timezone): string
+    {
+        $days = array_values(array_unique(array_filter(
+            array_map(static fn(mixed $day): int => (int)$day, $activeDays),
+            static fn(int $day): bool => $day >= 1 && $day <= 7
+        )));
+
+        if ([] === $days || 7 === count($days)) {
+            return '  is_active_day = true';
         }
+
+        sort($days);
+        $localOffset = self::buildLocalOffsetExpression($timezone);
+        $checks = implode(
+            ' or ',
+            array_map(static fn(int $day): string => "iso_weekday == {$day}", $days)
+        );
+
+        // 1970-01-01 (epoch day 0) was a Thursday, ISO weekday 4.
+        return <<<LIQ
+  local_day_epoch = time() + {$localOffset}
+  epoch_days = int_of_float(local_day_epoch / 86400.0)
+  iso_weekday = ((epoch_days + 3) mod 7) + 1
+  is_active_day = {$checks}
+LIQ;
+    }
+
+    /**
+     * Liquidsoap expression for the station's UTC offset in seconds at time().
+     *
+     * The offset was fixed when the config was written, so after a daylight
+     * saving change the News hours and days ran an hour off until the next
+     * Liquidsoap restart (America/Chicago, 1 Nov 2026: 11:59-17:59 would have
+     * become 10:59-16:59). The offset changes written in for the next year
+     * switch by themselves; any restart writes a fresh year.
+     */
+    private static function buildLocalOffsetExpression(DateTimeZone $timezone): string
+    {
+        $now = new DateTimeImmutable('now', $timezone);
+        $expression = number_format($timezone->getOffset($now), 1, '.', '');
+
+        $transitions = $timezone->getTransitions($now->getTimestamp(), $now->getTimestamp() + 400 * 86400);
+        // The first entry is the state at the start of the range, not a change.
+        foreach (array_slice($transitions ?: [], 1) as $transition) {
+            $expression = sprintf(
+                '(if time() >= %d. then %s else %s end)',
+                $transition['ts'],
+                number_format((float)$transition['offset'], 1, '.', ''),
+                $expression
+            );
+        }
+
+        return $expression;
     }
 
     private static function buildAiNewsCronDays(array $activeDays): string
@@ -653,10 +800,8 @@ LIQ;
 
     public function writeCrossfadeConfiguration(WriteLiquidsoapConfiguration $event): void
     {
-        // Write pre-crossfade section.
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_PRE_FADE);
 
-        // Amplify and Skip
         $event->appendBlock(
             <<<LIQ
             # Allow Telnet to skip the current track.
@@ -669,7 +814,6 @@ LIQ;
             LIQ
         );
 
-        // Replaygain metadata
         $settings = $event->getBackendConfig();
 
         if ($settings->enable_replaygain_metadata) {
@@ -682,19 +826,24 @@ LIQ;
             );
         }
 
-        // Add debug logging for metadata.
         $event->appendBlock(
             <<<LS
             # Log current metadata for debugging.
             source.methods(radio).on_metadata(synchronous=false, azuracast.log_meta)
 
-            # Clock Wheel stretch/squeeze: pitch-preserving time-stretch, ratio computed
-            # in PHP (safe +/-5%), passed through the 'liq_stretch_ratio' request annotation.
+            # Stretch/squeeze (music only): pitch-preserving tempo from PHP's
+            # 'liq_stretch_ratio' (natural length / target, so > 1 plays faster and
+            # shorter). The old stretch() operator changed pitch and read > 1 as
+            # slower, and its on_track hook never fired, so nothing was applied.
             clock_wheel_stretch_ratio = ref(1.0)
-            source.methods(radio).on_track(synchronous=false, fun (m) -> begin
-              clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
+            source.methods(radio).on_metadata(synchronous=true, fun (m) -> begin
+              if m["media_type"] == "music" then
+                clock_wheel_stretch_ratio := float_of_string(default=1.0, m["liq_stretch_ratio"])
+              elsif m["title"] != "" or m["sq_id"] != "" then
+                clock_wheel_stretch_ratio := 1.0
+              end
             end)
-            radio = stretch(ratio={clock_wheel_stretch_ratio()}, radio)
+            radio = soundtouch(id="stretch_squeeze", tempo={clock_wheel_stretch_ratio()}, radio)
 
             # Apply crossfade.
             radio = azuracast.apply_crossfade(radio)
@@ -727,8 +876,8 @@ LIQ;
             'port = ' . $this->liquidsoap->getStreamPort($station),
             'auth = azuracast.dj_auth',
             'icy = true',
-            'icy_metadata_charset = "' . $charset . '"',
-            'metadata_charset = "' . $charset . '"',
+            'icy_metadata_charset = ' . self::toRawString($charset),
+            'metadata_charset = ' . self::toRawString($charset),
         ];
 
         $djBuffer = $settings->dj_buffer;
@@ -861,7 +1010,6 @@ LIQ;
             LIQ
         );
 
-        // Custom configuration
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_PRE_BROADCAST);
     }
 
@@ -873,7 +1021,6 @@ LIQ;
             return;
         }
 
-        // @var Collection<EncodableInterface> $encodables
         $encodables = [
             $station->mounts,
             $station->remotes,
@@ -887,7 +1034,6 @@ LIQ;
         foreach ($encodables as $collection) {
             foreach ($collection as $encodable) {
                 $encoder = $encodable->getEncodingFormat();
-
                 if (null !== $encoder) {
                     $varName = $encoder->getVariableName('radio');
                     $encoders[$varName] = $encoder;
@@ -922,7 +1068,6 @@ LIQ;
             '# Local Broadcasts',
         ];
 
-        // Configure the outbound broadcast.
         $i = 0;
         foreach ($station->mounts as $mountRow) {
             $i++;
@@ -950,10 +1095,8 @@ LIQ;
             '# HLS Broadcasting',
         ];
 
-        // Configure the outbound broadcast.
         $hlsStreams = [];
 
-        // Build the HLS stream encoder destinations.
         foreach ($station->hls_streams as $hlsStream) {
             $streamVarName = self::cleanUpVarName($hlsStream->name);
 
@@ -991,7 +1134,6 @@ LIQ;
             $hlsStreams
         ) . "\n" . ']';
 
-        // Build an aggregate source composed of the various encoders.
         if ($shareEncoders) {
             $i = 0;
             $hlsSourceTracks = [];
@@ -1071,7 +1213,6 @@ LIQ;
             '# Remote Relays',
         ];
 
-        // Set up broadcast to remote relays.
         $i = 0;
         foreach ($station->remotes as $remoteRow) {
             $i++;
@@ -1097,7 +1238,6 @@ LIQ;
             return;
         }
 
-        // If LS editing is disabled, don't add custom blocks to the written code.
         $settings = $this->settingsRepo->readSettings();
         if (!$settings->enable_liquidsoap_editing) {
             return;
@@ -1125,7 +1265,6 @@ LIQ;
 
         switch ($settings->getAudioProcessingMethodEnum()) {
             case AudioProcessingMethods::Liquidsoap:
-                // NRJ normalization
                 $event->appendBlock(
                     <<<LIQ
                     # Normalization and Compression
@@ -1136,8 +1275,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::MasterMe:
-                // MasterMe Presets
-
                 $lines = [
                     'radio = ladspa.master_me(',
                 ];
@@ -1167,7 +1304,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::StereoTool:
-                // Stereo Tool processing
                 if (!StereoTool::isReady($station)) {
                     return;
                 }
@@ -1187,10 +1323,12 @@ LIQ;
                         $stereoToolProcess .= ' -k "' . $stereoToolLicenseKey . '"';
                     }
 
+                    $stereoToolProcessString = self::toRawString($stereoToolProcess);
+
                     $event->appendBlock(
                         <<<LIQ
                         # Stereo Tool Pipe
-                        radio = pipe(replay_delay=1.0, process='{$stereoToolProcess}', radio)
+                        radio = pipe(replay_delay=1.0, process={$stereoToolProcessString}, radio)
                         LIQ
                     );
                 } else {
@@ -1202,7 +1340,6 @@ LIQ;
                     };
 
                     if (!file_exists($stereoToolLibrary)) {
-                        // Stereo Tool 10.0 uploaded using a different format.
                         $is64Bit = in_array($serverArch, ['x86_64', 'arm64'], true);
                         if ($is64Bit && file_exists($stereoToolLibraryPath . '/libStereoTool_64.so')) {
                             $stereoToolLibrary = $stereoToolLibraryPath . '/libStereoTool_64.so';
@@ -1213,13 +1350,16 @@ LIQ;
                         }
                     }
 
+                    $stereoToolLicenseKeyString = self::toRawString($stereoToolLicenseKey ?? '');
+                    $stereoToolConfigurationString = self::toRawString($stereoToolConfiguration);
+
                     $event->appendBlock(
                         <<<LIQ
                         # Stereo Tool Pipe
                         radio = stereotool(
                             library_file="{$stereoToolLibrary}",
-                            license_key="{$stereoToolLicenseKey}",
-                            preset="{$stereoToolConfiguration}",
+                            license_key={$stereoToolLicenseKeyString},
+                            preset={$stereoToolConfigurationString},
                             radio
                         )
                         LIQ
@@ -1228,7 +1368,6 @@ LIQ;
                 break;
 
             case AudioProcessingMethods::None:
-                // Noop
                 break;
         }
     }
@@ -1238,9 +1377,6 @@ LIQ;
         return chr(7);
     }
 
-    /**
-     * Given a scheduled playlist, return the time criteria that Liquidsoap can use to determine when to play it.
-     */
     private function getScheduledPlaylistPlayTime(
         WriteLiquidsoapConfiguration $event,
         StationSchedule $playlistSchedule
@@ -1279,7 +1415,6 @@ LIQ;
         $startTime = $playlistSchedule->start_time;
         $endTime = $playlistSchedule->end_time;
 
-        // Handle multi-day playlists.
         if ($startTime > $endTime) {
             $playTimes = [
                 self::formatTimeCode($startTime) . '-23h59m59s',
@@ -1305,10 +1440,10 @@ LIQ;
                 $playTimes[1] = '(' . implode(' or ', $nextPlayDays) . ') and ' . $playTimes[1];
             }
 
-            return '(' . implode(') or (', $playTimes) . ')';
+            $playTime = '(' . implode(') or (', $playTimes) . ')';
+            return $this->applyScheduleDateRangeBounds($event, $playlistSchedule, $playTime);
         }
 
-        // Handle once-per-day playlists.
         $playTime = ($startTime === $endTime)
             ? self::formatTimeCode($startTime)
             : self::formatTimeCode($startTime) . '-' . self::formatTimeCode($endTime);
@@ -1323,60 +1458,58 @@ LIQ;
             $playTime = '(' . implode(' or ', $playDays) . ') and ' . $playTime;
         }
 
-        // Handle start-date and end-date boundaries.
+        return $this->applyScheduleDateRangeBounds($event, $playlistSchedule, $playTime);
+    }
+
+    private function applyScheduleDateRangeBounds(
+        WriteLiquidsoapConfiguration $event,
+        StationSchedule $playlistSchedule,
+        string $playTime
+    ): string {
         $startDate = $playlistSchedule->start_date;
         $endDate = $playlistSchedule->end_date;
 
-        if (!empty($startDate) || !empty($endDate)) {
-            $tzObject = $event->getStation()->getTimezoneObject();
-
-            $customFunctionBody = [];
-
-            $scheduleMethod = 'schedule_' . $playlistSchedule->id . '_date_range';
-            $customFunctionBody[] = 'def ' . $scheduleMethod . '() =';
-
-            $conditions = [];
-
-            if (!empty($startDate)) {
-                $startDateObj = CarbonImmutable::createFromFormat('Y-m-d', $startDate, $tzObject);
-
-                if (null !== $startDateObj) {
-                    $startDateObj = $startDateObj->setTime(0, 0);
-
-                    $customFunctionBody[] = '    # ' . $startDateObj->__toString();
-                    $customFunctionBody[] = '    range_start = ' . $startDateObj->getTimestamp() . '.';
-                    $conditions[] = 'range_start <= current_time';
-                }
-            }
-
-            if (!empty($endDate)) {
-                $endDateObj = CarbonImmutable::createFromFormat('Y-m-d', $endDate, $tzObject);
-
-                if (null !== $endDateObj) {
-                    $endDateObj = $endDateObj->setTime(23, 59, 59);
-
-                    $customFunctionBody[] = '    # ' . $endDateObj->__toString();
-                    $customFunctionBody[] = '    range_end = ' . $endDateObj->getTimestamp() . '.';
-
-                    $conditions[] = 'current_time <= range_end';
-                }
-            }
-
-            $customFunctionBody[] = '    current_time = time()';
-            $customFunctionBody[] = '    result = (' . implode(' and ', $conditions) . ')';
-            $customFunctionBody[] = '    result';
-            $customFunctionBody[] = 'end';
-            $event->appendLines($customFunctionBody);
-
-            $playTime = $scheduleMethod . '() and ' . $playTime;
+        if (empty($startDate) && empty($endDate)) {
+            return $playTime;
         }
 
-        return $playTime;
+        $tzObject = $event->getStation()->getTimezoneObject();
+        $customFunctionBody = [];
+        $scheduleMethod = 'schedule_' . $playlistSchedule->id . '_date_range';
+        $customFunctionBody[] = 'def ' . $scheduleMethod . '() =';
+        $conditions = [];
+
+        if (!empty($startDate)) {
+            $startDateObj = CarbonImmutable::createFromFormat('Y-m-d', $startDate, $tzObject);
+
+            if (null !== $startDateObj) {
+                $startDateObj = $startDateObj->setTime(0, 0);
+                $customFunctionBody[] = '    # ' . $startDateObj->__toString();
+                $customFunctionBody[] = '    range_start = ' . $startDateObj->getTimestamp() . '.';
+                $conditions[] = 'range_start <= current_time';
+            }
+        }
+
+        if (!empty($endDate)) {
+            $endDateObj = CarbonImmutable::createFromFormat('Y-m-d', $endDate, $tzObject);
+
+            if (null !== $endDateObj) {
+                $endDateObj = $endDateObj->setTime(23, 59, 59);
+                $customFunctionBody[] = '    # ' . $endDateObj->__toString();
+                $customFunctionBody[] = '    range_end = ' . $endDateObj->getTimestamp() . '.';
+                $conditions[] = 'current_time <= range_end';
+            }
+        }
+
+        $customFunctionBody[] = '    current_time = time()';
+        $customFunctionBody[] = '    result = (' . implode(' and ', $conditions) . ')';
+        $customFunctionBody[] = '    result';
+        $customFunctionBody[] = 'end';
+        $event->appendLines($customFunctionBody);
+
+        return $scheduleMethod . '() and ' . $playTime;
     }
 
-    /**
-     * Given outbound broadcast information, produce a suitable LiquidSoap configuration line for the stream.
-     */
     private function getOutputString(
         WriteLiquidsoapConfiguration $event,
         OutputtableSource $source,
@@ -1388,9 +1521,7 @@ LIQ;
         $shareEncoders = $event->getBackendConfig()->share_encoders;
 
         $encoding = $source->encoding;
-
         $outputParams = [];
-
         $container = $encoding->format->getFfmpegContainer();
 
         if ($shareEncoders) {
@@ -1401,7 +1532,6 @@ LIQ;
         }
 
         $outputParams[] = 'id="' . $idPrefix . $id . '"';
-
         $outputParams[] = 'host = ' . self::toRawString($source->host);
         $outputParams[] = 'port = ' . (int)$source->port;
 
@@ -1409,14 +1539,13 @@ LIQ;
             $outputParams[] = 'user = ' . self::toRawString($source->username);
         }
 
-        $password = self::cleanUpString($source->password);
-
+        $password = $source->password;
         $adapterType = $source->adapterType;
         if (FrontendAdapters::Shoutcast === $adapterType) {
             $password .= ':#' . $id;
         }
 
-        $outputParams[] = 'password = "' . $password . '"';
+        $outputParams[] = 'password = ' . self::toRawString($password);
 
         $mountPoint = $source->mount;
         if (StreamProtocols::Icy === $source->protocol) {
@@ -1427,7 +1556,6 @@ LIQ;
             if (empty($mountPoint)) {
                 $mountPoint = '/';
             }
-
             $outputParams[] = 'mount = ' . self::toRawString($mountPoint);
         }
 
@@ -1443,7 +1571,11 @@ LIQ;
         }
 
         $outputParams[] = 'public = ' . ($source->isPublic ? 'true' : 'false');
-        $outputParams[] = 'encoding = "' . $charset . '"';
+        $outputParams[] = 'encoding = ' . self::toRawString($charset);
+
+        // Keep the Icecast network read/write timeout above Liquidsoap's 30s default.
+        // output.icecast supports timeout, but does not support reconnect_delay.
+        $outputParams[] = 'timeout = 120.';
 
         if (StreamProtocols::Https === $source->protocol) {
             $outputParams[] = 'transport = https_transport';
@@ -1526,9 +1658,6 @@ LIQ;
         $this->writeCustomConfigurationSection($event, StationBackendConfiguration::CUSTOM_BOTTOM);
     }
 
-    /**
-     * Convert an integer or float into a Liquidsoap configuration compatible float.
-     */
     public static function toFloat(float|int|string $number, int $decimals = 2): string
     {
         return number_format(
@@ -1547,14 +1676,10 @@ LIQ;
         return $hours . 'h' . $mins . 'm';
     }
 
-    /**
-     * Filter a user-supplied string to be a valid LiquidSoap config entry.
-     */
     public static function cleanUpString(?string $string): string
     {
         $string = str_replace(['"', "\n", "\r"], ['\'', '', ''], $string ?? '');
 
-        // Remove strings that are interpolated
         $string = preg_replace(
             '/#{(.*)}/U',
             '$1',
@@ -1581,10 +1706,6 @@ LIQ;
         return '"' . $escaped . '"';
     }
 
-    /**
-     * Apply a more aggressive string filtering to variable names used in Liquidsoap.
-     * @return string The cleaned up, variable-name-friendly string.
-     */
     public static function cleanUpVarName(string $str): string
     {
         $str = strtolower(
@@ -1606,9 +1727,6 @@ LIQ;
         return self::cleanUpVarName('playlist_' . StationPlaylist::generateShortName($playlist->name));
     }
 
-    /**
-     * Given a value, convert it into an annotation-friendly quoted string.
-     */
     public static function annotateValue(string|int|float|bool $dataVal, bool $preserveType = false): string
     {
         if ($preserveType) {
@@ -1627,11 +1745,6 @@ LIQ;
         return str_replace(['"', "\n", "\t", "\r"], ['\"', '', '', ''], $strVal);
     }
 
-    /**
-     * Given an array of values, convert them into a Liquidsoap annotation format.
-     *
-     * @param array<string, string|int|float|bool|null> $values
-     */
     public static function annotateArray(array $values): string
     {
         $values = array_filter(

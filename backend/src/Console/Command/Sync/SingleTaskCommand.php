@@ -21,6 +21,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Throwable;
 
 #[AsCommand(
     name: 'azuracast:sync:task',
@@ -120,6 +121,14 @@ final class SingleTaskCommand extends AbstractSyncCommand
             ]);
 
             $this->syncStatusCache->markTaskAsRun($task::class);
+        } catch (Throwable $e) {
+            // Logged here, while every record still carries the task's name:
+            // the console's own report of an uncaught error does not say which
+            // task it came from. A database conflict that ended one task run
+            // at 22:39:04 on Mon 2026-10-12 could not be traced to its task.
+            $this->logger->error('Sync task failed.', ['exception' => $e]);
+
+            throw $e;
         } finally {
             $this->logger->popProcessor();
         }

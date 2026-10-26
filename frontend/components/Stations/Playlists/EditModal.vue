@@ -1,6 +1,8 @@
 <template>
     <modal-form
         ref="$modal"
+        class="playlist-editor-modal"
+        size="xl"
         :loading="loading"
         :title="langTitle"
         :error="error"
@@ -10,16 +12,18 @@
     >
         <tabs>
             <form-basic-info/>
+            <form-schedule-legacy v-model:schedule-items="form.schedule_items" />
             <form-schedule v-model:schedule-items="form.schedule_items" />
-            <form-advanced/>
+            <form-advanced v-if="form.source !== 'requests'" />
         </tabs>
     </modal-form>
 </template>
 
 <script setup lang="ts">
+import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
-import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
+import FormScheduleLegacy from "~/components/Stations/Playlists/Form/ScheduleLegacy.vue";
 import {BaseEditModalEmits, BaseEditModalProps, useBaseEditModal} from "~/functions/useBaseEditModal";
 import {computed, toRef, useTemplateRef} from "vue";
 import {useTranslate} from "~/vendor/gettext";
@@ -102,10 +106,18 @@ const {
         const {valid} = await validatedr$.$validate();
         const data = { ...form.value } as Record<string, unknown>;
 
-        // Never send a null playlist id on create — serializer requires int.
+        // Never send a null playlist ID on create; the serializer requires an integer.
         if (data.id == null) {
             delete data.id;
         }
+
+        // These are read-only relations managed via the Playlist Grouping tab / members API,
+        // not writable fields on the playlist record itself.
+        delete data.playlists;
+        delete data.playlist_groups;
+        // Smart Block criteria rows are managed entirely on the standalone Smart
+        // Blocks page, not as part of the general playlist record.
+        delete data.smart_block_criteria;
 
         if (Array.isArray(data.schedule_items) && data.schedule_items.length) {
             data.schedule_items = data.schedule_items.map((item: Record<string, unknown>) => {
@@ -167,3 +179,43 @@ defineExpose({
     close
 });
 </script>
+
+<style>
+.playlist-editor-modal .modal-dialog {
+    width: calc(100vw - 2rem);
+    max-width: 1500px;
+    margin: 1rem auto;
+}
+
+.playlist-editor-modal .modal-content {
+    min-height: calc(100vh - 2rem);
+    max-height: calc(100vh - 2rem);
+}
+
+.playlist-editor-modal .modal-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 1.25rem 1.5rem;
+}
+
+.playlist-editor-modal .modal-header,
+.playlist-editor-modal .modal-footer {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 767.98px) {
+    .playlist-editor-modal .modal-dialog {
+        width: calc(100vw - .75rem);
+        margin: .375rem auto;
+    }
+
+    .playlist-editor-modal .modal-content {
+        min-height: calc(100vh - .75rem);
+        max-height: calc(100vh - .75rem);
+    }
+
+    .playlist-editor-modal .modal-body {
+        padding: .9rem;
+    }
+}
+</style>

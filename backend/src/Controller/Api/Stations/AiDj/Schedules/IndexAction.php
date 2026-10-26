@@ -5,45 +5,56 @@ declare(strict_types=1);
 namespace App\Controller\Api\Stations\AiDj\Schedules;
 
 use App\Controller\SingleActionInterface;
-use App\Entity\Api\Status;
 use App\Entity\Repository\AiDjRepository;
 use App\Entity\Repository\AiDjScheduleRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
+use App\OpenApi;
+use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 
-#[\OpenApi\Attributes\Get(
+#[OA\Get(
     path: '/station/{station_id}/ai-dj/{dj_id}/schedules',
     operationId: 'getAiDjSchedules',
-    summary: 'List all schedules for an AI DJ',
-    tags: ['Station Broadcasting'],
+    summary: 'List all schedules for an AI DJ.',
+    tags: [OpenApi::TAG_STATIONS_BROADCASTING],
     parameters: [
-        new \OpenApi\Attributes\Parameter(ref: '#/components/parameters/station_id_required'),
-        new \OpenApi\Attributes\Parameter(name: 'dj_id', description: 'AI DJ ID', in: 'path', required: true, schema: new \OpenApi\Attributes\Schema(type: 'integer')),
+        new OA\Parameter(ref: OpenApi::REF_STATION_ID_REQUIRED),
+        new OA\Parameter(
+            name: 'dj_id',
+            description: 'AI DJ ID',
+            in: 'path',
+            required: true,
+            schema: new OA\Schema(type: 'integer')
+        ),
     ],
-    responses: [new \OpenApi\Attributes\Response(response: 200, description: 'Success')]
+    responses: [
+        new OpenApi\Response\Success(),
+        new OpenApi\Response\AccessDenied(),
+        new OpenApi\Response\NotFound(),
+    ]
 )]
-final readonly class IndexAction implements SingleActionInterface
+final class IndexAction implements SingleActionInterface
 {
     public function __construct(
-        private AiDjRepository $djRepo,
-        private AiDjScheduleRepository $scheduleRepo
+        private readonly AiDjRepository $djRepo,
+        private readonly AiDjScheduleRepository $scheduleRepo,
     ) {
     }
 
     public function __invoke(ServerRequest $request, Response $response, array $params): ResponseInterface
     {
         $station = $request->getStation();
-        $dj = $this->djRepo->find((int)$params['dj_id']);
+        $dj = $this->djRepo->findForStation((int) $params['dj_id'], $station->id);
 
-        if (null === $dj || $dj->getStationId() !== $station->id) {
-            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found']);
+        if (null === $dj) {
+            return $response->withStatus(404)->withJson(['error' => 'AI DJ not found.']);
         }
 
         $schedules = $this->scheduleRepo->findByDj($dj->id);
 
         return $response->withJson(array_map(
-            fn($schedule) => $schedule->api(),
+            static fn($schedule) => $schedule->api(),
             $schedules
         ));
     }

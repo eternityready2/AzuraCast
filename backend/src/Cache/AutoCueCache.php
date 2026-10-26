@@ -10,7 +10,10 @@ use Psr\Cache\CacheItemPoolInterface;
 
 final class AutoCueCache
 {
-    private const int CACHE_LIFETIME = 86400;
+    // The key includes the file mtime, so an edited file gets a new key anyway.
+    // A one-day lifetime re-ran AutoCue on every song daily; that CPU spike
+    // (often at :00, as the ID starts) caused Liquidsoap latency catch-ups.
+    private const int CACHE_LIFETIME = 30 * 86400;
 
     private readonly CacheItemPoolInterface $cache;
 

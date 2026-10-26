@@ -120,6 +120,7 @@ return [
         App\Doctrine\Event\StationRequiresRestart $eventRequiresRestart,
         App\Doctrine\Event\AuditLog $eventAuditLog,
         App\Doctrine\Event\SetExplicitChangeTracking $eventChangeTracking,
+        App\Doctrine\Event\LinearLogReplanOnScheduleChange $eventLinearLogReplan,
         Psr\EventDispatcher\EventDispatcherInterface $dispatcher
     ) {
         if ($environment->isCli()) {
@@ -162,6 +163,7 @@ return [
         $eventManager->addEventSubscriber($eventRequiresRestart);
         $eventManager->addEventSubscriber($eventAuditLog);
         $eventManager->addEventSubscriber($eventChangeTracking);
+        $eventManager->addEventSubscriber($eventLinearLogReplan);
 
         return new App\Doctrine\DecoratedEntityManager(
             fn() => new Doctrine\ORM\EntityManager($connection, $config, $eventManager)

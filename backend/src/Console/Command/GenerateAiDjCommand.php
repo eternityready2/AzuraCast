@@ -6,7 +6,6 @@ namespace App\Console\Command;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Entity\AiDj;
-use App\Entity\Station;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -22,10 +21,7 @@ use Throwable;
 final class GenerateAiDjCommand extends CommandAbstract
 {
     use EntityManagerAwareTrait;
-
-    public function __construct() {
-        parent::__construct();
-    }
+    use ResolvesStationArgumentTrait;
 
     protected function configure(): void
     {
@@ -72,7 +68,7 @@ final class GenerateAiDjCommand extends CommandAbstract
             try {
                 $djRepo = $this->em->getRepository(AiDj::class);
                 $djs = $djId
-                    ? [$djRepo->find((int) $djId)]
+                    ? array_filter([$djRepo->find((int) $djId)])
                     : $djRepo->findBy(['station' => $station, 'is_enabled' => true]);
 
                 if (empty($djs)) {
@@ -82,9 +78,7 @@ final class GenerateAiDjCommand extends CommandAbstract
                 }
 
                 foreach ($djs as $dj) {
-                    if (null !== $dj) {
-                        $io->text(sprintf('DJ: <info>%s</info>', $dj->getName()));
-                    }
+                    $io->text(sprintf('DJ: <info>%s</info>', $dj->getName()));
                 }
 
                 $successCount++;
@@ -105,21 +99,5 @@ final class GenerateAiDjCommand extends CommandAbstract
 
         return 0;
     }
-
-    /**
-     * @return Station[]
-     */
-    private function resolveStations(?string $stationName): array
-    {
-        $repo = $this->em->getRepository(Station::class);
-
-        if (null !== $stationName) {
-            $station = $repo->findOneBy(['short_name' => $stationName])
-                ?? $repo->find($stationName);
-
-            return (null !== $station) ? [$station] : [];
-        }
-
-        return $repo->findAll();
-    }
 }
+

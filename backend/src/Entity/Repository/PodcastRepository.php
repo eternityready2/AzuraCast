@@ -29,7 +29,7 @@ final class PodcastRepository extends Repository
 
     public function fetchPodcastForStation(Station $station, string $podcastId): ?Podcast
     {
-        return $this->repository->findOneBy(
+        return $this->getRepository()->findOneBy(
             [
                 'id' => $podcastId,
                 'storage_location' => $station->podcasts_storage_location,

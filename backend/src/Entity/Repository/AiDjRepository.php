@@ -14,6 +14,19 @@ final class AiDjRepository extends Repository
 {
     protected string $entityClass = AiDj::class;
 
+    public function findForStation(int $djId, int $stationId): ?AiDj
+    {
+        return $this->em->createQueryBuilder()
+            ->select('dj')
+            ->from(AiDj::class, 'dj')
+            ->andWhere('dj.id = :id')
+            ->andWhere('IDENTITY(dj.station) = :stationId')
+            ->setParameter('id', $djId)
+            ->setParameter('stationId', $stationId)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     /**
      * @return AiDj[]
      */

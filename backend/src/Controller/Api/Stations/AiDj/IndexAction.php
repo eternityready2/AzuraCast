@@ -10,6 +10,7 @@ use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use App\Service\AiNewsGenerator;
 use OpenApi\Attributes as OA;
@@ -34,6 +35,7 @@ final class IndexAction implements SingleActionInterface
     public function __construct(
         private readonly AiDjRepository $aiDjRepository,
         private readonly AiDjScheduler $scheduler,
+        private readonly AiDjRecordings $recordings,
     ) {
     }
 
@@ -45,21 +47,11 @@ final class IndexAction implements SingleActionInterface
         $station = $request->getStation();
         $djList = $this->aiDjRepository->findByStation($station->id);
 
+        // With how many of the DJ's own recordings are on the server, for the editor.
         $result = array_map(
-            static fn(\App\Entity\AiDj $dj): array => [
-                'id' => $dj->id,
-                'name' => $dj->getName(),
-                'is_enabled' => $dj->isEnabled(),
-                'voice_model_path' => $dj->getVoiceModelPath(),
-                'shift_intro_template' => $dj->getShiftIntroTemplate(),
-                'shift_outro_template' => $dj->getShiftOutroTemplate(),
-                'talk_frequency' => $dj->getTalkFrequency(),
-                'voice_speed' => $dj->getVoiceSpeed(),
-                'use_background_audio' => $dj->useBackgroundAudio(),
-                'schedules' => array_map(
-                    static fn(\App\Entity\AiDjSchedule $s): array => $s->api(),
-                    $dj->getSchedules()->toArray()
-                ),
+            fn(\App\Entity\AiDj $dj): array => [
+                ...$dj->api(),
+                'recordings_available' => $this->recordings->available($dj),
             ],
             $djList
         );
@@ -74,14 +66,12 @@ final class IndexAction implements SingleActionInterface
 
         $piperVoices = AiNewsGenerator::getAvailableVoiceModels();
 
-        // Find currently active DJ for "Live on Air" indicator
         $activeDj = $this->scheduler->findActiveDj($station->id);
-        $activeDjId = $activeDj?->getId();
 
         return $response->withJson([
             'rows' => $result,
             'voice_options' => array_merge($kokoroVoices, $piperVoices),
-            'active_dj_id' => $activeDjId,
+            'active_dj_id' => $activeDj?->getId(),
         ]);
     }
 }

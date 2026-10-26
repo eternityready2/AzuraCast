@@ -5,17 +5,32 @@ declare(strict_types=1);
 namespace App\Radio\AutoDJ\ClockWheel;
 
 use App\Entity\Enums\StationMediaTypes;
+use App\Entity\Repository\ClockWheelEventRepository;
 use App\Entity\StationMedia;
 use App\Entity\StationQueue;
 use App\Event\Radio\AnnotateNextSong;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Applies clock-wheel playback caps via AutoDJ annotations (cue_out) when the planner
- * could not guarantee fit by track selection alone.
+ * Applies timing-related playback annotations produced by AutoDJ planning.
+ *
+ * The stretch ratio field predates station-wide playout controls and retains its
+ * clock-wheel-prefixed database name for compatibility, but it is now used by
+ * ordinary rotation playlists and Smart Blocks as well as Clock Wheels.
  */
 final class ClockWheelAnnotator implements EventSubscriberInterface
 {
+    private const float RATIO_ALIGNMENT_TOLERANCE = 0.000075;
+
+    /** Matches Queue's floor and the Top-of-Hour early-ID window. */
+    private const int MIN_HOUR_BOUNDARY_CAP_SECONDS = 30;
+
+    public function __construct(
+        private readonly ClockWheelEventRepository $eventRepo,
+        private readonly ClockWheelEventLogger $eventLogger,
+    ) {
+    }
+
     public static function getSubscribedEvents(): array
     {
         return [
@@ -27,6 +42,12 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         ];
     }
 
+    /**
+     * Apply the stretch/squeeze decision frozen into the queue row when AutoDJ
+     * planned it. Runtime setting changes deliberately affect newly planned rows
+     * only, preventing an already-queued row from changing duration after later
+     * timestamps and protected boundaries were calculated from its old duration.
+     */
     public function applyClockWheelStretch(AnnotateNextSong $event): void
     {
         if (!$event->isAsAutoDj()) {
@@ -34,17 +55,57 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         }
 
         $queue = $event->getQueue();
-        if (!$queue instanceof StationQueue) {
+        $media = $event->getMedia();
+        if (!$queue instanceof StationQueue || !$media instanceof StationMedia) {
+            return;
+        }
+
+        $isLegalId = $queue->top_of_hour_legal_id
+            || $queue->clock_wheel_legal_id_substitute
+            || StationMediaTypes::isStationId($media->type);
+        if ($isLegalId) {
+            return;
+        }
+
+        // A row that still has a cap requirement was intentionally left on the
+        // fallback path during queue planning. Never stack stretch metadata on
+        // top of that cap at annotation time.
+        if (
+            $queue->clock_wheel_enforce_cap
+            || $queue->hour_boundary_enforce_cap
+        ) {
             return;
         }
 
         $ratio = $queue->clock_wheel_stretch_ratio;
-        if (null === $ratio) {
+        if (null === $ratio || $ratio <= 0 || abs($ratio - 1.0) < 0.0001) {
+            return;
+        }
+
+        $naturalDuration = $media->getCalculatedLength();
+        $projectedDuration = $queue->duration;
+        if (null === $projectedDuration || $projectedDuration <= 0 || $naturalDuration <= 0) {
+            $queue->clock_wheel_stretch_ratio = null;
+            return;
+        }
+
+        // Older queued rows can contain a planner ratio that predates active
+        // Liquidsoap serialization while their stored duration is still natural.
+        // Only activate a ratio when the persisted projected duration proves that
+        // this row was normalized for the same ratio during queue planning.
+        $durationRatio = $naturalDuration / $projectedDuration;
+        if (abs($durationRatio - $ratio) > self::RATIO_ALIGNMENT_TOLERANCE) {
+            $queue->clock_wheel_stretch_ratio = null;
+            $queue->duration = $naturalDuration;
+            $event->addAnnotations([
+                'duration' => $naturalDuration,
+            ]);
             return;
         }
 
         $event->addAnnotations([
-            'liq_stretch_ratio' => $ratio,
+            'liq_stretch_ratio' => round($ratio, 4),
+            'duration' => $projectedDuration,
         ]);
     }
 
@@ -65,6 +126,23 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
             }
 
             $maxSeconds = $queue->hour_boundary_max_play_seconds;
+
+            // A seconds-long boundary cap never airs as intended: nothing starts
+            // that close to the ID, so the row is held and would air after it as
+            // a fragment. Play it whole instead.
+            if (null !== $maxSeconds && $maxSeconds < self::MIN_HOUR_BOUNDARY_CAP_SECONDS) {
+                $queue->hour_boundary_enforce_cap = false;
+                $queue->hour_boundary_max_play_seconds = null;
+
+                $media = $event->getMedia();
+                if ($media instanceof StationMedia && $media->length > 0) {
+                    $queue->duration = $media->length;
+                    $event->addAnnotations([
+                        'duration' => $media->length,
+                    ]);
+                }
+                return;
+            }
         } else {
             $maxSeconds = $queue->clock_wheel_max_play_seconds;
         }
@@ -98,6 +176,16 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         $queue->duration = $cueOut;
     }
 
+    /**
+     * Give Station ID / legal-ID rows a clean, predictable ending and a gentle
+     * entrance. This applies equally to Clock Wheel IDs and the rebuilt
+     * station-wide Top-of-Hour ID path.
+     *
+     * The station-wide compliance event is created here, after Queue::buildQueue
+     * has accepted and persisted the row. This avoids orphan audit records from
+     * rejected BuildQueue candidates and makes expected_play_at equal the actual
+     * projected ID start rather than the following :00 boundary.
+     */
     public function applyLegalIdQuickCut(AnnotateNextSong $event): void
     {
         if (!$event->isAsAutoDj()) {
@@ -110,16 +198,48 @@ final class ClockWheelAnnotator implements EventSubscriberInterface
         }
 
         $media = $event->getMedia();
-        $isLegalId = ($queue->top_of_hour_legal_id ?? false)
-            || ($queue->clock_wheel_legal_id_substitute ?? false)
+        $isLegalId = $queue->top_of_hour_legal_id
+            || $queue->clock_wheel_legal_id_substitute
             || ($media instanceof StationMedia && StationMediaTypes::isStationId($media->type));
 
         if (!$isLegalId) {
             return;
         }
 
+        if (
+            $queue->top_of_hour_legal_id
+            && $media instanceof StationMedia
+            && isset($queue->id)
+            && null === $this->eventRepo->findLatestUnplayedTopOfHourLegalIdQueued(
+                $event->getStation(),
+                $queue->id,
+            )
+        ) {
+            $expectedPlayAt = $queue->timestamp_played
+                ?? $queue->top_of_hour_boundary_at;
+
+            if (null !== $expectedPlayAt) {
+                $this->eventLogger->recordTopOfHourLegalIdQueued(
+                    $event->getStation(),
+                    $media,
+                    $expectedPlayAt,
+                    $queue,
+                );
+            }
+        }
+
+        $fadeInSeconds = 0.0;
+        $station = $event->getStation();
+        if ($media instanceof StationMedia) {
+            $fadeInSeconds = min(
+                $station->backend_config->getCrossfadeDuration(),
+                $media->length / 2
+            );
+            $fadeInSeconds = max(0.0, $fadeInSeconds);
+        }
+
         $event->addAnnotations([
-            'autocue_fade_in' => 0.0,
+            'autocue_fade_in' => $fadeInSeconds,
             'autocue_fade_out' => 0.0,
             'autocue_start_next' => null,
         ]);

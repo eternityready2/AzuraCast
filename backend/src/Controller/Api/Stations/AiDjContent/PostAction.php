@@ -79,13 +79,6 @@ final class PostAction implements SingleActionInterface
 
         $this->em->flush();
 
-        return $response->withJson([
-            'id' => $content->id,
-            'type' => $content->type,
-            'content' => $content->content,
-            'reference' => $content->reference,
-            'is_enabled' => $content->is_enabled,
-            'is_global' => $content->is_global,
-        ])->withStatus(201);
+        return $response->withJson($content->api())->withStatus(201);
     }
 }

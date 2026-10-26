@@ -242,10 +242,25 @@ final class StreamersController extends AbstractScheduledEntityController
             ) {
                 /** @var StationStreamer $streamer */
                 $streamer = $scheduleItem->streamer;
+                $hasCustomArt = (0 !== $streamer->art_updated_at);
 
                 return [
                     'id' => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
+                    'type' => 'streamer',
                     'title' => $streamer->display_name,
+                    'streamer_username' => $streamer->streamer_username,
+                    'comments' => $streamer->comments,
+                    'has_custom_art' => $hasCustomArt,
+                    'art' => $hasCustomArt
+                        ? $request->getRouter()->named(
+                            'api:stations:streamer:art',
+                            [
+                                'station_id' => $station->id,
+                                'id' => $streamer->id,
+                                'timestamp' => $streamer->art_updated_at,
+                            ]
+                        )
+                        : null,
                     'start' => $dateRange->start->toIso8601String(),
                     'end' => $dateRange->end->toIso8601String(),
                     'edit_url' => $request->getRouter()->named(

@@ -154,6 +154,22 @@ final class PlaylistsController extends AbstractScheduledEntityController
             ->where('sp.station = :station')
             ->setParameter('station', $station);
 
+        $smartBlockFilter = $request->getParam('is_smart_block');
+        if ('1' === $smartBlockFilter) {
+            $qb->andWhere('sp.is_smart_block = true');
+        } elseif ('0' === $smartBlockFilter) {
+            $qb->andWhere('sp.is_smart_block = false');
+        }
+
+        $includeRemoteUrl = $request->getParam('include_remote_url');
+        if ('1' === $includeRemoteUrl) {
+            $qb->andWhere('sp.source = :remoteUrlSource')
+                ->setParameter('remoteUrlSource', PlaylistSources::RemoteUrl->value);
+        } else {
+            $qb->andWhere('sp.source != :remoteUrlSource')
+                ->setParameter('remoteUrlSource', PlaylistSources::RemoteUrl->value);
+        }
+
         $qb = $this->sortQueryBuilder(
             $request,
             $qb,
@@ -175,12 +191,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
         return $this->listPaginatedFromQuery($request, $response, $qb->getQuery());
     }
 
-    /**
-     * Controller used to respond to AJAX requests from the playlist "Schedule View".
-     *
-     * @param ServerRequest $request
-     * @param Response $response
-     */
     public function scheduleAction(
         ServerRequest $request,
         Response $response
@@ -192,7 +202,7 @@ final class PlaylistsController extends AbstractScheduledEntityController
                 SELECT ssc, sp
                 FROM App\Entity\StationSchedule ssc
                 JOIN ssc.playlist sp
-                WHERE sp.station = :station AND sp.is_jingle = 0 AND sp.is_enabled = 1
+                WHERE sp.station = :station AND sp.is_jingle = 0
             DQL
         )->setParameter('station', $station)
             ->execute();
@@ -213,23 +223,71 @@ final class PlaylistsController extends AbstractScheduledEntityController
 
                 return [
                     'id' => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
+                    'type' => 'playlist',
                     'schedule_id' => $scheduleItem->id,
                     'playlist_id' => $playlist->id,
-                    'title' => $playlist->name,
+                    'title' => $playlist->name . ($playlist->is_enabled ? '' : ' (' . __('Disabled') . ')'),
                     'start' => $dateRange->start->toIso8601String(),
                     'end' => $dateRange->end->toIso8601String(),
                     'edit_url' => $request->getRouter()->named(
                         'api:stations:playlist',
                         ['station_id' => $station->id, 'id' => $playlist->id]
                     ),
+                    'source' => $playlist->source->value,
+                    'order' => $playlist->order->value,
+                    'playlist_type' => $playlist->type->value,
+                    'weight' => $playlist->weight,
+                    'is_enabled' => $playlist->is_enabled,
+                    'play_per_songs' => $playlist->play_per_songs,
+                    'play_per_minutes' => $playlist->play_per_minutes,
+                    'play_per_hour_minute' => $playlist->play_per_hour_minute,
+                    'avoid_duplicates' => $playlist->avoid_duplicates,
+                    'is_jingle' => $playlist->is_jingle,
+                    'include_in_on_demand' => $playlist->include_in_on_demand,
+                    'remote_url' => $playlist->remote_url,
+                    'remote_type' => $playlist->remote_type?->value,
+                    'num_songs' => $playlist->media_items->count(),
+                    'total_length' => array_sum(
+                        $playlist->media_items->map(
+                            fn ($spm) => $spm->media->length
+                        )->toArray()
+                    ),
+                    'members' => $playlist->group_members->map(
+                        fn ($spg) => [
+                            'id' => $spg->playlist->id,
+                            'name' => $spg->playlist->name,
+                            'source' => $spg->playlist->source->value,
+                            'order' => $spg->playlist->order->value,
+                            'weight' => $spg->weight,
+                            'count' => match ($spg->playlist->source) {
+                                PlaylistSources::Songs => $spg->playlist->media_items->count(),
+                                PlaylistSources::Playlists => $spg->playlist->playlists->count(),
+                                default => null,
+                            },
+                            'is_enabled' => $spg->playlist->is_enabled,
+                            'consecutive_plays' => $spg->consecutive_plays,
+                            'play_full_cycle' => $spg->play_full_cycle,
+                        ]
+                    )->toArray(),
+                    'is_member_of_group' => $playlist->group_memberships->count() > 0,
+                    'plays_via_group_schedule' => $this->scheduler->isPlaylistFullyCoveredByGroupSchedule(
+                        $playlist,
+                        $dateRange
+                    ),
                 ];
             }
         );
     }
 
-    /**
-     * @return mixed[]
-     */
+    protected function editRecord(?array $data, ?object $record = null, array $context = []): object
+    {
+        $record = parent::editRecord($data, $record, $context);
+
+        $record->syncReadOnlyForeignKeys();
+
+        return $record;
+    }
+
     protected function viewRecord(object $record, ServerRequest $request): array
     {
         /** @var StationPlaylist $record */
@@ -252,6 +310,16 @@ final class PlaylistsController extends AbstractScheduledEntityController
         $return['num_songs'] = $songTotals['num_songs'];
         $return['total_length'] = round((float)$songTotals['total_length']);
 
+        $parentGroups = [];
+        foreach ($record->playlist_groups as $spg) {
+            $group = $spg->playlist_group;
+            $parentGroups[$group->id] = [
+                'id' => $group->id,
+                'name' => $group->name,
+            ];
+        }
+        $return['playlist_groups'] = array_values($parentGroups);
+
         $isInternal = $request->isInternal();
         $router = $request->getRouter();
 
@@ -272,6 +340,21 @@ final class PlaylistsController extends AbstractScheduledEntityController
                 absolute: !$isInternal
             ),
         ];
+
+        if (PlaylistSources::Playlists === $record->source) {
+            $return['links']['members'] = $router->fromHere(
+                routeName: 'api:stations:playlist:members',
+                routeParams: ['id' => $record->id],
+                absolute: !$isInternal
+            );
+
+            // Reshuffle resets the group's member rotation (upstream parity).
+            $return['links']['reshuffle'] = $router->fromHere(
+                routeName: 'api:stations:playlist:reshuffle',
+                routeParams: ['id' => $record->id],
+                absolute: !$isInternal
+            );
+        }
 
         if (PlaylistSources::Songs === $record->source) {
             if (PlaylistOrders::Sequential === $record->order) {

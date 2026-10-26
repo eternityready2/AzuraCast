@@ -73,7 +73,7 @@
                         min="1"
                         max="5"
                     >
-                    <p class="text-muted small mt-1">{{ $gettext('DMCA default: 2') }}</p>
+                    <p class="text-muted small mt-1">{{ $gettext('Recommended: 1 (never the same song back to back)') }}</p>
                 </div>
 
                 <div class="col-md-6">
@@ -88,7 +88,9 @@
                         min="1"
                         max="10"
                     >
-                    <p class="text-muted small mt-1">{{ $gettext('DMCA default: 3') }}</p>
+                    <p class="text-muted small mt-1">
+                        {{ $gettext('DMCA default: 3. Also always enforced: no more than 2 songs in a row from the same album (statutory, not adjustable).') }}
+                    </p>
                 </div>
 
                 <div class="col-md-6">

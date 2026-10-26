@@ -8,17 +8,21 @@ use App\Doctrine\Repository;
 use App\Entity\Api\StationPlaylistQueue;
 use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\PlaylistSources;
+use App\Entity\Enums\SmartBlockType;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistFolder;
 use App\Entity\StationPlaylistMedia;
+use App\Radio\SmartBlock\SmartBlockSyncer;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use Doctrine\ORM\NoResultException;
 use Doctrine\ORM\QueryBuilder;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 /**
  * @extends Repository<StationPlaylistMedia>
@@ -27,8 +31,18 @@ final class StationPlaylistMediaRepository extends Repository
 {
     protected string $entityClass = StationPlaylistMedia::class;
 
+    /**
+     * How often (in seconds) a Dynamic Smart Block is allowed to be inline-resynced
+     * from {@see self::getQueue()} -- see {@see self::maybeResyncDynamicSmartBlock()}.
+     */
+    private const int SMART_BLOCK_INLINE_RESYNC_THROTTLE_SECONDS = 60;
+
+    /** @var array<int, int> Playlist ID => unix timestamp of last inline resync. */
+    private array $smartBlockLastInlineSyncAt = [];
+
     public function __construct(
-        private readonly StationQueueRepository $queueRepo
+        private readonly StationQueueRepository $queueRepo,
+        private readonly SmartBlockSyncer $smartBlockSyncer,
     ) {
     }
 
@@ -131,11 +145,10 @@ final class StationPlaylistMediaRepository extends Repository
             throw new RuntimeException('This playlist is not meant to contain songs!');
         }
 
-        // Only update existing record for random-order playlists.
         $isNonSequential = PlaylistOrders::Sequential !== $playlist->order;
 
         $record = ($isNonSequential)
-            ? $this->repository->findOneBy(
+            ? $this->getRepository()->findOneBy(
                 [
                     'media' => $media,
                     'playlist' => $playlist,
@@ -174,6 +187,36 @@ final class StationPlaylistMediaRepository extends Repository
         return $weight;
     }
 
+    public function addMediaToPlaylistIfMissing(
+        StationMedia $media,
+        StationPlaylist $playlist
+    ): bool {
+        if (PlaylistSources::Songs !== $playlist->source) {
+            throw new RuntimeException('This playlist is not meant to contain songs!');
+        }
+
+        $existingRecord = $this->getRepository()->findOneBy([
+            'media' => $media,
+            'playlist' => $playlist,
+            'folder' => null,
+        ]);
+
+        if ($existingRecord instanceof StationPlaylistMedia) {
+            return false;
+        }
+
+        $weight = $this->getHighestSongWeight($playlist) + 1;
+        if (PlaylistOrders::Sequential !== $playlist->order) {
+            $weight = random_int(1, $weight);
+        }
+
+        $record = new StationPlaylistMedia($playlist, $media);
+        $record->weight = $weight;
+        $this->em->persist($record);
+
+        return true;
+    }
+
     public function getHighestSongWeight(StationPlaylist $playlist): int
     {
         try {
@@ -192,14 +235,6 @@ final class StationPlaylistMediaRepository extends Repository
         return (int)$highestWeight;
     }
 
-    /**
-     * Remove all playlist associations from the specified media object.
-     *
-     * @param StationMedia $media
-     * @param Station|null $station
-     *
-     * @return array<int, int> Affected Playlist records (id => id)
-     */
     public function clearPlaylistsFromMedia(
         StationMedia $media,
         ?Station $station = null
@@ -220,16 +255,14 @@ final class StationPlaylistMediaRepository extends Repository
             $affectedPlaylists[$playlist->id] = $playlist->id;
 
             $this->queueRepo->clearForMediaAndPlaylist($media, $playlist);
-
             $this->em->remove($spmRow);
         }
 
         return $affectedPlaylists;
     }
 
-    public function emptyPlaylist(
-        StationPlaylist $playlist
-    ): void {
+    public function emptyPlaylist(StationPlaylist $playlist): void
+    {
         $this->em->createQuery(
             <<<'DQL'
                 DELETE FROM App\Entity\StationPlaylistMedia spm
@@ -241,16 +274,6 @@ final class StationPlaylistMediaRepository extends Repository
         $this->queueRepo->clearForPlaylist($playlist);
     }
 
-    /**
-     * Set the order of the media, specified as
-     * [
-     *    media_id => new_weight,
-     *    ...
-     * ]
-     *
-     * @param StationPlaylist $playlist
-     * @param array $mapping
-     */
     public function setMediaOrder(StationPlaylist $playlist, array $mapping): void
     {
         $updateQuery = $this->em->createQuery(
@@ -317,15 +340,18 @@ final class StationPlaylistMediaRepository extends Repository
                         $updateSpmWeightQuery->setParameter('id', $spmId)
                             ->setParameter('weight', $weight)
                             ->execute();
-
                         $weight++;
                     }
                 }
             );
         }
 
-        $now ??= Time::nowUtc();
+        $this->resyncManagedEntities(
+            StationPlaylistMedia::class,
+            static fn(StationPlaylistMedia $spm): bool => $spm->playlist === $playlist
+        );
 
+        $now ??= Time::nowUtc();
         $playlist->queue_reset_at = $now;
         $this->em->persist($playlist);
         $this->em->flush();
@@ -336,22 +362,30 @@ final class StationPlaylistMediaRepository extends Repository
         $now = Time::nowUtc();
 
         foreach ($station->playlists as $playlist) {
-            if (PlaylistSources::Songs !== $playlist->source) {
+            if (PlaylistSources::Songs !== $playlist->source || !$playlist->resetsQueueOnRestart()) {
                 continue;
             }
 
+            // A restart reshuffles; it is not a pass through the playlist. The
+            // scheduler reads queue_reset_at inside a "loop once" window as
+            // "already played through", so stamping it here blocked Hymns for
+            // the rest of its 00:00-06:00 window after a 02:01 restart and left
+            // 03:24-06:00 with nothing to play (2026-10-05).
+            $lastReset = $playlist->queue_reset_at;
             $this->resetQueue($playlist, $now);
+            $playlist->queue_reset_at = $lastReset;
+            $this->em->persist($playlist);
         }
+        $this->em->flush();
     }
 
-    /**
-     * @return StationPlaylistQueue[]
-     */
     public function getQueue(StationPlaylist $playlist): array
     {
         if (PlaylistSources::Songs !== $playlist->source) {
             throw new InvalidArgumentException('Playlist must contain songs.');
         }
+
+        $this->maybeResyncDynamicSmartBlock($playlist);
 
         $queuedMediaQuery = $this->em->createQueryBuilder()
             ->select([
@@ -365,7 +399,9 @@ final class StationPlaylistMediaRepository extends Repository
             ->from(StationMedia::class, 'sm')
             ->join('sm.playlists', 'spm')
             ->where('spm.playlist = :playlist')
-            ->setParameter('playlist', $playlist);
+            ->andWhere('sm.type NOT IN (:excludedTypes) OR sm.type IS NULL')
+            ->setParameter('playlist', $playlist)
+            ->setParameter('excludedTypes', StationMediaTypes::stationIdTypeValues());
 
         if (PlaylistOrders::Random === $playlist->order) {
             $queuedMediaQuery = $queuedMediaQuery->orderBy('RAND()');
@@ -390,6 +426,28 @@ final class StationPlaylistMediaRepository extends Repository
             },
             $queuedMedia
         );
+    }
+
+    private function maybeResyncDynamicSmartBlock(StationPlaylist $playlist): void
+    {
+        if (!$playlist->is_smart_block || SmartBlockType::Dynamic !== $playlist->smart_block_type) {
+            return;
+        }
+
+        $playlistId = $playlist->id;
+        $now = time();
+        $lastSync = $this->smartBlockLastInlineSyncAt[$playlistId] ?? 0;
+
+        if (($now - $lastSync) < self::SMART_BLOCK_INLINE_RESYNC_THROTTLE_SECONDS) {
+            return;
+        }
+
+        $this->smartBlockLastInlineSyncAt[$playlistId] = $now;
+
+        try {
+            $this->smartBlockSyncer->sync($playlist);
+        } catch (Throwable) {
+        }
     }
 
     public function isQueueCompletelyFilled(StationPlaylist $playlist): bool
@@ -430,6 +488,31 @@ final class StationPlaylistMediaRepository extends Repository
             ->getSingleScalarResult();
 
         return $notQueuedMediaCount === $totalMediaCount;
+    }
+
+    public function isMediaInPlaylist(StationMedia $media, StationPlaylist $playlist): bool
+    {
+        if (PlaylistSources::Songs === $playlist->source) {
+            return (int)$this->em->createQuery(
+                <<<'DQL'
+                    SELECT COUNT(spm.id)
+                    FROM App\Entity\StationPlaylistMedia spm
+                    WHERE spm.playlist = :playlist AND spm.media = :media
+                DQL
+            )->setParameter('playlist', $playlist)
+                ->setParameter('media', $media)
+                ->getSingleScalarResult() > 0;
+        }
+
+        if (PlaylistSources::Playlists === $playlist->source) {
+            foreach ($playlist->playlists as $membership) {
+                if ($this->isMediaInPlaylist($media, $membership->playlist)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function getCountPlaylistMediaBaseQuery(StationPlaylist $playlist): QueryBuilder
