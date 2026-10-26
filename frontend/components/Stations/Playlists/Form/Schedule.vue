@@ -1,8 +1,95 @@
 <template>
     <tab
-        :label="$gettext('Schedule & Playback')"
-        badge="NEW"
+        id="schedule"
+        :label="$gettext('Schedule')"
     >
+        <div class="schedule-view-switch mb-3">
+            <span class="me-2">{{ $gettext('This playlist\'s schedule is set in:') }}</span>
+            <div
+                class="btn-group btn-group-sm"
+                role="group"
+                :aria-label="$gettext('Schedule editor for this playlist')"
+            >
+                <button
+                    type="button"
+                    class="btn"
+                    :class="view === 'classic' ? 'btn-primary' : 'btn-outline-secondary'"
+                    :aria-pressed="view === 'classic'"
+                    @click="setView('classic')"
+                >
+                    {{ $gettext('Classic Schedule') }}
+                </button>
+                <button
+                    type="button"
+                    class="btn"
+                    :class="view === 'new' ? 'btn-primary' : 'btn-outline-secondary'"
+                    :aria-pressed="view === 'new'"
+                    @click="setView('new')"
+                >
+                    {{ $gettext('New Schedule') }}
+                </button>
+            </div>
+            <small class="text-muted d-block mt-1">
+                {{ view === 'classic'
+                    ? $gettext('The standard AzuraCast schedule.')
+                    : $gettext('More options: repeat every few weeks, exact start times, what happens at the end.') }}
+            </small>
+        </div>
+
+        <template v-if="view === 'classic'">
+            <form-markup
+                v-if="scheduleItems.length === 0"
+                id="simple_no_scheduled_entries"
+            >
+                <template #label>
+                    {{ $gettext('Not Scheduled') }}
+                </template>
+                <p>
+                    {{
+                        $gettext('This playlist currently has no scheduled times. It will play at all times. To add a new scheduled time, click the button below.')
+                    }}
+                </p>
+            </form-markup>
+
+            <template
+                v-for="(row, index) in scheduleItems"
+                :key="index"
+            >
+                <div
+                    v-if="hasAdvancedSettings(row)"
+                    class="alert alert-info py-2 mb-2"
+                >
+                    {{ advancedSettingsNote(row) }}
+                    <button
+                        type="button"
+                        class="btn btn-link btn-sm p-0 ms-1 align-baseline"
+                        @click="setView('new')"
+                    >
+                        {{ $gettext('Switch to New Schedule to edit it.') }}
+                    </button>
+                </div>
+                <playlists-form-schedule-row-simple
+                    v-model:row="scheduleItems[index]"
+                    :index="index"
+                    @remove="remove(index)"
+                />
+            </template>
+
+            <div class="buttons">
+                <button
+                    type="button"
+                    class="btn btn-sm btn-primary"
+                    @click="add"
+                >
+                    <icon-ic-add/>
+                    <span>
+                        {{ $gettext('Add Schedule Item') }}
+                    </span>
+                </button>
+            </div>
+        </template>
+
+        <template v-else>
         <div class="schedule-hero mb-4">
             <div>
                 <h2 class="h4 mb-1">{{ $gettext('Schedule & Playback') }}</h2>
@@ -172,13 +259,16 @@
                 </div>
             </aside>
         </div>
+        </template>
     </tab>
 </template>
 
 <script setup lang="ts">
-import {computed, watch} from "vue";
+import {computed} from "vue";
+import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
 import {storeToRefs} from "pinia";
 import PlaylistsFormScheduleRow from "~/components/Stations/Playlists/Form/ScheduleRow.vue";
+import PlaylistsFormScheduleRowSimple from "~/components/Stations/Playlists/Form/ScheduleRowLegacy.vue";
 import FormPlayoutRules from "~/components/Stations/Playlists/Form/PlayoutRules.vue";
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import Tab from "~/components/Common/Tab.vue";
@@ -321,7 +411,6 @@ const add = () => {
         recurrence_end_after: null,
         recurrence_end_date: null
     });
-    applyTimingBundle('flexible');
 };
 
 const remove = (index: number) => {
@@ -332,15 +421,85 @@ const hasOption = (option: string): boolean => (
     Array.isArray(form.value.backend_options) && form.value.backend_options.includes(option)
 );
 
-watch(
-    effectiveTimingMode,
-    (mode) => {
-        if (mode === 'flexible' || mode === 'strict') {
-            applyTimingBundle(mode);
+// The playlist's start/end behavior (interrupt, overrun, priority) changes only
+// when the user picks a timing mode or a preset. Applied on open, or when a row
+// was added, it silently rewrote a show's settings on the next Save.
+
+// Each playlist's schedule is set in one editor, saved with the playlist.
+// Switching moves its times to the other editor; they are never in both.
+const view = computed<'classic' | 'new'>(() => (form.value.schedule_editor === 'new' ? 'new' : 'classic'));
+
+const {showAlert} = useDialog();
+
+const setView = async (target: 'classic' | 'new') => {
+    if (target === view.value) {
+        return;
+    }
+
+    // What the Classic Schedule can't keep, in the words a station user knows.
+    const lost: string[] = [];
+    if (target === 'classic') {
+        if (hasOption('allow_overrun')) {
+            lost.push($gettext('letting the last song finish after the time slot'));
         }
-    },
-    {immediate: true}
+        if (scheduleItems.value.some((row) => Boolean(row.strict_start))) {
+            lost.push($gettext('starting exactly on the minute'));
+        }
+        if (scheduleItems.value.some((row) => (row.recurrence_type ?? 'weekly') !== 'weekly'
+            || Number(row.recurrence_interval ?? 1) !== 1)) {
+            lost.push($gettext('repeating every few weeks or monthly'));
+        }
+        if (scheduleItems.value.some((row) => (row.recurrence_end_type ?? 'never') !== 'never')) {
+            lost.push($gettext('stopping after a set date'));
+        }
+    }
+
+    if (lost.length > 0) {
+        const {value} = await showAlert({
+            title: $gettext('Classic Schedule can\'t keep: %{settings}. Turn it off and switch?', {settings: lost.join(', ')}),
+            confirmButtonText: $gettext('Turn Off & Switch'),
+        });
+        if (!value) {
+            return;
+        }
+
+        setBackendOption('allow_overrun', false);
+        scheduleItems.value.forEach((row) => {
+            row.strict_start = false;
+            row.recurrence_type = 'weekly';
+            row.recurrence_interval = 1;
+            row.recurrence_monthly_pattern = null;
+            row.recurrence_monthly_day = null;
+            row.recurrence_monthly_week = null;
+            row.recurrence_monthly_day_of_week = null;
+            row.recurrence_end_type = 'never';
+            row.recurrence_end_after = null;
+            row.recurrence_end_date = null;
+        });
+    }
+
+    form.value.schedule_editor = target;
+};
+
+const hasAdvancedSettings = (row: Record<string, any>): boolean => (
+    (row.recurrence_type ?? 'weekly') !== 'weekly'
+    || Number(row.recurrence_interval ?? 1) !== 1
+    || (row.recurrence_end_type ?? 'never') !== 'never'
+    || Boolean(row.strict_start)
 );
+
+const advancedSettingsNote = (row: Record<string, any>): string => {
+    if ((row.recurrence_type ?? 'weekly') === 'monthly') {
+        return $gettext('This time repeats monthly, and the Classic Schedule can\'t show that.');
+    }
+    if (Number(row.recurrence_interval ?? 1) !== 1) {
+        return $gettext('This time repeats every few weeks, and the Classic Schedule can\'t show that.');
+    }
+    if ((row.recurrence_end_type ?? 'never') !== 'never') {
+        return $gettext('This time stops repeating after a set date or number of times, and the Classic Schedule can\'t show that.');
+    }
+    return $gettext('This time starts exactly on the minute, cutting off whatever is playing, and the Classic Schedule can\'t show that.');
+};
 
 const formatTime = (timeCode: number | string | null | undefined): string => {
     if (timeCode === null || timeCode === undefined || timeCode === '') {

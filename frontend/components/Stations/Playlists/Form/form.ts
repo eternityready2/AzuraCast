@@ -48,6 +48,7 @@ export const useStationsPlaylistsForm = defineStore(
             play_per_hour_minute: 0,
             include_in_requests: true,
             is_programme: false,
+            schedule_editor: 'new' as 'classic' | 'new',
             avoid_duplicates: true,
             preserve_queue_on_restart: false,
             smart_shuffle_distance: null,

@@ -464,7 +464,7 @@ const doCalendarClick = (event: EventImpl) => {
     void router.push({
         name: 'stations:playlists:edit',
         params: {playlist_id: event.extendedProps.playlist_id},
-        query: {tab: 'schedule_legacy'},
+        query: {tab: 'schedule'},
     });
 };
 const doEdit = (playlistId: number) => router.push({
