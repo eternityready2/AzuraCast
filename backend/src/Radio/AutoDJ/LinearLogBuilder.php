@@ -1249,6 +1249,7 @@ final class LinearLogBuilder
         $sourceType = match (true) {
             null !== $row->request => 'request',
             null !== $row->clock_wheel => 'clock_wheel',
+            null !== $row->smart_block => 'smart_block',
             null !== $row->autodj_custom_uri => 'stream',
             null !== $row->playlist => 'playlist',
             default => 'autodj',
@@ -1271,6 +1272,8 @@ final class LinearLogBuilder
             'playlist_chain' => $row->playlist_chain,
             'clock_wheel' => $row->clock_wheel?->name,
             'clock_wheel_id' => $row->clock_wheel?->id,
+            'smart_block' => $row->smart_block?->name,
+            'smart_block_id' => $row->smart_block?->id,
             'media_type' => $mediaType,
             'source_type' => $sourceType,
             'is_request' => null !== $row->request,

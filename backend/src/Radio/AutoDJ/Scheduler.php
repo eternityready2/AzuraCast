@@ -15,7 +15,9 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationStreamer;
+use App\Radio\SmartBlock\SmartBlockAvailability;
 use App\Utilities\DateRange;
 use App\Utilities\ScheduleRecurrence;
 use App\Utilities\Time;
@@ -36,6 +38,7 @@ final class Scheduler
         private readonly StationQueueRepository $queueRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly LinearLogPreviewContext $previewContext,
+        private readonly SmartBlockAvailability $smartBlockAvailability,
     ) {
     }
 
@@ -280,6 +283,33 @@ final class Scheduler
             }
         }
 
+        // A scheduled smart block holds its calendar time the same way, while
+        // it still has a song it can play then. When it has none (all would
+        // repeat, or break a DMCA limit), normal music fills in, not dead air.
+        foreach ($station->smart_blocks as $smartBlock) {
+            if (!$smartBlock->is_enabled) {
+                continue;
+            }
+
+            $ownsWindow = false;
+            foreach ($smartBlock->schedule_items as $schedule) {
+                if (null !== $this->ownedWindowSeconds($schedule, $tz, $at)) {
+                    $ownsWindow = true;
+                    break;
+                }
+            }
+            if (!$ownsWindow || !$this->smartBlockAvailability->hasPlayableSong($smartBlock, $at)) {
+                continue;
+            }
+
+            foreach ($smartBlock->schedule_items as $schedule) {
+                $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+                if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                    $narrowest = $seconds;
+                }
+            }
+        }
+
         return $narrowest;
     }
 
@@ -309,6 +339,38 @@ final class Scheduler
 
         $ownWindow = null;
         foreach ($clockWheel->schedule_items as $schedule) {
+            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+            if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
+                $ownWindow = $seconds;
+            }
+        }
+
+        if (null === $ownWindow) {
+            return false;
+        }
+
+        $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
+
+        return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
+    }
+
+    /**
+     * True when a smart block's own calendar time is open at $at and no
+     * narrower calendar item holds the air then. Same rule as a clock wheel.
+     */
+    public function isSmartBlockAllowedAt(
+        StationSmartBlock $smartBlock,
+        DateTimeImmutable $at
+    ): bool {
+        if (0 === $smartBlock->schedule_items->count()) {
+            return true;
+        }
+
+        $station = $smartBlock->station;
+        $tz = $station->getTimezoneObject();
+
+        $ownWindow = null;
+        foreach ($smartBlock->schedule_items as $schedule) {
             $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
             if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
                 $ownWindow = $seconds;

@@ -750,6 +750,48 @@ return static function (RouteCollectorProxy $group) {
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
 
+                    // Smart blocks: rule-based song sources, scheduled on the calendar.
+                    $group->group(
+                        '',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/smart-blocks',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':listAction'
+                            )->setName('api:stations:smart-blocks');
+
+                            $group->post(
+                                '/smart-blocks',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/smart-blocks/schedule',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':scheduleAction'
+                            )->setName('api:stations:smart-blocks:schedule');
+
+                            $group->group(
+                                '/smart-block/{id}',
+                                function (RouteCollectorProxy $group) {
+                                    $group->get(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':getAction'
+                                    )->setName('api:stations:smart-block');
+
+                                    $group->put(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':editAction'
+                                    );
+
+                                    $group->delete(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':deleteAction'
+                                    );
+                                }
+                            );
+                        }
+                    )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
+                        ->add(new Middleware\Permissions(StationPermissions::Media, true));
+
                     // Ads: advertisers, the airtime they bought, and what it delivered.
                     $group->group(
                         '/ads',

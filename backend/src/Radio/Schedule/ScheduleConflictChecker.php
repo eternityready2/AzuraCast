@@ -14,6 +14,7 @@ use App\Entity\Enums\PlaylistTypes;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationStreamer;
 use App\Exception\ValidationException;
 use App\Radio\AutoDJ\Scheduler;
@@ -25,7 +26,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 
 /**
- * Ensures station calendar entries (playlists, streamers, clock wheels) do not overlap.
+ * Ensures station calendar entries (playlists, streamers, clock wheels, smart blocks) do not overlap.
  */
 final class ScheduleConflictChecker
 {
@@ -38,12 +39,12 @@ final class ScheduleConflictChecker
     }
 
     /**
-     * @param StationPlaylist|StationStreamer|StationClockWheel $relation
+     * @param StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation
      * @param array<int, array<string, mixed>> $items
      */
     public function assertBatchHasNoConflicts(
         Station $station,
-        StationPlaylist|StationStreamer|StationClockWheel $relation,
+        StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation,
         array $items,
     ): void {
         // Jingles/promos and frequency-based playlists (Once per Hour, Once per X Songs,
@@ -149,14 +150,16 @@ final class ScheduleConflictChecker
     {
         return $this->em->createQuery(
             <<<'DQL'
-                SELECT ssc, sp, sst, scw
+                SELECT ssc, sp, sst, scw, ssb
                 FROM App\Entity\StationSchedule ssc
                 LEFT JOIN ssc.playlist sp
                 LEFT JOIN ssc.streamer sst
                 LEFT JOIN ssc.clock_wheel scw
+                LEFT JOIN ssc.smart_block ssb
                 WHERE (sp.station = :station AND sp.is_jingle = 0 AND sp.is_enabled = 1)
                 OR (sst.station = :station AND sst.is_active = 1)
                 OR (scw.station = :station AND scw.is_active = 1)
+                OR (ssb.station = :station AND ssb.is_enabled = 1)
             DQL
         )->setParameter('station', $station)
             ->execute();
@@ -231,11 +234,11 @@ final class ScheduleConflictChecker
     }
 
   /**
-     * @param StationPlaylist|StationStreamer|StationClockWheel $relation
+     * @param StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation
      * @param array<string, mixed> $item
      */
     private function buildCandidateSchedule(
-        StationPlaylist|StationStreamer|StationClockWheel $relation,
+        StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation,
         array $item,
     ): StationSchedule {
         $record = new StationSchedule($relation);
@@ -289,7 +292,7 @@ final class ScheduleConflictChecker
 
     private function isSameRelation(
         StationSchedule $schedule,
-        StationPlaylist|StationStreamer|StationClockWheel $relation,
+        StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation,
     ): bool {
         if ($relation instanceof StationPlaylist) {
             return $schedule->playlist?->id === $relation->id;
@@ -297,6 +300,10 @@ final class ScheduleConflictChecker
 
         if ($relation instanceof StationStreamer) {
             return $schedule->streamer?->id === $relation->id;
+        }
+
+        if ($relation instanceof StationSmartBlock) {
+            return $schedule->smart_block?->id === $relation->id;
         }
 
         return $schedule->clock_wheel?->id === $relation->id;
@@ -322,6 +329,13 @@ final class ScheduleConflictChecker
             return sprintf(
                 __('This time conflicts with the scheduled clock wheel "%s".'),
                 $existing->clock_wheel->name
+            );
+        }
+
+        if ($existing->smart_block !== null) {
+            return sprintf(
+                __('This time conflicts with the scheduled smart block "%s".'),
+                $existing->smart_block->name
             );
         }
 

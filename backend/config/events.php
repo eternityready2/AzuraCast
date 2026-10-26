@@ -158,6 +158,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
         [
             App\Console\ErrorHandler::class,
             App\Nginx\ConfigWriter::class,
+            App\Radio\AutoDJ\SmartBlockScheduler::class,
             App\Radio\AutoDJ\ClockWheelScheduler::class,
             // Saved linear log playout: listed before QueueBuilder so it takes
             // the priority-0 slot first when the log controls playout.

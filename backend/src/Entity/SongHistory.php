@@ -247,6 +247,7 @@ final class SongHistory implements
         $sh->request = $queue->request;
         $sh->playlist = $queue->playlist;
         $sh->clock_wheel = $queue->clock_wheel;
+        $sh->smart_block = $queue->smart_block;
         $sh->playlist_chain = $queue->playlist_chain;
         $sh->duration = $queue->duration;
         $sh->updateVisibility();

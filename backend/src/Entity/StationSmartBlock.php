@@ -39,7 +39,7 @@ final class StationSmartBlock implements Stringable, StationAwareInterface, Iden
     use Traits\TruncateStrings;
 
     #[
-        ORM\ManyToOne,
+        ORM\ManyToOne(inversedBy: 'smart_blocks'),
         ORM\JoinColumn(name: 'station_id', referencedColumnName: 'id', nullable: false, onDelete: 'CASCADE')
     ]
     public Station $station;
