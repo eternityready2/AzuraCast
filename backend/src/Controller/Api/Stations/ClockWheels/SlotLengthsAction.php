@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Api\Stations\ClockWheels;
 
+use App\Entity\StationSmartBlock;
+use App\Radio\SmartBlock\SmartBlockAvailability;
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Http\Response;
@@ -38,6 +40,7 @@ final class SlotLengthsAction implements SingleActionInterface
 
     public function __construct(
         private readonly TopOfHourClock $topOfHourClock,
+        private readonly SmartBlockAvailability $smartBlockAvailability,
     ) {
     }
 
@@ -74,6 +77,18 @@ final class SlotLengthsAction implements SingleActionInterface
                 'name' => trim((string)$row['name']),
                 'is_smart_block' => (bool)$row['is_smart_block'],
                 'main_type' => $row['main_type'] ?? ((bool)$row['is_jingle'] ? 'promo' : 'music'),
+            ];
+        }
+
+        // Smart blocks: their songs right now, from their own rules.
+        $bySmartBlock = [];
+        foreach ($this->em->getRepository(StationSmartBlock::class)->findBy(['station' => $station, 'is_enabled' => true]) as $smartBlock) {
+            $songs = $this->smartBlockAvailability->getPool($smartBlock);
+            $lengths = array_filter(array_column($songs, 'length'), static fn($l) => $l > 0);
+            $bySmartBlock[$smartBlock->id] = [
+                'avg_seconds' => [] !== $lengths ? (int)round(array_sum($lengths) / count($lengths)) : 0,
+                'items' => count($songs),
+                'name' => trim($smartBlock->name),
             ];
         }
 
@@ -121,6 +136,7 @@ final class SlotLengthsAction implements SingleActionInterface
             'id_start_second' => 59 * 60 + $this->topOfHourClock->getIdStartSecond($station),
             'id_seconds' => (int)round($idSeconds),
             'playlists' => (object)$byPlaylist,
+            'smart_blocks' => (object)$bySmartBlock,
             'categories' => (object)$byCategory,
             'types' => (object)$byType,
         ]);

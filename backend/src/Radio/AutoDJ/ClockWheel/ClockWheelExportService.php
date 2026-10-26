@@ -45,6 +45,7 @@ final class ClockWheelExportService
                 'duration_seconds' => $slot->duration_seconds,
                 'category_id' => $slot->category_id,
                 'playlist_id' => $slot->playlist_id,
+                'smart_block_id' => $slot->smart_block_id,
                 'pool_mode' => $slot->pool_mode->value,
                 'separation_override_enabled' => $slot->separation_override_enabled,
                 'separation_artist_minutes' => $slot->separation_artist_minutes,

@@ -108,17 +108,6 @@
                                         {{ $gettext('Jingle Mode') }}
                                     </span>
                                     <span
-                                        v-if="row.item.source === 'songs' && row.item.is_smart_block"
-                                        class="badge text-bg-success"
-                                    >
-                                        <router-link
-                                            :to="{name: 'stations:smart-blocks:index'}"
-                                            class="text-white text-decoration-none"
-                                        >
-                                            {{ $gettext('Smart Block') }}
-                                        </router-link>
-                                    </span>
-                                    <span
                                         v-if="row.item.source === 'songs' && row.item.order === 'sequential'"
                                         class="badge text-bg-info"
                                     >

@@ -49,7 +49,7 @@
                         :items="playlistGroups"
                         @navigate="onNavigateToPlaylist"
                     />
-                    <form-advanced v-if="form.source !== 'requests' && (form.schedule_editor !== 'new' || form.is_smart_block)" />
+                    <form-advanced v-if="form.source !== 'requests' && form.schedule_editor !== 'new'" />
                 </tabs>
             </div>
 

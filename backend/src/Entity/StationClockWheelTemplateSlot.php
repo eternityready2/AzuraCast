@@ -129,6 +129,7 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
     {
         $this->template_id = $this->template->id;
         $this->playlist_id = $this->playlist?->id;
+        $this->smart_block_id = $this->smart_block?->id;
         $this->category_id = $this->category?->id;
     }
 }

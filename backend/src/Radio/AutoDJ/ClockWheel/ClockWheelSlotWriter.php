@@ -12,6 +12,7 @@ use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationClockWheelTemplate;
 use App\Entity\StationClockWheelTemplateSlot;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationMediaCategory;
 use App\Entity\StationPlaylist;
 
@@ -73,6 +74,7 @@ final class ClockWheelSlotWriter
             $slot->category = $templateSlot->category;
             $slot->algorithm = $templateSlot->algorithm;
             $slot->playlist = $templateSlot->playlist;
+            $slot->smart_block = $templateSlot->smart_block;
             $slot->pool_mode = $templateSlot->pool_mode;
             $slot->separation_override_enabled = $templateSlot->separation_override_enabled;
             $slot->separation_artist_minutes = $templateSlot->separation_artist_minutes;
@@ -171,6 +173,21 @@ final class ClockWheelSlotWriter
                 : null;
         } else {
             $slot->playlist = null;
+        }
+
+        // A smart block slot plays from the smart block's own rules, never a playlist.
+        $smartBlockId = isset($datum['smart_block_id']) && is_numeric($datum['smart_block_id'])
+            ? (int)$datum['smart_block_id']
+            : null;
+
+        $slot->smart_block = null;
+        if ($smartBlockId !== null && $smartBlockId > 0) {
+            $smartBlock = $this->em->find(StationSmartBlock::class, $smartBlockId);
+            if ($smartBlock !== null && $smartBlock->station->id === $station->id) {
+                $slot->smart_block = $smartBlock;
+                $slot->playlist = null;
+                $slot->pool_mode = ClockWheelSlotPoolModes::RestrictPool;
+            }
         }
 
         $durRaw = $datum['duration_seconds'] ?? null;

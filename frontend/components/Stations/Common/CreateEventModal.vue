@@ -223,7 +223,7 @@
             </form-markup>
 
             <form-markup
-                v-if="isPlaylistSchedule"
+                v-if="isPlaylistSchedule && form.source !== 'smart_block'"
                 id="edit_form_scheduling"
                 class="col-md-4"
                 :label="$gettext('Start Timing')"
@@ -474,17 +474,26 @@ interface ClockWheelOption extends EntityOption {
 }
 
 const playlists = ref<EntityOption[]>([]);
+const smartBlocks = ref<EntityOption[]>([]);
 const webStreams = ref<EntityOption[]>([]);
 const clockWheels = ref<ClockWheelOption[]>([]);
 
 onMounted(async () => {
-    const [plResp, webResp, cwResp] = await Promise.all([
+    const [plResp, webResp, cwResp, sbResp] = await Promise.all([
         axios.get(getStationApiUrl('/playlists').value),
         axios.get(getStationApiUrl('/playlists').value, {
             params: {rowCount: -1, include_remote_url: 1},
         }),
         axios.get(getStationApiUrl('/clock-wheels').value),
+        axios.get(getStationApiUrl('/smart-blocks').value),
     ]);
+
+    smartBlocks.value = (sbResp.data as Array<Record<string, unknown>>).map((b) => ({
+        id: b.id as number,
+        name: b.name as string,
+        self_url: (b.links as Record<string, string>).self,
+        is_smart_block: true,
+    }));
 
     playlists.value = (plResp.data as Array<Record<string, unknown>>).map((p) => ({
         id: p.id as number,
@@ -520,12 +529,15 @@ const blankForm = () => ({
 
 const form = ref(blankForm());
 
-/** Both 'playlist' and 'smart_block' sources ultimately POST to the same /playlist/{id}
- *  entity API endpoint -- a Smart Block is just a playlist under the hood. This keeps
- *  every one of the (several) places below that need to map source -> API entity type
- *  in agreement, instead of repeating the ternary and risking one getting missed. */
-const apiEntityType = (source: string): 'playlist' | 'clock-wheel' =>
-    'clock_wheel' === source ? 'clock-wheel' : 'playlist';
+/** The entity API each source saves its calendar times to: /playlist/{id},
+ *  /clock-wheel/{id} or /smart-block/{id}. Web streams are playlists. Kept in
+ *  one place so every caller below agrees. */
+const apiEntityType = (source: string): 'playlist' | 'clock-wheel' | 'smart-block' => {
+    if ('clock_wheel' === source) {
+        return 'clock-wheel';
+    }
+    return 'smart_block' === source ? 'smart-block' : 'playlist';
+};
 
 const startTimingMode = ref<'flexible' | 'strict'>('flexible');
 const clockWheelScheduleMode = ref<'flexible' | 'strict'>('flexible');
@@ -657,11 +669,10 @@ const currentEntityOptions = computed(() => {
     if (form.value.source === 'web_stream') {
         return webStreams.value;
     }
-    // 'playlist' shows regular playlists; 'smart_block' shows just the Smart Blocks --
-    // two focused pickers over the same underlying /playlists collection.
-    return playlists.value.filter(
-        (p) => Boolean(p.is_smart_block) === (form.value.source === 'smart_block')
-    );
+    if (form.value.source === 'smart_block') {
+        return smartBlocks.value;
+    }
+    return playlists.value.filter((p) => !p.is_smart_block);
 });
 
 const isPlaylistSchedule = computed(() =>
@@ -1027,6 +1038,8 @@ const openForEdit = async (event: EventImpl) => {
 
     if (editUrl?.includes('/clock-wheel/')) {
         form.value.source = 'clock_wheel';
+    } else if (editUrl?.includes('/smart-block/')) {
+        form.value.source = 'smart_block';
     } else if (event.extendedProps.source === 'remote_url') {
         form.value.source = 'web_stream';
     } else {
@@ -1034,18 +1047,9 @@ const openForEdit = async (event: EventImpl) => {
     }
 
     if (editUrl) {
-        const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+        const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
         if (m?.[2]) {
             form.value.entity_id = Number(m[2]);
-
-            // If this is actually a Smart Block (not a regular playlist), reflect that
-            // in the Source dropdown too, rather than showing it as a generic Playlist.
-            if (form.value.source === 'playlist') {
-                const matchedPlaylist = playlists.value.find((p) => p.id === form.value.entity_id);
-                if (matchedPlaylist?.is_smart_block) {
-                    form.value.source = 'smart_block';
-                }
-            }
         }
     }
 
@@ -1106,7 +1110,7 @@ const openForEdit = async (event: EventImpl) => {
 // we already know exactly which item we're scheduling -- no FullCalendar
 // event object involved, so no Source/Entity dropdown needed at all.
 const openScopedForCreate = (
-    source: 'playlist' | 'clock_wheel' | 'web_stream',
+    source: 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
     entityId: number
 ) => {
     clearForm();
@@ -1117,7 +1121,7 @@ const openScopedForCreate = (
 };
 
 const openScopedForEdit = async (
-    source: 'playlist' | 'clock_wheel' | 'web_stream',
+    source: 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
     entityId: number,
     scheduleId: number,
 ) => {

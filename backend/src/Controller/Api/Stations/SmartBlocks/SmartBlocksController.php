@@ -452,7 +452,9 @@ final class SmartBlocksController extends AbstractScheduledEntityController
                     'id' => $scheduleItem->id . '_' . $dateRange->start->getTimestamp(),
                     'schedule_id' => $scheduleItem->id,
                     'smart_block_id' => $smartBlock->id,
+                    'is_smart_block' => true,
                     'title' => $smartBlock->name,
+                    'backgroundColor' => '#8b5cf6',
                     'start' => $dateRange->start->toIso8601String(),
                     'end' => $dateRange->end->toIso8601String(),
                     'edit_url' => $request->getRouter()->named(

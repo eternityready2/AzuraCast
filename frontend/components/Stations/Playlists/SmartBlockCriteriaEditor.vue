@@ -27,7 +27,7 @@
                     input-type="number"
                     :input-attrs="{min: '0'}"
                     :label="$gettext('Weight')"
-                    :description="$gettext('Larger numbers play more often relative to other playlists.')"
+                    :description="$gettext('Saved with the smart block. Its calendar times decide when it plays.')"
                 />
 
                 <form-group-checkbox
@@ -49,7 +49,7 @@
                             stacked
                             radio
                             :label="$gettext('Type')"
-                            :description="$gettext('Dynamic stays in sync automatically. Static generates a one-time tracklist you can hand-edit, until you Generate again.')"
+                            :description="$gettext('Dynamic always uses the songs that match right now. Static makes a fixed song list when you save, and keeps it until you save again.')"
                         />
 
                         <form-group-multi-check
@@ -104,7 +104,7 @@
                             v-model="editor.smart_block_sort_order"
                             :options="sortOrderOptions"
                             :label="$gettext('Sort Tracks')"
-                            :description="$gettext('Controls the order tracks are weighted when the block syncs. For Sequential playlists this is the on-air playback order; for Shuffle/Random it seeds the initial order.')"
+                            :description="$gettext('The order songs take turns in. The song this smart block played longest ago always goes next; songs that are tied go in this order.')"
                         />
 
                         <form-group-checkbox
@@ -112,7 +112,7 @@
                             class="col-md-6"
                             v-model="editor.smart_block_avoid_duplicates"
                             :label="$gettext('Allow Repeated Tracks')"
-                            :description="$gettext('When unchecked, tracks already in this block are not re-added on the next sync — useful for small libraries where you want strict rotation.')"
+                            :description="$gettext('Saved with the smart block. Songs never repeat within the station\'s repeat window either way; when a smart block runs out, normal music fills the rest of its time.')"
                         />
                     </div>
                 </tab>
@@ -301,7 +301,7 @@
                     />
                     {{ editor.smart_block_type === SmartBlockType.Static
                         ? $gettext('Save & Generate Now')
-                        : $gettext('Save & Sync Now') }}
+                        : $gettext('Save') }}
                 </button>
             </div>
         </template>
@@ -666,8 +666,8 @@ const doSave = async (): Promise<void> => {
                     {added: data.added ?? 0, removed: data.removed ?? 0},
                 )
                 : $gettext(
-                    '%{added} tracks added, %{removed} removed. Smart Block synced.',
-                    {added: data.added ?? 0, removed: data.removed ?? 0},
+                    'Saved. %{count} songs match right now.',
+                    {count: data.total_members ?? 0},
                 ),
         );
 

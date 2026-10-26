@@ -120,7 +120,7 @@
                     <div :class="sidebarVisible ? 'col-12 col-lg-9' : 'col-12'">
                         <schedule-calendar
                             ref="$scheduleTab"
-                            :schedule-url="[scheduleUrl, clockWheelsScheduleUrl]"
+                            :schedule-url="[scheduleUrl, clockWheelsScheduleUrl, smartBlocksScheduleUrl]"
                             :show-create-button="false"
                             external-drag-selector=".smart-block-drag-item, .clock-wheel-drag-item"
                             @click="doCalendarClick"
@@ -497,6 +497,8 @@ const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheel-templates');
 const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
+const smartBlocksListUrl = getStationApiUrl('/smart-blocks');
+const smartBlocksScheduleUrl = getStationApiUrl('/smart-blocks/schedule');
 
 const $editModal = useTemplateRef('$editModal');
 const {doEdit} = useHasEditModal($editModal);
@@ -567,7 +569,7 @@ const onDeleteEvent = async (event: EventImpl) => {
 
     if (!editUrl || !scheduleId) return;
 
-    const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+    const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
     if (!m) return;
     const entityId = Number(m[2]);
     const apiType = m[1];
@@ -639,13 +641,15 @@ const onDuplicateEvent = (event: EventImpl) => {
     const editUrl = event.extendedProps.edit_url as string | undefined;
     if (!editUrl) return;
 
-    const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+    const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
     if (!m) return;
 
     const entityId = Number(m[2]);
-    const source = m[1] === 'clock-wheel' ? 'clock_wheel' : 'playlist';
+    const source = m[1] === 'clock-wheel'
+        ? 'clock_wheel'
+        : (m[1] === 'smart-block' ? 'smart_block' : 'playlist');
 
-    $createEventModal.value?.openScopedForCreate(source as 'playlist' | 'clock_wheel', entityId);
+    $createEventModal.value?.openScopedForCreate(source, entityId);
 };
 
 // ── Drag sources ─────────────────────────────────────────────────────────────
@@ -659,11 +663,9 @@ const playlistsForDrag = ref<PlaylistDragItem[]>([]);
 
 const loadSmartBlocksForDrag = async () => {
     try {
-        const {data} = await axios.get(listUrl.value, {
-            params: {rowCount: -1, is_smart_block: '1'},
-        });
+        const {data} = await axios.get(smartBlocksListUrl.value);
         const rows = (data.rows ?? data ?? []) as Array<Record<string, unknown>>;
-        smartBlocksForDrag.value = rows.map((row) => ({
+        smartBlocksForDrag.value = rows.filter((row) => row.is_enabled !== false).map((row) => ({
             id: row.id as number,
             name: row.name as string,
         }));
@@ -807,7 +809,7 @@ const confirmQuickDrop = async () => {
         quickPanel.visible = false;
         showUndoToast(
             $gettext('Scheduled: %{name}', {name: quickPanel.entityName}),
-            {type: 'delete', entityType: quickPanel.entityType === 'clock_wheel' ? 'clock-wheel' : 'playlist', entityId: quickPanel.entityId, scheduleId: 0}
+            {type: 'delete', entityType: quickPanel.entityType === 'clock_wheel' ? 'clock-wheel' : (quickPanel.entityType === 'smart_block' ? 'smart-block' : 'playlist'), entityId: quickPanel.entityId, scheduleId: 0}
         );
     } else {
         quickPanel.error = $gettext('Could not save — time conflict or error. Try different settings or use Create Event for full options.');
