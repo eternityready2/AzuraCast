@@ -1126,6 +1126,16 @@ return static function (RouteCollectorProxy $group) {
                         Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':editAction'
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
+                    // Setup problems that make the log misbehave, with one-click fixes.
+                    $group->get(
+                        '/reports/linear-log/setup-check',
+                        Controller\Api\Stations\Reports\LinearLogSetupCheckAction::class . ':listAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+                    $group->post(
+                        '/reports/linear-log/setup-check/fix',
+                        Controller\Api\Stations\Reports\LinearLogSetupCheckAction::class . ':fixAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
                     // Per-feature settings edited on each feature's own page.
                     $group->get(
                         '/reports/linear-log/settings',
