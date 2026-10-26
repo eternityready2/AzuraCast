@@ -53,6 +53,13 @@ final class StationQueue implements
     public private(set) ?int $clock_wheel_id = null;
 
     #[ORM\ManyToOne]
+    #[ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    public ?StationSmartBlock $smart_block = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $smart_block_id = null;
+
+    #[ORM\ManyToOne]
     #[ORM\JoinColumn(name: 'media_id', referencedColumnName: 'id', nullable: true, onDelete: 'CASCADE')]
     public ?StationMedia $media = null {
         set {

@@ -39,6 +39,16 @@ final class StationClockWheelTemplateSlot implements IdentifiableEntityInterface
     #[ORM\Column(nullable: true, insertable: false, updatable: false)]
     public private(set) ?int $playlist_id = null;
 
+    /** A smart block this slot plays from, instead of a playlist. */
+    #[
+        ORM\ManyToOne(targetEntity: StationSmartBlock::class),
+        ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')
+    ]
+    public ?StationSmartBlock $smart_block = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $smart_block_id = null;
+
     #[
         OA\Property(example: 'music', nullable: true),
         ORM\Column(type: 'string', length: 20, nullable: true, enumType: ClockWheelSlotTypes::class)
