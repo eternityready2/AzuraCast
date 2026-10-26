@@ -633,8 +633,12 @@ const toHhmm = (value: string): number => {
 const createShow = async () => {
     isCreating.value = true;
     newShowError.value = null;
+
+    // The show first, then its time slot: a time slot the server refuses (it
+    // clashes with another show) must not leave a show with no time behind.
+    let createdId: number | null = null;
     try {
-        await axios.post(playlistsUrl.value, {
+        const {data} = await axios.post(playlistsUrl.value, {
             name: newShow.value.name.trim(),
             description: newShow.value.description.trim() || null,
             source: 'songs',
@@ -644,6 +648,13 @@ const createShow = async () => {
             is_programme: true,
             include_in_requests: false,
             schedule_editor: 'new',
+        });
+        createdId = Number(data?.id ?? 0) || null;
+        if (null === createdId) {
+            throw new Error($gettext('The show could not be created.'));
+        }
+
+        await axios.put(getStationApiUrl(`/playlist/${createdId}`).value, {
             schedule_items: [{
                 start_time: toHhmm(newShow.value.start),
                 end_time: toHhmm(newShow.value.end),
@@ -654,10 +665,18 @@ const createShow = async () => {
                 recurrence_end_type: 'never',
             }],
         });
+
         newShowOpen.value = false;
         notifySuccess($gettext('Show created. Next, upload its episodes on the Media page and add them to this show.'));
         await load();
     } catch (e: any) {
+        if (null !== createdId) {
+            try {
+                await axios.delete(getStationApiUrl(`/playlist/${createdId}`).value);
+            } catch {
+                // Shown in the list; the user can delete it there.
+            }
+        }
         newShowError.value = e?.response?.data?.message ?? String(e);
     } finally {
         isCreating.value = false;
