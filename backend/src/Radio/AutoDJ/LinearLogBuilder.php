@@ -479,6 +479,7 @@ final class LinearLogBuilder
                 $maxTracks,
                 true,
                 $seededPlannedAt,
+                $liveQueueIds,
             );
 
             $rows = $this->queueRepo->getUnplayedQueue($station);
