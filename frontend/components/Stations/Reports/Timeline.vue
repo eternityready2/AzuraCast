@@ -106,6 +106,10 @@
                     {{ $gettext('Live Streamer:') }}
                     {{ row.item.streamer }}
                 </template>
+                <template v-else-if="row.item.smart_block">
+                    {{ $gettext('Smart Block:') }}
+                    {{ row.item.smart_block }}
+                </template>
                 <template v-else>
                     &nbsp;
                 </template>
