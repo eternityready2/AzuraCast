@@ -63,7 +63,7 @@
                                     aria-hidden="true"
                                 />
                                 {{ heldUntil
-                                    ? $gettext('REBUILD AT %{time}', {time: formatTimestampAsTime(heldUntil)})
+                                    ? $gettext('REBUILD AT %{time}', {time: formatHeldTime(heldUntil)})
                                     : (isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH')) }}
                             </button>
 
@@ -114,7 +114,7 @@
 
                     <div v-else-if="heldUntil" class="build-status">
                         <span>
-                            {{ $gettext('A rebuild is waiting for the top of the hour to pass. It starts at %{time}.', {time: formatTimestampAsTime(heldUntil)}) }}
+                            {{ $gettext('A rebuild is waiting for the top of the hour to pass. It starts at %{time}.', {time: formatHeldTime(heldUntil)}) }}
                         </span>
                         <span v-if="allItems.length" class="text-body-secondary">
                             {{ $gettext('The log below keeps playing as it is until then.') }}
@@ -841,6 +841,8 @@ function displayTitle(item: LinearLogItem): string {
 
 // Station time, like the station clock and Upcoming Song Queue, not the viewer's PC.
 const {formatTimestampAsTime, formatTimestampAsDateTime, timestampToDateTime} = useStationDateTimeFormatter();
+// "9:07 PM": the held rebuild starts on the minute; seconds only add noise.
+const formatHeldTime = (ts: number): string => timestampToDateTime(ts).toFormat('h:mm a');
 
 const zoneLabel = computed(() => timestampToDateTime(nowTs.value).offsetNameShort ?? "");
 
