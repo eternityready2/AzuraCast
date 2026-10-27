@@ -44,23 +44,21 @@ export function useStationSearchSources(): DataSearchSource[] {
         },
     });
 
-    // Shows are playlists marked as shows; the list is small: load it once per sidebar.
+    // The shows API has no search, but the list is small: load it once per sidebar.
     let showsPromise: Promise<Row[]> | null = null;
 
     const shows: DataSearchSource = {
         routeName: 'stations:shows:index',
         search: async (query) => {
-            showsPromise ??= axios.get(getStationApiUrl('/playlists').value, {params: {rowCount: -1}})
-                .then(({data}) => rowsOf(data).filter((row) => true === row.is_programme));
+            showsPromise ??= axios.get(getStationApiUrl('/features/shows').value).then(({data}) => rowsOf(data));
             const needle = query.toLowerCase();
 
             return (await showsPromise)
                 .filter((row) => str(row.name).toLowerCase().includes(needle))
                 .slice(0, MAX_PER_SOURCE)
                 .map((row) => result(`show:${str(row.id)}`, str(row.name), $gettext('Shows'), {
-                    name: 'stations:playlists:edit',
-                    params: {playlist_id: str(row.id)},
-                    query: {tab: 'schedule'},
+                    name: 'stations:shows:edit',
+                    params: {show_id: str(row.id)},
                 }));
         },
     };

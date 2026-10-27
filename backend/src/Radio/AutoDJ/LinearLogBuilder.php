@@ -18,6 +18,7 @@ use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Service\AiNewsGenerator;
+use App\Sync\Task\BuildLinearLogTask;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -201,7 +202,7 @@ final class LinearLogBuilder
             $rebuild,
             $throughTomorrow,
             $replanLockWindow,
-            $this->heldBuildStartsAt($station, $wait),
+            $this->heldBuildStartsAt($wait),
         );
 
         $this->logger->notice('Linear Log build held until the top of the hour has settled.', [
@@ -215,14 +216,14 @@ final class LinearLogBuilder
     }
 
     /**
-     * When the hourly task (Sync\Task\BuildLinearLogTask, minute :07) will run
-     * a build held for the top of the hour: the first :07 once the hour has
-     * settled.
+     * When the hourly task will run a build held for the top of the hour: the
+     * first BuildLinearLogTask::BUILD_MINUTE once the hour has settled. Its
+     * cron pattern runs in UTC, so the minute is a UTC minute.
      */
-    private function heldBuildStartsAt(Station $station, int $waitSeconds): int
+    private function heldBuildStartsAt(int $waitSeconds): int
     {
-        $clear = CarbonImmutable::createFromTimestamp(time() + $waitSeconds, $station->getTimezoneObject());
-        $next = $clear->setTime((int)$clear->format('G'), \App\Sync\Task\BuildLinearLogTask::BUILD_MINUTE);
+        $clear = CarbonImmutable::createFromTimestamp(time() + $waitSeconds, 'UTC');
+        $next = $clear->setTime((int)$clear->format('G'), BuildLinearLogTask::BUILD_MINUTE);
         if ($next->getTimestamp() < $clear->getTimestamp()) {
             $next = $next->addHour();
         }

@@ -23,7 +23,6 @@ final class SmartBlockEntry implements JsonSerializable
     public function __construct(
         public readonly string $name,
         public readonly bool $isEnabled = true,
-        public readonly int $weight = 3,
         public readonly SmartBlockType $type = SmartBlockType::Dynamic,
         public readonly SmartBlockMatchType $matchType = SmartBlockMatchType::All,
         public readonly ?int $limit = null,
@@ -40,7 +39,6 @@ final class SmartBlockEntry implements JsonSerializable
         return new self(
             name: Types::string($data['name'] ?? 'Imported Smart Block'),
             isEnabled: Types::bool($data['is_enabled'] ?? true),
-            weight: Types::int($data['weight'] ?? 3),
             type: SmartBlockType::tryFrom(Types::string($data['type'] ?? 'dynamic')) ?? SmartBlockType::Dynamic,
             matchType: SmartBlockMatchType::tryFrom(Types::string($data['match_type'] ?? 'all'))
                 ?? SmartBlockMatchType::All,
@@ -73,7 +71,6 @@ final class SmartBlockEntry implements JsonSerializable
         return self::fromArray([
             'name' => $data['name'] ?? 'Imported Smart Block',
             'is_enabled' => $config['is_enabled'] ?? true,
-            'weight' => $config['weight'] ?? 3,
             'type' => $config['smart_block_type'] ?? 'dynamic',
             'match_type' => $config['smart_block_match_type'] ?? 'all',
             'limit' => $config['smart_block_limit'] ?? null,
@@ -90,7 +87,6 @@ final class SmartBlockEntry implements JsonSerializable
         return [
             'name' => $this->name,
             'is_enabled' => $this->isEnabled,
-            'weight' => $this->weight,
             'type' => $this->type->value,
             'match_type' => $this->matchType->value,
             'limit' => $this->limit,

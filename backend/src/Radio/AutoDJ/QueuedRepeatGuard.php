@@ -57,6 +57,12 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
             return;
         }
 
+        // A smart block with "Avoid repeats" off plays its own songs again on
+        // purpose; DMCA limits and the no-back-to-back rule still apply.
+        if (null !== $row->smart_block && !$row->smart_block->avoid_duplicates) {
+            return;
+        }
+
         $station = $event->getStation();
         $minutes = $station->backend_config->duplicate_prevention_time_range;
         if ($minutes <= 0) {

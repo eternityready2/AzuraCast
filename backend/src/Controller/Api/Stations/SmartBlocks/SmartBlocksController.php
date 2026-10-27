@@ -140,9 +140,6 @@ final class SmartBlocksController extends AbstractScheduledEntityController
     protected string $entityClass = StationSmartBlock::class;
     protected string $resourceRouteName = 'api:stations:smart-block';
 
-    /** @var array{added: int, removed: int, total: int} */
-    private array $lastSync = ['added' => 0, 'removed' => 0, 'total' => 0];
-
     public function __construct(
         StationScheduleRepository $scheduleRepo,
         Scheduler $scheduler,
@@ -223,13 +220,19 @@ final class SmartBlocksController extends AbstractScheduledEntityController
                 ->withJson(Error::notFound());
         }
 
-        $this->editRecord((array)$request->getParsedBody(), $record);
+        $data = (array)$request->getParsedBody();
+        $this->editRecord($data, $record);
+
+        // Saving the rules (re)makes a Static block's song list; report it.
+        $result = array_key_exists('criteria', $data)
+            ? $this->refreshSongList($record)
+            : ['added' => 0, 'removed' => 0, 'total' => 0];
 
         return $response->withJson([
             'success' => true,
-            'added' => $this->lastSync['added'],
-            'removed' => $this->lastSync['removed'],
-            'total_members' => $this->lastSync['total'],
+            'added' => $result['added'],
+            'removed' => $result['removed'],
+            'total_members' => $result['total'],
         ]);
     }
 
@@ -251,9 +254,6 @@ final class SmartBlocksController extends AbstractScheduledEntityController
         }
         if (array_key_exists('is_enabled', $data)) {
             $record->is_enabled = Types::bool($data['is_enabled']);
-        }
-        if (array_key_exists('weight', $data)) {
-            $record->weight = Types::int($data['weight'], $record->weight);
         }
         if (array_key_exists('smart_block_type', $data)) {
             $record->type = SmartBlockType::tryFrom(Types::string($data['smart_block_type']))
@@ -290,9 +290,6 @@ final class SmartBlocksController extends AbstractScheduledEntityController
         if ($rulesSaved) {
             $this->em->refresh($record);
             $this->availability->forget($record);
-            $this->lastSync = (SmartBlockType::Static === $record->type)
-                ? $this->rebuildStaticList($record)
-                : ['added' => 0, 'removed' => 0, 'total' => count($this->availability->getPool($record))];
         }
 
         if (array_key_exists('schedule_items', $data) && is_array($data['schedule_items'])) {
@@ -300,6 +297,21 @@ final class SmartBlocksController extends AbstractScheduledEntityController
         }
 
         return $record;
+    }
+
+    /**
+     * After the rules are saved: a Static block's list is made again from them;
+     * a Dynamic block just reports how many songs match now.
+     *
+     * @return array{added: int, removed: int, total: int}
+     */
+    private function refreshSongList(StationSmartBlock $record): array
+    {
+        if (SmartBlockType::Static === $record->type) {
+            return $this->rebuildStaticList($record);
+        }
+
+        return ['added' => 0, 'removed' => 0, 'total' => count($this->availability->getPool($record))];
     }
 
     /**
@@ -519,7 +531,6 @@ final class SmartBlocksController extends AbstractScheduledEntityController
             'id' => $record->id,
             'name' => $record->name,
             'is_enabled' => $record->is_enabled,
-            'weight' => $record->weight,
             'is_smart_block' => true,
             'smart_block_type' => $record->type->value,
             'smart_block_match_type' => $record->match_type->value,

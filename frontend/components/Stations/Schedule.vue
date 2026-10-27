@@ -20,28 +20,8 @@
             </div>
         </div>
 
-        <div class="card-body pb-0">
-            <nav
-                class="nav nav-tabs"
-                role="tablist"
-            >
-                <div class="nav-item" role="presentation">
-                    <button
-                        type="button"
-                        class="nav-link"
-                        :class="{active: activeTab === 'calendar'}"
-                        role="tab"
-                        :aria-selected="activeTab === 'calendar'"
-                        @click="activeTab = 'calendar'"
-                    >
-                        {{ $gettext('Calendar') }}
-                    </button>
-                </div>
-            </nav>
-        </div>
-
         <div class="card-body">
-            <div v-show="activeTab === 'calendar'">
+            <div>
                 <!-- ── Toolbar row ── -->
                 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                     <!-- Left cluster -->
@@ -457,7 +437,6 @@ import IconIcAdd from "~icons/ic/baseline-add";
 const {$gettext} = useTranslate();
 const {getStationApiUrl} = useApiRouter();
 
-const activeTab = ref<'calendar'>('calendar');
 const sidebarVisible = ref<boolean>(false);
 const hasConflicts = ref<boolean>(false);
 
@@ -488,13 +467,6 @@ const {doEdit: doEditClockWheel} = useHasEditModal($clockWheelEditModal);
 
 const $scheduleTab = useTemplateRef('$scheduleTab');
 const $createEventModal = useTemplateRef('$createEventModal');
-
-watch(activeTab, async (newTab) => {
-    if (newTab === 'calendar') {
-        await nextTick();
-        $scheduleTab.value?.updateSize();
-    }
-});
 
 const doCalendarClick = (event: EventImpl) => {
     $createEventModal.value?.openForEdit(event);

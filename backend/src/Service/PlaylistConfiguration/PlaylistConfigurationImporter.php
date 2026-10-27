@@ -180,7 +180,6 @@ final class PlaylistConfigurationImporter
             $smartBlock = new StationSmartBlock($station);
             $smartBlock->name = (!empty($namePrefix) ? $namePrefix : '') . $entry->name;
             $smartBlock->is_enabled = $entry->isEnabled;
-            $smartBlock->weight = $entry->weight;
             $smartBlock->type = $entry->type;
             $smartBlock->match_type = $entry->matchType;
             $smartBlock->limit = $entry->limit;

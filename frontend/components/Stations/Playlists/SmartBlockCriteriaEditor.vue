@@ -370,7 +370,6 @@ const saving = ref<boolean>(false);
 
 const basicInfo = reactive({
     name: '',
-    weight: 3,
     is_enabled: true,
 });
 
@@ -569,7 +568,6 @@ const loadEditor = async (): Promise<void> => {
 
         if (props.standalone) {
             basicInfo.name = data.name ?? '';
-            basicInfo.weight = data.weight ?? 3;
             basicInfo.is_enabled = data.is_enabled ?? true;
         }
     } catch (err) {
@@ -635,7 +633,6 @@ const doSave = async (): Promise<void> => {
             ...(props.standalone ? {
                 name: basicInfo.name,
                 is_enabled: basicInfo.is_enabled,
-                weight: basicInfo.weight,
             } : {}),
             is_smart_block: true,
             smart_block_type: editor.value.smart_block_type,

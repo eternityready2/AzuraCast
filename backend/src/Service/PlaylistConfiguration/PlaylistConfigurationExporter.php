@@ -103,7 +103,6 @@ final class PlaylistConfigurationExporter
         $entry = new SmartBlockEntry(
             name: $smartBlock->name,
             isEnabled: $smartBlock->is_enabled,
-            weight: $smartBlock->weight,
             type: $smartBlock->type,
             matchType: $smartBlock->match_type,
             limit: $smartBlock->limit,

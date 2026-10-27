@@ -82,13 +82,16 @@ final class LinearLogSnapshotStore
         return $snapshot;
     }
 
-    public function markQueued(Station $station, int $hours): void
+    /**
+     * @param int|null $heldUntil a build held for the top of the hour starts then
+     */
+    public function markQueued(Station $station, int $hours, ?int $heldUntil = null): void
     {
         $snapshot = $this->get($station);
         $snapshot['status'] = 'queued';
         $snapshot['hours'] = $hours;
         $snapshot['requested_at'] = time();
-        $snapshot['held_until'] = null;
+        $snapshot['held_until'] = $heldUntil;
         $snapshot['error'] = null;
 
         $this->saveCache($station, $snapshot);
@@ -117,12 +120,8 @@ final class LinearLogSnapshotStore
             'replan_lock_window' => $replanLockWindow || ($held['replan_lock_window'] ?? false),
         ], self::STALE_BUILD_SECONDS * 2);
 
-        $this->markQueued($station, $hours);
-
         // The page tells the operator when the waiting build starts.
-        $snapshot = $this->get($station);
-        $snapshot['held_until'] = $startsAt;
-        $this->saveCache($station, $snapshot);
+        $this->markQueued($station, $hours, $startsAt);
     }
 
     /**

@@ -275,11 +275,9 @@ final class Scheduler
                 continue;
             }
 
-            foreach ($clockWheel->schedule_items as $schedule) {
-                $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-                if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
-                    $narrowest = $seconds;
-                }
+            $seconds = $this->narrowestOwnedWindowSeconds($clockWheel->schedule_items, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
             }
         }
 
@@ -291,22 +289,13 @@ final class Scheduler
                 continue;
             }
 
-            $ownsWindow = false;
-            foreach ($smartBlock->schedule_items as $schedule) {
-                if (null !== $this->ownedWindowSeconds($schedule, $tz, $at)) {
-                    $ownsWindow = true;
-                    break;
-                }
-            }
-            if (!$ownsWindow || !$this->smartBlockAvailability->hasPlayableSong($smartBlock, $at)) {
-                continue;
-            }
-
-            foreach ($smartBlock->schedule_items as $schedule) {
-                $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-                if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
-                    $narrowest = $seconds;
-                }
+            $seconds = $this->narrowestOwnedWindowSeconds($smartBlock->schedule_items, $tz, $at);
+            if (
+                null !== $seconds
+                && (null === $narrowest || $seconds < $narrowest)
+                && $this->smartBlockAvailability->hasPlayableSong($smartBlock, $at)
+            ) {
+                $narrowest = $seconds;
             }
         }
 
@@ -329,29 +318,8 @@ final class Scheduler
         DateTimeImmutable $at
     ): bool {
         // A wheel with no schedule rows of its own is driven by something else
-        // (a clock wheel slot, say); this rule has nothing to say about it.
-        if (0 === $clockWheel->schedule_items->count()) {
-            return true;
-        }
-
-        $station = $clockWheel->station;
-        $tz = $station->getTimezoneObject();
-
-        $ownWindow = null;
-        foreach ($clockWheel->schedule_items as $schedule) {
-            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-            if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
-                $ownWindow = $seconds;
-            }
-        }
-
-        if (null === $ownWindow) {
-            return false;
-        }
-
-        $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
-
-        return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
+        // (a daypart, say); this rule has nothing to say about it.
+        return $this->ownsScheduledAirAt($clockWheel->station, $clockWheel->schedule_items, $at);
     }
 
     /**
@@ -362,21 +330,24 @@ final class Scheduler
         StationSmartBlock $smartBlock,
         DateTimeImmutable $at
     ): bool {
-        if (0 === $smartBlock->schedule_items->count()) {
+        // With no calendar time of its own it plays only inside a clock wheel
+        // slot, and the wheel's own rule governs it.
+        return $this->ownsScheduledAirAt($smartBlock->station, $smartBlock->schedule_items, $at);
+    }
+
+    /**
+     * True when one of these calendar rows is open at $at and no narrower
+     * calendar item holds the air then. No rows: nothing to judge, true.
+     *
+     * @param Collection<int, StationSchedule> $scheduleItems
+     */
+    private function ownsScheduledAirAt(Station $station, Collection $scheduleItems, DateTimeImmutable $at): bool
+    {
+        if (0 === $scheduleItems->count()) {
             return true;
         }
 
-        $station = $smartBlock->station;
-        $tz = $station->getTimezoneObject();
-
-        $ownWindow = null;
-        foreach ($smartBlock->schedule_items as $schedule) {
-            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-            if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
-                $ownWindow = $seconds;
-            }
-        }
-
+        $ownWindow = $this->narrowestOwnedWindowSeconds($scheduleItems, $station->getTimezoneObject(), $at);
         if (null === $ownWindow) {
             return false;
         }
@@ -384,6 +355,28 @@ final class Scheduler
         $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
 
         return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
+    }
+
+    /**
+     * Length in seconds of the narrowest of these calendar rows open at $at,
+     * or null when none is.
+     *
+     * @param Collection<int, StationSchedule> $scheduleItems
+     */
+    private function narrowestOwnedWindowSeconds(
+        Collection $scheduleItems,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): ?int {
+        $narrowest = null;
+        foreach ($scheduleItems as $schedule) {
+            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
+            }
+        }
+
+        return $narrowest;
     }
 
     /**

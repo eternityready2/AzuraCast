@@ -66,13 +66,6 @@ final class StationSmartBlock implements Stringable, StationAwareInterface, Iden
     ]
     public bool $is_enabled = true;
 
-    /** Kept from the playlist era; shown on the Smart Blocks page. */
-    #[
-        OA\Property(example: 3),
-        ORM\Column(options: ['default' => 3])
-    ]
-    public int $weight = 3;
-
     #[
         OA\Property(example: 'dynamic'),
         ORM\Column(type: 'string', length: 10, enumType: SmartBlockType::class, options: ['default' => 'dynamic'])
