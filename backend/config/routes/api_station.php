@@ -1029,35 +1029,6 @@ return static function (RouteCollectorProxy $group) {
                                 }
                             );
 
-                            $group->get(
-                                '/holiday-overrides',
-                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':listAction'
-                            )->setName('api:stations:holiday-overrides');
-
-                            $group->post(
-                                '/holiday-overrides',
-                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':createAction'
-                            );
-
-                            $group->group(
-                                '/holiday-override/{id}',
-                                function (RouteCollectorProxy $group) {
-                                    $group->get(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':getAction'
-                                    )->setName('api:stations:holiday-override');
-
-                                    $group->put(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':editAction'
-                                    );
-
-                                    $group->delete(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':deleteAction'
-                                    );
-                                }
-                            );
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));

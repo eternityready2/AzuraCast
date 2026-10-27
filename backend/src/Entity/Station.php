@@ -761,17 +761,6 @@ final class Station implements Stringable, IdentifiableEntityInterface
     public private(set) Collection $clock_dayparts;
 
     #[
-        ORM\OneToMany(
-            targetEntity: StationHolidayOverride::class,
-            mappedBy: 'station',
-            cascade: ['persist', 'remove'],
-            fetch: 'EXTRA_LAZY'
-        ),
-        ORM\OrderBy(['override_date' => 'ASC'])
-    ]
-    public private(set) Collection $holiday_overrides;
-
-    #[
         ORM\ManyToOne,
         ORM\JoinColumn(name: 'current_song_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL'),
         Attributes\AuditIgnore
@@ -804,7 +793,6 @@ final class Station implements Stringable, IdentifiableEntityInterface
         $this->smart_blocks = new ArrayCollection();
         $this->clock_wheel_templates = new ArrayCollection();
         $this->clock_dayparts = new ArrayCollection();
-        $this->holiday_overrides = new ArrayCollection();
     }
 
     public function supportsAutoDjQueue(): bool

@@ -26,7 +26,6 @@ use App\Entity\StationQueue;
 use App\Event\Radio\BuildQueue;
 use App\Radio\PlaylistParser;
 use App\Radio\SmartBlock\SmartBlockPlaybackPreparer;
-use App\Service\HolidayOverrideService;
 use App\Utilities\UserUrlFilter;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -54,7 +53,6 @@ final class QueueBuilder implements EventSubscriberInterface
         private readonly StationRequestRepository $requestRepo,
         private readonly StationQueueRepository $queueRepo,
         private readonly SongHistoryRepository $historyRepo,
-        private readonly HolidayOverrideService $holidayOverrideService,
         private readonly SmartBlockPlaybackPreparer $smartBlockPlaybackPreparer,
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
         private readonly UserUrlFilter $userUrlFilter,
@@ -154,27 +152,6 @@ final class QueueBuilder implements EventSubscriberInterface
             $expectedPlayTime,
             $station->backend_config->duplicate_prevention_time_range
         );
-
-        $holidayPlaylist = $this->holidayOverrideService->getHolidayPlaylist($station, $expectedPlayTime);
-        if ($holidayPlaylist !== null) {
-            foreach ([false, true] as $allowDuplicates) {
-                $selection = $this->playSongFromPlaylist(
-                    $holidayPlaylist,
-                    $recentSongHistoryForDuplicatePrevention,
-                    $expectedPlayTime,
-                    $allowDuplicates
-                );
-
-                if (null !== $selection) {
-                    $event->setNextSongs($selection);
-                    $this->logger->info(
-                        'Holiday override playlist is active.',
-                        ['playlist_id' => $holidayPlaylist->id]
-                    );
-                    return;
-                }
-            }
-        }
 
         $this->logger->debug(
             'AutoDJ recent song playback history',

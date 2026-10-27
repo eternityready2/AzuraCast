@@ -6,7 +6,6 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
-use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\ClockWheelFallbackReason;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationScheduleRepository;
@@ -16,7 +15,6 @@ use App\Event\Radio\BuildQueue;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
-use App\Service\HolidayOverrideService;
 use App\Radio\Schedule\ScheduleConflictChecker;
 use DateTimeImmutable;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -39,7 +37,6 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         private readonly ClockWheelPlaybackPlanner $planner,
         private readonly ScheduleConflictChecker $conflictChecker,
         private readonly ClockWheelEventLogger $eventLogger,
-        private readonly HolidayOverrideService $holidayOverrideService,
         private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
     ) {
     }
@@ -105,14 +102,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         $activeEvent = $this->findActiveClockWheelSchedule($station, $expectedPlayTime);
 
         if (null === $activeEvent || null === $activeEvent->clock_wheel) {
-            $holidayWheel = $this->holidayOverrideService->getHolidayClockWheel($station, $expectedPlayTime);
-            if ($holidayWheel !== null) {
-                // In-memory stand-in for the holiday; never persisted.
-                $activeEvent = new StationSchedule($holidayWheel);
-                $activeEvent->clock_wheel_mode = ClockWheelScheduleMode::Flexible;
-            } else {
-                return;
-            }
+            return;
         }
 
         $wheel = $activeEvent->clock_wheel;
@@ -132,7 +122,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
 
         $this->logger->info(
             sprintf('Clock Wheel "%s" is active. Overriding normal AutoDJ queue.', $wheel->name),
-            ['clock_wheel_id' => $wheel->id, 'schedule_id' => isset($activeEvent->id) ? $activeEvent->id : null]
+            ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
         );
 
         $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);

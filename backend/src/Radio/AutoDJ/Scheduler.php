@@ -329,7 +329,7 @@ final class Scheduler
         DateTimeImmutable $at
     ): bool {
         // A wheel with no schedule rows of its own is driven by something else
-        // (a holiday override, say); this rule has nothing to say about it.
+        // (a clock wheel slot, say); this rule has nothing to say about it.
         if (0 === $clockWheel->schedule_items->count()) {
             return true;
         }

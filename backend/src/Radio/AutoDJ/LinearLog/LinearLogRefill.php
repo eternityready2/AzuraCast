@@ -625,7 +625,7 @@ final class LinearLogRefill
 
     /**
      * The playlist the AutoDJ itself would pick from at $at: one pick from the
-     * real pipeline (schedules, weights, groups, holiday overrides, validators),
+     * real pipeline (schedules, weights, groups, validators),
      * made in the preview context inside a transaction that is rolled back, as
      * the log builder makes its plan.
      */
