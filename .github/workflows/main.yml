@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ dev ]
-    tags: [ 'v*' ]
+    tags: [ 'v[0-9]*' ]
 
 permissions:
   contents: read
@@ -41,8 +41,10 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-  # v* release tags publish :vX.Y.Z and :stable for amd64 and arm64, so ARM64
-  # hosts (e.g. Oracle Ampere A1) pulling :stable get a multi-arch image. Each
+  # Version tags (v0.30.0, ...) publish :vX.Y.Z and :stable for amd64 and
+  # arm64, so ARM64 hosts (e.g. Oracle Ampere A1) pulling :stable get a
+  # multi-arch image. Asset-only tags such as voice-kim-rasmussen-v2 (the Kim
+  # voice download used by piper.sh) don't match v[0-9]* and build nothing. Each
   # architecture builds at the same time on its own native runner -- arm64
   # under QEMU emulation took about an hour -- and merge-release joins them.
   # arm64 keeps its own cache because the amd64 builds overwrite :buildcache.
