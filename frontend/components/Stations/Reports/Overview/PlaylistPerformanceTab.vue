@@ -64,6 +64,39 @@
             </p>
         </fieldset>
 
+        <fieldset
+            v-if="state && (state.smart_blocks ?? []).length > 0"
+            class="mt-4"
+        >
+            <legend>
+                {{ $gettext('Smart Block Performance') }}
+            </legend>
+
+            <table class="table table-striped table-condensed">
+                <thead>
+                    <tr>
+                        <th>{{ $gettext('Smart Block') }}</th>
+                        <th class="text-end">{{ $gettext('Plays') }}</th>
+                        <th class="text-end">{{ $gettext('Avg Δ listeners') }}</th>
+                        <th class="text-end">{{ $gettext('Avg unique') }}</th>
+                        <th class="text-end">{{ $gettext('Tune-outs') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="row in state.smart_blocks"
+                        :key="row.id"
+                    >
+                        <td>{{ row.name }}</td>
+                        <td class="text-end">{{ row.play_count }}</td>
+                        <td class="text-end">{{ formatNullable(row.avg_delta) }}</td>
+                        <td class="text-end">{{ formatNullable(row.avg_unique_listeners) }}</td>
+                        <td class="text-end">{{ row.tune_outs }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </fieldset>
+
         <template v-if="state">
             <fieldset class="mt-4">
                 <legend>{{ $gettext('Repeats') }}</legend>
@@ -197,6 +230,14 @@ type PlaylistPerformanceData = {
         max_track_plays: number | null,
         rotation_goal_days: number | null,
     }>,
+    smart_blocks?: Array<{
+        id: number,
+        name: string,
+        play_count: number,
+        avg_delta: number | null,
+        avg_unique_listeners: number | null,
+        tune_outs: number,
+    }>,
     over_played: Array<{media_id: number, text: string, plays: number, playlist: string | null}>,
     never_played_count: number,
     never_played: Array<{media_id: number, artist: string | null, title: string | null, playlist: string}>,
@@ -222,6 +263,7 @@ const {data: state, isLoading} = useQuery<PlaylistPerformanceData>({
     },
     placeholderData: () => ({
         playlists: [],
+        smart_blocks: [],
         over_played: [],
         never_played_count: 0,
         never_played: [],

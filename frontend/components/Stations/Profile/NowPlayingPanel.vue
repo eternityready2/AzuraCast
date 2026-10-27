@@ -114,6 +114,11 @@
                                             />
                                         </small>
                                     </div>
+                                    <div v-if="np.now_playing?.smart_block">
+                                        <small class="text-muted">
+                                            {{ $gettext('Smart Block') }}
+                                            : {{ np.now_playing.smart_block }}</small>
+                                    </div>
                                     <div v-if="np.now_playing?.clock_wheel">
                                         <small class="text-muted">
                                             {{ $gettext('Clock Wheel') }}
@@ -194,6 +199,11 @@
                                                 :source="np.playing_next.playlist_chain ? 'songs' : undefined"
                                             />
                                         </small>
+                                    </div>
+                                    <div v-if="np.playing_next.smart_block">
+                                        <small class="text-muted">
+                                            {{ $gettext('Smart Block') }}
+                                            : {{ np.playing_next.smart_block }}</small>
                                     </div>
                                     <div v-if="np.playing_next.clock_wheel">
                                         <small class="text-muted">

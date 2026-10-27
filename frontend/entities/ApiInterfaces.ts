@@ -903,6 +903,11 @@ export interface ApiNowPlayingSongHistory {
    */
   clock_wheel: string | null;
   /**
+   * Indicates the smart block the song came from, if available, or empty string if not.
+   * @example "Upbeat Worship"
+   */
+  smart_block?: string | null;
+  /**
    * Indicates the current streamer that was connected, if available, or empty string if not.
    * @example "Test DJ"
    */
@@ -1047,6 +1052,11 @@ export interface ApiNowPlayingStationQueue {
    * @example "Morning Drive"
    */
   clock_wheel: string | null;
+  /**
+   * Indicates the smart block the song came from, if available, or empty string if not.
+   * @example "Upbeat Worship"
+   */
+  smart_block?: string | null;
   /** Indicates whether the song is a listener request. */
   is_request: boolean;
   song: ApiSong;
@@ -1369,7 +1379,7 @@ export interface ApiStationSchedule {
    * The type of this schedule entry.
    * @example "playlist"
    */
-  type?: "playlist" | "streamer" | "clock_wheel";
+  type?: "playlist" | "streamer" | "clock_wheel" | "smart_block";
   /**
    * Either the playlist or streamer's display name.
    * @example "Example Schedule Entry"

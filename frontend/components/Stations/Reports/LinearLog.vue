@@ -57,12 +57,14 @@
                                 @click="requestBuild"
                             >
                                 <span
-                                    v-if="isBuilding"
+                                    v-if="isBuilding && !heldUntil"
                                     class="spinner-border spinner-border-sm me-1"
                                     role="status"
                                     aria-hidden="true"
                                 />
-                                {{ isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH') }}
+                                {{ heldUntil
+                                    ? $gettext('REBUILD AT %{time}', {time: formatTimestampAsTime(heldUntil)})
+                                    : (isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH')) }}
                             </button>
 
                             <a
@@ -110,15 +112,22 @@
                         {{ buildError }}
                     </div>
 
+                    <div v-else-if="heldUntil" class="build-status">
+                        <span>
+                            {{ $gettext('A rebuild is waiting for the top of the hour to pass. It starts at %{time}.', {time: formatTimestampAsTime(heldUntil)}) }}
+                        </span>
+                        <span v-if="allItems.length" class="text-body-secondary">
+                            {{ $gettext('The log below keeps playing as it is until then.') }}
+                        </span>
+                    </div>
+
                     <div v-else-if="isBuilding" class="build-status">
                         <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
                         <span>
-                            {{ status === 'queued'
-                                ? $gettext('The Linear Log build is queued in the background.')
-                                : $gettext('AutoDJ is calculating the isolated playout projection in the background.') }}
+                            {{ $gettext('The log is being rebuilt. This takes a minute or two.') }}
                         </span>
                         <span v-if="allItems.length" class="text-body-secondary">
-                            {{ $gettext('The last completed snapshot remains visible below.') }}
+                            {{ $gettext('The log below keeps playing as it is until the rebuild finishes.') }}
                         </span>
                     </div>
 
@@ -563,6 +572,7 @@ const {
     snapshotHours,
     builtAt,
     nextBuildAt,
+    heldUntil,
     coverageStart,
     coverageEnd,
     allItems,

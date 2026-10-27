@@ -21,6 +21,9 @@
                                     <template v-else-if="row.type === 'clock_wheel'">
                                         {{ $gettext('Clock Wheel') }}
                                     </template>
+                                    <template v-else-if="row.type === 'smart_block'">
+                                        {{ $gettext('Smart Block') }}
+                                    </template>
                                     <template v-else>
                                         {{ $gettext('Streamer/DJ') }}
                                     </template>

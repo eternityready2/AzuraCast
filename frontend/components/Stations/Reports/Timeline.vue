@@ -123,6 +123,9 @@
             <template #cell(clock_wheel)="row">
                 {{ row.item.clock_wheel || '—' }}
             </template>
+            <template #cell(smart_block)="row">
+                {{ row.item.smart_block || '—' }}
+            </template>
         </data-table>
     </div>
 </template>
@@ -221,6 +224,12 @@ const fields: DataTableField[] = [
     {
         key: 'clock_wheel',
         label: $gettext('Clock Wheel'),
+        selectable: true,
+        sortable: false
+    },
+    {
+        key: 'smart_block',
+        label: $gettext('Smart Block'),
         selectable: true,
         sortable: false
     },

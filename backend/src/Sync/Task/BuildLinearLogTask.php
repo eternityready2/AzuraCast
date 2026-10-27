@@ -26,7 +26,7 @@ final class BuildLinearLogTask extends AbstractTask
     private const int BUILD_LOCAL_HOUR = 3;
 
     /** Minute of the hour the task runs at; see getSchedulePattern(). */
-    private const int BUILD_MINUTE = 7;
+    public const int BUILD_MINUTE = 7;
 
     public static function getSchedulePattern(): string
     {

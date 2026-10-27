@@ -195,7 +195,14 @@ final class LinearLogBuilder
         }
 
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
-        $this->snapshotStore->holdBuild($station, $hours, $rebuild, $throughTomorrow, $replanLockWindow);
+        $this->snapshotStore->holdBuild(
+            $station,
+            $hours,
+            $rebuild,
+            $throughTomorrow,
+            $replanLockWindow,
+            $this->heldBuildStartsAt($station, $wait),
+        );
 
         $this->logger->notice('Linear Log build held until the top of the hour has settled.', [
             'station_id' => $station->id,
@@ -205,6 +212,22 @@ final class LinearLogBuilder
         ]);
 
         return true;
+    }
+
+    /**
+     * When the hourly task (Sync\Task\BuildLinearLogTask, minute :07) will run
+     * a build held for the top of the hour: the first :07 once the hour has
+     * settled.
+     */
+    private function heldBuildStartsAt(Station $station, int $waitSeconds): int
+    {
+        $clear = CarbonImmutable::createFromTimestamp(time() + $waitSeconds, $station->getTimezoneObject());
+        $next = $clear->setTime((int)$clear->format('G'), \App\Sync\Task\BuildLinearLogTask::BUILD_MINUTE);
+        if ($next->getTimestamp() < $clear->getTimestamp()) {
+            $next = $next->addHour();
+        }
+
+        return $next->getTimestamp();
     }
 
     /** @return array<string, mixed> */

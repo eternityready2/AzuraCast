@@ -107,8 +107,8 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         if (null === $activeEvent || null === $activeEvent->clock_wheel) {
             $holidayWheel = $this->holidayOverrideService->getHolidayClockWheel($station, $expectedPlayTime);
             if ($holidayWheel !== null) {
-                $activeEvent = new StationSchedule();
-                $activeEvent->clock_wheel = $holidayWheel;
+                // In-memory stand-in for the holiday; never persisted.
+                $activeEvent = new StationSchedule($holidayWheel);
                 $activeEvent->clock_wheel_mode = ClockWheelScheduleMode::Flexible;
             } else {
                 return;
@@ -132,7 +132,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
 
         $this->logger->info(
             sprintf('Clock Wheel "%s" is active. Overriding normal AutoDJ queue.', $wheel->name),
-            ['clock_wheel_id' => $wheel->id, 'schedule_id' => $activeEvent->id]
+            ['clock_wheel_id' => $wheel->id, 'schedule_id' => isset($activeEvent->id) ? $activeEvent->id : null]
         );
 
         $separationSettings = ClockWheelSeparationSettings::resolveForWheel($wheel);
