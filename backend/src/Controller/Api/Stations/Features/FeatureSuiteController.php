@@ -465,7 +465,7 @@ final class FeatureSuiteController
         $this->linearLogSnapshotStore->markQueued($station, $hours);
 
         try {
-            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, false, true));
+            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, false, true, true));
         } catch (Throwable $e) {
             $this->linearLogSnapshotStore->markFailed($station, $hours, $e->getMessage());
             throw $e;

@@ -97,7 +97,7 @@ final class LinearLogReplanOnScheduleChange implements EventSubscriber
         foreach ($pending as $stationId => $hours) {
             try {
                 $this->di->get(MessageBus::class)->dispatch(
-                    new BuildLinearLogMessage($stationId, $hours, false, true, false, true)
+                    new BuildLinearLogMessage($stationId, $hours, false, true, true, true)
                 );
             } catch (Throwable) {
                 // The hourly build still picks the change up.

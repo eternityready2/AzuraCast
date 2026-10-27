@@ -609,7 +609,7 @@ final class LinearLogEntryAction
         $hours = $station->backend_config->linear_log_hours;
         $this->snapshotStore->markQueued($station, $hours);
         try {
-            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, true, false));
+            $this->messageBus->dispatch(new BuildLinearLogMessage($station->id, $hours, true, false, true));
         } catch (Throwable $e) {
             $this->snapshotStore->markFailed($station, $hours, $e->getMessage());
         }

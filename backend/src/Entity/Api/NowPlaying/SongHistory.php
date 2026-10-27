@@ -54,6 +54,12 @@ class SongHistory
     public ?string $clock_wheel = null;
 
     #[OA\Property(
+        description: 'Indicates the smart block the song came from, if available, or empty string if not.',
+        example: 'Upbeat Worship'
+    )]
+    public ?string $smart_block = null;
+
+    #[OA\Property(
         description: 'Indicates the current streamer that was connected, if available, or empty string if not.',
         example: 'Test DJ'
     )]

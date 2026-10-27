@@ -56,6 +56,12 @@ class StationQueue
     public ?string $clock_wheel = null;
 
     #[OA\Property(
+        description: 'Indicates the smart block the song came from, if available, or empty string if not.',
+        example: 'Upbeat Worship'
+    )]
+    public ?string $smart_block = null;
+
+    #[OA\Property(
         description: 'Indicates this queue row is a station-wide top-of-hour legal ID.',
     )]
     public bool $top_of_hour_legal_id = false;
