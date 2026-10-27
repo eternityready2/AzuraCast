@@ -34,8 +34,8 @@ final class EnvFile extends AbstractEnvFile
                 ],
                 'AZURACAST_VERSION' => [
                     'name' => __('Release Channel'),
-                    'options' => ['latest', 'stable'],
-                    'default' => 'latest',
+                    'options' => ['stable'],
+                    'default' => 'stable',
                     'required' => true,
                 ],
                 'AZURACAST_HTTP_PORT' => [

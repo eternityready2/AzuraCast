@@ -123,13 +123,15 @@ final class InstallCommand extends Command
             $env['AZURACAST_HTTPS_PORT'] = (string)$httpsPort;
         }
 
-        // Migrate legacy config values.
+        // Migrate legacy config values. The :latest image is no longer
+        // published, so every install uses the :stable release channel.
         if (isset($azuracastEnv['PREFER_RELEASE_BUILDS'])) {
-            $env['AZURACAST_VERSION'] = ('true' === $azuracastEnv['PREFER_RELEASE_BUILDS'])
-                ? 'stable'
-                : 'latest';
+            $env['AZURACAST_VERSION'] = 'stable';
 
             unset($azuracastEnv['PREFER_RELEASE_BUILDS']);
+        }
+        if ('latest' === ($env['AZURACAST_VERSION'] ?? null)) {
+            $env['AZURACAST_VERSION'] = 'stable';
         }
 
         unset($azuracastEnv['ENABLE_ADVANCED_FEATURES']);

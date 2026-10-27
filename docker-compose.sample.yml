@@ -17,7 +17,7 @@ services:
     security_opt:
       - seccomp:unconfined
     container_name: azuracast
-    image: "ghcr.io/eternityready2/azuracast_custom:${AZURACAST_VERSION:-latest}"
+    image: "ghcr.io/eternityready2/azuracast_custom:${AZURACAST_VERSION:-stable}"
     labels:
       - "com.centurylinklabs.watchtower.scope=azuracast"
     # Want to customize the HTTP/S ports? Follow the instructions here:

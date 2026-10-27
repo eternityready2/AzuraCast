@@ -382,6 +382,12 @@ run-installer() {
   if [[ ! -f .env ]]; then
     curl -fsSL https://raw.githubusercontent.com/eternityready2/Azura-Cast-Custom/$AZURACAST_RELEASE_BRANCH/sample.env -o .env
   fi
+
+  # The :latest image is no longer published; move old installs to :stable.
+  if .env --file .env get AZURACAST_VERSION && [[ "$REPLY" == "latest" ]]; then
+    .env --file .env set AZURACAST_VERSION=stable
+  fi
+
   if [[ ! -f azuracast.env ]]; then
     curl -fsSL https://raw.githubusercontent.com/eternityready2/Azura-Cast-Custom/$AZURACAST_RELEASE_BRANCH/azuracast.sample.env -o azuracast.env
   fi
