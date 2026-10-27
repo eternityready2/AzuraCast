@@ -1,11 +1,6 @@
 name: Build Custom AzuraCast
 on:
   workflow_dispatch:
-    inputs:
-      release_test:
-        description: 'Run the release (amd64 + arm64) build but publish only :multiarch-test (:stable untouched)'
-        type: boolean
-        default: false
   push:
     branches: [ dev ]
     tags: [ 'v*' ]
@@ -21,7 +16,7 @@ jobs:
   # dev (:rolling) is amd64-only for fast builds. main no longer publishes an
   # image: installs use :stable, which only v* release tags publish.
   build:
-    if: ${{ github.ref == 'refs/heads/dev' && !inputs.release_test }}
+    if: ${{ github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +47,7 @@ jobs:
   # under QEMU emulation took about an hour -- and merge-release joins them.
   # arm64 keeps its own cache because the amd64 builds overwrite :buildcache.
   build-release:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_test }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: true
       matrix:
@@ -102,7 +97,7 @@ jobs:
           retention-days: 1
 
   merge-release:
-    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_test }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: build-release
     runs-on: ubuntu-latest
     steps:
@@ -120,15 +115,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # A release_test run publishes only :multiarch-test, never :stable.
-      - name: Create multi-arch manifest
+      - name: Create multi-arch :${{ github.ref_name }} and :stable
         working-directory: ${{ runner.temp }}/digests
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            tags=(-t "${IMAGE}:${{ github.ref_name }}" -t "${IMAGE}:stable")
-          else
-            tags=(-t "${IMAGE}:multiarch-test")
-          fi
-          docker buildx imagetools create "${tags[@]}" $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools create \
+            -t "${IMAGE}:${{ github.ref_name }}" \
+            -t "${IMAGE}:stable" \
+            $(printf "${IMAGE}@sha256:%s " *)
       - name: Inspect
-        run: docker buildx imagetools inspect "${IMAGE}:${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'multiarch-test' }}"
+        run: docker buildx imagetools inspect "${IMAGE}:${{ github.ref_name }}"
