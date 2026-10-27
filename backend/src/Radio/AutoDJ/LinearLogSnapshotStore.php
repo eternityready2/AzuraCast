@@ -163,6 +163,7 @@ final class LinearLogSnapshotStore
     {
         $snapshot = $this->get($station);
         $snapshot['status'] = null !== $snapshot['built_at'] ? 'ready' : 'idle';
+        $snapshot['held_until'] = null;
         $snapshot['error'] = null;
 
         $this->saveCache($station, $snapshot);

@@ -252,7 +252,7 @@ final class LinearLogRefill
         // each taking what a song really takes in this hour beyond its file.
         $perSong = $this->airTimePerSong->secondsBeyondFile($station, $hourStart);
         $plannedSeconds = 0;
-        $lastPlannedAt = $hourStart;
+        $lastPlannedEndsAt = $hourStart;
         foreach (
             $conn->fetchAllAssociative(
                 'SELECT status, planned_at, duration, media_id, playlist_id FROM station_log_entries
@@ -265,7 +265,10 @@ final class LinearLogRefill
             }
             if (StationLogEntry::STATUS_PLANNED === $line['status'] && (int)$line['planned_at'] >= $hourStart) {
                 $plannedSeconds += (int)ceil((float)$line['duration'] + $perSong);
-                $lastPlannedAt = max($lastPlannedAt, (int)$line['planned_at']);
+                $lastPlannedEndsAt = max(
+                    $lastPlannedEndsAt,
+                    (int)$line['planned_at'] + (int)ceil((float)$line['duration'])
+                );
             }
         }
 
@@ -275,7 +278,7 @@ final class LinearLogRefill
             return 0;
         }
 
-        return $this->addSong($station, $hourStart, $idAt, $endsAt, $shortBy, $lastPlannedAt, false);
+        return $this->addSong($station, $hourStart, $idAt, $endsAt, $shortBy, $lastPlannedEndsAt, false);
     }
 
     /**
@@ -284,7 +287,8 @@ final class LinearLogRefill
      * $idAt: what topUp() adds to the hour the queue is in, and
      * LinearLogHourFit to an hour ahead of it.
      *
-     * @param int $lastPlannedAt planned time of the hour's last planned line
+     * @param int $lastPlannedEndsAt when the hour's last planned line ends, by
+     *     the log's own times (planned_at + duration)
      * @param bool $landsOnId the song that fills the hour is picked to end on
      *     the ID (LinearLogSongMatch::OnId)
      * @return int lines added
@@ -295,7 +299,7 @@ final class LinearLogRefill
         int $idAt,
         int $endsAt,
         int $shortBy,
-        int $lastPlannedAt,
+        int $lastPlannedEndsAt,
         bool $landsOnId,
     ): int {
         // A top-up line that was dropped means something takes lines out of this
@@ -333,8 +337,12 @@ final class LinearLogRefill
 
         [$media, $playlist] = $pick;
 
-        // After the hour's last planned line, so playout takes it last.
-        $plannedAt = min(max($endsAt, $lastPlannedAt + 1), $idAt - 1);
+        // After the hour's last planned line ends, so playout takes it last
+        // and the log's own times do not overlap. The hour is measured by the
+        // live times, which run ahead of the plan once the air gets ahead; put
+        // a second after the last line's start, the fill overlapped it by
+        // nearly its whole length (10pm hour, Mon 2026-10-26).
+        $plannedAt = min(max($endsAt, $lastPlannedEndsAt), $idAt - 1);
         $newId = $this->writeLine(
             $station,
             $media,
