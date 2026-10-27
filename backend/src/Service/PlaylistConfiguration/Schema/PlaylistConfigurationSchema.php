@@ -21,17 +21,35 @@ final class PlaylistConfigurationSchema implements JsonSerializable
     /**
      * @param MediaEntry[] $mediaEntries
      * @param PlaylistEntry[] $playlistEntries
+     * @param SmartBlockEntry[] $smartBlockEntries
      */
     public function __construct(
         public readonly PlaylistConfigurationType $type,
         public readonly Station $station,
         public array $mediaEntries,
         public array $playlistEntries,
+        public array $smartBlockEntries = [],
     ) {
     }
 
     public static function fromArray(array $data, Station $station): self
     {
+        // A file written when smart blocks were playlists lists them under
+        // "playlists" with "is_smart_block"; they come in as smart blocks.
+        $playlistEntries = [];
+        $smartBlockEntries = [];
+        foreach (Types::array($data['playlists'] ?? []) as $item) {
+            $item = Types::array($item);
+            if (Types::bool(Types::array($item['config'] ?? [])['is_smart_block'] ?? false)) {
+                $smartBlockEntries[] = SmartBlockEntry::fromLegacyPlaylist($item);
+            } else {
+                $playlistEntries[] = PlaylistEntry::fromArray($item);
+            }
+        }
+        foreach (Types::array($data['smart_blocks'] ?? []) as $item) {
+            $smartBlockEntries[] = SmartBlockEntry::fromArray(Types::array($item));
+        }
+
         return new self(
             type: PlaylistConfigurationType::from(Types::string($data['type'] ?? null)),
             station: $station,
@@ -39,10 +57,8 @@ final class PlaylistConfigurationSchema implements JsonSerializable
                 static fn(mixed $item): MediaEntry => MediaEntry::fromArray(Types::array($item)),
                 Types::array($data['media'] ?? [])
             ),
-            playlistEntries: array_map(
-                static fn(mixed $item): PlaylistEntry => PlaylistEntry::fromArray(Types::array($item)),
-                Types::array($data['playlists'] ?? [])
-            ),
+            playlistEntries: $playlistEntries,
+            smartBlockEntries: $smartBlockEntries,
         );
     }
 
@@ -72,6 +88,7 @@ final class PlaylistConfigurationSchema implements JsonSerializable
             ],
             'media' => array_values($this->mediaEntries),
             'playlists' => array_values($this->playlistEntries),
+            'smart_blocks' => array_values($this->smartBlockEntries),
         ];
     }
 }

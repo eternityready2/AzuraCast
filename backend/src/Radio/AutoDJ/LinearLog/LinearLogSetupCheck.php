@@ -57,7 +57,7 @@ final class LinearLogSetupCheck
         $schedulesByPlaylist = [];
 
         foreach ($playlists as $playlist) {
-            if (!$playlist->is_enabled || $playlist->is_smart_block) {
+            if (!$playlist->is_enabled) {
                 continue;
             }
 

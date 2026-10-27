@@ -20,16 +20,6 @@
                     :input-attrs="{required: true}"
                 />
 
-                <form-group-field
-                    id="smart_block_weight"
-                    class="col-md-4"
-                    v-model="basicInfo.weight"
-                    input-type="number"
-                    :input-attrs="{min: '0'}"
-                    :label="$gettext('Weight')"
-                    :description="$gettext('Saved with the smart block. Its calendar times decide when it plays.')"
-                />
-
                 <form-group-checkbox
                     id="smart_block_is_enabled"
                     class="col-md-12"
@@ -111,8 +101,8 @@
                             id="smart_block_avoid_duplicates"
                             class="col-md-6"
                             v-model="editor.smart_block_avoid_duplicates"
-                            :label="$gettext('Allow Repeated Tracks')"
-                            :description="$gettext('Saved with the smart block. Songs never repeat within the station\'s repeat window either way; when a smart block runs out, normal music fills the rest of its time.')"
+                            :label="$gettext('Avoid repeats')"
+                            :description="$gettext('On: a song that aired within the station\'s repeat window is skipped, and when every song in this block has aired recently, regular music fills the rest of its time. Off: this block plays its own songs again instead. Turn it off for a small block that must stay on its own songs.')"
                         />
                     </div>
                 </tab>

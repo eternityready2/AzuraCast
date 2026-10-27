@@ -115,7 +115,6 @@ const {
         delete data.playlist_groups;
         // Smart Block criteria rows are managed entirely on the standalone Smart
         // Blocks page, not as part of the general playlist record.
-        delete data.smart_block_criteria;
 
         if (Array.isArray(data.schedule_items) && data.schedule_items.length) {
             data.schedule_items = data.schedule_items.map((item: Record<string, unknown>) => {

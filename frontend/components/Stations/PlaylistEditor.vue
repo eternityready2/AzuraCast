@@ -211,7 +211,6 @@ const buildSubmitData = () => {
     }
     delete data.playlists;
     delete data.playlist_groups;
-    delete data.smart_block_criteria;
 
     if (Array.isArray(data.schedule_items) && data.schedule_items.length) {
         data.schedule_items = data.schedule_items.map((item: Record<string, any>) => {

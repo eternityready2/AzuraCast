@@ -8,10 +8,6 @@ use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
-use App\Entity\Enums\SmartBlockLimitType;
-use App\Entity\Enums\SmartBlockMatchType;
-use App\Entity\Enums\SmartBlockSortOrder;
-use App\Entity\Enums\SmartBlockType;
 use App\Utilities\Types;
 use JsonSerializable;
 
@@ -23,7 +19,6 @@ final class PlaylistEntry implements JsonSerializable
      * @param PlaylistMediaEntry[] $media
      * @param PlaylistScheduleEntry[] $schedules
      * @param PlaylistMemberEntry[] $members
-     * @param PlaylistSmartBlockCriterionEntry[] $smartBlockCriteria
      */
     public function __construct(
         public readonly string $ref,
@@ -53,19 +48,11 @@ final class PlaylistEntry implements JsonSerializable
         public readonly ?int $sponsorGuaranteedPlaysPerDay = null,
         public readonly ?string $sponsorContractStart = null,
         public readonly ?string $sponsorContractEnd = null,
-        public readonly bool $isSmartBlock = false,
-        public readonly SmartBlockMatchType $smartBlockMatchType = SmartBlockMatchType::All,
-        public readonly ?int $smartBlockLimit = null,
-        public readonly SmartBlockLimitType $smartBlockLimitType = SmartBlockLimitType::Tracks,
-        public readonly SmartBlockType $smartBlockType = SmartBlockType::Dynamic,
-        public readonly SmartBlockSortOrder $smartBlockSortOrder = SmartBlockSortOrder::Random,
-        public readonly bool $smartBlockAvoidDuplicates = true,
         public readonly bool $preserveQueueOnRestart = false,
         public array $folders = [],
         public array $media = [],
         public array $schedules = [],
         public array $members = [],
-        public array $smartBlockCriteria = [],
     ) {
     }
 
@@ -102,17 +89,6 @@ final class PlaylistEntry implements JsonSerializable
             sponsorGuaranteedPlaysPerDay: Types::intOrNull($config['sponsor_guaranteed_plays_per_day'] ?? null),
             sponsorContractStart: Types::stringOrNull($config['sponsor_contract_start'] ?? null),
             sponsorContractEnd: Types::stringOrNull($config['sponsor_contract_end'] ?? null),
-            isSmartBlock: Types::bool($config['is_smart_block'] ?? false),
-            smartBlockMatchType: SmartBlockMatchType::tryFrom(Types::string($config['smart_block_match_type'] ?? 'all'))
-                ?? SmartBlockMatchType::All,
-            smartBlockLimit: Types::intOrNull($config['smart_block_limit'] ?? null),
-            smartBlockLimitType: SmartBlockLimitType::tryFrom(Types::string($config['smart_block_limit_type'] ?? 'tracks'))
-                ?? SmartBlockLimitType::Tracks,
-            smartBlockType: SmartBlockType::tryFrom(Types::string($config['smart_block_type'] ?? 'dynamic'))
-                ?? SmartBlockType::Dynamic,
-            smartBlockSortOrder: SmartBlockSortOrder::tryFrom(Types::string($config['smart_block_sort_order'] ?? 'random'))
-                ?? SmartBlockSortOrder::Random,
-            smartBlockAvoidDuplicates: Types::bool($config['smart_block_avoid_duplicates'] ?? true),
             preserveQueueOnRestart: Types::bool($config['preserve_queue_on_restart'] ?? null),
             folders: array_map(
                 static fn(mixed $item): PlaylistFolderEntry => PlaylistFolderEntry::fromArray(Types::array($item)),
@@ -129,10 +105,6 @@ final class PlaylistEntry implements JsonSerializable
             members: array_map(
                 static fn(mixed $item): PlaylistMemberEntry => PlaylistMemberEntry::fromArray(Types::array($item)),
                 Types::array($data['members'] ?? [])
-            ),
-            smartBlockCriteria: array_map(
-                static fn(mixed $item): PlaylistSmartBlockCriterionEntry => PlaylistSmartBlockCriterionEntry::fromArray(Types::array($item)),
-                Types::array($data['smart_block_criteria'] ?? [])
             ),
         );
     }
@@ -168,20 +140,12 @@ final class PlaylistEntry implements JsonSerializable
                 'sponsor_guaranteed_plays_per_day' => $this->sponsorGuaranteedPlaysPerDay,
                 'sponsor_contract_start' => $this->sponsorContractStart,
                 'sponsor_contract_end' => $this->sponsorContractEnd,
-                'is_smart_block' => $this->isSmartBlock,
-                'smart_block_match_type' => $this->smartBlockMatchType->value,
-                'smart_block_limit' => $this->smartBlockLimit,
-                'smart_block_limit_type' => $this->smartBlockLimitType->value,
-                'smart_block_type' => $this->smartBlockType->value,
-                'smart_block_sort_order' => $this->smartBlockSortOrder->value,
-                'smart_block_avoid_duplicates' => $this->smartBlockAvoidDuplicates,
                 'preserve_queue_on_restart' => $this->preserveQueueOnRestart,
             ],
             'folders' => $this->folders,
             'media' => $this->media,
             'schedules' => $this->schedules,
             'members' => $this->members,
-            'smart_block_criteria' => $this->smartBlockCriteria,
         ];
     }
 }

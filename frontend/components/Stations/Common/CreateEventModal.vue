@@ -464,7 +464,6 @@ interface EntityOption {
     id: number;
     name: string;
     self_url: string;
-    is_smart_block?: boolean;
     source?: string;
 }
 
@@ -492,14 +491,12 @@ onMounted(async () => {
         id: b.id as number,
         name: b.name as string,
         self_url: (b.links as Record<string, string>).self,
-        is_smart_block: true,
     }));
 
     playlists.value = (plResp.data as Array<Record<string, unknown>>).map((p) => ({
         id: p.id as number,
         name: p.name as string,
         self_url: (p.links as Record<string, string>).self,
-        is_smart_block: Boolean(p.is_smart_block),
     }));
 
     const webRows = Array.isArray(webResp.data)
@@ -510,7 +507,6 @@ onMounted(async () => {
         id: p.id as number,
         name: p.name as string,
         self_url: (p.links as Record<string, string>).self,
-        is_smart_block: false,
         source: p.source as string,
     }));
 
@@ -672,7 +668,7 @@ const currentEntityOptions = computed(() => {
     if (form.value.source === 'smart_block') {
         return smartBlocks.value;
     }
-    return playlists.value.filter((p) => !p.is_smart_block);
+    return playlists.value;
 });
 
 const isPlaylistSchedule = computed(() =>

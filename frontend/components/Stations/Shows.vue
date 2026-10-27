@@ -376,7 +376,6 @@ type ShowRow = {
     description: string | null,
     is_enabled: boolean,
     is_programme: boolean,
-    is_smart_block?: boolean,
     source: string,
     num_songs: number,
     total_length: number,
@@ -402,7 +401,7 @@ const clock = ref(now());
 let clockTimer: number | null = null;
 
 const shows = computed(() => allPlaylists.value
-    .filter((p) => p.is_programme && !p.is_smart_block)
+    .filter((p) => p.is_programme)
     .sort((a, b) => a.name.localeCompare(b.name)));
 
 const filteredShows = computed(() => {

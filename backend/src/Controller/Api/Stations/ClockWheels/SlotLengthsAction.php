@@ -53,12 +53,11 @@ final class SlotLengthsAction implements SingleActionInterface
         $conn = $this->em->getConnection();
 
         // Every playlist an entry can play from: its name, average length and
-        // what it mostly holds (so a playlist entry gets the right type). Smart
-        // blocks build their list on the fly, so they have no fixed media.
+        // what it mostly holds (so a playlist entry gets the right type).
         $byPlaylist = [];
         foreach (
             $conn->fetchAllAssociative(
-                'SELECT p.id, p.name, p.is_smart_block, p.is_jingle,
+                'SELECT p.id, p.name, p.is_jingle,
                     AVG(m.length) AS avg_seconds, COUNT(m.id) AS items,
                     (SELECT m2.type FROM station_playlist_media pm2
                         JOIN station_media m2 ON m2.id = pm2.media_id
@@ -68,14 +67,13 @@ final class SlotLengthsAction implements SingleActionInterface
                 LEFT JOIN station_playlist_media pm ON pm.playlist_id = p.id
                 LEFT JOIN station_media m ON m.id = pm.media_id AND m.length > 0
                 WHERE p.station_id = ? AND p.is_enabled = 1 AND p.source = ?
-                GROUP BY p.id, p.name, p.is_smart_block, p.is_jingle
+                GROUP BY p.id, p.name, p.is_jingle
                 ORDER BY p.name',
                 [$station->id, 'songs']
             ) as $row
         ) {
             $byPlaylist[(int)$row['id']] = self::stat($row) + [
                 'name' => trim((string)$row['name']),
-                'is_smart_block' => (bool)$row['is_smart_block'],
                 'main_type' => $row['main_type'] ?? ((bool)$row['is_jingle'] ? 'promo' : 'music'),
             ];
         }

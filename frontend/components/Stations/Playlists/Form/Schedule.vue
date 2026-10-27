@@ -157,7 +157,6 @@
                 </div>
 
                 <form-playout-rules
-                    v-if="!form.is_smart_block"
                     :has-schedule="scheduleItems.length > 0"
                 />
 

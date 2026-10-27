@@ -15,6 +15,8 @@ use App\Service\PlaylistConfiguration\Schema\PlaylistMediaEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistMemberEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistScheduleEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistSmartBlockCriterionEntry;
+use App\Service\PlaylistConfiguration\Schema\SmartBlockEntry;
+use App\Entity\StationSmartBlock;
 
 final class PlaylistConfigurationExporter
 {
@@ -86,7 +88,46 @@ final class PlaylistConfigurationExporter
             $this->exportPlaylistEntry($schema, $playlist, $playlistRefs);
         }
 
+        // A whole-station file carries the station's smart blocks too.
+        if (PlaylistConfigurationType::STATION === $type) {
+            foreach ($station->smart_blocks as $smartBlock) {
+                $schema->smartBlockEntries[] = $this->exportSmartBlockEntry($smartBlock);
+            }
+        }
+
         return $schema;
+    }
+
+    private function exportSmartBlockEntry(StationSmartBlock $smartBlock): SmartBlockEntry
+    {
+        $entry = new SmartBlockEntry(
+            name: $smartBlock->name,
+            isEnabled: $smartBlock->is_enabled,
+            weight: $smartBlock->weight,
+            type: $smartBlock->type,
+            matchType: $smartBlock->match_type,
+            limit: $smartBlock->limit,
+            limitType: $smartBlock->limit_type,
+            sortOrder: $smartBlock->sort_order,
+            avoidDuplicates: $smartBlock->avoid_duplicates,
+        );
+
+        foreach ($smartBlock->criteria as $criterion) {
+            $entry->criteria[] = new PlaylistSmartBlockCriterionEntry(
+                field: $criterion->field->value,
+                comparison: $criterion->comparison->value,
+                value: $criterion->value,
+                value2: $criterion->value2,
+                weight: $criterion->weight,
+                customFieldName: $criterion->custom_field?->name,
+            );
+        }
+
+        foreach ($smartBlock->schedule_items as $schedule) {
+            $entry->schedules[] = $this->exportScheduleEntry($schedule);
+        }
+
+        return $entry;
     }
 
     /**
@@ -125,13 +166,6 @@ final class PlaylistConfigurationExporter
             sponsorGuaranteedPlaysPerDay: $playlist->sponsor_guaranteed_plays_per_day,
             sponsorContractStart: $playlist->sponsor_contract_start?->format(DATE_ATOM),
             sponsorContractEnd: $playlist->sponsor_contract_end?->format(DATE_ATOM),
-            isSmartBlock: $playlist->is_smart_block,
-            smartBlockMatchType: $playlist->smart_block_match_type,
-            smartBlockLimit: $playlist->smart_block_limit,
-            smartBlockLimitType: $playlist->smart_block_limit_type,
-            smartBlockType: $playlist->smart_block_type,
-            smartBlockSortOrder: $playlist->smart_block_sort_order,
-            smartBlockAvoidDuplicates: $playlist->smart_block_avoid_duplicates,
             preserveQueueOnRestart: $playlist->preserve_queue_on_restart,
         );
 
@@ -173,28 +207,7 @@ final class PlaylistConfigurationExporter
         }
 
         foreach ($playlist->schedule_items as $schedule) {
-            $entry->schedules[] = new PlaylistScheduleEntry(
-                startTime: $schedule->start_time,
-                endTime: $schedule->end_time,
-                days: array_values($schedule->days),
-                startDate: $schedule->start_date,
-                endDate: $schedule->end_date,
-                loopOnce: $schedule->loop_once,
-                preventRequests: $schedule->prevent_requests,
-                resetQueueAtStart: $schedule->reset_queue_at_start,
-                resetQueueRecursive: $schedule->reset_queue_recursive,
-                strictStart: $schedule->strict_start,
-                isEmergency: $schedule->is_emergency,
-                recurrenceType: $schedule->recurrence_type?->value,
-                recurrenceInterval: $schedule->recurrence_interval,
-                recurrenceMonthlyPattern: $schedule->recurrence_monthly_pattern?->value,
-                recurrenceMonthlyDay: $schedule->recurrence_monthly_day,
-                recurrenceMonthlyWeek: $schedule->recurrence_monthly_week,
-                recurrenceMonthlyDayOfWeek: $schedule->recurrence_monthly_day_of_week,
-                recurrenceEndType: $schedule->recurrence_end_type?->value,
-                recurrenceEndAfter: $schedule->recurrence_end_after,
-                recurrenceEndDate: $schedule->recurrence_end_date,
-            );
+            $entry->schedules[] = $this->exportScheduleEntry($schedule);
         }
 
         foreach ($playlist->playlists as $playlistGroup) {
@@ -212,18 +225,33 @@ final class PlaylistConfigurationExporter
             );
         }
 
-        foreach ($playlist->smart_block_criteria as $criterion) {
-            $entry->smartBlockCriteria[] = new PlaylistSmartBlockCriterionEntry(
-                field: $criterion->field->value,
-                comparison: $criterion->comparison->value,
-                value: $criterion->value,
-                value2: $criterion->value2,
-                weight: $criterion->weight,
-                customFieldName: $criterion->custom_field?->name,
-            );
-        }
-
         $schema->playlistEntries[] = $entry;
+    }
+
+    private function exportScheduleEntry(\App\Entity\StationSchedule $schedule): PlaylistScheduleEntry
+    {
+        return new PlaylistScheduleEntry(
+            startTime: $schedule->start_time,
+            endTime: $schedule->end_time,
+            days: array_values($schedule->days),
+            startDate: $schedule->start_date,
+            endDate: $schedule->end_date,
+            loopOnce: $schedule->loop_once,
+            preventRequests: $schedule->prevent_requests,
+            resetQueueAtStart: $schedule->reset_queue_at_start,
+            resetQueueRecursive: $schedule->reset_queue_recursive,
+            strictStart: $schedule->strict_start,
+            isEmergency: $schedule->is_emergency,
+            recurrenceType: $schedule->recurrence_type?->value,
+            recurrenceInterval: $schedule->recurrence_interval,
+            recurrenceMonthlyPattern: $schedule->recurrence_monthly_pattern?->value,
+            recurrenceMonthlyDay: $schedule->recurrence_monthly_day,
+            recurrenceMonthlyWeek: $schedule->recurrence_monthly_week,
+            recurrenceMonthlyDayOfWeek: $schedule->recurrence_monthly_day_of_week,
+            recurrenceEndType: $schedule->recurrence_end_type?->value,
+            recurrenceEndAfter: $schedule->recurrence_end_after,
+            recurrenceEndDate: $schedule->recurrence_end_date,
+        );
     }
 
     /**

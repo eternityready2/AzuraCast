@@ -675,7 +675,7 @@ const loadSmartBlocksForDrag = async () => {
 const loadPlaylistsForDrag = async () => {
     try {
         const {data} = await axios.get(listUrl.value, {
-            params: {rowCount: -1, is_smart_block: '0'},
+            params: {rowCount: -1},
         });
         const rows = (data.rows ?? data ?? []) as Array<Record<string, unknown>>;
         playlistsForDrag.value = rows.map((row) => ({

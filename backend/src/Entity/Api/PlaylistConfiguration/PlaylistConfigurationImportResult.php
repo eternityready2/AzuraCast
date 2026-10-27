@@ -25,6 +25,9 @@ final readonly class PlaylistConfigurationImportResult extends Status
     #[OA\Property(example: 1)]
     public int $members_created;
 
+    #[OA\Property(example: 1)]
+    public int $smart_blocks_created;
+
     #[OA\Property(example: 4)]
     public int $smart_block_criteria_created;
 
@@ -43,7 +46,8 @@ final readonly class PlaylistConfigurationImportResult extends Status
         int $mediaGenerated = 0,
         int $membersCreated = 0,
         int $smartBlockCriteriaCreated = 0,
-        array $warnings = []
+        array $warnings = [],
+        int $smartBlocksCreated = 0,
     ) {
         parent::__construct($success, $message);
 
@@ -51,6 +55,7 @@ final readonly class PlaylistConfigurationImportResult extends Status
         $this->media_relinked = $mediaRelinked;
         $this->media_generated = $mediaGenerated;
         $this->members_created = $membersCreated;
+        $this->smart_blocks_created = $smartBlocksCreated;
         $this->smart_block_criteria_created = $smartBlockCriteriaCreated;
         $this->warnings = $warnings;
     }

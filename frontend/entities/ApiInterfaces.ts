@@ -2519,18 +2519,6 @@ export type StationPlaylist = HasAutoIncrementId & {
   playlists?: StationPlaylistGroupMember[];
   /** The Playlist Groups (if any) this playlist is currently a member of. */
   playlist_groups?: StationPlaylistGroupMember[];
-  /** Smart Block: whether this playlist's membership is auto-managed by criteria. */
-  is_smart_block?: boolean;
-  /** Smart Block: whether ALL or ANY criteria rows must match a track. */
-  smart_block_match_type?: SmartBlockMatchType;
-  /** Smart Block: optional cap on the number of matching tracks kept as members. */
-  smart_block_limit?: number | null;
-  /** Smart Block: whether smart_block_limit is measured in tracks or seconds. */
-  smart_block_limit_type?: SmartBlockLimitType;
-  /** Smart Block: Static (generate once, hand-editable) or Dynamic (always kept in sync). */
-  smart_block_type?: SmartBlockType;
-  /** Smart Block: the filter rules, if is_smart_block is enabled. */
-  smart_block_criteria?: StationPlaylistSmartBlockCriterion[];
 };
 
 export enum SmartBlockCriteriaField {

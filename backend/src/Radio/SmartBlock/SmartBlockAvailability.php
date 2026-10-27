@@ -102,8 +102,10 @@ final class SmartBlockAvailability
             return [];
         }
 
+        // "Avoid repeats" off: the block plays its own songs again rather than
+        // handing its time to regular music.
         $minutes = $smartBlock->station->backend_config->duplicate_prevention_time_range;
-        if ($minutes <= 0) {
+        if ($minutes <= 0 || !$smartBlock->avoid_duplicates) {
             return $pool;
         }
 

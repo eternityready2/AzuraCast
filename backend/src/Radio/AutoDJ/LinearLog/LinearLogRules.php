@@ -296,7 +296,7 @@ final class LinearLogRules
             LEFT JOIN station_playlist_media spm ON spm.playlist_id = e.playlist_id AND spm.media_id = e.media_id
             WHERE e.station_id = ? AND e.status IN (?, ?) AND e.planned_at >= ?
             AND e.media_id IS NOT NULL AND spm.id IS NULL
-            AND p.source = ? AND p.is_smart_block = 0',
+            AND p.source = ?',
             [
                 $station->id,
                 StationLogEntry::STATUS_PLANNED,

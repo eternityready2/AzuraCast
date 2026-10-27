@@ -11,7 +11,6 @@ export interface ClockWheelSlotLengths {
         avg_seconds: number;
         items: number;
         name: string;
-        is_smart_block: boolean;
         main_type: string;
     }>;
     smart_blocks?: Record<string, {

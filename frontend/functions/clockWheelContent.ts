@@ -80,7 +80,7 @@ export function clockWheelPlaylistOptions(
         ? Object.entries(lengths?.smart_blocks ?? {})
             .map(([id, b]) => ({key: `sb:${id}`, label: b.name, type: 'music' as MediaTypeValue}))
         : Object.entries(lengths?.playlists ?? {})
-            .filter(([, p]) => !p.is_smart_block && p.items > 0)
+            .filter(([, p]) => p.items > 0)
             .map(([id, p]) => ({key: `pl:${id}`, label: p.name, type: asType(p.main_type)}));
     return options.sort((a, b) => a.label.localeCompare(b.label));
 }
