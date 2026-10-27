@@ -277,24 +277,6 @@ final class StationPlaylist implements
     ]
     public bool $is_programme = false;
 
-    public const string SCHEDULE_EDITOR_CLASSIC = 'classic';
-    public const string SCHEDULE_EDITOR_NEW = 'new';
-
-    #[
-        OA\Property(
-            description: "Which schedule editor this playlist's times are set in: 'classic' (the standard AzuraCast "
-            . "schedule rows, with playback options on the Advanced tab) or 'new' (repeat rules, timing modes and "
-            . "playback options together). A playlist's schedule is edited in one of them, not both.",
-            example: 'classic'
-        ),
-        ORM\Column(length: 10, options: ['default' => 'classic'])
-    ]
-    public string $schedule_editor = self::SCHEDULE_EDITOR_CLASSIC {
-        set (string|null $value) => (self::SCHEDULE_EDITOR_NEW === $value)
-            ? self::SCHEDULE_EDITOR_NEW
-            : self::SCHEDULE_EDITOR_CLASSIC;
-    }
-
     #[ORM\Column(name: 'backend_options', length: 255, nullable: true)]
     private ?string $backend_options_raw = '';
 

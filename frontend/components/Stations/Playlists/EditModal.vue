@@ -13,7 +13,7 @@
         <tabs>
             <form-basic-info/>
             <form-schedule v-model:schedule-items="form.schedule_items" />
-            <form-advanced v-if="form.source !== 'requests' && form.schedule_editor !== 'new'" />
+            <form-advanced v-if="form.source !== 'requests'" />
         </tabs>
     </modal-form>
 </template>

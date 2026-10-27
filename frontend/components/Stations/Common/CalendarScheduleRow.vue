@@ -1,10 +1,17 @@
 <template>
-    <section class="schedule-card card mb-4">
+    <section
+        class="schedule-card card mb-4"
+        :class="{'is-this-event': !!highlightLabel}"
+    >
         <div class="card-header schedule-card-header d-flex align-items-center">
-            <div class="flex-fill">
+            <div class="flex-fill d-flex align-items-center gap-2">
                 <h2 class="card-title h5 mb-0">
                     {{ $gettext('Scheduled Time #%{num}', {num: index + 1}) }}
                 </h2>
+                <span
+                    v-if="highlightLabel"
+                    class="this-event-badge"
+                >{{ highlightLabel }}</span>
             </div>
             <div class="flex-shrink-0">
                 <button
@@ -73,7 +80,7 @@
 
                 <form-group-multi-check
                     :id="'edit_form_days_'+index"
-                    class="col-xl-7"
+                    class="col-12"
                     :field="r$.days"
                     :label="$gettext('Days of Week')"
                     :description="daysOfWeekFieldDescription"
@@ -82,16 +89,6 @@
                     :disabled="isMonthlyDatePattern"
                     stacked
                 />
-
-                <form-markup
-                    :id="'station_time_zone_'+index"
-                    class="col-xl-5"
-                    :label="$gettext('Station Time Zone')"
-                >
-                    <div class="timezone-card">
-                        <time-zone />
-                    </div>
-                </form-markup>
 
                 <div class="col-12">
                     <hr class="my-1">
@@ -394,6 +391,7 @@
 </template>
 
 <script setup lang="ts">
+// New Schedule "Scheduled Time" card, used by the calendar event editor.
 import PlaylistTime from "~/components/Common/TimeCode.vue";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
 import {applyIf, minLength, minValue, required, requiredIf, withMessage} from "@regle/rules";
@@ -402,7 +400,6 @@ import {useTranslate} from "~/vendor/gettext";
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
 import FormGroupSelect from "~/components/Form/FormGroupSelect.vue";
-import TimeZone from "~/components/Stations/Common/TimeZone.vue";
 import {useAppScopedRegle} from "~/vendor/regle.ts";
 import IconIcInfo from "~icons/ic/baseline-info";
 import IconIcRemove from "~icons/ic/baseline-remove";
@@ -432,6 +429,8 @@ interface PlaylistScheduleRow {
 const props = defineProps<{
     index: number,
     isPlaylistGroup?: boolean,
+    // Set on the window the calendar event was opened from ("This event" / "New").
+    highlightLabel?: string | null,
 }>();
 
 const {index, isPlaylistGroup = false} = props;
@@ -595,6 +594,24 @@ const doRemove = () => {
     color: #fff;
 }
 
+.schedule-card.is-this-event {
+    /* Stop below the site's fixed top bar when scrolled to. */
+    scroll-margin-top: 5.5rem;
+    border: 2px solid #ffc107;
+    box-shadow: 0 0 0 .2rem rgba(255, 193, 7, .2);
+}
+
+.this-event-badge {
+    padding: .15rem .55rem;
+    border-radius: 999px;
+    background: #ffc107;
+    color: #212529;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
 .mode-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -726,14 +743,6 @@ const doRemove = () => {
     margin-top: .2rem;
     color: var(--bs-secondary-color);
     line-height: 1.4;
-}
-
-.timezone-card {
-    min-height: 2.4rem;
-    padding: .55rem .7rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .45rem;
-    background: var(--bs-tertiary-bg);
 }
 
 .calendar-rules {

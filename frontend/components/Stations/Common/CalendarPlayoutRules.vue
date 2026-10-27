@@ -1,31 +1,11 @@
 <template>
     <div class="playout-settings">
-        <section class="behavior-recommendation mb-4">
-            <div class="recommendation-copy">
-                <span class="recommendation-kicker">{{ $gettext('Playlist Behavior Recommendation') }}</span>
-                <strong>{{ detectedBehaviorLabel }}</strong>
-                <small>{{ detectedBehavior.reason }}</small>
-                <small class="recommendation-safety">
-                    {{ $gettext('This is a recommendation only. It never changes a saved playlist unless you click Apply Recommendation.') }}
-                </small>
-            </div>
-            <button
-                type="button"
-                class="btn btn-sm"
-                :class="recommendationApplied ? 'btn-outline-success' : 'btn-primary'"
-                :disabled="recommendationApplied"
-                @click="applyRecommendation"
-            >
-                {{ recommendationApplied ? $gettext('Already Applied') : $gettext('Apply Recommendation') }}
-            </button>
-        </section>
-
         <section class="behavior-section mb-4">
             <div class="behavior-heading behavior-heading-start">
                 <span class="heading-icon heading-icon-start"><icon-ic-play-arrow /></span>
                 <span>
                     <span class="heading-title-with-help">
-                        <strong>{{ $gettext('2. How should it start?') }}</strong>
+                        <strong>{{ $gettext('3. How should it start?') }}</strong>
                         <span
                             class="info-help"
                             tabindex="0"
@@ -74,12 +54,6 @@
                             </span>
                         </span>
                         <small>{{ option.description }}</small>
-                        <span
-                            v-if="detectedStartBehavior === option.value"
-                            class="recommended-badge"
-                        >
-                            {{ $gettext('Recommended') }}
-                        </span>
                     </span>
                 </label>
             </div>
@@ -94,7 +68,7 @@
                 <span class="heading-icon heading-icon-end"><icon-ic-stop /></span>
                 <span>
                     <span class="heading-title-with-help">
-                        <strong>{{ $gettext('3. What should happen at the end?') }}</strong>
+                        <strong>{{ $gettext('4. What should happen at the end?') }}</strong>
                         <span
                             class="info-help"
                             tabindex="0"
@@ -236,6 +210,7 @@
 </template>
 
 <script setup lang="ts">
+// New Schedule start/end behavior section, used by the calendar event editor.
 import {computed} from "vue";
 import {storeToRefs} from "pinia";
 import FormGroupField from "~/components/Form/FormGroupField.vue";
@@ -244,7 +219,6 @@ import IconIcPlayArrow from "~icons/ic/baseline-play-arrow";
 import IconIcSettings from "~icons/ic/baseline-settings";
 import IconIcStop from "~icons/ic/baseline-stop";
 import {useStationsPlaylistsForm} from "~/components/Stations/Playlists/Form/form";
-import {detectPlaylistBehavior} from "~/functions/playlistBehaviorDetector";
 import {useTranslate} from "~/vendor/gettext";
 
 type StartBehavior = 'wait' | 'scheduled' | 'priority';
@@ -306,40 +280,6 @@ const isEndOptionDisabled = (value: 'boundary' | 'finish'): boolean => {
     return startBehavior.value === 'wait'
         ? value === 'boundary'
         : value === 'finish';
-};
-
-const detectedBehavior = computed(() => detectPlaylistBehavior({
-    name: form.value.name,
-    description: form.value.description,
-    hasSchedule: props.hasSchedule,
-    scheduleItems: form.value.schedule_items,
-}));
-
-const detectedStartBehavior = computed<StartBehavior>(() => {
-    switch (detectedBehavior.value.behavior) {
-        case 'priority':
-            return 'priority';
-        case 'programme':
-            return 'scheduled';
-        default:
-            return 'wait';
-    }
-});
-
-const detectedBehaviorLabel = computed(() => {
-    switch (detectedBehavior.value.behavior) {
-        case 'priority':
-            return $gettext('News / Alert / Priority');
-        case 'programme':
-            return $gettext('Scheduled Show / Program');
-        default:
-            return $gettext('Music Rotation Block');
-    }
-});
-
-const recommendationApplied = computed(() => startBehavior.value === detectedStartBehavior.value);
-const applyRecommendation = () => {
-    startBehavior.value = detectedStartBehavior.value;
 };
 
 const prioritizeRequests = computed({
@@ -407,50 +347,6 @@ const endBehaviorOptions: Array<{
 <style scoped>
 .playout-settings {
     padding-top: .25rem;
-}
-
-.behavior-recommendation {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 1rem;
-    border: 1px solid rgba(38, 136, 255, .35);
-    border-radius: .75rem;
-    background: rgba(38, 136, 255, .08);
-}
-
-.recommendation-copy {
-    min-width: 0;
-}
-
-.recommendation-copy strong,
-.recommendation-copy small,
-.recommendation-kicker {
-    display: block;
-}
-
-.recommendation-kicker {
-    margin-bottom: .15rem;
-    color: #2688ff;
-    font-size: .72rem;
-    font-weight: 700;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-}
-
-.recommendation-copy strong {
-    font-size: 1rem;
-}
-
-.recommendation-copy small {
-    margin-top: .2rem;
-    color: var(--bs-secondary-color);
-    line-height: 1.4;
-}
-
-.recommendation-safety {
-    font-weight: 600;
 }
 
 .behavior-section {
@@ -609,17 +505,6 @@ const endBehaviorOptions: Array<{
     line-height: 1.45;
 }
 
-.recommended-badge {
-    display: inline-block;
-    margin-top: .45rem;
-    padding: .18rem .5rem;
-    border-radius: 999px;
-    background: rgba(25, 135, 84, .18);
-    color: #24ab65;
-    font-size: .7rem;
-    font-weight: 700;
-}
-
 .behavior-note {
     color: var(--bs-secondary-color);
     font-size: .8rem;
@@ -679,13 +564,6 @@ const endBehaviorOptions: Array<{
     .choice-grid-start,
     .choice-grid-end {
         grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 767.98px) {
-    .behavior-recommendation {
-        align-items: flex-start;
-        flex-direction: column;
     }
 }
 </style>

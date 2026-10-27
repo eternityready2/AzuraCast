@@ -20,7 +20,10 @@
             </div>
         </div>
 
-        <div class="card-body">
+        <div
+            v-show="!eventEditorOpen"
+            class="card-body"
+        >
             <div>
                 <!-- ── Toolbar row ── -->
                 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
@@ -92,6 +95,7 @@
                             :show-create-button="false"
                             external-drag-selector=".smart-block-drag-item, .clock-wheel-drag-item"
                             @click="doCalendarClick"
+                            @edit-event="doCalendarClick"
                             @create="doCreateEvent"
                             @date-click="doDateClick"
                             @drop-external="onEntityDrop"
@@ -408,7 +412,10 @@
 
         <create-event-modal
             ref="$createEventModal"
+            inline
             @relist="relist"
+            @shown="eventEditorOpen = true"
+            @hidden="eventEditorOpen = false"
         />
     </section>
 </template>
@@ -467,6 +474,20 @@ const {doEdit: doEditClockWheel} = useHasEditModal($clockWheelEditModal);
 
 const $scheduleTab = useTemplateRef('$scheduleTab');
 const $createEventModal = useTemplateRef('$createEventModal');
+
+// The event editor opens in place of the calendar (same width as the
+// Playlist page editor) instead of in a popup.
+const eventEditorOpen = ref(false);
+
+// FullCalendar can't measure itself while hidden, so redraw it once the
+// editor closes and the calendar is visible again.
+watch(eventEditorOpen, (open) => {
+    if (!open) {
+        void nextTick(() => {
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+});
 
 const doCalendarClick = (event: EventImpl) => {
     $createEventModal.value?.openForEdit(event);

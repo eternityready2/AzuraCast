@@ -61,12 +61,6 @@
                             :selected="selectedPlaylists"
                             :refresh="refreshAll"
                             @needs-restart="mayNeedRestart"
-                            @clone="(p) => doClone(p.name, p.links.clone, p.source === 'playlists')"
-                            @reorder="(p) => p.links.order ? doReorder(p.links.order) : doGroupReorder(p.links.members!)"
-                            @queue="(p) => doQueue(p.links.queue!)"
-                            @import="(p) => doImport(p.links.import!)"
-                            @apply-to="(p) => doApplyTo(p.links.applyto!)"
-                            @grouping="activeTab = 'playlist_grouping'"
                         />
 
                         <data-table

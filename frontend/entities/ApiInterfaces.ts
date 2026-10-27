@@ -2493,11 +2493,6 @@ export type StationPlaylist = HasAutoIncrementId & {
    * @example false
    */
   is_programme?: boolean;
-  /**
-   * Which schedule editor this playlist's times are set in: 'classic' (the standard AzuraCast schedule rows, with playback options on the Advanced tab) or 'new' (repeat rules, timing modes and playback options together). A playlist's schedule is edited in one of them, not both.
-   * @example "classic"
-   */
-  schedule_editor?: 'classic' | 'new';
   /** @example "interrupt,loop_once,single_track,merge" */
   backend_options?: string[];
   /** @example true */
