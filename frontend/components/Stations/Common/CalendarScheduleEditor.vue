@@ -1,20 +1,7 @@
 <template>
     <div class="calendar-schedule-editor">
-        <div
-            class="row g-4 schedule-workspace"
-            :class="timingModeClass"
-            @change="onWorkspaceChange"
-        >
+        <div class="row g-4 schedule-workspace">
             <div class="col-xl-9">
-                <div class="schedule-summary mb-4">
-                    <span class="summary-check"><icon-ic-check-circle /></span>
-                    <span>
-                        <strong>{{ $gettext('Schedule Summary') }}</strong>
-                        <small v-if="scheduleItems.length > 0">{{ scheduleSummary }}</small>
-                        <small v-else>{{ $gettext('No scheduled window is configured. This enabled playlist can be eligible all day.') }}</small>
-                    </span>
-                </div>
-
                 <div class="step-heading step-heading-time mb-3">
                     <span class="step-icon step-icon-time"><icon-ic-event /></span>
                     <span>
@@ -38,10 +25,19 @@
                     :key="index"
                     v-model:row="scheduleItems[index]"
                     :index="index"
+                    :source="source"
                     :is-playlist-group="form.source === 'playlists'"
                     :highlight-label="highlightRow && scheduleItems[index] === highlightRow ? highlightLabel : null"
                     @remove="remove(index)"
-                />
+                    @timing="applyTimingBundle"
+                >
+                    <template
+                        v-if="index === 0"
+                        #aside
+                    >
+                        <calendar-advanced-settings :source="source" />
+                    </template>
+                </playlists-form-schedule-row>
 
                 <div class="buttons mb-4">
                     <button
@@ -54,35 +50,81 @@
                     </button>
                 </div>
 
-                <form-playout-rules
-                    :has-schedule="scheduleItems.length > 0"
+                <calendar-advanced-settings
+                    v-if="scheduleItems.length === 0"
+                    :source="source"
                 />
-
             </div>
 
             <aside class="col-xl-3 schedule-sidebar">
-                <div class="side-card side-card-help mb-3">
-                    <div class="side-card-heading">
-                        <span class="side-card-icon icon-help"><icon-ic-help /></span>
-                        <h3>{{ $gettext('Need Help?') }}</h3>
+                <div class="summary-card mb-3">
+                    <div class="summary-head">
+                        <strong>{{ $gettext('Schedule summary') }}</strong>
+                        <span class="summary-pill">{{ countLabel }}</span>
                     </div>
-                    <p class="mb-0">
-                        {{ $gettext('This simplified editor puts the most important settings in one place. Start with the schedule, then choose how playback begins and ends.') }}
-                    </p>
+                    <div class="summary-sec">
+                        <div class="summary-sec-title">
+                            {{ $gettext('When') }}
+                        </div>
+                        <div
+                            v-for="(line, i) in whenLines"
+                            :key="i"
+                            class="summary-when"
+                        >
+                            {{ line.title }}
+                            <small>{{ line.detail }}</small>
+                        </div>
+                        <div
+                            v-if="whenLines.length === 0"
+                            class="summary-when"
+                        >
+                            {{ $gettext('No times set') }}
+                            <small>{{ $gettext('Plays all day while enabled') }}</small>
+                        </div>
+                    </div>
+                    <div class="summary-sec">
+                        <div class="summary-sec-title">
+                            {{ $gettext('How it plays') }}
+                        </div>
+                        <div class="summary-row">
+                            <span>{{ $gettext('Style') }}</span>
+                            <span>{{ styleLabel }}</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>{{ $gettext('Start') }}</span>
+                            <span>{{ startLabel }}</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>{{ $gettext('End') }}</span>
+                            <span>{{ endLabel }}</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>{{ $gettext('Timing') }}</span>
+                            <span>{{ timingLabel }}</span>
+                        </div>
+                        <div
+                            v-if="source === 'playlist' && scheduleItems.length > 0"
+                            class="summary-row"
+                        >
+                            <span>{{ $gettext('In each window') }}</span>
+                            <span>{{ scheduleItems[0].loop_once ? $gettext('Plays once') : $gettext('Repeats') }}</span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="side-card side-card-presets mb-3">
                     <div class="side-card-heading">
                         <span class="side-card-icon icon-presets"><icon-ic-settings /></span>
-                        <h3>{{ $gettext('Quick Setup Presets') }}</h3>
+                        <h3>{{ $gettext('Quick setup — how it plays') }}</h3>
                     </div>
                     <p class="side-card-intro mb-3">
-                        {{ $gettext('Use a preset to quickly configure common playlist types.') }}
+                        {{ $gettext('Pick one. It sets the start, end and timing for every time below.') }}
                     </p>
 
                     <button
                         type="button"
                         class="preset-button preset-show"
+                        :class="{'is-active': activePreset === 'show'}"
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('show')"
                     >
@@ -96,6 +138,7 @@
                     <button
                         type="button"
                         class="preset-button preset-music"
+                        :class="{'is-active': activePreset === 'music'}"
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('music')"
                     >
@@ -109,6 +152,7 @@
                     <button
                         type="button"
                         class="preset-button preset-news"
+                        :class="{'is-active': activePreset === 'news'}"
                         :disabled="scheduleItems.length === 0"
                         @click="applyPreset('news')"
                     >
@@ -156,12 +200,12 @@
 // schedule windows, start/end behavior, presets and summary. (The Playlist
 // page itself uses the Classic Schedule.)
 import {computed} from "vue";
+import {DateTime} from "luxon";
 import {storeToRefs} from "pinia";
 import PlaylistsFormScheduleRow from "~/components/Stations/Common/CalendarScheduleRow.vue";
-import FormPlayoutRules from "~/components/Stations/Common/CalendarPlayoutRules.vue";
+import CalendarAdvancedSettings from "~/components/Stations/Common/CalendarAdvancedSettings.vue";
 import FormMarkup from "~/components/Form/FormMarkup.vue";
 import IconIcAdd from "~icons/ic/baseline-add";
-import IconIcCheckCircle from "~icons/ic/baseline-check-circle";
 import IconIcEvent from "~icons/ic/baseline-event";
 import IconIcHelp from "~icons/ic/baseline-help";
 import IconIcInfo from "~icons/ic/baseline-info";
@@ -175,11 +219,17 @@ import {useTranslate} from "~/vendor/gettext";
 const {$gettext} = useTranslate();
 const {form} = storeToRefs(useStationsPlaylistsForm());
 
-defineProps<{
+withDefaults(defineProps<{
     // The window the calendar event was opened from, and the tag to show on it.
     highlightRow?: Record<string, any> | null,
     highlightLabel?: string | null,
-}>();
+    // Calendar source: a song playlist or a web stream (also a playlist).
+    source?: 'playlist' | 'web_stream',
+}>(), {
+    highlightRow: null,
+    highlightLabel: null,
+    source: 'playlist',
+});
 
 const scheduleItems = defineModel<Array<any>>('scheduleItems', {
     default: () => []
@@ -231,21 +281,6 @@ const effectiveTimingMode = computed<'flexible' | 'strict' | 'mixed'>(() => {
     return 'mixed';
 });
 
-const timingModeClass = computed(() => `timing-${effectiveTimingMode.value}`);
-
-const onWorkspaceChange = (event: Event) => {
-    const target = event.target as HTMLInputElement | null;
-    if (!target || target.type !== 'radio') {
-        return;
-    }
-
-    if (target.id.startsWith('scheduling_flexible_')) {
-        applyTimingBundle('flexible');
-    } else if (target.id.startsWith('scheduling_strict_')) {
-        applyTimingBundle('strict');
-    }
-};
-
 const applyPreset = (preset: 'show' | 'music' | 'news') => {
     if (scheduleItems.value.length === 0) {
         return;
@@ -258,6 +293,7 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         scheduleItems.value.forEach((item) => {
             item.loop_once = true;
             item.strict_start = true;
+            item.prevent_requests = false;
         });
         return;
     }
@@ -269,6 +305,7 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
         scheduleItems.value.forEach((item) => {
             item.loop_once = false;
             item.strict_start = false;
+            item.prevent_requests = false;
         });
         return;
     }
@@ -332,56 +369,126 @@ const formatTime = (timeCode: number | string | null | undefined): string => {
     return `${hour12}:${minute} ${suffix}`;
 };
 
-const formatDays = (days: number[]): string => {
-    if (!Array.isArray(days) || days.length === 0) {
-        return $gettext('Any day');
-    }
-
-    const labels: Record<number, string> = {
-        1: $gettext('Mon'),
-        2: $gettext('Tue'),
-        3: $gettext('Wed'),
-        4: $gettext('Thu'),
-        5: $gettext('Fri'),
-        6: $gettext('Sat'),
-        7: $gettext('Sun'),
-    };
-
-    return days.map((day) => labels[day] ?? String(day)).join(', ');
+const dayShort: Record<number, string> = {
+    1: $gettext('Mon'),
+    2: $gettext('Tue'),
+    3: $gettext('Wed'),
+    4: $gettext('Thu'),
+    5: $gettext('Fri'),
+    6: $gettext('Sat'),
+    7: $gettext('Sun'),
 };
 
-const scheduleSummary = computed(() => {
-    const first = scheduleItems.value[0];
-    if (!first) {
-        return '';
+const formatDays = (days: number[]): string => {
+    const sorted = Array.isArray(days) ? [...days].sort((a, b) => a - b) : [];
+    const key = sorted.join(',');
+    if (key === '1,2,3,4,5') {
+        return $gettext('Mon–Fri');
+    }
+    if (key === '6,7') {
+        return $gettext('Sat–Sun');
+    }
+    if (sorted.length === 7) {
+        return $gettext('Every day');
+    }
+    if (sorted.length === 0) {
+        return $gettext('No days set');
+    }
+    return sorted.map((day) => dayShort[day] ?? String(day)).join(', ');
+};
+
+const formatDate = (date: string | null, format = 'LLL d, yyyy'): string => (
+    date ? DateTime.fromISO(date).toFormat(format) : '—'
+);
+
+const ordinal = (n: number): string => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
+const repeatsLabel = (item: Record<string, any>): string => {
+    switch (item.recurrence_type) {
+        case 'biweekly':
+            return $gettext('Repeats every 2 weeks');
+        case 'custom':
+            return $gettext('Repeats every %{n} weeks', {n: String(item.recurrence_interval ?? 1)});
+        case 'monthly':
+            return $gettext('Repeats monthly');
+        default:
+            return $gettext('Repeats weekly');
+    }
+};
+
+const whenLines = computed(() => scheduleItems.value.map((item) => {
+    const times = `${formatTime(item.start_time)} – ${formatTime(item.end_time)}`;
+
+    if (item.start_date && item.start_date === item.end_date) {
+        return {
+            title: `${$gettext('One time')} · ${formatDate(item.start_date, 'ccc, LLL d, yyyy')}`,
+            detail: `${times} · ${$gettext('Does not repeat')}`,
+        };
     }
 
-    const startBehavior = hasOption('interrupt')
-        ? (hasOption('prioritize') ? $gettext('Priority start') : $gettext('Starts on time'))
-        : $gettext('Waits for current song');
-    const repeatBehavior = first.loop_once
-        ? $gettext('Plays once per block')
-        : $gettext('Repeats during block');
-    const endBehavior = hasOption('allow_overrun')
-        ? $gettext('Lets current item finish')
-        : $gettext('Stops at boundary');
-    const timingMode = effectiveTimingMode.value === 'strict'
-        ? $gettext('Strict scheduling')
-        : effectiveTimingMode.value === 'mixed'
-            ? $gettext('Mixed Flexible/Strict scheduling')
-            : $gettext('Flexible scheduling');
+    let days = formatDays(item.days);
+    if (item.recurrence_type === 'monthly' && item.recurrence_monthly_pattern === 'date') {
+        days = item.recurrence_monthly_day
+            ? $gettext('Monthly on the %{day}', {day: ordinal(Number(item.recurrence_monthly_day))})
+            : $gettext('Monthly · pick a day');
+    } else if (item.recurrence_type === 'monthly') {
+        const week = Number(item.recurrence_monthly_week);
+        const weekText = week === 5 ? $gettext('last') : (week >= 1 && week <= 4 ? ordinal(week) : $gettext('(pick week)'));
+        const dayText = Array.isArray(item.days) && item.days.length > 0 ? formatDays(item.days) : $gettext('(pick weekday)');
+        days = $gettext('Monthly on the %{week} %{days}', {week: weekText, days: dayText});
+    }
 
-    const dateRange = first.start_date && first.end_date
-        ? `${first.start_date} – ${first.end_date}`
-        : $gettext('Date range not complete');
+    const until = item.recurrence_end_type === 'after'
+        ? $gettext('%{n} times from %{date}', {n: String(item.recurrence_end_after ?? '?'), date: formatDate(item.start_date)})
+        : `${formatDate(item.start_date)} → ${formatDate(item.end_date)}`;
 
-    const windowText = `${formatDays(first.days)} ${formatTime(first.start_time)} – ${formatTime(first.end_time)}`;
-    const extraWindows = scheduleItems.value.length > 1
-        ? $gettext(' • %{count} schedule windows total', {count: scheduleItems.value.length})
-        : '';
+    return {
+        title: `${days} · ${times}`,
+        detail: `${until} · ${repeatsLabel(item)}`,
+    };
+}));
 
-    return `${windowText} • ${dateRange} • ${startBehavior} • ${repeatBehavior} • ${endBehavior} • ${timingMode}${extraWindows}`;
+const countLabel = computed(() => {
+    const count = scheduleItems.value.length;
+    if (count === 0) {
+        return $gettext('Not scheduled');
+    }
+    return count === 1 ? $gettext('1 time') : $gettext('%{n} times', {n: String(count)});
 });
+
+// The Quick setup preset that matches the playlist's start behavior.
+const activePreset = computed((): 'show' | 'music' | 'news' => {
+    if (!hasOption('interrupt')) {
+        return 'music';
+    }
+    return hasOption('prioritize') ? 'news' : 'show';
+});
+
+const styleLabel = computed(() => ({
+    show: $gettext('Scheduled Show / Program'),
+    music: $gettext('Music Rotation Block'),
+    news: $gettext('News / Alert / Priority'),
+})[activePreset.value]);
+
+const startLabel = computed(() => ({
+    show: $gettext('On time'),
+    music: $gettext('After current song'),
+    news: $gettext('On time, top priority'),
+})[activePreset.value]);
+
+const endLabel = computed(() => (
+    hasOption('allow_overrun') ? $gettext('After current song') : $gettext('At end time')
+));
+
+const timingLabel = computed(() => ({
+    strict: $gettext('Strict'),
+    flexible: $gettext('Flexible'),
+    mixed: $gettext('Mixed'),
+})[effectiveTimingMode.value]);
 </script>
 
 <style scoped>
@@ -406,16 +513,6 @@ const scheduleSummary = computed(() => {
     align-items: flex-start;
 }
 
-.timing-flexible :deep(.choice-grid-start .choice-option:nth-child(1)),
-.timing-flexible :deep(.choice-grid-start .choice-option:nth-child(3)),
-.timing-flexible :deep(.choice-grid-end .choice-option:nth-child(1)),
-.timing-strict :deep(.choice-grid-start .choice-option:nth-child(2)),
-.timing-strict :deep(.choice-grid-end .choice-option:nth-child(2)) {
-    opacity: .42;
-    pointer-events: none;
-    filter: grayscale(.45);
-}
-
 .schedule-overview {
     padding: 1rem 1.1rem;
     border: 1px solid;
@@ -426,8 +523,6 @@ const scheduleSummary = computed(() => {
 .schedule-overview span,
 .step-heading strong,
 .step-heading small,
-.schedule-summary strong,
-.schedule-summary small,
 .preset-copy strong,
 .preset-copy small {
     display: block;
@@ -539,7 +634,6 @@ const scheduleSummary = computed(() => {
     font-size: 1.55rem;
 }
 
-.icon-help,
 .icon-reminder,
 .icon-terms {
     background: rgba(13, 110, 253, .14);
@@ -551,12 +645,6 @@ const scheduleSummary = computed(() => {
     color: #f59e0b;
 }
 
-.side-card-help {
-    border-color: rgba(13, 110, 253, .42);
-    background: rgba(13, 110, 253, .10);
-}
-
-.side-card-help h3,
 .side-card-reminder h3,
 .side-card-terms h3 {
     color: #2688ff;
@@ -640,6 +728,93 @@ const scheduleSummary = computed(() => {
     background: linear-gradient(135deg, #0d6efd, #1688f8);
 }
 
+.preset-button.is-active {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+}
+
+.summary-card {
+    overflow: hidden;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .6rem;
+    background: var(--bs-tertiary-bg);
+}
+
+.summary-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .65rem .9rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.summary-head strong {
+    color: var(--bs-emphasis-color);
+    font-size: .8rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.summary-pill {
+    padding: .15rem .5rem;
+    border-radius: 999px;
+    background: rgba(25, 135, 84, .18);
+    color: #4fd18b;
+    font-size: .7rem;
+    font-weight: 700;
+}
+
+.summary-sec {
+    padding: .55rem .9rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.summary-sec:last-child {
+    border-bottom: 0;
+}
+
+.summary-sec-title {
+    margin-bottom: .3rem;
+    color: var(--bs-secondary-color);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.summary-when {
+    padding: .12rem 0;
+    color: var(--bs-emphasis-color);
+    font-size: .82rem;
+    font-weight: 600;
+}
+
+.summary-when small {
+    display: block;
+    color: var(--bs-secondary-color);
+    font-size: .76rem;
+    font-weight: 400;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .12rem 0;
+    font-size: .82rem;
+}
+
+.summary-row span:first-child {
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+}
+
+.summary-row span:last-child {
+    color: var(--bs-emphasis-color);
+    font-weight: 600;
+    text-align: right;
+}
+
 .preset-news {
     background: linear-gradient(135deg, #7c3aed, #9333ea);
 }
@@ -648,40 +823,9 @@ const scheduleSummary = computed(() => {
     margin-top: .35rem;
 }
 
-.schedule-summary {
-    display: flex;
-    align-items: flex-start;
-    gap: .8rem;
-    padding: 1rem 1.1rem;
-    border: 1px solid rgba(25, 135, 84, .48);
-    border-radius: .7rem;
-    background: rgba(25, 135, 84, .10);
-}
 
-.summary-check {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.6rem;
-    height: 2.6rem;
-    flex: 0 0 2.6rem;
-    border-radius: 50%;
-    background: #198754;
-    color: #fff;
-    font-size: 1.55rem;
-}
 
-.schedule-summary strong {
-    color: #23a866;
-    font-size: 1rem;
-}
 
-.schedule-summary small {
-    margin-top: .2rem;
-    color: var(--bs-secondary-color);
-    font-size: .84rem;
-    line-height: 1.45;
-}
 
 @media (max-width: 1199.98px) {
     .schedule-sidebar {

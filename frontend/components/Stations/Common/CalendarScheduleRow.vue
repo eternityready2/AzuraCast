@@ -6,7 +6,7 @@
         <div class="card-header schedule-card-header d-flex align-items-center">
             <div class="flex-fill d-flex align-items-center gap-2">
                 <h2 class="card-title h5 mb-0">
-                    {{ $gettext('Scheduled Time #%{num}', {num: index + 1}) }}
+                    {{ headerTitle }}
                 </h2>
                 <span
                     v-if="highlightLabel"
@@ -26,389 +26,498 @@
         </div>
 
         <div class="card-body p-3 p-lg-4">
-            <div class="row g-3">
-                <form-group-field
-                    :id="'edit_form_start_time_'+index"
-                    class="col-md-6 col-xl-3"
-                    :field="r$.start_time"
-                    :label="$gettext('Start Time')"
-                >
-                    <template #default="{id, model, fieldClass}">
-                        <playlist-time
-                            :id="id"
-                            v-model="model.$model"
-                            :class="fieldClass"
-                        />
-                    </template>
-                </form-group-field>
+            <!-- Times, duration and dates on one line -->
+            <div class="time-row">
+                <div class="form-group">
+                    <label
+                        class="form-label"
+                        :for="'edit_form_start_time_'+index"
+                    >
+                        {{ $gettext('Start Time') }} <span class="text-danger">*</span>
+                    </label>
+                    <am-pm-time-input
+                        v-model="row.start_time"
+                        :input-id="'edit_form_start_time_'+index"
+                        :aria-label="$gettext('Start Time')"
+                    />
+                </div>
 
-                <form-group-field
-                    :id="'edit_form_end_time_'+index"
-                    class="col-md-6 col-xl-3"
-                    :field="r$.end_time"
-                    :label="$gettext('End Time')"
-                    :description="$gettext('If end is before start, the schedule continues overnight.')"
-                >
-                    <template #default="{id, model, fieldClass}">
-                        <playlist-time
-                            :id="id"
-                            v-model="model.$model"
-                            :class="fieldClass"
-                        />
-                    </template>
-                </form-group-field>
+                <div class="form-group">
+                    <label
+                        class="form-label"
+                        :for="'edit_form_end_time_'+index"
+                    >
+                        {{ $gettext('End Time') }} <span class="text-danger">*</span>
+                    </label>
+                    <am-pm-time-input
+                        v-model="row.end_time"
+                        :input-id="'edit_form_end_time_'+index"
+                        :aria-label="$gettext('End Time')"
+                    />
+                    <div class="field-hint">
+                        {{ $gettext('Overnight is fine: end before start runs past midnight.') }}
+                    </div>
+                </div>
+
+                <div class="form-group duration-group">
+                    <label class="form-label">{{ $gettext('Duration') }}</label>
+                    <div class="input-group input-group-sm">
+                        <input
+                            v-model.number="durationHours"
+                            type="number"
+                            min="0"
+                            max="24"
+                            class="form-control"
+                            placeholder="HH"
+                            :aria-label="$gettext('Hours')"
+                        >
+                        <span class="input-group-text">:</span>
+                        <input
+                            v-model.number="durationMinutes"
+                            type="number"
+                            min="0"
+                            max="59"
+                            class="form-control"
+                            placeholder="MM"
+                            :aria-label="$gettext('Minutes')"
+                        >
+                    </div>
+                    <div class="field-hint">
+                        {{ $gettext('Hours:Minutes') }}
+                    </div>
+                </div>
 
                 <form-group-field
                     :id="'edit_form_start_date_'+index"
-                    class="col-md-6 col-xl-3"
+                    class="date-group"
                     :field="r$.start_date"
                     input-type="date"
-                    :label="$gettext('Start Date')"
-                    :description="$gettext('First date this schedule may run.')"
+                    :label="isOneTime ? $gettext('Date') : $gettext('Start Date')"
                 />
 
                 <form-group-field
+                    v-if="!isOneTime"
                     :id="'edit_form_end_date_'+index"
-                    class="col-md-6 col-xl-3"
+                    class="date-group"
                     :field="r$.end_date"
                     input-type="date"
                     :label="$gettext('End Date')"
-                    :description="$gettext('Last date this schedule may run.')"
                     :required="row.recurrence_end_type !== 'after'"
                     :input-attrs="{ disabled: row.recurrence_end_type === 'after' }"
                 />
+            </div>
 
+            <!-- One time or repeating -->
+            <div class="schedule-mode">
+                <span class="schedule-mode-label">{{ $gettext('Schedule') }}</span>
+                <div
+                    class="seg"
+                    role="group"
+                    :aria-label="$gettext('Schedule')"
+                >
+                    <button
+                        type="button"
+                        :class="{on: isOneTime}"
+                        :aria-pressed="isOneTime"
+                        @click="setOneTime"
+                    >
+                        {{ $gettext('One time') }}
+                    </button>
+                    <button
+                        type="button"
+                        :class="{on: !isOneTime}"
+                        :aria-pressed="!isOneTime"
+                        @click="setRepeating"
+                    >
+                        {{ $gettext('Repeating') }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Row 1: which days | how it repeats -->
+            <div
+                v-if="!isOneTime"
+                class="box-row"
+            >
                 <form-group-multi-check
                     :id="'edit_form_days_'+index"
-                    class="col-12"
+                    class="days-panel"
                     :field="r$.days"
                     :label="$gettext('Days of Week')"
-                    :description="daysOfWeekFieldDescription"
                     :options="dayOptions"
                     :required="!isMonthlyDatePattern"
-                    :disabled="isMonthlyDatePattern"
                     stacked
-                />
+                >
+                    <template #description>
+                        <span class="days-hint">{{ daysHint }}</span>
+                        <span class="quick-pick">
+                            <span>{{ $gettext('Quick pick:') }}</span>
+                            <button
+                                v-for="pick in quickPicks"
+                                :key="pick.label"
+                                type="button"
+                                @click="row.days = [...pick.days]"
+                            >
+                                {{ pick.label }}
+                            </button>
+                        </span>
+                    </template>
+                </form-group-multi-check>
 
-                <div class="col-12">
-                    <hr class="my-1">
+                <div class="panel repeats-panel">
+                    <div class="panel-title">
+                        {{ $gettext('Repeats & ends') }}
+                        <small>{{ $gettext('How often this time repeats and when it stops.') }}</small>
+                    </div>
+                    <div class="repeats-grid">
+                        <div class="cell-repeats">
+                            <div class="mini-label">
+                                {{ $gettext('Repeats') }}
+                            </div>
+                            <div
+                                class="seg seg-sm"
+                                role="group"
+                                :aria-label="$gettext('Repeats')"
+                            >
+                                <button
+                                    v-for="opt in recurrenceTypeOptions"
+                                    :key="opt.value"
+                                    type="button"
+                                    :class="{on: recurrenceType === opt.value}"
+                                    :aria-pressed="recurrenceType === opt.value"
+                                    @click="setRecurrenceType(opt.value)"
+                                >
+                                    {{ opt.text }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="row.recurrence_type === 'custom'"
+                            class="cell-extra-1"
+                        >
+                            <label
+                                class="mini-label"
+                                :for="'edit_form_recurrence_interval_'+index"
+                            >{{ $gettext('Every (weeks)') }}</label>
+                            <input
+                                :id="'edit_form_recurrence_interval_'+index"
+                                v-model.number="row.recurrence_interval"
+                                type="number"
+                                min="1"
+                                max="52"
+                                class="form-control form-control-sm mini-input"
+                            >
+                        </div>
+
+                        <template v-if="row.recurrence_type === 'monthly'">
+                            <div class="cell-extra-1">
+                                <label
+                                    class="mini-label"
+                                    :for="'edit_form_recurrence_monthly_pattern_'+index"
+                                >{{ $gettext('Pattern') }}</label>
+                                <select
+                                    :id="'edit_form_recurrence_monthly_pattern_'+index"
+                                    v-model="row.recurrence_monthly_pattern"
+                                    class="form-select form-select-sm mini-select"
+                                >
+                                    <option
+                                        v-for="opt in recurrenceMonthlyPatternOptions"
+                                        :key="opt.value"
+                                        :value="opt.value"
+                                    >
+                                        {{ opt.text }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div
+                                v-if="row.recurrence_monthly_pattern === 'date'"
+                                class="cell-extra-2"
+                            >
+                                <label
+                                    class="mini-label"
+                                    :for="'edit_form_recurrence_monthly_day_'+index"
+                                >{{ $gettext('Day of month') }}</label>
+                                <input
+                                    :id="'edit_form_recurrence_monthly_day_'+index"
+                                    v-model.number="row.recurrence_monthly_day"
+                                    type="number"
+                                    min="1"
+                                    max="31"
+                                    class="form-control form-control-sm mini-input"
+                                    :class="{'is-invalid': !row.recurrence_monthly_day}"
+                                >
+                            </div>
+
+                            <div
+                                v-if="row.recurrence_monthly_pattern === 'day_of_week'"
+                                class="cell-extra-2"
+                            >
+                                <label
+                                    class="mini-label"
+                                    :for="'edit_form_recurrence_monthly_week_'+index"
+                                >{{ $gettext('Week') }}</label>
+                                <select
+                                    :id="'edit_form_recurrence_monthly_week_'+index"
+                                    v-model.number="row.recurrence_monthly_week"
+                                    class="form-select form-select-sm mini-select"
+                                    :class="{'is-invalid': !row.recurrence_monthly_week}"
+                                >
+                                    <option
+                                        v-for="opt in recurrenceMonthlyWeekOptions"
+                                        :key="opt.value"
+                                        :value="opt.value"
+                                    >
+                                        {{ opt.text }}
+                                    </option>
+                                </select>
+                            </div>
+                        </template>
+
+                        <div class="cell-ends">
+                            <div class="mini-label">
+                                {{ $gettext('Ends') }}
+                            </div>
+                            <div
+                                class="seg seg-sm"
+                                role="group"
+                                :aria-label="$gettext('Ends')"
+                            >
+                                <button
+                                    v-for="opt in recurrenceEndTypeOptions"
+                                    :key="opt.value"
+                                    type="button"
+                                    :class="{on: row.recurrence_end_type === opt.value}"
+                                    :aria-pressed="row.recurrence_end_type === opt.value"
+                                    @click="row.recurrence_end_type = opt.value"
+                                >
+                                    {{ opt.text }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="row.recurrence_end_type === 'after'"
+                            class="cell-ends-extra"
+                        >
+                            <label
+                                class="mini-label"
+                                :for="'edit_form_recurrence_end_after_'+index"
+                            >{{ $gettext('Number of times') }}</label>
+                            <input
+                                :id="'edit_form_recurrence_end_after_'+index"
+                                v-model.number="row.recurrence_end_after"
+                                type="number"
+                                min="1"
+                                class="form-control form-control-sm mini-input"
+                                :class="{'is-invalid': !row.recurrence_end_after}"
+                            >
+                        </div>
+                    </div>
                 </div>
+            </div>
 
-                <form-markup
-                    :id="'edit_form_scheduling_'+index"
-                    class="col-xl-6"
+            <!-- Row 2: options for this time | playlist-wide settings (first card only) -->
+            <div
+                v-if="hasTimeOptions || $slots.aside"
+                class="box-row"
+            >
+                <div
+                    v-if="hasTimeOptions"
+                    class="panel options-panel"
+                    :class="{'is-wide': !$slots.aside}"
                 >
-                    <template #label>
-                        <span class="field-label-with-help">
-                            {{ $gettext('Scheduling Mode') }}
-                            <span
-                                class="info-help"
-                                tabindex="0"
-                                role="img"
-                                :aria-label="schedulingHelp"
-                                :title="schedulingHelp"
-                            >
-                                <icon-ic-info />
-                            </span>
-                        </span>
-                    </template>
+                    <div class="panel-title">
+                        {{ $gettext('Options for this time') }}
+                        <small>{{ optionsSummary }}</small>
+                    </div>
 
-                    <div class="mode-grid scheduling-mode-grid">
-                        <label
-                            class="mode-option mode-option-scheduling"
-                            :class="{
-                                'is-active': schedulingMode === 'flexible',
-                                'is-muted': schedulingMode !== 'flexible'
-                            }"
-                        >
-                            <input
-                                :id="'scheduling_flexible_'+index"
-                                v-model="schedulingMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="flexible"
-                            >
-                            <span class="mode-copy">
-                                <span class="mode-title-row">
+                    <div class="seg-wrap">
+                        <div v-if="shows.timing">
+                            <div class="mini-label">
+                                {{ $gettext('Timing') }}
+                                <span
+                                    class="info-tip"
+                                    tabindex="0"
+                                    role="button"
+                                    :aria-label="$gettext('More info')"
+                                >i<span class="info-tip-body">
                                     <strong>{{ $gettext('Flexible') }}</strong>
-                                    <span class="mode-badge">{{ $gettext('Default') }}</span>
-                                </span>
-                                <small>{{ $gettext('Normal AzuraCast-style schedule timing. This schedule row does not add its own hard-start override.') }}</small>
-                                <ul class="mode-detail-list">
-                                    <li>{{ $gettext('Start Behavior below still decides whether the playlist normally interrupts.') }}</li>
-                                    <li>{{ $gettext('Best for normal music flow and schedules that do not need a special exact-time override.') }}</li>
-                                </ul>
-                            </span>
-                        </label>
-
-                        <label
-                            class="mode-option mode-option-scheduling"
-                            :class="{
-                                'is-active': schedulingMode === 'strict',
-                                'is-muted': schedulingMode !== 'strict'
-                            }"
-                        >
-                            <input
-                                :id="'scheduling_strict_'+index"
-                                v-model="schedulingMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="strict"
-                            >
-                            <span class="mode-copy">
-                                <span class="mode-title-row">
+                                    <span>{{ $gettext('Normal AzuraCast-style schedule timing. This schedule row does not add its own hard-start override.') }}</span>
+                                    <span>• {{ $gettext('Start Behavior still decides whether the playlist normally interrupts.') }}</span>
+                                    <span>• {{ $gettext('Best for normal music flow and schedules that do not need a special exact-time override.') }}</span>
                                     <strong>{{ $gettext('Strict / Exact Time') }}</strong>
-                                    <span class="mode-badge mode-badge-strict">{{ $gettext('Exact') }}</span>
-                                </span>
-                                <small>{{ $gettext('Adds a hard wall-clock start override to this specific schedule row.') }}</small>
-                                <ul class="mode-detail-list">
-                                    <li>{{ $gettext('May cut current audio at the scheduled start if needed.') }}</li>
-                                    <li>{{ $gettext('Overrides a Rotation / wait start for this schedule time only.') }}</li>
-                                </ul>
-                            </span>
-                        </label>
+                                    <span>{{ $gettext('Adds a hard wall-clock start override to this specific schedule row.') }}</span>
+                                    <span>• {{ $gettext('May cut current audio at the scheduled start if needed.') }}</span>
+                                    <span>• {{ $gettext('Overrides a Rotation / wait start for this schedule time only.') }}</span>
+                                </span></span>
+                            </div>
+                            <div
+                                class="seg"
+                                role="group"
+                                :aria-label="$gettext('Timing')"
+                            >
+                                <button
+                                    :id="'scheduling_flexible_'+index"
+                                    type="button"
+                                    :class="{on: !row.strict_start}"
+                                    :aria-pressed="!row.strict_start"
+                                    @click="setTiming('flexible')"
+                                >
+                                    {{ $gettext('Flexible') }}
+                                </button>
+                                <button
+                                    :id="'scheduling_strict_'+index"
+                                    type="button"
+                                    :class="{on: row.strict_start}"
+                                    :aria-pressed="row.strict_start"
+                                    @click="setTiming('strict')"
+                                >
+                                    {{ $gettext('Strict') }}
+                                </button>
+                            </div>
+                            <div class="field-hint">
+                                {{ row.strict_start
+                                    ? $gettext('Starts exactly on time — may cut the current song.')
+                                    : $gettext('Waits for the current song, then starts.') }}
+                            </div>
+                        </div>
+
+                        <div v-if="shows.loop">
+                            <div class="mini-label">
+                                {{ $gettext('If it runs out before the end time') }}
+                                <span
+                                    class="info-tip"
+                                    tabindex="0"
+                                    role="button"
+                                    :aria-label="$gettext('More info')"
+                                >i<span class="info-tip-body">
+                                    <strong>{{ $gettext('Stop — Play once per scheduled block (No Loop)') }}</strong>
+                                    <span>{{ $gettext('Recommended for shows and programs. The playlist will not start a second cycle in this time slot.') }}</span>
+                                    <strong>{{ $gettext('Play it again — Repeat until end of block (Loop)') }}</strong>
+                                    <span>{{ $gettext('Useful for music rotation. The playlist may begin another cycle while this schedule remains active.') }}</span>
+                                </span></span>
+                            </div>
+                            <div
+                                class="seg"
+                                role="group"
+                                :aria-label="$gettext('If it runs out before the end time')"
+                            >
+                                <button
+                                    :id="'scheduling_once_'+index"
+                                    type="button"
+                                    :class="{on: row.loop_once}"
+                                    :aria-pressed="row.loop_once"
+                                    @click="row.loop_once = true"
+                                >
+                                    {{ $gettext('Stop') }}
+                                </button>
+                                <button
+                                    :id="'scheduling_repeat_'+index"
+                                    type="button"
+                                    :class="{on: !row.loop_once}"
+                                    :aria-pressed="!row.loop_once"
+                                    @click="row.loop_once = false"
+                                >
+                                    {{ $gettext('Play it again') }}
+                                </button>
+                            </div>
+                            <div class="field-hint">
+                                {{ row.loop_once
+                                    ? $gettext('Normal rotation fills the rest of the time.')
+                                    : $gettext('Starts the playlist over until the end time.') }}
+                            </div>
+                        </div>
                     </div>
 
-                    <p class="mode-explainer mb-0">
-                        {{ schedulingMode === 'strict'
-                            ? $gettext('Strict is active for this schedule row. Other playlist playback controls remain available and are not removed.')
-                            : $gettext('Flexible is active by default. Strict-only behavior is inactive until you select Strict / Exact Time.')
-                        }}
-                    </p>
-                </form-markup>
-
-                <form-markup
-                    :id="'edit_form_repeat_mode_'+index"
-                    class="col-xl-6"
-                >
-                    <template #label>
-                        <span class="field-label-with-help">
-                            {{ $gettext('Repeat During Scheduled Window') }}
-                            <span
-                                class="info-help"
-                                tabindex="0"
-                                role="img"
-                                :aria-label="repeatHelp"
-                                :title="repeatHelp"
-                            >
-                                <icon-ic-info />
-                            </span>
-                        </span>
-                    </template>
-
-                    <div class="mode-stack">
-                        <label
-                            class="mode-option"
-                            :class="{'is-active': repeatMode === 'once'}"
-                        >
-                            <input
-                                :id="'scheduling_once_'+index"
-                                v-model="repeatMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="once"
-                            >
-                            <span>
-                                <strong>{{ $gettext('Play once per scheduled block — No Loop') }}</strong>
-                                <small>{{ $gettext('Recommended for shows and programs. The playlist will not start a second cycle in this time slot.') }}</small>
-                            </span>
-                        </label>
-
-                        <label
-                            class="mode-option"
-                            :class="{'is-active': repeatMode === 'repeat'}"
-                        >
-                            <input
-                                :id="'scheduling_repeat_'+index"
-                                v-model="repeatMode"
-                                class="form-check-input"
-                                type="radio"
-                                value="repeat"
-                            >
-                            <span>
-                                <strong>{{ $gettext('Repeat until end of block — Loop') }}</strong>
-                                <small>{{ $gettext('Useful for music rotation. The playlist may begin another cycle while this schedule remains active.') }}</small>
-                            </span>
-                        </label>
-                    </div>
-                </form-markup>
-
-                <div class="col-12">
-                    <label class="request-option">
+                    <div
+                        v-if="shows.hold"
+                        class="form-check form-switch option-switch"
+                    >
                         <input
                             :id="'scheduling_prevent_requests_'+index"
                             v-model="row.prevent_requests"
                             class="form-check-input"
                             type="checkbox"
+                            role="switch"
                         >
-                        <span>
-                            <span class="option-title-with-help">
-                                <strong>{{ $gettext('Block listener requests while this schedule is active') }}</strong>
-                                <span
-                                    class="info-help"
-                                    tabindex="0"
-                                    role="img"
-                                    :aria-label="requestHelp"
-                                    :title="requestHelp"
-                                >
-                                    <icon-ic-info />
-                                </span>
-                            </span>
-                            <small>{{ $gettext('Requests remain queued, but the automatic request queue will not interrupt this scheduled window.') }}</small>
-                        </span>
-                    </label>
-                </div>
+                        <label
+                            class="form-check-label"
+                            :for="'scheduling_prevent_requests_'+index"
+                        >
+                            <strong>{{ $gettext('Hold listener requests during this time') }}</strong>
+                            <small>{{ $gettext('Requests wait in the queue until this time ends.') }}</small>
+                        </label>
+                    </div>
 
-                <div class="col-12">
-                    <label class="request-option">
+                    <div
+                        v-if="shows.reset"
+                        class="form-check form-switch option-switch"
+                    >
                         <input
                             :id="'scheduling_reset_queue_'+index"
                             v-model="row.reset_queue_at_start"
                             class="form-check-input"
                             type="checkbox"
+                            role="switch"
                         >
-                        <span>
-                            <strong>{{ $gettext('Reset playlist rotation when this schedule starts') }}</strong>
-                            <small>{{ $gettext('Starts this scheduled block from a fresh internal playlist queue instead of continuing the previous rotation position.') }}</small>
-                        </span>
-                    </label>
-                </div>
+                        <label
+                            class="form-check-label"
+                            :for="'scheduling_reset_queue_'+index"
+                        >
+                            <strong>{{ $gettext('Start from the beginning') }}</strong>
+                            <small>{{ $gettext('Restarts the playlist each time this slot begins, instead of picking up where it left off.') }}</small>
+                        </label>
+                    </div>
 
-                <div
-                    v-if="isPlaylistGroup && row.reset_queue_at_start"
-                    class="col-12"
-                >
-                    <label class="request-option">
+                    <div
+                        v-if="shows.reset && isPlaylistGroup && row.reset_queue_at_start"
+                        class="form-check form-switch option-switch option-switch-nested"
+                    >
                         <input
                             :id="'scheduling_reset_queue_recursive_'+index"
                             v-model="row.reset_queue_recursive"
                             class="form-check-input"
                             type="checkbox"
+                            role="switch"
                         >
-                        <span>
-                            <strong>{{ $gettext('Also reset nested Playlist Group members') }}</strong>
-                            <small>{{ $gettext('Recursively resets nested Playlist Groups and their member playlists when this schedule begins.') }}</small>
-                        </span>
-                    </label>
+                        <label
+                            class="form-check-label"
+                            :for="'scheduling_reset_queue_recursive_'+index"
+                        >
+                            <strong>{{ $gettext('Also restart the playlists inside it') }}</strong>
+                            <small>{{ $gettext('Restarts every playlist in this group too.') }}</small>
+                        </label>
+                    </div>
                 </div>
 
-                <div class="col-12">
-                    <details class="calendar-rules">
-                        <summary>
-                            <span class="option-title-with-help">
-                                <strong>{{ $gettext('Calendar Repeat & Date Rules') }}</strong>
-                                <span
-                                    class="info-help"
-                                    tabindex="0"
-                                    role="img"
-                                    :aria-label="calendarHelp"
-                                    :title="calendarHelp"
-                                >
-                                    <icon-ic-info />
-                                </span>
-                            </span>
-                            <small>{{ $gettext('Weekly, bi-weekly, monthly and limited-occurrence scheduling.') }}</small>
-                        </summary>
-
-                        <div class="row g-3 p-3">
-                            <form-group-select
-                                :id="'edit_form_recurrence_type_'+index"
-                                class="col-md-6 col-xl-4"
-                                :field="r$.recurrence_type"
-                                :label="$gettext('Repeat')"
-                                :description="$gettext('Choose how often this scheduled block repeats.')"
-                                :options="recurrenceTypeOptions"
-                            />
-
-                            <form-group-field
-                                v-if="row.recurrence_type === 'custom'"
-                                :id="'edit_form_recurrence_interval_'+index"
-                                class="col-md-6 col-xl-4"
-                                :field="r$.recurrence_interval"
-                                input-type="number"
-                                min="1"
-                                max="52"
-                                :label="$gettext('Every (weeks)')"
-                                :description="$gettext('Example: 3 means every 3 weeks.')"
-                            />
-
-                            <template v-if="row.recurrence_type === 'monthly'">
-                                <form-group-select
-                                    :id="'edit_form_recurrence_monthly_pattern_'+index"
-                                    class="col-md-6 col-xl-4"
-                                    :field="r$.recurrence_monthly_pattern"
-                                    :label="$gettext('Monthly Pattern')"
-                                    :options="recurrenceMonthlyPatternOptions"
-                                />
-
-                                <form-group-field
-                                    v-if="row.recurrence_monthly_pattern === 'date'"
-                                    :id="'edit_form_recurrence_monthly_day_'+index"
-                                    class="col-md-6 col-xl-4"
-                                    :field="r$.recurrence_monthly_day"
-                                    input-type="number"
-                                    min="1"
-                                    max="31"
-                                    :label="$gettext('Day of Month')"
-                                    :description="$gettext('Day of the month from 1 through 31.')"
-                                />
-
-                                <form-group-select
-                                    v-if="row.recurrence_monthly_pattern === 'day_of_week'"
-                                    :id="'edit_form_recurrence_monthly_week_'+index"
-                                    class="col-md-6 col-xl-4"
-                                    :field="r$.recurrence_monthly_week"
-                                    :label="$gettext('Week of Month')"
-                                    :description="$gettext('Used with the selected day or days of week above.')"
-                                    :options="recurrenceMonthlyWeekOptions"
-                                />
-                            </template>
-
-                            <form-group-select
-                                :id="'edit_form_recurrence_end_type_'+index"
-                                class="col-md-6 col-xl-4"
-                                :field="r$.recurrence_end_type"
-                                :label="$gettext('Stop Recurrence')"
-                                :description="$gettext('Use the End Date above or stop after a set number of occurrences.')"
-                                :options="recurrenceEndTypeOptions"
-                            />
-
-                            <form-group-field
-                                v-if="row.recurrence_end_type === 'after'"
-                                :id="'edit_form_recurrence_end_after_'+index"
-                                class="col-md-6 col-xl-4"
-                                :field="r$.recurrence_end_after"
-                                input-type="number"
-                                min="1"
-                                :label="$gettext('Stop After (occurrences)')"
-                            />
-                        </div>
-                    </details>
-                </div>
+                <slot name="aside" />
             </div>
         </div>
     </section>
 </template>
 
 <script setup lang="ts">
-// New Schedule "Scheduled Time" card, used by the calendar event editor.
-import PlaylistTime from "~/components/Common/TimeCode.vue";
+// "Scheduled Time" card of the calendar event editor. Shows only the options
+// the chosen source actually uses (see the backend AutoDJ schedulers).
 import FormGroupField from "~/components/Form/FormGroupField.vue";
-import {applyIf, minLength, minValue, required, requiredIf, withMessage} from "@regle/rules";
-import {computed, watch} from "vue";
-import {useTranslate} from "~/vendor/gettext";
-import FormMarkup from "~/components/Form/FormMarkup.vue";
+import AmPmTimeInput from "~/components/Common/AmPmTimeInput.vue";
 import FormGroupMultiCheck from "~/components/Form/FormGroupMultiCheck.vue";
-import FormGroupSelect from "~/components/Form/FormGroupSelect.vue";
+import {applyIf, minLength, minValue, required, requiredIf, withMessage} from "@regle/rules";
+import {computed, ref, watch} from "vue";
+import {DateTime} from "luxon";
+import {useTranslate} from "~/vendor/gettext";
 import {useAppScopedRegle} from "~/vendor/regle.ts";
-import IconIcInfo from "~icons/ic/baseline-info";
 import IconIcRemove from "~icons/ic/baseline-remove";
 
+export type CalendarSource = 'playlist' | 'web_stream' | 'smart_block' | 'clock_wheel';
+
 interface PlaylistScheduleRow {
-    start_time: number,
-    end_time: number,
-    start_date: string,
-    end_date: string,
+    start_time: number | null,
+    end_time: number | null,
+    start_date: string | null,
+    end_date: string | null,
     days: number[],
     loop_once: boolean,
     prevent_requests: boolean,
@@ -428,19 +537,161 @@ interface PlaylistScheduleRow {
 
 const props = defineProps<{
     index: number,
+    source?: CalendarSource,
     isPlaylistGroup?: boolean,
     // Set on the window the calendar event was opened from ("This event" / "New").
     highlightLabel?: string | null,
 }>();
 
-const {index, isPlaylistGroup = false} = props;
+const {index} = props;
 
 const row = defineModel<PlaylistScheduleRow>('row', {required: true});
 
 const emit = defineEmits<{
-    (e: 'remove'): void
+    (e: 'remove'): void,
+    (e: 'timing', mode: 'flexible' | 'strict'): void,
 }>();
 
+const {$gettext} = useTranslate();
+
+// Which per-time options the source really uses:
+// - Hold requests: playlist schedules only (QueueBuilder reads playlist rows).
+// - Start from the beginning: song playlists and playlist groups only.
+// - If it runs out (loop_once): song playlists; forced off for clock wheels.
+// - Timing: playlists, web streams and clock wheels (clock_wheel_mode).
+// Smart Blocks use only the time window.
+const shows = computed(() => {
+    const source = props.source ?? 'playlist';
+    return {
+        timing: source !== 'smart_block',
+        loop: source === 'playlist',
+        hold: source === 'playlist' || source === 'web_stream',
+        reset: source === 'playlist',
+    };
+});
+
+const hasTimeOptions = computed(() => Object.values(shows.value).some(Boolean));
+
+const optionsSummary = computed(() => {
+    const parts = [];
+    if (shows.value.timing) {
+        parts.push($gettext('Timing'));
+    }
+    if (shows.value.loop) {
+        parts.push($gettext('if it runs out early'));
+    }
+    if (shows.value.hold) {
+        parts.push($gettext('listener requests'));
+    }
+    if (shows.value.reset) {
+        parts.push($gettext('start from the beginning'));
+    }
+    return parts.join(', ');
+});
+
+const setTiming = (mode: 'flexible' | 'strict') => {
+    row.value.strict_start = mode === 'strict';
+    emit('timing', mode);
+};
+
+// ── Times and duration ──────────────────────────────────────────────────────
+const toMinutes = (code: number | null): number | null => {
+    if (code === null || code === undefined) {
+        return null;
+    }
+    const n = Number(code);
+    return Math.floor(n / 100) * 60 + (n % 100);
+};
+
+const toTimeCode = (minutes: number): number => {
+    const m = ((minutes % 1440) + 1440) % 1440;
+    return Math.floor(m / 60) * 100 + (m % 60);
+};
+
+const durationTotal = computed((): number | null => {
+    const start = toMinutes(row.value.start_time);
+    const end = toMinutes(row.value.end_time);
+    if (start === null || end === null) {
+        return null;
+    }
+    let total = end - start;
+    if (total <= 0) {
+        total += 1440;
+    }
+    return total;
+});
+
+const setDuration = (hours: number, minutes: number) => {
+    const start = toMinutes(row.value.start_time);
+    const total = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+    if (start !== null && total > 0) {
+        row.value.end_time = toTimeCode(start + total);
+    }
+};
+
+const durationHours = computed({
+    get: () => durationTotal.value === null ? null : Math.floor(durationTotal.value / 60),
+    set: (value) => setDuration(Number(value), durationMinutes.value ?? 0),
+});
+
+const durationMinutes = computed({
+    get: () => durationTotal.value === null ? null : durationTotal.value % 60,
+    set: (value) => setDuration(durationHours.value ?? 0, Number(value)),
+});
+
+// ── One time / repeating ────────────────────────────────────────────────────
+// A one-time window is a single-day date range; the weekday is that date's.
+const weekdayOf = (date: string | null): number | null => {
+    if (!date) {
+        return null;
+    }
+    const weekday = DateTime.fromISO(date).weekday;
+    return weekday || null;
+};
+
+const isOneTime = ref(!!row.value.start_date && row.value.start_date === row.value.end_date);
+let savedEndDate: string | null = null;
+let savedDays: number[] = [];
+
+const applyOneTime = () => {
+    row.value.end_date = row.value.start_date;
+    row.value.recurrence_type = 'weekly';
+    row.value.recurrence_interval = 1;
+    row.value.recurrence_end_type = 'never';
+    const weekday = weekdayOf(row.value.start_date);
+    row.value.days = weekday ? [weekday] : [];
+};
+
+const setOneTime = () => {
+    if (isOneTime.value) {
+        return;
+    }
+    savedEndDate = row.value.end_date;
+    savedDays = [...row.value.days];
+    isOneTime.value = true;
+    applyOneTime();
+};
+
+const setRepeating = () => {
+    if (!isOneTime.value) {
+        return;
+    }
+    isOneTime.value = false;
+    if (savedEndDate && savedEndDate !== row.value.start_date) {
+        row.value.end_date = savedEndDate;
+    }
+    if (savedDays.length > 0) {
+        row.value.days = [...savedDays];
+    }
+};
+
+watch(() => row.value.start_date, () => {
+    if (isOneTime.value) {
+        applyOneTime();
+    }
+});
+
+// ── Days ────────────────────────────────────────────────────────────────────
 const isMonthlyDatePattern = computed(
     () => row.value.recurrence_type === 'monthly' && row.value.recurrence_monthly_pattern === 'date'
 );
@@ -451,36 +702,72 @@ const isMonthlyDayOfWeekPattern = computed(
 
 const requiresDaysOfWeek = computed(() => !isMonthlyDatePattern.value);
 
-const {$gettext} = useTranslate();
+const dayOptions = [
+    {value: 1, text: $gettext('Monday')},
+    {value: 2, text: $gettext('Tuesday')},
+    {value: 3, text: $gettext('Wednesday')},
+    {value: 4, text: $gettext('Thursday')},
+    {value: 5, text: $gettext('Friday')},
+    {value: 6, text: $gettext('Saturday')},
+    {value: 7, text: $gettext('Sunday')}
+];
 
-const schedulingHelp = $gettext('Flexible is the normal/default schedule behavior. Strict / Exact Time adds a per-schedule hard-start override. Playlist-wide Start Behavior and End Behavior remain separate controls below.');
-const repeatHelp = $gettext('Play once prevents a second playlist cycle inside this scheduled window. Repeat allows another cycle while the same window is still active.');
-const requestHelp = $gettext('This blocks automatic listener-request playback only while this schedule is active. Requests remain queued for later.');
-const calendarHelp = $gettext('These rules control which calendar occurrences of this scheduled time are active. They do not change Flexible versus Strict playback behavior.');
+const dayShort: Record<number, string> = {
+    1: $gettext('Mon'), 2: $gettext('Tue'), 3: $gettext('Wed'), 4: $gettext('Thu'),
+    5: $gettext('Fri'), 6: $gettext('Sat'), 7: $gettext('Sun'),
+};
 
-const schedulingMode = computed({
-    get: (): 'flexible' | 'strict' => row.value.strict_start ? 'strict' : 'flexible',
-    set: (mode: 'flexible' | 'strict') => {
-        row.value.strict_start = mode === 'strict';
-    },
-});
+const quickPicks = [
+    {label: $gettext('Weekdays'), days: [1, 2, 3, 4, 5]},
+    {label: $gettext('Weekends'), days: [6, 7]},
+    {label: $gettext('Every day'), days: [1, 2, 3, 4, 5, 6, 7]},
+    {label: $gettext('Clear'), days: []},
+];
 
-const repeatMode = computed({
-    get: (): 'once' | 'repeat' => row.value.loop_once ? 'once' : 'repeat',
-    set: (mode: 'once' | 'repeat') => {
-        row.value.loop_once = mode === 'once';
-    },
-});
 
-const daysOfWeekFieldDescription = computed(() => {
+const daysHint = computed(() => {
     if (isMonthlyDatePattern.value) {
         return $gettext('Not used for a monthly "day of month" schedule.');
     }
-    if (isMonthlyDayOfWeekPattern.value) {
-        return $gettext('For a monthly weekday pattern, select the weekday or weekdays here.');
-    }
-    return $gettext('Select at least one day of the week.');
+    return isMonthlyDayOfWeekPattern.value
+        ? $gettext('Pick the weekday for this pattern.')
+        : $gettext('Select at least one day of the week.');
 });
+
+// ── Repeats & ends ──────────────────────────────────────────────────────────
+const recurrenceType = computed(() => row.value.recurrence_type ?? 'weekly');
+
+const setRecurrenceType = (type: string) => {
+    row.value.recurrence_type = type;
+    if (type === 'monthly' && !row.value.recurrence_monthly_pattern) {
+        row.value.recurrence_monthly_pattern = 'date';
+    }
+};
+
+const recurrenceTypeOptions = [
+    {value: 'weekly', text: $gettext('Weekly')},
+    {value: 'biweekly', text: $gettext('Every 2 weeks')},
+    {value: 'monthly', text: $gettext('Monthly')},
+    {value: 'custom', text: $gettext('Custom')}
+];
+
+const recurrenceMonthlyPatternOptions = [
+    {value: 'date', text: $gettext('Day of month (15th)')},
+    {value: 'day_of_week', text: $gettext('Weekday (3rd Mon)')}
+];
+
+const recurrenceMonthlyWeekOptions = [
+    {value: 1, text: $gettext('1st')},
+    {value: 2, text: $gettext('2nd')},
+    {value: 3, text: $gettext('3rd')},
+    {value: 4, text: $gettext('4th')},
+    {value: 5, text: $gettext('Last')}
+];
+
+const recurrenceEndTypeOptions = [
+    {value: 'never', text: $gettext('On end date')},
+    {value: 'after', text: $gettext('After a number of times')}
+];
 
 const {r$} = useAppScopedRegle(
     row,
@@ -506,11 +793,15 @@ const {r$} = useAppScopedRegle(
                 () => row.value.recurrence_type === 'monthly' && row.value.recurrence_monthly_pattern === 'date'
             ),
         },
+        recurrence_monthly_week: {
+            required: requiredIf(() => isMonthlyDayOfWeekPattern.value),
+        },
     },
     {
         namespace: 'stations-playlists'
     }
 );
+
 
 watch(
     () => row.value.reset_queue_at_start,
@@ -532,49 +823,72 @@ watch(
     }
 );
 
-watch(
-    () => [row.value.recurrence_type, row.value.recurrence_monthly_pattern] as const,
-    () => {
-        if (isMonthlyDatePattern.value) {
-            row.value.days = [];
-        }
+// A monthly "day of month" schedule ignores weekdays. They stay as the user
+// set them here; the save leaves them out (CreateEventModal newSchedulePayload).
+
+// ── Card title ──────────────────────────────────────────────────────────────
+const formatTime = (code: number | null): string => {
+    const m = toMinutes(code);
+    if (m === null) {
+        return '—';
     }
-);
+    const h = Math.floor(m / 60);
+    return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+};
 
-const dayOptions = [
-    {value: 1, text: $gettext('Monday')},
-    {value: 2, text: $gettext('Tuesday')},
-    {value: 3, text: $gettext('Wednesday')},
-    {value: 4, text: $gettext('Thursday')},
-    {value: 5, text: $gettext('Friday')},
-    {value: 6, text: $gettext('Saturday')},
-    {value: 7, text: $gettext('Sunday')}
-];
+const ordinal = (n: number): string => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+};
 
-const recurrenceTypeOptions = [
-    {value: 'weekly', text: $gettext('Weekly (default)')},
-    {value: 'biweekly', text: $gettext('Bi-weekly (every 2 weeks)')},
-    {value: 'monthly', text: $gettext('Monthly')},
-    {value: 'custom', text: $gettext('Custom (every N weeks)')}
-];
+const formatDayList = (days: number[]): string => {
+    const key = [...days].sort((a, b) => a - b).join(',');
+    if (key === '1,2,3,4,5') {
+        return $gettext('Mon–Fri');
+    }
+    if (key === '6,7') {
+        return $gettext('Sat–Sun');
+    }
+    if (days.length === 7) {
+        return $gettext('Every day');
+    }
+    if (days.length === 0) {
+        return $gettext('No days set');
+    }
+    return [...days].sort((a, b) => a - b)
+        .map((d) => dayShort[d] ?? '')
+        .join(', ');
+};
 
-const recurrenceMonthlyPatternOptions = [
-    {value: 'date', text: $gettext('On day of month (e.g. 15th)')},
-    {value: 'day_of_week', text: $gettext('Specific day of week (e.g. 3rd Monday)')}
-];
+const headerTitle = computed(() => {
+    const times = `${formatTime(row.value.start_time)} – ${formatTime(row.value.end_time)}`;
 
-const recurrenceMonthlyWeekOptions = [
-    {value: 1, text: $gettext('1st')},
-    {value: 2, text: $gettext('2nd')},
-    {value: 3, text: $gettext('3rd')},
-    {value: 4, text: $gettext('4th')},
-    {value: 5, text: $gettext('Last')}
-];
+    if (isOneTime.value) {
+        const date = row.value.start_date
+            ? DateTime.fromISO(row.value.start_date).toFormat('ccc, LLL d, yyyy')
+            : '—';
+        return `${$gettext('One time')} · ${date} · ${times}`;
+    }
 
-const recurrenceEndTypeOptions = [
-    {value: 'never', text: $gettext('Never (use End Date above)')},
-    {value: 'after', text: $gettext('After number of occurrences')}
-];
+    if (row.value.recurrence_type === 'monthly') {
+        if (isMonthlyDatePattern.value) {
+            const day = Number(row.value.recurrence_monthly_day) || 0;
+            const when = day
+                ? $gettext('Monthly on the %{day}', {day: ordinal(day)})
+                : $gettext('Monthly · pick a day');
+            return `${when} · ${times}`;
+        }
+        const week = recurrenceMonthlyWeekOptions.find((o) => o.value === Number(row.value.recurrence_monthly_week));
+        const when = $gettext('Monthly on the %{week} %{days}', {
+            week: week ? week.text.toLowerCase() : $gettext('(pick week)'),
+            days: row.value.days.length ? formatDayList(row.value.days) : $gettext('(pick weekday)'),
+        });
+        return `${when} · ${times}`;
+    }
+
+    return `${formatDayList(row.value.days)} · ${times}`;
+});
 
 const doRemove = () => {
     emit('remove');
@@ -583,15 +897,22 @@ const doRemove = () => {
 
 <style scoped>
 .schedule-card {
-    overflow: hidden;
+    border: 1px solid rgba(13, 110, 253, .45);
     border-radius: .75rem;
 }
 
 .schedule-card-header {
     padding: .8rem 1rem;
-    border-bottom: 0;
-    background: linear-gradient(90deg, #1688f8, #0d6efd);
-    color: #fff;
+    border-bottom: 1px solid rgba(13, 110, 253, .45);
+    border-top-left-radius: .7rem;
+    border-top-right-radius: .7rem;
+    background: rgba(13, 110, 253, .14);
+    color: #cfe2ff;
+}
+
+.schedule-card-header .btn {
+    color: #cfe2ff;
+    border-color: rgba(207, 226, 255, .5);
 }
 
 .schedule-card.is-this-event {
@@ -612,153 +933,412 @@ const doRemove = () => {
     text-transform: uppercase;
 }
 
-.mode-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: .65rem;
-}
-
-.mode-stack {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: .65rem;
-}
-
-.mode-option,
-.request-option {
+/* Times, duration and dates */
+.time-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
-    gap: .7rem;
-    padding: .8rem .85rem;
+    column-gap: 1.5rem;
+    row-gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.time-row > .form-group,
+.time-row > :deep(.form-group) {
+    flex: 0 0 auto;
+    width: auto;
     margin: 0;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .65rem;
-    background: var(--bs-tertiary-bg);
-    cursor: pointer;
-    transition: opacity .15s ease, border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
-.mode-option.is-active {
-    border-color: #2688ff;
-    background: rgba(38, 136, 255, .08);
-    box-shadow: 0 0 0 .1rem rgba(38, 136, 255, .1);
+/* The "11:00 AM" readout sits under the pickers without widening the field. */
+.time-row :deep(.am-pm-time-segments) {
+    position: relative;
+    width: max-content;
+    padding-bottom: 1.55rem;
 }
 
-.mode-option-scheduling.is-muted {
-    opacity: .48;
-    background: rgba(108, 117, 125, .06);
+.time-row :deep(.am-pm-time-segments > .d-flex) {
+    flex-wrap: nowrap !important;
 }
 
-.mode-option-scheduling.is-muted:hover,
-.mode-option-scheduling.is-muted:focus-within {
-    opacity: .82;
+.time-row :deep(.am-pm-time-segments__preview) {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    white-space: nowrap;
 }
 
-.mode-option input,
-.request-option input {
-    margin-top: .2rem;
+.time-row :deep(.date-group input[type=date]) {
+    width: 9.5rem;
 }
 
-.mode-copy {
+.time-row :deep(.date-group .form-text) {
+    display: none;
+}
+
+.time-row :deep(.date-group label .text-danger) {
+    margin-left: .25em;
+}
+
+.duration-group .input-group {
+    width: 8.5rem;
+}
+
+.duration-group input {
+    padding-left: .5rem;
+    padding-right: .25rem;
+}
+
+.field-hint {
+    max-width: 15rem;
+    margin-top: .3rem;
+    color: var(--bs-secondary-color);
+    font-size: .78rem;
+}
+
+.field-error {
+    margin-top: .3rem;
+    color: var(--bs-form-invalid-color);
+    font-size: .78rem;
+}
+
+/* One time / Repeating */
+.schedule-mode {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.schedule-mode-label {
+    min-width: 6.5rem;
+    font-weight: 600;
+}
+
+/* Segmented buttons */
+.seg {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid #0d6efd;
+    border-radius: .45rem;
+}
+
+.seg button {
+    padding: .35rem .9rem;
+    border: 0;
+    background: transparent;
+    color: #6ea8fe;
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.seg button.on {
+    background: #0d6efd;
+    color: #fff;
+}
+
+.seg-sm button {
+    height: 26.6px;
+    padding: 0 8px;
+    font-size: 11.2px;
+}
+
+/* Two boxes side by side, same columns on every row */
+.box-row {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 1rem;
+    align-items: stretch;
+    margin-bottom: 1rem;
+}
+
+.box-row > :only-child,
+.options-panel.is-wide {
+    grid-column: 1 / -1;
+}
+
+.panel {
+    min-width: 0;
+    padding: 7.7px 9.1px;
+    border: 1px solid rgb(108, 117, 125);
+    border-radius: 9.1px;
+    background: rgb(43, 48, 53);
+}
+
+.panel-title {
+    margin-bottom: 6px;
+    color: #fff;
+    font-size: 13.4px;
+    font-weight: 700;
+}
+
+.panel-title small {
+    display: block;
+    color: var(--bs-secondary-color);
+    font-size: 11.2px;
+    font-weight: 400;
+}
+
+.repeats-panel .panel-title small {
+    display: inline;
+    margin-left: .5rem;
+}
+
+.mini-label {
+    display: block;
+    margin: 0 0 4.9px;
+    color: #fff;
+    font-size: 11.2px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+/* Days: the shared weekday pills, stretched to fill the box */
+.days-panel {
+    min-width: 0;
+    margin: 0 !important;
+    padding-top: 4.7px !important;
+    padding-bottom: 19px !important;
+}
+
+.days-panel :deep(> label),
+.days-panel :deep(.form-label) {
+    margin-bottom: 6px;
+    color: #fff;
+    font-size: 13.4px;
+    font-weight: 700;
+}
+
+.days-panel :deep(.form-check) {
+    flex: 1 1 0 !important;
     min-width: 0;
 }
 
-.mode-title-row,
-.option-title-with-help,
-.field-label-with-help {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
+.days-panel :deep(.form-check-label) {
+    width: 100% !important;
+    min-width: 0 !important;
 }
 
-.mode-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: .08rem .42rem;
-    border-radius: 999px;
-    background: rgba(13, 110, 253, .14);
-    color: #2688ff;
-    font-size: .65rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .02em;
+.days-panel :deep(> div) {
+    flex-wrap: nowrap !important;
+    gap: 5.88px !important;
 }
 
-.mode-badge-strict {
-    background: rgba(220, 53, 69, .14);
-    color: var(--bs-danger-text-emphasis);
-}
-
-.mode-detail-list {
-    margin: .5rem 0 0;
-    padding-left: 1.1rem;
+.days-panel :deep(.form-text) {
+    display: block;
+    margin-top: calc(.3rem + 3px);
     color: var(--bs-secondary-color);
-    font-size: .76rem;
-    line-height: 1.4;
+    font-size: .78rem;
 }
 
-.mode-explainer {
-    margin-top: .6rem;
-    color: var(--bs-secondary-color);
-    font-size: .76rem;
-    line-height: 1.4;
+.days-panel :deep(.invalid-feedback ~ .form-text .days-hint),
+.days-panel :deep(.invalid-feedback.d-block ~ .form-text .days-hint) {
+    display: none;
 }
 
-.info-help {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    flex: 0 0 1.25rem;
-    border-radius: 50%;
-    color: #2688ff;
-    cursor: help;
-    font-size: 1rem;
-    line-height: 1;
-}
-
-.info-help:focus {
-    outline: 2px solid rgba(38, 136, 255, .45);
-    outline-offset: 2px;
-}
-
-.mode-option strong,
-.mode-option small,
-.request-option strong,
-.request-option small,
-.calendar-rules summary strong,
-.calendar-rules summary small {
+.days-hint {
     display: block;
 }
 
-.mode-option strong,
-.request-option strong {
-    font-size: .86rem;
-}
 
-.mode-option small,
-.request-option small,
-.calendar-rules summary small {
-    margin-top: .2rem;
+
+.quick-pick {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    margin-top: 10px;
     color: var(--bs-secondary-color);
-    line-height: 1.4;
+    font-size: .8rem;
 }
 
-.calendar-rules {
+.quick-pick span {
+    margin-right: .25rem;
+}
+
+.quick-pick button {
+    padding: .2rem .35rem;
+    border: 0;
+    background: transparent;
+    color: #6ea8fe;
+    font-size: .8rem;
+    font-weight: 600;
+}
+
+.quick-pick button:hover {
+    text-decoration: underline;
+}
+
+/* Repeats & ends: buttons on the left, their extra boxes inline on the right */
+.repeats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    column-gap: .5rem;
+    row-gap: .45rem;
+    align-items: end;
+}
+
+.cell-repeats {
+    grid-row: 1;
+    grid-column: 1;
+}
+
+.cell-extra-1 {
+    grid-row: 1;
+    grid-column: 2;
+}
+
+.cell-extra-2 {
+    grid-row: 1;
+    grid-column: 3;
+}
+
+.cell-ends {
+    grid-row: 2;
+    grid-column: 1;
+}
+
+.cell-ends-extra {
+    grid-row: 2;
+    grid-column: 2;
+}
+
+.mini-input,
+.mini-select {
+    height: 26.6px;
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 11.2px;
+}
+
+/* Missing value: red border only. Bootstrap's warning icon would fill these
+   small boxes and hide the number. */
+.mini-input.is-invalid,
+.mini-select.is-invalid {
+    border-color: var(--bs-form-invalid-border-color);
+    box-shadow: none;
+}
+
+.mini-input.is-invalid {
+    padding-right: .4rem;
+    background-image: none;
+}
+
+.mini-select.is-invalid {
+    padding-right: 1.75rem;
+    background-image: var(--bs-form-select-bg-img);
+    background-position: right .45rem center;
+    background-size: 16px 12px;
+}
+
+.mini-input {
+    width: 4.25rem;
+    padding-left: .5rem;
+    padding-right: .4rem;
+}
+
+.mini-select {
+    width: auto;
+    padding-left: .5rem;
+    padding-right: 1.75rem;
+    background-position: right .45rem center;
+}
+
+/* Options for this time */
+.seg-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 2rem;
+    margin-bottom: .6rem;
+}
+
+.option-switch {
+    margin: .4rem 0;
+    padding-left: 2.75em;
+}
+
+.option-switch-nested {
+    margin-left: 1.5rem;
+}
+
+.option-switch strong,
+.option-switch small {
+    display: block;
+}
+
+.option-switch strong {
+    font-size: .84rem;
+}
+
+.option-switch small {
+    color: var(--bs-secondary-color);
+    font-size: .78rem;
+}
+
+/* "i" icon with a hover / focus explanation */
+.info-tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05rem;
+    height: 1.05rem;
+    margin-left: .35rem;
+    border-radius: 50%;
+    background: #0d6efd;
+    color: #fff;
+    font-size: .68rem;
+    font-style: normal;
+    font-weight: 700;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.info-tip-body {
+    position: absolute;
+    top: 1.5rem;
+    left: 0;
+    z-index: 50;
+    display: none;
+    width: 24rem;
+    max-width: 80vw;
+    padding: .75rem .85rem;
     border: 1px solid var(--bs-border-color);
-    border-radius: .65rem;
-    background: var(--bs-tertiary-bg);
-    overflow: hidden;
+    border-radius: .5rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 .5rem 1.25rem rgba(0, 0, 0, .35);
+    color: var(--bs-body-color);
+    font-size: .8rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    white-space: normal;
+    cursor: default;
 }
 
-.calendar-rules summary {
-    padding: .8rem .9rem;
-    cursor: pointer;
+.info-tip:hover .info-tip-body,
+.info-tip:focus .info-tip-body,
+.info-tip:focus-within .info-tip-body {
+    display: block;
+}
+
+.info-tip-body strong,
+.info-tip-body span {
+    display: block;
+}
+
+.info-tip-body strong {
+    margin-top: .35rem;
+    color: var(--bs-emphasis-color);
+}
+
+.info-tip-body strong:first-child {
+    margin-top: 0;
 }
 
 @media (max-width: 991.98px) {
-    .mode-grid {
+    .box-row {
         grid-template-columns: 1fr;
     }
 }

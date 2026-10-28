@@ -77,7 +77,7 @@
         </div>
 
         <div
-            v-if="isPlaylistSchedule && (!useNewSchedule || nsTargetRow)"
+            v-if="isPlaylistSchedule && !useNewSchedule"
             class="col-12 mb-3"
         >
             <label class="request-option request-option-warning">
@@ -414,6 +414,7 @@
             <calendar-schedule-editor
                 v-else-if="usePlaylistEditor"
                 v-model:schedule-items="nsItems"
+                :source="form.source === 'web_stream' ? 'web_stream' : 'playlist'"
                 :highlight-row="nsTargetRow"
                 :highlight-label="nsHighlightLabel"
             />
@@ -435,14 +436,6 @@
                 </div>
 
                 <template v-else>
-                    <div class="schedule-summary mb-4">
-                        <span class="summary-check"><icon-ic-check-circle /></span>
-                        <span>
-                            <strong>{{ $gettext('Schedule Summary') }}</strong>
-                            <small>{{ rowEditorSummary }}</small>
-                        </span>
-                    </div>
-
                     <div class="step-heading step-heading-source mb-3">
                         <span class="step-icon step-icon-source"><icon-ic-event /></span>
                         <span>
@@ -456,6 +449,7 @@
                         :key="index"
                         v-model:row="nsItems[index]"
                         :index="index"
+                        :source="form.source"
                         :highlight-label="nsTargetRow && row === nsTargetRow ? nsHighlightLabel : null"
                         @remove="nsItems.splice(index, 1)"
                     />
@@ -513,7 +507,6 @@ import IconIcEvent from '~icons/ic/baseline-event';
 import CalendarScheduleEditor from '~/components/Stations/Common/CalendarScheduleEditor.vue';
 import PlaylistsFormScheduleRow from '~/components/Stations/Common/CalendarScheduleRow.vue';
 import IconIcAdd from '~icons/ic/baseline-add';
-import IconIcCheckCircle from '~icons/ic/baseline-check-circle';
 import {useStationsPlaylistsForm} from '~/components/Stations/Playlists/Form/form.ts';
 import mergeExisting from '~/functions/mergeExisting.ts';
 import {storeToRefs} from 'pinia';
@@ -785,37 +778,6 @@ const addRowEditorItem = () => {
     });
 };
 
-const formatTimeCode = (timeCode: unknown): string => {
-    if (timeCode === null || timeCode === undefined || timeCode === '') {
-        return '—';
-    }
-    const padded = String(timeCode).padStart(4, '0');
-    const hour24 = Number(padded.slice(0, 2));
-    const hour12 = hour24 % 12 || 12;
-    return `${hour12}:${padded.slice(2, 4)} ${hour24 >= 12 ? 'PM' : 'AM'}`;
-};
-
-const rowEditorSummary = computed(() => {
-    const first = nsItems.value[0];
-    if (!first) {
-        return $gettext('No scheduled window is configured.');
-    }
-    const dayLabels: Record<number, string> = {
-        1: $gettext('Mon'), 2: $gettext('Tue'), 3: $gettext('Wed'), 4: $gettext('Thu'),
-        5: $gettext('Fri'), 6: $gettext('Sat'), 7: $gettext('Sun'),
-    };
-    const days = Array.isArray(first.days) && first.days.length > 0
-        ? first.days.map((d: number) => dayLabels[d] ?? String(d)).join(', ')
-        : $gettext('Any day');
-    const dates = first.start_date && first.end_date
-        ? `${first.start_date} – ${first.end_date}`
-        : $gettext('Date range not complete');
-    const mode = first.strict_start ? $gettext('Strict scheduling') : $gettext('Flexible scheduling');
-    const extra = nsItems.value.length > 1
-        ? $gettext(' • %{count} schedule windows total', {count: nsItems.value.length})
-        : '';
-    return `${days} ${formatTimeCode(first.start_time)} – ${formatTimeCode(first.end_time)} • ${dates} • ${mode}${extra}`;
-});
 
 const emergencyOverride = computed({
     get: () => useNewSchedule.value
@@ -1170,6 +1132,27 @@ const endDateSameAsStart = computed(() =>
     && scheduleRow.value.end_date <= scheduleRow.value.start_date
 );
 
+// The same recurrence rules the server checks before saving, so Save stays
+// off instead of failing.
+const isRecurrenceComplete = (row: Record<string, any>): boolean => {
+    const days = Array.isArray(row.days) ? row.days : [];
+    if (row.recurrence_end_type === 'after' && !(Number(row.recurrence_end_after) >= 1)) {
+        return false;
+    }
+    if (row.recurrence_end_type !== 'after' && !row.end_date) {
+        return false;
+    }
+    if (row.recurrence_type === 'monthly') {
+        if (row.recurrence_monthly_pattern === 'date') {
+            const day = Number(row.recurrence_monthly_day);
+            return day >= 1 && day <= 31;
+        }
+        const week = Number(row.recurrence_monthly_week);
+        return week >= 1 && week <= 5 && days.length > 0;
+    }
+    return days.length > 0;
+};
+
 const isFormValid = computed(() => {
     if (form.value.entity_id === null) {
         return false;
@@ -1179,6 +1162,7 @@ const isFormValid = computed(() => {
             row.start_time !== null && row.start_time !== undefined && row.start_time !== ''
             && row.end_time !== null && row.end_time !== undefined && row.end_time !== ''
             && !!row.start_date
+            && isRecurrenceComplete(row)
         );
     }
     return !r$.$invalid && !endDateSameAsStart.value;
@@ -1939,9 +1923,7 @@ defineExpose({open, openForEdit, openScopedForCreate, openScopedForEdit, openFor
 }
 
 .schedule-overview strong,
-.schedule-overview span,
-.schedule-summary strong,
-.schedule-summary small {
+.schedule-overview span {
     display: block;
 }
 
@@ -1972,40 +1954,9 @@ defineExpose({open, openForEdit, openScopedForCreate, openScopedForEdit, openFor
     font-weight: 600;
 }
 
-.schedule-summary {
-    display: flex;
-    align-items: flex-start;
-    gap: .8rem;
-    padding: 1rem 1.1rem;
-    border: 1px solid rgba(25, 135, 84, .48);
-    border-radius: .7rem;
-    background: rgba(25, 135, 84, .10);
-}
 
-.summary-check {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.6rem;
-    height: 2.6rem;
-    flex: 0 0 2.6rem;
-    border-radius: 50%;
-    background: #198754;
-    color: #fff;
-    font-size: 1.55rem;
-}
 
-.schedule-summary strong {
-    color: #23a866;
-    font-size: 1rem;
-}
 
-.schedule-summary small {
-    margin-top: .2rem;
-    color: var(--bs-secondary-color);
-    font-size: .84rem;
-    line-height: 1.45;
-}
 </style>
 
 <style>

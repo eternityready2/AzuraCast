@@ -305,11 +305,13 @@ final class ScheduleRecurrence
                     break 2;
                 }
 
-                // Skip outside the requested API window; later months may still fall inside.
-                if ($candidate->greaterThan($rangeEnd)) {
-                    continue;
-                }
                 if ($scheduleEndDate !== null && $candidate->greaterThan($scheduleEndDate)) {
+                    break 2;
+                }
+                // Months only move forward, so once a candidate is past the
+                // requested window every later one is too. Continuing here
+                // walked up to 20,000 months and timed out saves.
+                if ($candidate->greaterThan($rangeEnd)) {
                     break 2;
                 }
                 if ($candidate->lessThan($effectiveStart)) {
