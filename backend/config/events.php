@@ -90,6 +90,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 App\Sync\Task\ReconcileLinearLogTask::class,
                 App\Sync\Task\AirCheckTask::class,
                 App\Sync\Task\StationDiagnosticsRuntimeReconcileTask::class,
+                App\Sync\Task\ApplyWebStreamChangesTask::class,
             ]);
         }
     );
