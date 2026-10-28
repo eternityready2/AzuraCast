@@ -72,7 +72,7 @@
                 for="edit_form_prioritize"
             >
                 <strong>{{ $gettext('Play ahead of listener requests') }}</strong>
-                <small>{{ $gettext('This playlist always goes before queued listener requests.') }}</small>
+                <small>{{ isPlaylist ? $gettext('This playlist always goes before queued listener requests.') : $gettext('This stream always goes before queued listener requests.') }}</small>
             </label>
         </div>
 

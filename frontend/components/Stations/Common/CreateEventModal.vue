@@ -440,7 +440,9 @@
                         <span class="step-icon step-icon-source"><icon-ic-event /></span>
                         <span>
                             <strong>{{ $gettext('2. When should this play?') }}</strong>
-                            <small>{{ $gettext('Set the days, times, date range, timing mode and repeat rules for each window.') }}</small>
+                            <small>{{ isClockWheelSchedule
+                                ? $gettext('Set the days, times, date range, timing mode and repeat rules for each window.')
+                                : $gettext('Set the days, times, date range and repeat rules for each window.') }}</small>
                         </span>
                     </div>
 
@@ -1135,6 +1137,11 @@ const endDateSameAsStart = computed(() =>
 // The same recurrence rules the server checks before saving, so Save stays
 // off instead of failing.
 const isRecurrenceComplete = (row: Record<string, any>): boolean => {
+    // A one-time window is a single date; older ones were saved with no
+    // repeat type and no weekdays, which the server accepts.
+    if (row.start_date && row.start_date === row.end_date) {
+        return true;
+    }
     const days = Array.isArray(row.days) ? row.days : [];
     if (row.recurrence_end_type === 'after' && !(Number(row.recurrence_end_after) >= 1)) {
         return false;

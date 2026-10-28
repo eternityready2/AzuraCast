@@ -5,7 +5,7 @@
                 <div class="step-heading step-heading-time mb-3">
                     <span class="step-icon step-icon-time"><icon-ic-event /></span>
                     <span>
-                        <strong>{{ $gettext('2. When should this playlist play?') }}</strong>
+                        <strong>{{ source === 'web_stream' ? $gettext('2. When should this stream play?') : $gettext('2. When should this playlist play?') }}</strong>
                         <small>{{ $gettext('Set the days, times, date range, timing mode and whether the playlist repeats inside its window.') }}</small>
                     </span>
                 </div>
@@ -112,7 +112,10 @@
                     </div>
                 </div>
 
-                <div class="side-card side-card-presets mb-3">
+                <div
+                    v-if="source !== 'web_stream'"
+                    class="side-card side-card-presets mb-3"
+                >
                     <div class="side-card-heading">
                         <span class="side-card-icon icon-presets"><icon-ic-settings /></span>
                         <h3>{{ $gettext('Quick setup — how it plays') }}</h3>
@@ -219,7 +222,7 @@ import {useTranslate} from "~/vendor/gettext";
 const {$gettext} = useTranslate();
 const {form} = storeToRefs(useStationsPlaylistsForm());
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
     // The window the calendar event was opened from, and the tag to show on it.
     highlightRow?: Record<string, any> | null,
     highlightLabel?: string | null,
@@ -320,11 +323,14 @@ const applyPreset = (preset: 'show' | 'music' | 'news') => {
     });
 };
 
+const today = (): string => DateTime.now().toFormat('yyyy-LL-dd');
+
 const add = () => {
+    // Real defaults, so the pickers show what will be saved.
     scheduleItems.value.push({
-        start_time: null,
-        end_time: null,
-        start_date: null,
+        start_time: 800,
+        end_time: 900,
+        start_date: today(),
         end_date: null,
         days: [],
         loop_once: false,
@@ -332,6 +338,7 @@ const add = () => {
         reset_queue_at_start: false,
         reset_queue_recursive: false,
         strict_start: false,
+        is_emergency: false,
         recurrence_type: 'weekly',
         recurrence_interval: 1,
         recurrence_monthly_pattern: null,
@@ -468,23 +475,24 @@ const activePreset = computed((): 'show' | 'music' | 'news' => {
     return hasOption('prioritize') ? 'news' : 'show';
 });
 
-const styleLabel = computed(() => ({
+const styleLabel = computed(() => props.source === 'web_stream' ? $gettext('Live stream') : ({
     show: $gettext('Scheduled Show / Program'),
     music: $gettext('Music Rotation Block'),
     news: $gettext('News / Alert / Priority'),
 })[activePreset.value]);
 
-const startLabel = computed(() => ({
+// Web streams always switch in and out on the scheduled times.
+const startLabel = computed(() => props.source === 'web_stream' ? $gettext('On time') : ({
     show: $gettext('On time'),
     music: $gettext('After current song'),
     news: $gettext('On time, top priority'),
 })[activePreset.value]);
 
 const endLabel = computed(() => (
-    hasOption('allow_overrun') ? $gettext('After current song') : $gettext('At end time')
+    props.source !== 'web_stream' && hasOption('allow_overrun') ? $gettext('After current song') : $gettext('At end time')
 ));
 
-const timingLabel = computed(() => ({
+const timingLabel = computed(() => props.source === 'web_stream' ? $gettext('Exact') : ({
     strict: $gettext('Strict'),
     flexible: $gettext('Flexible'),
     mixed: $gettext('Mixed'),

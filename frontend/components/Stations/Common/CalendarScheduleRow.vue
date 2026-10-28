@@ -333,7 +333,17 @@
                         <small>{{ optionsSummary }}</small>
                     </div>
 
-                    <div class="seg-wrap">
+                    <div
+                        v-if="shows.streamNote"
+                        class="field-hint stream-note"
+                    >
+                        {{ $gettext('Streams start and stop exactly on the scheduled times.') }}
+                    </div>
+
+                    <div
+                        v-if="shows.timing || shows.loop"
+                        class="seg-wrap"
+                    >
                         <div v-if="shows.timing">
                             <div class="mini-label">
                                 {{ $gettext('Timing') }}
@@ -490,6 +500,26 @@
                             <small>{{ $gettext('Restarts every playlist in this group too.') }}</small>
                         </label>
                     </div>
+
+                    <div
+                        v-if="shows.emergency"
+                        class="form-check form-switch option-switch"
+                    >
+                        <input
+                            :id="'scheduling_emergency_'+index"
+                            v-model="row.is_emergency"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                        >
+                        <label
+                            class="form-check-label"
+                            :for="'scheduling_emergency_'+index"
+                        >
+                            <strong>{{ $gettext('Emergency override') }}</strong>
+                            <small>{{ $gettext('While this time is active, clock wheel AutoDJ will not run. For breaking news or other must-play windows.') }}</small>
+                        </label>
+                    </div>
                 </div>
 
                 <slot name="aside" />
@@ -524,6 +554,7 @@ interface PlaylistScheduleRow {
     reset_queue_at_start: boolean,
     reset_queue_recursive: boolean,
     strict_start: boolean,
+    is_emergency?: boolean,
     recurrence_type: string | null,
     recurrence_interval: number,
     recurrence_monthly_pattern: string | null,
@@ -563,10 +594,15 @@ const {$gettext} = useTranslate();
 const shows = computed(() => {
     const source = props.source ?? 'playlist';
     return {
-        timing: source !== 'smart_block',
+        // Web streams always switch in and out exactly on time
+        // (RigidScheduleWindowResolver), so Flexible/Strict does nothing there.
+        timing: source === 'playlist' || source === 'clock_wheel',
+        streamNote: source === 'web_stream',
         loop: source === 'playlist',
         hold: source === 'playlist' || source === 'web_stream',
         reset: source === 'playlist',
+        // Clock wheels have it forced off by the server; Smart Blocks ignore it.
+        emergency: source === 'playlist' || source === 'web_stream',
     };
 });
 
@@ -586,7 +622,11 @@ const optionsSummary = computed(() => {
     if (shows.value.reset) {
         parts.push($gettext('start from the beginning'));
     }
-    return parts.join(', ');
+    if (shows.value.emergency) {
+        parts.push($gettext('emergency override'));
+    }
+    const text = parts.join(', ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
 });
 
 const setTiming = (mode: 'flexible' | 'strict') => {
@@ -682,6 +722,12 @@ const setRepeating = () => {
     }
     if (savedDays.length > 0) {
         row.value.days = [...savedDays];
+    } else if (row.value.days.length === 0) {
+        // An older one-time event has no weekdays: start from its own weekday.
+        const weekday = weekdayOf(row.value.start_date);
+        if (weekday) {
+            row.value.days = [weekday];
+        }
     }
 };
 
@@ -1256,6 +1302,11 @@ const doRemove = () => {
 .option-switch {
     margin: .4rem 0;
     padding-left: 2.75em;
+}
+
+.stream-note {
+    max-width: none;
+    margin: 0 0 .5rem;
 }
 
 .option-switch-nested {
