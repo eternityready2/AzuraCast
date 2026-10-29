@@ -11,6 +11,7 @@ use App\Entity\Enums\ClockWheelFallbackReason;
 use BackedEnum;
 use App\Entity\Station;
 use App\Entity\StationClockWheel;
+use App\Radio\AutoDJ\TopOfHour\TopOfHourStatsStart;
 use DateTimeImmutable;
 
 /**
@@ -524,6 +525,9 @@ final class ClockWheelEventRepository extends Repository
         DateTimeImmutable $since,
         int $toleranceSeconds = 10,
     ): array {
+        // Hours before the server's stats start (TOP_OF_HOUR_STATS_START) are left out.
+        $since = $since->setTimestamp(TopOfHourStatsStart::clamp($since->getTimestamp()));
+
         $compliance = $this->getLegalIdComplianceForQuery(
             <<<'DQL'
                 SELECT e FROM App\Entity\ClockWheelEvent e

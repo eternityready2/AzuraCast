@@ -110,8 +110,12 @@ final class TopOfHourLandingReport
     public function build(Station $station, int $from, int $to): array
     {
         $to = min($to, time());
-        $from = min($from, $to);
+        // Hours before the server's stats start (TOP_OF_HOUR_STATS_START) are left out.
+        $statsStart = TopOfHourStatsStart::get();
+        $from = min(TopOfHourStatsStart::clamp($from), $to);
         $previousFrom = $from - ($to - $from);
+        // No trend against a period before the stats start.
+        $hasPrevious = null === $statsStart || $previousFrom >= $statsStart;
         $tz = $station->getTimezoneObject();
 
         $rows = $this->historyRows($station, $previousFrom - 3600, $to + (int)self::RESUME_WINDOW_SECONDS);
@@ -160,7 +164,7 @@ final class TopOfHourLandingReport
             $landing = $this->scoreLanding($before, $target);
 
             if ($idAt < $from) {
-                if (null !== $landing) {
+                if (null !== $landing && $hasPrevious) {
                     $c['previous_music']++;
                     $c['previous_clean'] += null === $landing['kind'] ? 1 : 0;
                 }
