@@ -11,7 +11,6 @@ use App\Entity\Enums\PlaylistSources;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
-use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenApi\Attributes as OA;
 
@@ -62,7 +61,6 @@ final class StationHealthReport
     public ?float $legal_id_compliance_percent = null;
 
     #[OA\Property(example: 2)]
-    public int $upcoming_holidays = 0;
 
     /**
      * @var StationHealthMountSummary[]
@@ -140,17 +138,6 @@ final class StationHealthService
             $this->hourBoundaryPlanner->getComplianceToleranceSeconds($station),
         );
         $report->legal_id_compliance_percent = $compliance['compliance_percent'];
-
-        $today = CarbonImmutable::now($tz)->startOfDay();
-        $report->upcoming_holidays = (int)$this->em->createQuery(
-            <<<'DQL'
-                SELECT COUNT(h.id) FROM App\Entity\StationHolidayOverride h
-                WHERE h.station = :station AND h.is_active = 1
-                AND h.override_date >= :today
-            DQL
-        )->setParameter('station', $station)
-            ->setParameter('today', $today->toDateTimeImmutable(), Types::DATE_IMMUTABLE)
-            ->getSingleScalarResult();
 
         foreach ($station->mounts as $mount) {
             if (!$mount instanceof StationMount) {

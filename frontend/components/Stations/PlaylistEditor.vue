@@ -26,7 +26,6 @@
             <div class="playlist-editor-surface">
                 <tabs>
                     <form-basic-info />
-                    <form-schedule-legacy v-model:schedule-items="form.schedule_items" />
                     <form-schedule v-model:schedule-items="form.schedule_items" />
                     <playlist-link-list-tab
                         v-if="isEditMode && form.source === PlaylistSources.Playlists"
@@ -82,7 +81,6 @@ import Tabs from "~/components/Common/Tabs.vue";
 import FormAdvanced from "~/components/Stations/Playlists/Form/Advanced.vue";
 import FormBasicInfo from "~/components/Stations/Playlists/Form/BasicInfo.vue";
 import FormSchedule from "~/components/Stations/Playlists/Form/Schedule.vue";
-import FormScheduleLegacy from "~/components/Stations/Playlists/Form/ScheduleLegacy.vue";
 import PlaylistLinkListTab from "~/components/Stations/Playlists/Form/PlaylistLinkListTab.vue";
 import {useDialog} from "~/components/Common/Dialogs/useDialog.ts";
 import {PlaylistSources} from "~/entities/ApiInterfaces";
@@ -213,7 +211,6 @@ const buildSubmitData = () => {
     }
     delete data.playlists;
     delete data.playlist_groups;
-    delete data.smart_block_criteria;
 
     if (Array.isArray(data.schedule_items) && data.schedule_items.length) {
         data.schedule_items = data.schedule_items.map((item: Record<string, any>) => {

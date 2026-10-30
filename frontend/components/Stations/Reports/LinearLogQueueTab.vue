@@ -103,6 +103,9 @@
                         :chain="row.item.playlist_chain"
                     />
                 </div>
+                <div v-else-if="row.item.smart_block">
+                    {{ $gettext('Smart Block') }}: {{ row.item.smart_block }}
+                </div>
                 <div v-else-if="row.item.clock_wheel">
                     {{ $gettext('Clock Wheel') }}: {{ row.item.clock_wheel }}
                 </div>

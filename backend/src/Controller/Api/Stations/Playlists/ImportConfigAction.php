@@ -124,7 +124,8 @@ final class ImportConfigAction implements SingleActionInterface
                 mediaGenerated: $summary->mediaGenerated,
                 membersCreated: $summary->membersCreated,
                 smartBlockCriteriaCreated: $summary->smartBlockCriteriaCreated,
-                warnings: $summary->warnings
+                warnings: $summary->warnings,
+                smartBlocksCreated: $summary->smartBlocksCreated,
             )
         );
     }

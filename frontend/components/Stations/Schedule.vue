@@ -20,40 +20,11 @@
             </div>
         </div>
 
-        <div class="card-body pb-0">
-            <nav
-                class="nav nav-tabs"
-                role="tablist"
-            >
-                <div class="nav-item" role="presentation">
-                    <button
-                        type="button"
-                        class="nav-link"
-                        :class="{active: activeTab === 'calendar'}"
-                        role="tab"
-                        :aria-selected="activeTab === 'calendar'"
-                        @click="activeTab = 'calendar'"
-                    >
-                        {{ $gettext('Calendar') }}
-                    </button>
-                </div>
-                <div class="nav-item" role="presentation">
-                    <button
-                        type="button"
-                        class="nav-link"
-                        :class="{active: activeTab === 'holidays'}"
-                        role="tab"
-                        :aria-selected="activeTab === 'holidays'"
-                        @click="activeTab = 'holidays'"
-                    >
-                        {{ $gettext('Holidays') }}
-                    </button>
-                </div>
-            </nav>
-        </div>
-
-        <div class="card-body">
-            <div v-show="activeTab === 'calendar'">
+        <div
+            v-show="!eventEditorOpen"
+            class="card-body"
+        >
+            <div>
                 <!-- ── Toolbar row ── -->
                 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
                     <!-- Left cluster -->
@@ -120,10 +91,11 @@
                     <div :class="sidebarVisible ? 'col-12 col-lg-9' : 'col-12'">
                         <schedule-calendar
                             ref="$scheduleTab"
-                            :schedule-url="[scheduleUrl, clockWheelsScheduleUrl]"
+                            :schedule-url="[scheduleUrl, clockWheelsScheduleUrl, smartBlocksScheduleUrl]"
                             :show-create-button="false"
                             external-drag-selector=".smart-block-drag-item, .clock-wheel-drag-item"
                             @click="doCalendarClick"
+                            @edit-event="doCalendarClick"
                             @create="doCreateEvent"
                             @date-click="doDateClick"
                             @drop-external="onEntityDrop"
@@ -423,12 +395,6 @@
             </transition>
         </Teleport>
 
-            <holiday-overrides-tab
-                v-show="activeTab === 'holidays'"
-                :list-url="holidayOverridesUrl"
-                :wheels-url="clockWheelsListUrl"
-                :playlists-url="listUrl"
-            />
         </div>
 
         <edit-modal
@@ -446,14 +412,16 @@
 
         <create-event-modal
             ref="$createEventModal"
+            inline
             @relist="relist"
+            @shown="eventEditorOpen = true"
+            @hidden="eventEditorOpen = false"
         />
     </section>
 </template>
 
 <script setup lang="ts">
 import ScheduleCalendar from "~/components/Stations/Common/ScheduleCalendar.vue";
-import HolidayOverridesTab from "~/components/Stations/Schedule/HolidayOverridesTab.vue";
 import EditModal from "~/components/Stations/Playlists/EditModal.vue";
 import ClockWheelEditModal from "~/components/Stations/ClockWheels/EditModal.vue";
 import CreateEventModal from "~/components/Stations/Common/CreateEventModal.vue";
@@ -476,7 +444,6 @@ import IconIcAdd from "~icons/ic/baseline-add";
 const {$gettext} = useTranslate();
 const {getStationApiUrl} = useApiRouter();
 
-const activeTab = ref<'calendar' | 'holidays'>('calendar');
 const sidebarVisible = ref<boolean>(false);
 const hasConflicts = ref<boolean>(false);
 
@@ -494,9 +461,10 @@ const panelsOpen = reactive({
 const listUrl = getStationApiUrl('/playlists');
 const clockWheelsListUrl = getStationApiUrl('/clock-wheels');
 const clockWheelTemplatesUrl = getStationApiUrl('/clock-wheel-templates');
-const holidayOverridesUrl = getStationApiUrl('/holiday-overrides');
 const scheduleUrl = getStationApiUrl('/playlists/schedule');
 const clockWheelsScheduleUrl = getStationApiUrl('/clock-wheels/schedule');
+const smartBlocksListUrl = getStationApiUrl('/smart-blocks');
+const smartBlocksScheduleUrl = getStationApiUrl('/smart-blocks/schedule');
 
 const $editModal = useTemplateRef('$editModal');
 const {doEdit} = useHasEditModal($editModal);
@@ -507,10 +475,17 @@ const {doEdit: doEditClockWheel} = useHasEditModal($clockWheelEditModal);
 const $scheduleTab = useTemplateRef('$scheduleTab');
 const $createEventModal = useTemplateRef('$createEventModal');
 
-watch(activeTab, async (newTab) => {
-    if (newTab === 'calendar') {
-        await nextTick();
-        $scheduleTab.value?.updateSize();
+// The event editor opens in place of the calendar (same width as the
+// Playlist page editor) instead of in a popup.
+const eventEditorOpen = ref(false);
+
+// FullCalendar can't measure itself while hidden, so redraw it once the
+// editor closes and the calendar is visible again.
+watch(eventEditorOpen, (open) => {
+    if (!open) {
+        void nextTick(() => {
+            window.dispatchEvent(new Event('resize'));
+        });
     }
 });
 
@@ -567,7 +542,7 @@ const onDeleteEvent = async (event: EventImpl) => {
 
     if (!editUrl || !scheduleId) return;
 
-    const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+    const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
     if (!m) return;
     const entityId = Number(m[2]);
     const apiType = m[1];
@@ -639,13 +614,15 @@ const onDuplicateEvent = (event: EventImpl) => {
     const editUrl = event.extendedProps.edit_url as string | undefined;
     if (!editUrl) return;
 
-    const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+    const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
     if (!m) return;
 
     const entityId = Number(m[2]);
-    const source = m[1] === 'clock-wheel' ? 'clock_wheel' : 'playlist';
+    const source = m[1] === 'clock-wheel'
+        ? 'clock_wheel'
+        : (m[1] === 'smart-block' ? 'smart_block' : 'playlist');
 
-    $createEventModal.value?.openScopedForCreate(source as 'playlist' | 'clock_wheel', entityId);
+    $createEventModal.value?.openScopedForCreate(source, entityId);
 };
 
 // ── Drag sources ─────────────────────────────────────────────────────────────
@@ -659,11 +636,9 @@ const playlistsForDrag = ref<PlaylistDragItem[]>([]);
 
 const loadSmartBlocksForDrag = async () => {
     try {
-        const {data} = await axios.get(listUrl.value, {
-            params: {rowCount: -1, is_smart_block: '1'},
-        });
+        const {data} = await axios.get(smartBlocksListUrl.value);
         const rows = (data.rows ?? data ?? []) as Array<Record<string, unknown>>;
-        smartBlocksForDrag.value = rows.map((row) => ({
+        smartBlocksForDrag.value = rows.filter((row) => row.is_enabled !== false).map((row) => ({
             id: row.id as number,
             name: row.name as string,
         }));
@@ -673,7 +648,7 @@ const loadSmartBlocksForDrag = async () => {
 const loadPlaylistsForDrag = async () => {
     try {
         const {data} = await axios.get(listUrl.value, {
-            params: {rowCount: -1, is_smart_block: '0'},
+            params: {rowCount: -1},
         });
         const rows = (data.rows ?? data ?? []) as Array<Record<string, unknown>>;
         playlistsForDrag.value = rows.map((row) => ({
@@ -807,7 +782,7 @@ const confirmQuickDrop = async () => {
         quickPanel.visible = false;
         showUndoToast(
             $gettext('Scheduled: %{name}', {name: quickPanel.entityName}),
-            {type: 'delete', entityType: quickPanel.entityType === 'clock_wheel' ? 'clock-wheel' : 'playlist', entityId: quickPanel.entityId, scheduleId: 0}
+            {type: 'delete', entityType: quickPanel.entityType === 'clock_wheel' ? 'clock-wheel' : (quickPanel.entityType === 'smart_block' ? 'smart-block' : 'playlist'), entityId: quickPanel.entityId, scheduleId: 0}
         );
     } else {
         quickPanel.error = $gettext('Could not save — time conflict or error. Try different settings or use Create Event for full options.');

@@ -696,16 +696,6 @@ return static function (RouteCollectorProxy $group) {
                                     );
 
                                     $group->get(
-                                        '/smart-block',
-                                        Controller\Api\Stations\Playlists\GetSmartBlockAction::class
-                                    )->setName('api:stations:playlist:smart-block');
-
-                                    $group->put(
-                                        '/smart-block',
-                                        Controller\Api\Stations\Playlists\PutSmartBlockAction::class
-                                    );
-
-                                    $group->get(
                                         '/queue',
                                         Controller\Api\Stations\Playlists\GetQueueAction::class
                                     )->setName('api:stations:playlist:queue');
@@ -744,6 +734,48 @@ return static function (RouteCollectorProxy $group) {
                                         '/empty',
                                         Controller\Api\Stations\Playlists\EmptyAction::class
                                     )->setName('api:stations:playlist:empty');
+                                }
+                            );
+                        }
+                    )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
+                        ->add(new Middleware\Permissions(StationPermissions::Media, true));
+
+                    // Smart blocks: rule-based song sources, scheduled on the calendar.
+                    $group->group(
+                        '',
+                        function (RouteCollectorProxy $group) {
+                            $group->get(
+                                '/smart-blocks',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':listAction'
+                            )->setName('api:stations:smart-blocks');
+
+                            $group->post(
+                                '/smart-blocks',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':createAction'
+                            );
+
+                            $group->get(
+                                '/smart-blocks/schedule',
+                                Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':scheduleAction'
+                            )->setName('api:stations:smart-blocks:schedule');
+
+                            $group->group(
+                                '/smart-block/{id}',
+                                function (RouteCollectorProxy $group) {
+                                    $group->get(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':getAction'
+                                    )->setName('api:stations:smart-block');
+
+                                    $group->put(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':editAction'
+                                    );
+
+                                    $group->delete(
+                                        '',
+                                        Controller\Api\Stations\SmartBlocks\SmartBlocksController::class . ':deleteAction'
+                                    );
                                 }
                             );
                         }
@@ -997,35 +1029,6 @@ return static function (RouteCollectorProxy $group) {
                                 }
                             );
 
-                            $group->get(
-                                '/holiday-overrides',
-                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':listAction'
-                            )->setName('api:stations:holiday-overrides');
-
-                            $group->post(
-                                '/holiday-overrides',
-                                Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':createAction'
-                            );
-
-                            $group->group(
-                                '/holiday-override/{id}',
-                                function (RouteCollectorProxy $group) {
-                                    $group->get(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':getAction'
-                                    )->setName('api:stations:holiday-override');
-
-                                    $group->put(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':editAction'
-                                    );
-
-                                    $group->delete(
-                                        '',
-                                        Controller\Api\Stations\HolidayOverrides\HolidayOverridesController::class . ':deleteAction'
-                                    );
-                                }
-                            );
                         }
                     )->add(new Middleware\StationSupportsFeature(StationFeatures::Media))
                         ->add(new Middleware\Permissions(StationPermissions::Media, true));
@@ -1124,6 +1127,16 @@ return static function (RouteCollectorProxy $group) {
                     $group->post(
                         '/reports/linear-log/entries/{entry_id}/{edit}',
                         Controller\Api\Stations\Reports\LinearLogEntryAction::class . ':editAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
+
+                    // Setup problems that make the log misbehave, with one-click fixes.
+                    $group->get(
+                        '/reports/linear-log/setup-check',
+                        Controller\Api\Stations\Reports\LinearLogSetupCheckAction::class . ':listAction'
+                    )->add(new Middleware\Permissions(StationPermissions::Reports, true));
+                    $group->post(
+                        '/reports/linear-log/setup-check/fix',
+                        Controller\Api\Stations\Reports\LinearLogSetupCheckAction::class . ':fixAction'
                     )->add(new Middleware\Permissions(StationPermissions::Broadcasting, true));
 
                     // Per-feature settings edited on each feature's own page.

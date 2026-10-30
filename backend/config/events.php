@@ -64,7 +64,6 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
         function (App\Event\GetSyncTasks $e) {
             $e->addTasks([
                 App\Sync\Task\CheckFolderPlaylistsTask::class,
-                App\Sync\Task\CheckSmartBlockPlaylistsTask::class,
                 App\Sync\Task\CheckMediaTask::class,
                 App\Sync\Task\CheckPodcastPlaylistsTask::class,
                 App\Sync\Task\ImportPodcastFeedsTask::class,
@@ -91,6 +90,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
                 App\Sync\Task\ReconcileLinearLogTask::class,
                 App\Sync\Task\AirCheckTask::class,
                 App\Sync\Task\StationDiagnosticsRuntimeReconcileTask::class,
+                App\Sync\Task\ApplyWebStreamChangesTask::class,
             ]);
         }
     );
@@ -158,6 +158,7 @@ return static function (CallableEventDispatcherInterface $dispatcher) {
         [
             App\Console\ErrorHandler::class,
             App\Nginx\ConfigWriter::class,
+            App\Radio\AutoDJ\SmartBlockScheduler::class,
             App\Radio\AutoDJ\ClockWheelScheduler::class,
             // Saved linear log playout: listed before QueueBuilder so it takes
             // the priority-0 slot first when the log controls playout.

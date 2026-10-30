@@ -487,8 +487,7 @@ final readonly class StationDiagnosticsFinalizer
             ];
 
             if ('smart-blocks' === $featureFilter) {
-                $dql .= ' JOIN h.playlist p';
-                $where[] = 'p.is_smart_block = true';
+                $where[] = 'h.smart_block IS NOT NULL';
             } elseif ('remote-streams' === $featureFilter) {
                 $dql .= ' JOIN h.playlist p';
                 $where[] = 'p.source = :source';

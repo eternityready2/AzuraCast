@@ -17,6 +17,7 @@
                 <li>{{ $gettext('Media re-linked:') }} {{ results.media_relinked }}</li>
                 <li>{{ $gettext('Media generated:') }} {{ results.media_generated }}</li>
                 <li>{{ $gettext('Group members created:') }} {{ results.members_created }}</li>
+                <li>{{ $gettext('Smart Blocks created:') }} {{ results.smart_blocks_created ?? 0 }}</li>
                 <li>{{ $gettext('Smart Block criteria created:') }} {{ results.smart_block_criteria_created }}</li>
             </ul>
 
@@ -116,6 +117,7 @@ type ConfigImportResult = Required<ApiStatus> & {
     media_relinked: number;
     media_generated: number;
     members_created: number;
+    smart_blocks_created?: number;
     smart_block_criteria_created: number;
     warnings: string[];
 };

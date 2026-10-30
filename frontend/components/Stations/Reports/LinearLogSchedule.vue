@@ -64,7 +64,7 @@
                                 <span
                                     v-if="item.over_scheduled"
                                     class="text-body-secondary"
-                                    :title="item.log_note ?? ''"
+                                    :title="plainNote(item.log_note)"
                                 >{{ $gettext('Over') }}</span>
                                 <template v-else>{{ formatTime(item.played_at) }}</template>
                             </td>
@@ -77,7 +77,7 @@
                                     <span
                                         v-else-if="logMarker(item)"
                                         :class="logMarker(item)?.cls"
-                                        :title="item.log_note ?? ''"
+                                        :title="plainNote(item.log_note)"
                                     >{{ logMarker(item)?.label }}</span>
                                     <div>
                                         <div v-if="item.autodj_custom_uri" class="small text-body-secondary">
@@ -87,7 +87,7 @@
                                             <strong class="track-title">{{ displayTitle(item) }}</strong>
                                             <div v-if="item.artist" class="small track-artist">{{ item.artist }}</div>
                                             <div v-if="item.album" class="small text-body-secondary">{{ item.album }}</div>
-                                            <div v-if="item.log_note" class="small log-note">{{ item.log_note }}</div>
+                                            <div v-if="item.log_note" class="small log-note" :title="item.log_note">{{ plainNote(item.log_note) }}</div>
                                             <div
                                                 v-for="handEdit in item.hand_edits ?? []"
                                                 :key="`${handEdit.edit}-${handEdit.at}`"
@@ -226,6 +226,7 @@
 import type {LinearLogGapAhead, LinearLogHandEdit, LinearLogHourGroup, LinearLogItem} from "~/entities/LinearLog";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
+import {linearLogPlainNote} from "~/functions/linearLogPlainNote";
 
 const props = defineProps<{
     groups: LinearLogHourGroup[];
@@ -256,6 +257,7 @@ function canMove(item: LinearLogItem): boolean {
 }
 
 const {$gettext} = useTranslate();
+const plainNote = (note: string | null | undefined): string => linearLogPlainNote(note, $gettext);
 
 function isNextUp(item: LinearLogItem): boolean {
     return (item.played_at ?? 0) >= props.nowTs && item.is_live_queue;

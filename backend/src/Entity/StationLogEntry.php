@@ -63,6 +63,10 @@ class StationLogEntry
     #[ORM\JoinColumn(name: 'playlist_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
     public ?StationPlaylist $playlist = null;
 
+    #[ORM\ManyToOne(targetEntity: StationSmartBlock::class)]
+    #[ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    public ?StationSmartBlock $smart_block = null;
+
     #[ORM\Column(length: 20)]
     public string $status = self::STATUS_PLANNED;
 

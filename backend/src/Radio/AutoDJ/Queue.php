@@ -77,6 +77,14 @@ final class Queue
      *        saved log's air time for each line it seeded into the queue, by log
      *        line id. A saved line is never projected earlier than that, and is
      *        dropped once its hour has ended.
+     * @param array<int, true> $liveRowIds Linear Log preview only: the rows the
+     *        live queue held before the preview seeded its own. They are read as
+     *        the live queue last projected them and never written: the preview's
+     *        changes to them are rolled back anyway, and written inside its
+     *        transaction they held row locks for its whole run, so Liquidsoap's
+     *        "nextsong" and "feedback" and the live queue build waited on them
+     *        until MySQL gave up (50s) and songs fell out of the hour (9:07pm,
+     *        Mon 2026-10-26).
      * @return list<array{started_at:int, duration:int, reason:string}>
      */
     public function buildQueue(
@@ -85,6 +93,7 @@ final class Queue
         ?int $maxTracksOverride = null,
         bool $isPreview = false,
         array $plannedAtByLogEntry = [],
+        array $liveRowIds = [],
     ): array {
         $previewGaps = [];
         // Early-fail if the station is disabled.
@@ -157,7 +166,16 @@ final class Queue
 
         $unsentWhenRead = [];
         foreach ($upcomingQueue as $queueRow) {
-            if (!$queueRow->sent_to_autodj) {
+            // A live row in a preview: taken as the live queue projected it.
+            $readOnly = $isPreview && isset($liveRowIds[$queueRow->id]);
+            if ($readOnly) {
+                $storedPlayTime = $queueRow->timestamp_played;
+                if (null !== $storedPlayTime && $storedPlayTime > $expectedPlayTime) {
+                    $expectedPlayTime = CarbonImmutable::instance($storedPlayTime);
+                }
+            }
+
+            if (!$queueRow->sent_to_autodj && !$readOnly) {
                 // By id, taken now: a row a listener removes and flushes below no
                 // longer has one.
                 $unsentWhenRead[$queueRow->id] = $queueRow;
@@ -235,7 +253,9 @@ final class Queue
             ) {
                 $naturalDuration = $queueRow->media?->getCalculatedLength() ?? 0.0;
                 if ($naturalDuration >= 5.0) {
-                    $queueRow->duration = $naturalDuration;
+                    if (!$readOnly) {
+                        $queueRow->duration = $naturalDuration;
+                    }
                     $effectiveDuration = $naturalDuration;
                 } else {
                     $effectiveDuration = 5.0;
@@ -289,6 +309,13 @@ final class Queue
                 if (0 === $queueLength) {
                     $queueLength = 1;
                 }
+            } elseif ($readOnly) {
+                $expectedCueTime = $this->addDurationToTime(
+                    $station,
+                    $queueRow->timestamp_cued,
+                    $effectiveDuration
+                );
+                $queueLength++;
             } else {
                 $queueRow->timestamp_cued = $expectedCueTime;
                 $expectedCueTime = $this->addDurationToTime($station, $expectedCueTime, $effectiveDuration);
@@ -297,8 +324,10 @@ final class Queue
                 $queueLength++;
             }
 
-            $queueRow->timestamp_played = $expectedPlayTime;
-            $this->em->persist($queueRow);
+            if (!$readOnly) {
+                $queueRow->timestamp_played = $expectedPlayTime;
+                $this->em->persist($queueRow);
+            }
 
             $takenAt = $expectedPlayTime->getTimestamp();
             $expectedPlayTime = $nextExpectedPlayTime;

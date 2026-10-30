@@ -360,11 +360,14 @@ final class LinearLogHourFit
         // measure of that hour.
         $changed = 0;
         if (!$isQueueHour && $shortBy >= LinearLogRefill::MIN_TOP_UP_SECONDS) {
-            // After the hour's last planned line, so playout takes it last.
-            $lastPlannedAt = $hour['start'];
+            // After the hour's last planned line ends, so playout takes it last.
+            $lastPlannedEndsAt = $hour['start'];
             foreach ($openLines as $line) {
                 if (StationLogEntry::STATUS_PLANNED === $line['status'] && (int)$line['planned_at'] >= $hour['start']) {
-                    $lastPlannedAt = max($lastPlannedAt, (int)$line['planned_at']);
+                    $lastPlannedEndsAt = max(
+                        $lastPlannedEndsAt,
+                        (int)$line['planned_at'] + (int)ceil((float)$line['duration'])
+                    );
                 }
             }
             $changed = $this->refill->addSong(
@@ -373,7 +376,7 @@ final class LinearLogHourFit
                 $hour['id_at'],
                 $endsAt,
                 $shortBy,
-                $lastPlannedAt,
+                $lastPlannedEndsAt,
                 true
             );
         }
@@ -415,7 +418,7 @@ final class LinearLogHourFit
     private function openLinesOf(int $stationId, int $hourStart): array
     {
         return $this->em->getConnection()->fetchAllAssociative(
-            'SELECT status, planned_at, media_id, playlist_id FROM station_log_entries
+            'SELECT status, planned_at, duration, media_id, playlist_id FROM station_log_entries
             WHERE station_id = ? AND status IN (?, ?) AND planned_at < ? AND planned_at + duration > ?',
             [
                 $stationId,

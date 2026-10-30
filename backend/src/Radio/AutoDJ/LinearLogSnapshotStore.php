@@ -82,12 +82,16 @@ final class LinearLogSnapshotStore
         return $snapshot;
     }
 
-    public function markQueued(Station $station, int $hours): void
+    /**
+     * @param int|null $heldUntil a build held for the top of the hour starts then
+     */
+    public function markQueued(Station $station, int $hours, ?int $heldUntil = null): void
     {
         $snapshot = $this->get($station);
         $snapshot['status'] = 'queued';
         $snapshot['hours'] = $hours;
         $snapshot['requested_at'] = time();
+        $snapshot['held_until'] = $heldUntil;
         $snapshot['error'] = null;
 
         $this->saveCache($station, $snapshot);
@@ -104,6 +108,7 @@ final class LinearLogSnapshotStore
         bool $rebuild,
         bool $throughTomorrow,
         bool $replanLockWindow,
+        ?int $startsAt = null,
     ): void {
         $held = $this->cache->get($this->getHeldKey($station));
         $held = is_array($held) ? $held : [];
@@ -115,7 +120,8 @@ final class LinearLogSnapshotStore
             'replan_lock_window' => $replanLockWindow || ($held['replan_lock_window'] ?? false),
         ], self::STALE_BUILD_SECONDS * 2);
 
-        $this->markQueued($station, $hours);
+        // The page tells the operator when the waiting build starts.
+        $this->markQueued($station, $hours, $startsAt);
     }
 
     /**
@@ -146,6 +152,7 @@ final class LinearLogSnapshotStore
         $snapshot['status'] = 'building';
         $snapshot['hours'] = $hours;
         $snapshot['started_at'] = time();
+        $snapshot['held_until'] = null;
         $snapshot['error'] = null;
 
         $this->saveCache($station, $snapshot);
@@ -155,6 +162,7 @@ final class LinearLogSnapshotStore
     {
         $snapshot = $this->get($station);
         $snapshot['status'] = null !== $snapshot['built_at'] ? 'ready' : 'idle';
+        $snapshot['held_until'] = null;
         $snapshot['error'] = null;
 
         $this->saveCache($station, $snapshot);
@@ -181,6 +189,7 @@ final class LinearLogSnapshotStore
             'status' => 'ready',
             'hours' => $hours,
             'requested_at' => $this->get($station)['requested_at'],
+            'held_until' => null,
             'started_at' => $buildStartedAt,
             'built_at' => time(),
             'failed_at' => null,
@@ -256,6 +265,7 @@ final class LinearLogSnapshotStore
             'status' => 'idle',
             'hours' => $station->backend_config->linear_log_hours,
             'requested_at' => null,
+            'held_until' => null,
             'started_at' => null,
             'built_at' => null,
             'failed_at' => null,

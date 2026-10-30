@@ -49,6 +49,7 @@ export function useLinearLog() {
     const snapshotHours = ref(24);
     const builtAt = ref<number | null>(null);
     const nextBuildAt = ref<number | null>(null);
+    const heldUntil = ref<number | null>(null);
     const coverageStart = ref<number | null>(null);
     const coverageEnd = ref<number | null>(null);
     const allItems = ref<LinearLogItem[]>([]);
@@ -90,6 +91,7 @@ export function useLinearLog() {
             snapshotHours.value = data.hours || data.configured_hours || 24;
             builtAt.value = data.built_at;
             nextBuildAt.value = data.next_build_at ?? null;
+            heldUntil.value = data.status === "queued" ? (data.held_until ?? null) : null;
             coverageStart.value = data.coverage_start;
             coverageEnd.value = data.coverage_end;
             allItems.value = data.entries ?? [];
@@ -318,6 +320,7 @@ export function useLinearLog() {
         snapshotHours,
         builtAt,
         nextBuildAt,
+        heldUntil,
         coverageStart,
         coverageEnd,
         allItems,

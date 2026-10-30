@@ -36,6 +36,7 @@ final class StationSchedule implements IdentifiableEntityInterface
             if ($value !== null) {
                 $this->streamer = null;
                 $this->clock_wheel = null;
+                $this->smart_block = null;
             }
 
             $this->playlist = $value;
@@ -51,6 +52,7 @@ final class StationSchedule implements IdentifiableEntityInterface
             if ($value !== null) {
                 $this->playlist = null;
                 $this->clock_wheel = null;
+                $this->smart_block = null;
             }
 
             $this->streamer = $value;
@@ -66,9 +68,26 @@ final class StationSchedule implements IdentifiableEntityInterface
             if ($value !== null) {
                 $this->playlist = null;
                 $this->streamer = null;
+                $this->smart_block = null;
             }
 
             $this->clock_wheel = $value;
+        }
+    }
+
+    #[
+        ORM\ManyToOne(inversedBy: 'schedule_items'),
+        ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: true, onDelete: 'CASCADE')
+    ]
+    public ?StationSmartBlock $smart_block = null {
+        set {
+            if ($value !== null) {
+                $this->playlist = null;
+                $this->streamer = null;
+                $this->clock_wheel = null;
+            }
+
+            $this->smart_block = $value;
         }
     }
 
@@ -238,12 +257,14 @@ final class StationSchedule implements IdentifiableEntityInterface
     #[ORM\Column(length: 10, nullable: true)]
     public ?string $recurrence_end_date = null;
 
-    public function __construct(StationPlaylist|StationStreamer|StationClockWheel $relation)
+    public function __construct(StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation)
     {
         if ($relation instanceof StationPlaylist) {
             $this->playlist = $relation;
         } elseif ($relation instanceof StationStreamer) {
             $this->streamer = $relation;
+        } elseif ($relation instanceof StationSmartBlock) {
+            $this->smart_block = $relation;
         } else {
             $this->clock_wheel = $relation;
         }

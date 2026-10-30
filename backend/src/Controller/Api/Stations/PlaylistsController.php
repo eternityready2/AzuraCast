@@ -154,13 +154,6 @@ final class PlaylistsController extends AbstractScheduledEntityController
             ->where('sp.station = :station')
             ->setParameter('station', $station);
 
-        $smartBlockFilter = $request->getParam('is_smart_block');
-        if ('1' === $smartBlockFilter) {
-            $qb->andWhere('sp.is_smart_block = true');
-        } elseif ('0' === $smartBlockFilter) {
-            $qb->andWhere('sp.is_smart_block = false');
-        }
-
         $includeRemoteUrl = $request->getParam('include_remote_url');
         if ('1' === $includeRemoteUrl) {
             $qb->andWhere('sp.source = :remoteUrlSource')

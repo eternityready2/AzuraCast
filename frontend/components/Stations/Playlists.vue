@@ -61,12 +61,6 @@
                             :selected="selectedPlaylists"
                             :refresh="refreshAll"
                             @needs-restart="mayNeedRestart"
-                            @clone="(p) => doClone(p.name, p.links.clone, p.source === 'playlists')"
-                            @reorder="(p) => p.links.order ? doReorder(p.links.order) : doGroupReorder(p.links.members!)"
-                            @queue="(p) => doQueue(p.links.queue!)"
-                            @import="(p) => doImport(p.links.import!)"
-                            @apply-to="(p) => doApplyTo(p.links.applyto!)"
-                            @grouping="activeTab = 'playlist_grouping'"
                         />
 
                         <data-table
@@ -106,17 +100,6 @@
                                         class="badge text-bg-primary"
                                     >
                                         {{ $gettext('Jingle Mode') }}
-                                    </span>
-                                    <span
-                                        v-if="row.item.source === 'songs' && row.item.is_smart_block"
-                                        class="badge text-bg-success"
-                                    >
-                                        <router-link
-                                            :to="{name: 'stations:smart-blocks:index'}"
-                                            class="text-white text-decoration-none"
-                                        >
-                                            {{ $gettext('Smart Block') }}
-                                        </router-link>
                                     </span>
                                     <span
                                         v-if="row.item.source === 'songs' && row.item.order === 'sequential'"
@@ -464,7 +447,7 @@ const doCalendarClick = (event: EventImpl) => {
     void router.push({
         name: 'stations:playlists:edit',
         params: {playlist_id: event.extendedProps.playlist_id},
-        query: {tab: 'schedule_legacy'},
+        query: {tab: 'schedule'},
     });
 };
 const doEdit = (playlistId: number) => router.push({

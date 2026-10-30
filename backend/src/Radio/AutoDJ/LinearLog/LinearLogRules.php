@@ -213,10 +213,12 @@ final class LinearLogRules
         $lines = $conn->fetchAllAssociative(
             'SELECT e.id, e.status, e.is_locked, e.duration, m.song_id, m.type,
                 COALESCE(p.is_programme, 0) AS is_programme,
+                COALESCE(sb.avoid_duplicates, 1) AS avoid_repeats,
                 COALESCE(e.aired_at, e.planned_at) AS airs_at
             FROM station_log_entries e
             JOIN station_media m ON m.id = e.media_id
             LEFT JOIN station_playlists p ON p.id = e.playlist_id
+            LEFT JOIN station_smart_blocks sb ON sb.id = e.smart_block_id
             WHERE e.station_id = ? AND e.status <> ? AND e.planned_at >= ?
             ORDER BY airs_at ASC, e.sequence ASC',
             [$station->id, StationLogEntry::STATUS_DROPPED, $now - $window - 3600]
@@ -248,6 +250,8 @@ final class LinearLogRules
                 // A show's next part is its file going on after the Station
                 // ID (ProgrammeParts), not the file played again.
                 && !$line['is_programme']
+                // A smart block with "Avoid repeats" off replays on purpose.
+                && $line['avoid_repeats']
                 && (float)$line['duration'] < LinearLogRefill::PROGRAMME_MIN_SECONDS
                 && !self::isFinalSong($station, $airsAt, (float)$line['duration'])
             ) {
@@ -296,7 +300,7 @@ final class LinearLogRules
             LEFT JOIN station_playlist_media spm ON spm.playlist_id = e.playlist_id AND spm.media_id = e.media_id
             WHERE e.station_id = ? AND e.status IN (?, ?) AND e.planned_at >= ?
             AND e.media_id IS NOT NULL AND spm.id IS NULL
-            AND p.source = ? AND p.is_smart_block = 0',
+            AND p.source = ?',
             [
                 $station->id,
                 StationLogEntry::STATUS_PLANNED,

@@ -8,6 +8,8 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationClockWheelSlot;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
+use App\Entity\StationSmartBlockCriteria;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\LinearLog\LinearLogPlayout;
 use App\Radio\AutoDJ\LinearLogPreviewContext;
@@ -22,8 +24,8 @@ use Throwable;
 /**
  * Re-plans a station's saved linear log when its schedule changes.
  *
- * The log is planned up to two days ahead. A schedule row or clock wheel
- * added, moved or removed after that leaves the planned hours describing the
+ * The log is planned up to two days ahead. A schedule row, clock wheel or
+ * smart block added, moved or removed after that leaves the planned hours describing the
  * old schedule: the log rules then drop those lines at air time and the hour
  * plays live with no log behind it. Lines an operator locked are kept by the
  * rebuild itself.
@@ -63,8 +65,11 @@ final class LinearLogReplanOnScheduleChange implements EventSubscriber
             $station = match (true) {
                 $entity instanceof StationSchedule => $entity->playlist->station
                     ?? $entity->clock_wheel->station
+                    ?? $entity->smart_block->station
                     ?? $entity->streamer?->station,
                 $entity instanceof StationClockWheel => $entity->station,
+                $entity instanceof StationSmartBlock => $entity->station,
+                $entity instanceof StationSmartBlockCriteria => $entity->smart_block->station,
                 $entity instanceof StationClockWheelSlot => $entity->clock_wheel->station,
                 default => null,
             };
@@ -92,7 +97,7 @@ final class LinearLogReplanOnScheduleChange implements EventSubscriber
         foreach ($pending as $stationId => $hours) {
             try {
                 $this->di->get(MessageBus::class)->dispatch(
-                    new BuildLinearLogMessage($stationId, $hours, false, true, false, true)
+                    new BuildLinearLogMessage($stationId, $hours, false, true, true, true)
                 );
             } catch (Throwable) {
                 // The hourly build still picks the change up.

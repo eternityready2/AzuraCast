@@ -278,8 +278,48 @@ final class StationReportsAnalyticsService
             ];
         }
 
+        // Smart blocks play songs with no playlist; they get their own rows.
+        /** @var array<array{id: int, name: string, play_count: string, avg_delta: string|null, avg_unique_listeners: string|null, tune_outs: string}> $smartBlockRows */
+        $smartBlockRows = $this->em->createQuery(
+            <<<'DQL'
+                SELECT b.id, b.name,
+                    COUNT(sh.id) AS play_count,
+                    AVG(sh.delta_total) AS avg_delta,
+                    AVG(sh.unique_listeners) AS avg_unique_listeners,
+                    SUM(sh.delta_negative) AS tune_outs
+                FROM App\Entity\SongHistory sh
+                JOIN sh.smart_block b
+                WHERE sh.station = :station
+                AND sh.is_visible = 1
+                AND sh.timestamp_start <= :end
+                AND sh.timestamp_end >= :start
+                GROUP BY b.id, b.name
+                ORDER BY play_count DESC
+            DQL
+        )->setParameter('station', $station)
+            ->setParameter('start', $dateRange->start)
+            ->setParameter('end', $dateRange->end)
+            ->getArrayResult();
+
+        $smartBlocks = [];
+        foreach ($smartBlockRows as $row) {
+            $smartBlocks[] = [
+                'id' => (int)$row['id'],
+                'name' => $row['name'],
+                'play_count' => (int)$row['play_count'],
+                'avg_delta' => is_numeric($row['avg_delta'])
+                    ? round((float)$row['avg_delta'], 2)
+                    : null,
+                'avg_unique_listeners' => is_numeric($row['avg_unique_listeners'])
+                    ? round((float)$row['avg_unique_listeners'], 2)
+                    : null,
+                'tune_outs' => (int)$row['tune_outs'],
+            ];
+        }
+
         return [
             'playlists' => $playlists,
+            'smart_blocks' => $smartBlocks,
             ...$this->getRotationHealth($station, $dateRange),
         ];
     }
@@ -298,10 +338,11 @@ final class StationReportsAnalyticsService
         $to = $dateRange->end->utc()->format('Y-m-d H:i:s');
 
         $overPlayed = $conn->fetchAllAssociative(
-            'SELECT h.media_id, MAX(h.text) AS text, COUNT(*) AS plays, MAX(p.name) AS playlist
+            'SELECT h.media_id, MAX(h.text) AS text, COUNT(*) AS plays, MAX(COALESCE(p.name, sb.name)) AS playlist
             FROM song_history h
             JOIN station_media m ON m.id = h.media_id AND m.type = ?
             LEFT JOIN station_playlists p ON p.id = h.playlist_id
+            LEFT JOIN station_smart_blocks sb ON sb.id = h.smart_block_id
             WHERE h.station_id = ? AND h.timestamp_start BETWEEN ? AND ?
             GROUP BY h.media_id
             ORDER BY plays DESC

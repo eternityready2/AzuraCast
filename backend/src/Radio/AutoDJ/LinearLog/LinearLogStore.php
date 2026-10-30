@@ -13,6 +13,7 @@ use App\Entity\StationClockWheel;
 use App\Entity\StationLogEntry;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationPlaylistMedia;
 use App\Entity\StationQueue;
 use App\Radio\AutoDJ\AiredLength;
@@ -258,6 +259,9 @@ final class LinearLogStore
         $row->log_entry_id = $entry->id;
 
         $payload = $entry->payload ?? [];
+        $row->smart_block = $entry->smart_block ?? (!empty($payload['smart_block_id'])
+            ? $this->em->getReference(StationSmartBlock::class, (int)$payload['smart_block_id'])
+            : null);
         if (!empty($payload['clock_wheel_id'])) {
             $row->clock_wheel = $this->em->getReference(StationClockWheel::class, (int)$payload['clock_wheel_id']);
         }
@@ -373,6 +377,8 @@ final class LinearLogStore
             'clock_wheel_enforce_cap' => $row->clock_wheel_enforce_cap,
             'clock_wheel_stretch_ratio' => $row->clock_wheel_stretch_ratio,
             'clock_wheel_legal_id_substitute' => $row->clock_wheel_legal_id_substitute,
+            'smart_block_id' => $row->smart_block?->id,
+            'smart_block' => $row->smart_block?->name,
             'playlist_chain' => $row->playlist_chain,
             'album' => $row->album,
             'song_id' => $row->song_id,
@@ -623,6 +629,10 @@ final class LinearLogStore
         $entry->playlist = null !== $data['playlist_id']
             ? $this->em->getReference(StationPlaylist::class, (int)$data['playlist_id'])
             : null;
+        $smartBlockId = $data['payload']['smart_block_id'] ?? null;
+        $entry->smart_block = null !== $smartBlockId
+            ? $this->em->getReference(StationSmartBlock::class, (int)$smartBlockId)
+            : null;
         $entry->title = self::cut($data['title']);
         $entry->artist = self::cut($data['artist']);
         $entry->text = self::cut($data['text']);
@@ -670,6 +680,8 @@ final class LinearLogStore
             'playlist_chain' => $payload['playlist_chain'] ?? null,
             'clock_wheel' => $payload['clock_wheel'] ?? null,
             'clock_wheel_id' => $payload['clock_wheel_id'] ?? null,
+            'smart_block' => $entry->smart_block?->name ?? ($payload['smart_block'] ?? null),
+            'smart_block_id' => $entry->smart_block?->id ?? ($payload['smart_block_id'] ?? null),
             'media_type' => $isProgramme
                 ? 'programme'
                 : ($entry->media->type ?? ($payload['media_type'] ?? 'music')),
@@ -677,6 +689,7 @@ final class LinearLogStore
                 $isProgramme => 'scheduled_programme',
                 $isRequest => 'request',
                 !empty($payload['clock_wheel_id']) => 'clock_wheel',
+                null !== $entry->smart_block, !empty($payload['smart_block_id']) => 'smart_block',
                 null !== $entry->playlist => 'playlist',
                 default => 'autodj',
             },

@@ -136,6 +136,26 @@ final class IcecastConfigTest extends TestCase
         self::assertSame(60, $clients[0]->connectedSeconds);
     }
 
+    public function testSendsCorsHeadersForBrowserPlayers(): void
+    {
+        $xml = Writer::toString(
+            ['http-headers' => IcecastConfig::getHttpHeaders()],
+            'icecast',
+            false
+        );
+
+        self::assertStringContainsString(
+            '<header name="Access-Control-Allow-Origin" value="*"/>',
+            $xml
+        );
+        self::assertStringContainsString(
+            '<header name="Access-Control-Allow-Methods" value="GET, HEAD, OPTIONS"/>',
+            $xml
+        );
+        self::assertStringContainsString('Icy-MetaInt, Icy-Name', $xml);
+        self::assertSame(4, substr_count($xml, '<header '));
+    }
+
     public function testInvalidListClientsXmlReturnsNull(): void
     {
         self::assertNull(IcecastConfig::parseListClients('not xml'));

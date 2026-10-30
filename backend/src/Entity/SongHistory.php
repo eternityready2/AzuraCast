@@ -66,6 +66,13 @@ final class SongHistory implements
     public private(set) ?int $clock_wheel_id = null;
 
     #[ORM\ManyToOne]
+    #[ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    public ?StationSmartBlock $smart_block = null;
+
+    #[ORM\Column(nullable: true, insertable: false, updatable: false)]
+    public private(set) ?int $smart_block_id = null;
+
+    #[ORM\ManyToOne]
     #[ORM\JoinColumn(name: 'media_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
     public ?StationMedia $media = null {
         set {
@@ -240,6 +247,7 @@ final class SongHistory implements
         $sh->request = $queue->request;
         $sh->playlist = $queue->playlist;
         $sh->clock_wheel = $queue->clock_wheel;
+        $sh->smart_block = $queue->smart_block;
         $sh->playlist_chain = $queue->playlist_chain;
         $sh->duration = $queue->duration;
         $sh->updateVisibility();

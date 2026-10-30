@@ -15,6 +15,7 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationStreamer;
 use App\Exception\ValidationException;
 use App\Radio\AutoDJ\Scheduler;
@@ -40,17 +41,18 @@ final class StationScheduleRepository extends Repository
     }
 
     /**
-     * @param StationPlaylist|StationStreamer|StationClockWheel $relation
+     * @param StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation
      * @param array $items
      */
     public function setScheduleItems(
-        StationPlaylist|StationStreamer|StationClockWheel $relation,
+        StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation,
         array $items = []
     ): void {
         $station = match (true) {
             $relation instanceof StationPlaylist => $relation->station,
             $relation instanceof StationStreamer => $relation->station,
             $relation instanceof StationClockWheel => $relation->station,
+            $relation instanceof StationSmartBlock => $relation->station,
         };
 
         $this->conflictChecker->assertBatchHasNoConflicts($station, $relation, $items);
@@ -196,11 +198,11 @@ final class StationScheduleRepository extends Repository
     }
 
     /**
-     * @param StationPlaylist|StationStreamer|StationClockWheel $relation
+     * @param StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation
      *
      * @return StationSchedule[]
      */
-    public function findByRelation(StationPlaylist|StationStreamer|StationClockWheel $relation): array
+    public function findByRelation(StationPlaylist|StationStreamer|StationClockWheel|StationSmartBlock $relation): array
     {
         if ($relation instanceof StationPlaylist) {
             return $this->getRepository()->findBy(['playlist' => $relation]);
@@ -208,6 +210,10 @@ final class StationScheduleRepository extends Repository
 
         if ($relation instanceof StationClockWheel) {
             return $this->getRepository()->findBy(['clock_wheel' => $relation]);
+        }
+
+        if ($relation instanceof StationSmartBlock) {
+            return $this->getRepository()->findBy(['smart_block' => $relation]);
         }
 
         return $this->getRepository()->findBy(['streamer' => $relation]);
@@ -222,14 +228,16 @@ final class StationScheduleRepository extends Repository
     {
         return $this->em->createQuery(
             <<<'DQL'
-                SELECT ssc, sp, sst, scw
+                SELECT ssc, sp, sst, scw, ssb
                 FROM App\Entity\StationSchedule ssc
                 LEFT JOIN ssc.playlist sp
                 LEFT JOIN ssc.streamer sst
                 LEFT JOIN ssc.clock_wheel scw
+                LEFT JOIN ssc.smart_block ssb
                 WHERE (sp.station = :station AND sp.is_jingle = 0 AND sp.is_enabled = 1)
                 OR (sst.station = :station AND sst.is_active = 1)
                 OR (scw.station = :station AND scw.is_active = 1)
+                OR (ssb.station = :station AND ssb.is_enabled = 1)
             DQL
         )->setParameter('station', $station)
             ->execute();

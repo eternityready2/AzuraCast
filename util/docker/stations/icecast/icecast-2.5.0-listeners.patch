@@ -1,0 +1,150 @@
+Icecast 2.5.0: start listeners instantly and answer HEAD on stream mounts.
+
+Icecast 2.5 attaches a new listener, sends its headers and its burst only
+from the mount's source loop, which waits up to 250ms for source data and
+then sits a listener out for a pass after each stage. Listeners waited
+0.3-0.9s for audio (Icecast-KH: ~0s). With these changes the headers and
+burst go out in the same pass, 2-12ms after connecting.
+
+HEAD on a stream mount answered 405, which failed directory and stream
+checkers (Radio Garden and others). It now returns the stream's headers
+and closes. HEAD on anything else still answers 405.
+
+diff -ru a/src/connection_handle.c b/src/connection_handle.c
+--- a/src/connection_handle.c
++++ b/src/connection_handle.c
+@@ -425,6 +425,11 @@
+     }
+ 
+     if (util_check_valid_extension(client->uri) == XSLT_CONTENT) {
++        if (client->parser->req_type == httpp_req_head) {
++            client_send_error_by_id(client, ICECAST_ERROR_CON_UNKNOWN_REQUEST);
++            return;
++        }
++
+         /* If the file exists, then transform it, otherwise, write a 404 */
+         ICECAST_LOG_DEBUG("Stats request, sending XSL transformed stats");
+         stats_transform_xslt(client);
+@@ -472,6 +477,11 @@
+     } else {
+         /* file */
+         avl_tree_unlock(global.source_tree);
++        if (client->parser->req_type == httpp_req_head) {
++            /* HEAD is only answered for stream mounts. */
++            client_send_error_by_id(client, ICECAST_ERROR_CON_UNKNOWN_REQUEST);
++            return;
++        }
+         fserve_client_create(client);
+     }
+ }
+@@ -553,6 +563,7 @@
+             _handle_stats_request(client);
+         break;
+         case httpp_req_get:
++        case httpp_req_head:
+         case httpp_req_post:
+         case httpp_req_options:
+             _handle_get_request(client);
+diff -ru a/src/format.c b/src/format.c
+--- a/src/format.c
++++ b/src/format.c
+@@ -245,6 +245,13 @@
+ 
+     if (client->pos == refbuf->len)
+     {
++        /* Stream checkers (directories, players) probe mounts with HEAD:
++         * they get the stream headers, then the connection is closed. */
++        if (client->parser->req_type == httpp_req_head) {
++            client->con->error = 1;
++            return -1;
++        }
++
+         client->write_to_client = source->format->write_buf_to_client;
+         client->check_buffer = format_check_file_buffer;
+         client->intro_offset = 0;
+diff -ru a/src/source.c b/src/source.c
+--- a/src/source.c
++++ b/src/source.c
+@@ -505,7 +505,9 @@
+ static refbuf_t *get_next_buffer (source_t *source)
+ {
+     refbuf_t *refbuf = NULL;
+-    int delay = 250;
++    /* Wake up often: new listeners are only attached, sent headers and
++     * burst from this loop, so a long wait delays every tune-in. */
++    int delay = 10;
+ 
+     if (source->short_delay)
+         delay = 0;
+@@ -608,8 +610,17 @@
+ 
+         loop--;
+ 
+-        if (client->check_buffer(source, client) < 0)
+-            break;
++        {
++            int (*check_buffer)(source_t *, client_t *) = client->check_buffer;
++
++            if (client->check_buffer(source, client) < 0) {
++                /* A new listener just moved on to its next stage (headers,
++                 * intro, burst). Keep going now instead of waiting a pass. */
++                if (client->check_buffer != check_buffer && !client->con->error)
++                    continue;
++                break;
++            }
++        }
+ 
+         bytes = client->write_to_client(client);
+         if (bytes <= 0)
+@@ -860,25 +871,7 @@
+         /* acquire write lock on client_tree */
+         avl_tree_wlock(source->client_tree);
+ 
+-        client_node = avl_get_first(source->client_tree);
+-        while (client_node) {
+-            client_t *client = (client_t *) client_node->key;
+-
+-            send_to_listener(source, client, remove_from_q);
+-
+-            if (client->con->error) {
+-                client_node = avl_get_next(client_node);
+-                if (client->respcode == 200)
+-                    stats_event_dec(NULL, "listeners");
+-                avl_delete(source->client_tree, (void *) client, _free_client);
+-                source->listeners--;
+-                ICECAST_LOG_DEBUG("Client removed");
+-                continue;
+-            }
+-            client_node = avl_get_next(client_node);
+-        }
+-
+-        /** add pending clients **/
++        /** add pending clients first, so they get headers and burst this pass **/
+         client_node = avl_get_first(source->pending_tree);
+         old_flags = source->flags;
+         while (client_node) {
+@@ -936,6 +929,24 @@
+                     source_remove_client);
+         }
+ 
++        client_node = avl_get_first(source->client_tree);
++        while (client_node) {
++            client_t *client = (client_t *) client_node->key;
++
++            send_to_listener(source, client, remove_from_q);
++
++            if (client->con->error) {
++                client_node = avl_get_next(client_node);
++                if (client->respcode == 200)
++                    stats_event_dec(NULL, "listeners");
++                avl_delete(source->client_tree, (void *) client, _free_client);
++                source->listeners--;
++                ICECAST_LOG_DEBUG("Client removed");
++                continue;
++            }
++            client_node = avl_get_next(client_node);
++        }
++
+         /* release write lock on pending_tree */
+         avl_tree_unlock(source->pending_tree);
+ 

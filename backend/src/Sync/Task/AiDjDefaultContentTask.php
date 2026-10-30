@@ -37,6 +37,14 @@ final class AiDjDefaultContentTask extends AbstractTask
 
         foreach ($stations as $station) {
             try {
+                $replaced = $this->defaultContent->replaceLegacyBible($station);
+                if (0 !== $replaced) {
+                    $this->logger->notice('AI DJ: the old King James Bible was replaced by the World English Bible.', [
+                        'station_id' => $station->id,
+                        'verses' => $replaced,
+                    ]);
+                }
+
                 $added = $this->defaultContent->seed($station);
                 if ([] !== $added) {
                     $this->logger->notice('AI DJ: default content library added.', [

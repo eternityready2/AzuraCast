@@ -58,7 +58,7 @@ final class LinearLogExportAction
                 (string)($entry['media_type'] ?? ''),
                 (string)($entry['title'] ?? $entry['text'] ?? ''),
                 (string)($entry['artist'] ?? ''),
-                (string)($entry['playlist'] ?? ''),
+                (string)($entry['playlist'] ?? $entry['smart_block'] ?? ''),
                 (string)($entry['log_status'] ?? 'planned'),
                 !empty($entry['is_locked']) ? 'yes' : '',
                 (string)($entry['log_note'] ?? ''),

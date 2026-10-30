@@ -6,6 +6,7 @@ namespace App\Entity\ApiGenerator;
 
 use App\Entity\Api\NowPlaying\StationQueue as NowPlayingStationQueue;
 use App\Entity\StationClockWheel;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use Psr\Http\Message\UriInterface;
@@ -40,6 +41,10 @@ final readonly class StationQueueApiGenerator
         } else {
             $response->clock_wheel = '';
         }
+
+        $response->smart_block = ($record->smart_block instanceof StationSmartBlock)
+            ? $record->smart_block->name
+            : '';
 
         $response->top_of_hour_legal_id = $record->top_of_hour_legal_id ?? false;
 

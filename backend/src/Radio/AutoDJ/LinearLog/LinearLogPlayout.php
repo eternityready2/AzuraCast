@@ -358,6 +358,7 @@ final class LinearLogPlayout implements EventSubscriberInterface
             // the song that actually airs, not the one that was planned.
             $entry->media = $row->media;
             $entry->playlist = $row->playlist;
+            $entry->smart_block = $row->smart_block;
             $entry->title = $row->title;
             $entry->artist = $row->artist;
             $entry->text = mb_substr((string)$row->text, 0, 255) ?: null;
@@ -366,6 +367,8 @@ final class LinearLogPlayout implements EventSubscriberInterface
                 'song_id' => $row->song_id,
                 'album' => $row->album,
                 'media_type' => $row->media?->type,
+                'smart_block_id' => $row->smart_block?->id,
+                'smart_block' => $row->smart_block?->name,
             ];
         }
         $this->em->persist($entry);
