@@ -28,6 +28,38 @@ final class IcecastConfig
     }
 
     /**
+     * Icecast-KH sent CORS headers on its own; Icecast 2.5 only sends what is
+     * configured. Without them browser players on other sites (Radio Garden,
+     * embedded players) cannot play the stream or read its ICY headers.
+     *
+     * @return array{header: array<int, array{'@name': string, '@value': string}>}
+     */
+    public static function getHttpHeaders(): array
+    {
+        $headers = [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Headers' => 'Origin, Icy-MetaData, Range',
+            'Access-Control-Expose-Headers' => implode(', ', [
+                'Icy-Br',
+                'Icy-Description',
+                'Icy-Genre',
+                'Icy-MetaInt',
+                'Icy-Name',
+                'Icy-Pub',
+                'Icy-Url',
+            ]),
+            'Access-Control-Allow-Methods' => 'GET, HEAD, OPTIONS',
+        ];
+
+        $config = [];
+        foreach ($headers as $name => $value) {
+            $config[] = ['@name' => $name, '@value' => $value];
+        }
+
+        return ['header' => $config];
+    }
+
+    /**
      * @return array<int, array<string, int|string|array<int, string>>>
      */
     public static function getListenSockets(int $port, ?string $proxyClientAddress = null): array
