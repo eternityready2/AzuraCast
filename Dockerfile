@@ -25,9 +25,12 @@ ARG LIBIGLOO_SHA256=ea22e9119f7a2188810f99100c5155c6762d4595ae213b9ac29e69b4f0b8
 ARG ICECAST_VERSION=2.5.0
 ARG ICECAST_SHA512=d92ce5d8ae1cd011eaa8c7424adea744f35e5c2d3e8244d362743be1c6bbc8fc44d76d7a212cf1eebe79da9b7d83b2ed5ab8659fb97929af316674b5ddf590b5
 
+# Instant listener start and HEAD support; see the patch header for details.
+COPY util/docker/stations/icecast/icecast-2.5.0-listeners.patch /tmp/icecast-listeners.patch
+
 RUN apt-get update \
     && apt-get install -q -y --no-install-recommends \
-        build-essential ca-certificates curl pkg-config \
+        build-essential ca-certificates curl patch pkg-config \
         libcurl4-openssl-dev librhash-dev libssl-dev libvorbis-dev libxml2-dev libxslt1-dev \
     && curl -fsSL \
         "https://downloads.xiph.org/releases/igloo/libigloo-${LIBIGLOO_VERSION}.tar.gz" \
@@ -46,6 +49,7 @@ RUN apt-get update \
     && mkdir /tmp/icecast \
     && tar -xzf /tmp/icecast.tar.gz --strip-components=1 -C /tmp/icecast \
     && cd /tmp/icecast \
+    && patch -p1 < /tmp/icecast-listeners.patch \
     && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure --prefix=/usr/local \
     && make -j"$(nproc)" \
     && make install \

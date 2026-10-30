@@ -8,14 +8,12 @@ use App\Doctrine\Repository;
 use App\Entity\Api\StationPlaylistQueue;
 use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\PlaylistSources;
-use App\Entity\Enums\SmartBlockType;
 use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Station;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistFolder;
 use App\Entity\StationPlaylistMedia;
-use App\Radio\SmartBlock\SmartBlockSyncer;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use Doctrine\ORM\NoResultException;
@@ -31,18 +29,8 @@ final class StationPlaylistMediaRepository extends Repository
 {
     protected string $entityClass = StationPlaylistMedia::class;
 
-    /**
-     * How often (in seconds) a Dynamic Smart Block is allowed to be inline-resynced
-     * from {@see self::getQueue()} -- see {@see self::maybeResyncDynamicSmartBlock()}.
-     */
-    private const int SMART_BLOCK_INLINE_RESYNC_THROTTLE_SECONDS = 60;
-
-    /** @var array<int, int> Playlist ID => unix timestamp of last inline resync. */
-    private array $smartBlockLastInlineSyncAt = [];
-
     public function __construct(
         private readonly StationQueueRepository $queueRepo,
-        private readonly SmartBlockSyncer $smartBlockSyncer,
     ) {
     }
 
@@ -385,7 +373,6 @@ final class StationPlaylistMediaRepository extends Repository
             throw new InvalidArgumentException('Playlist must contain songs.');
         }
 
-        $this->maybeResyncDynamicSmartBlock($playlist);
 
         $queuedMediaQuery = $this->em->createQueryBuilder()
             ->select([
@@ -426,28 +413,6 @@ final class StationPlaylistMediaRepository extends Repository
             },
             $queuedMedia
         );
-    }
-
-    private function maybeResyncDynamicSmartBlock(StationPlaylist $playlist): void
-    {
-        if (!$playlist->is_smart_block || SmartBlockType::Dynamic !== $playlist->smart_block_type) {
-            return;
-        }
-
-        $playlistId = $playlist->id;
-        $now = time();
-        $lastSync = $this->smartBlockLastInlineSyncAt[$playlistId] ?? 0;
-
-        if (($now - $lastSync) < self::SMART_BLOCK_INLINE_RESYNC_THROTTLE_SECONDS) {
-            return;
-        }
-
-        $this->smartBlockLastInlineSyncAt[$playlistId] = $now;
-
-        try {
-            $this->smartBlockSyncer->sync($playlist);
-        } catch (Throwable) {
-        }
     }
 
     public function isQueueCompletelyFilled(StationPlaylist $playlist): bool

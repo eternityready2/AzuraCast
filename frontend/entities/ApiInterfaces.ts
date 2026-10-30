@@ -903,6 +903,11 @@ export interface ApiNowPlayingSongHistory {
    */
   clock_wheel: string | null;
   /**
+   * Indicates the smart block the song came from, if available, or empty string if not.
+   * @example "Upbeat Worship"
+   */
+  smart_block?: string | null;
+  /**
    * Indicates the current streamer that was connected, if available, or empty string if not.
    * @example "Test DJ"
    */
@@ -1047,6 +1052,11 @@ export interface ApiNowPlayingStationQueue {
    * @example "Morning Drive"
    */
   clock_wheel: string | null;
+  /**
+   * Indicates the smart block the song came from, if available, or empty string if not.
+   * @example "Upbeat Worship"
+   */
+  smart_block?: string | null;
   /** Indicates whether the song is a listener request. */
   is_request: boolean;
   song: ApiSong;
@@ -1369,7 +1379,7 @@ export interface ApiStationSchedule {
    * The type of this schedule entry.
    * @example "playlist"
    */
-  type?: "playlist" | "streamer" | "clock_wheel";
+  type?: "playlist" | "streamer" | "clock_wheel" | "smart_block";
   /**
    * Either the playlist or streamer's display name.
    * @example "Example Schedule Entry"
@@ -2504,18 +2514,6 @@ export type StationPlaylist = HasAutoIncrementId & {
   playlists?: StationPlaylistGroupMember[];
   /** The Playlist Groups (if any) this playlist is currently a member of. */
   playlist_groups?: StationPlaylistGroupMember[];
-  /** Smart Block: whether this playlist's membership is auto-managed by criteria. */
-  is_smart_block?: boolean;
-  /** Smart Block: whether ALL or ANY criteria rows must match a track. */
-  smart_block_match_type?: SmartBlockMatchType;
-  /** Smart Block: optional cap on the number of matching tracks kept as members. */
-  smart_block_limit?: number | null;
-  /** Smart Block: whether smart_block_limit is measured in tracks or seconds. */
-  smart_block_limit_type?: SmartBlockLimitType;
-  /** Smart Block: Static (generate once, hand-editable) or Dynamic (always kept in sync). */
-  smart_block_type?: SmartBlockType;
-  /** Smart Block: the filter rules, if is_smart_block is enabled. */
-  smart_block_criteria?: StationPlaylistSmartBlockCriterion[];
 };
 
 export enum SmartBlockCriteriaField {

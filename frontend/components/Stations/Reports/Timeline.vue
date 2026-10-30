@@ -106,6 +106,10 @@
                     {{ $gettext('Live Streamer:') }}
                     {{ row.item.streamer }}
                 </template>
+                <template v-else-if="row.item.smart_block">
+                    {{ $gettext('Smart Block:') }}
+                    {{ row.item.smart_block }}
+                </template>
                 <template v-else>
                     &nbsp;
                 </template>
@@ -122,6 +126,9 @@
             </template>
             <template #cell(clock_wheel)="row">
                 {{ row.item.clock_wheel || '—' }}
+            </template>
+            <template #cell(smart_block)="row">
+                {{ row.item.smart_block || '—' }}
             </template>
         </data-table>
     </div>
@@ -221,6 +228,12 @@ const fields: DataTableField[] = [
     {
         key: 'clock_wheel',
         label: $gettext('Clock Wheel'),
+        selectable: true,
+        sortable: false
+    },
+    {
+        key: 'smart_block',
+        label: $gettext('Smart Block'),
         selectable: true,
         sortable: false
     },

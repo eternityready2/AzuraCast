@@ -63,7 +63,8 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
 
         $playlist = $row->playlist;
         $clockWheel = $row->clock_wheel;
-        if (!$playlist instanceof StationPlaylist && null === $clockWheel) {
+        $smartBlock = $row->smart_block;
+        if (!$playlist instanceof StationPlaylist && null === $clockWheel && null === $smartBlock) {
             return;
         }
 
@@ -95,6 +96,12 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
             }
 
             $sourceName = $clockWheel->name;
+        } elseif (null !== $smartBlock) {
+            if ($this->scheduler->isSmartBlockAllowedAt($smartBlock, $airsAtImmutable)) {
+                return;
+            }
+
+            $sourceName = $smartBlock->name;
         } else {
             if ($this->scheduler->isPlaylistAllowedAt($playlist, $airsAtImmutable)) {
                 return;

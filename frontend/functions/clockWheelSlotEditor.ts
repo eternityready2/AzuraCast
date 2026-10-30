@@ -10,9 +10,11 @@ export interface ClockWheelSlotEditorRow {
     position_seconds: number;
     duration_seconds: number | null;
     category_id: number | null;
-    /** Play from this playlist / smart block instead of the whole library. */
+    /** Play from this playlist instead of the whole library. */
     playlist_id: number | null;
-    /** restrict_pool: library media in the playlist; playlist_rotation: the playlist's own order (smart blocks). */
+    /** Play from this smart block's rules instead of the whole library. */
+    smart_block_id: number | null;
+    /** restrict_pool: library media in the playlist; playlist_rotation: the playlist's own order. */
     pool_mode: 'restrict_pool' | 'playlist_rotation';
     separation_override_enabled: boolean;
     separation_artist_minutes: number | null;
@@ -33,6 +35,7 @@ type ApiSlotInput = {
     duration_seconds?: number | null;
     category_id?: number | null;
     playlist_id?: number | null;
+    smart_block_id?: number | null;
     pool_mode?: string | null;
     separation_override_enabled?: boolean;
     separation_artist_minutes?: number | null;
@@ -51,6 +54,7 @@ export function mapApiSlotToEditorRow(slot: ApiSlotInput): ClockWheelSlotEditorR
         duration_seconds: slot.duration_seconds ?? null,
         category_id: slot.category_id ?? null,
         playlist_id: slot.playlist_id ?? null,
+        smart_block_id: slot.smart_block_id ?? null,
         pool_mode: slot.pool_mode === 'playlist_rotation' ? 'playlist_rotation' : 'restrict_pool',
         separation_override_enabled: Boolean(slot.separation_override_enabled),
         separation_artist_minutes: slot.separation_artist_minutes ?? null,
@@ -62,8 +66,9 @@ export function mapEditorRowToApiSlot(row: ClockWheelSlotEditorRow): Record<stri
     return {
         type: row.type,
         category_id: row.category_id,
-        playlist_id: row.playlist_id,
-        pool_mode: row.playlist_id ? row.pool_mode : 'restrict_pool',
+        playlist_id: row.smart_block_id ? null : row.playlist_id,
+        smart_block_id: row.smart_block_id,
+        pool_mode: row.playlist_id && !row.smart_block_id ? row.pool_mode : 'restrict_pool',
         algorithm: row.algorithm,
         position_seconds: row.position_seconds,
         duration_seconds: row.duration_seconds,
@@ -86,6 +91,7 @@ export function defaultClockWheelSlotEditorRow(positionSeconds: number): ClockWh
         duration_seconds: null,
         category_id: null,
         playlist_id: null,
+        smart_block_id: null,
         pool_mode: 'restrict_pool',
         separation_override_enabled: false,
         separation_artist_minutes: null,

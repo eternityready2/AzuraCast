@@ -14,6 +14,7 @@ use App\Entity\StationClockWheelSlot;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Radio\AutoDJ\Scheduler;
+use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Doctrine\ORM\EntityManagerInterface;
@@ -34,6 +35,7 @@ final class ClockWheelPreviewSimulator
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly Scheduler $scheduler,
+        private readonly SmartBlockAvailability $smartBlockAvailability,
     ) {
     }
 
@@ -259,7 +261,11 @@ final class ClockWheelPreviewSimulator
         $dql = 'SELECT m FROM App\Entity\StationMedia m
              WHERE m.storage_location = :storageLocation';
 
-        if ($playlistId !== null && $playlistId > 0) {
+        if (null !== $slot->smart_block) {
+            $smartBlockMediaIds = array_column($this->smartBlockAvailability->getPool($slot->smart_block), 'id');
+            $dql .= ' AND m.id IN (:smartBlockMediaIds)';
+            $params['smartBlockMediaIds'] = [] !== $smartBlockMediaIds ? $smartBlockMediaIds : [0];
+        } elseif ($playlistId !== null && $playlistId > 0) {
             $dql .= ' AND EXISTS (
                 SELECT 1 FROM App\Entity\StationPlaylistMedia spm
                 WHERE spm.media = m AND spm.playlist = :playlistId

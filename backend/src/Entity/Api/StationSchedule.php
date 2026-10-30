@@ -16,6 +16,7 @@ final class StationSchedule
     public const string TYPE_PLAYLIST = 'playlist';
     public const string TYPE_STREAMER = 'streamer';
     public const string TYPE_CLOCK_WHEEL = 'clock_wheel';
+    public const string TYPE_SMART_BLOCK = 'smart_block';
 
     #[OA\Property(
         description: 'Unique identifier for this schedule entry.',
@@ -29,6 +30,7 @@ final class StationSchedule
             StationSchedule::TYPE_PLAYLIST,
             StationSchedule::TYPE_STREAMER,
             StationSchedule::TYPE_CLOCK_WHEEL,
+            StationSchedule::TYPE_SMART_BLOCK,
         ],
         example: StationSchedule::TYPE_PLAYLIST
     )]

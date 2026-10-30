@@ -16,6 +16,12 @@
                 </div>
                 <div class="col-md-4 text-end">
                     <router-link
+                        :to="{name: 'stations:schedule:index'}"
+                        class="btn btn-sm btn-light me-2"
+                    >
+                        {{ $gettext('Open Calendar') }}
+                    </router-link>
+                    <router-link
                         :to="{name: 'stations:playlists:index'}"
                         class="btn btn-sm btn-secondary"
                     >
@@ -28,7 +34,7 @@
         <div class="card-body">
             <p class="text-muted mb-0">
                 {{
-                    $gettext('A Smart Block automatically fills itself with tracks from your media library that match a set of rules — genre, BPM, mood, or any Custom Field — instead of being built by hand. Schedule it like any other playlist to fill empty airtime automatically. Smart Blocks also show up in your regular Playlists list, tagged accordingly.')
+                    $gettext('A Smart Block automatically fills itself with tracks from your media library that match a set of rules — genre, BPM, mood, or any Custom Field — instead of being built by hand. To put one on the air, drag it onto the Calendar, or add it to a Clock Wheel.')
                 }}
             </p>
         </div>
@@ -88,6 +94,13 @@
                             </div>
                             <div class="text-muted small mt-1">
                                 {{ $gettext('%{count} tracks', {count: item.num_songs ?? 0}) }}
+                                ·
+                                <span v-if="item.num_schedules">
+                                    {{ $gettext('On the calendar') }}
+                                </span>
+                                <span v-else>
+                                    {{ $gettext('Not on the calendar yet') }}
+                                </span>
                             </div>
                         </button>
                     </li>
@@ -114,7 +127,7 @@
                         :key="selectedId"
                         standalone
                         :smart-block-url="smartBlockUrl(selectedId)"
-                        :playlist-url="playlistUrl(selectedId)"
+                        :playlist-url="smartBlockUrl(selectedId)"
                         @saved="loadSmartBlocks"
                         @deleted="onDeleted"
                     />
@@ -129,12 +142,6 @@ import {onMounted, ref} from "vue";
 import AddButton from "~/components/Common/AddButton.vue";
 import {useNotify} from "~/components/Common/Toasts/useNotify.ts";
 import SmartBlockCriteriaEditor from "~/components/Stations/Playlists/SmartBlockCriteriaEditor.vue";
-import {
-    PlaylistOrders,
-    PlaylistSources,
-    PlaylistTypes,
-    type StationPlaylist,
-} from "~/entities/ApiInterfaces.ts";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
 import {getErrorAsString, useAxios} from "~/vendor/axios";
 import {useTranslate} from "~/vendor/gettext";
@@ -144,11 +151,14 @@ const {axios} = useAxios();
 const {notifySuccess, notifyError} = useNotify();
 const {getStationApiUrl} = useApiRouter();
 
-const listUrl = getStationApiUrl('/playlists');
+const listUrl = getStationApiUrl('/smart-blocks');
 
-type SmartBlockListItem = StationPlaylist & {
+type SmartBlockListItem = {
     id: number,
+    name: string,
+    is_enabled: boolean,
     num_songs?: number,
+    num_schedules?: number,
     links?: {self?: string},
 };
 
@@ -159,14 +169,8 @@ const selectedId = ref<number | null>(null);
 const loadSmartBlocks = async (): Promise<void> => {
     loading.value = true;
     try {
-        const {data} = await axios.get(listUrl.value, {
-            params: {rowCount: -1, is_smart_block: '1'},
-        });
-        const items: SmartBlockListItem[] = (data.rows ?? data ?? []) as SmartBlockListItem[];
-
-        smartBlocks.value = items.filter(
-            (item) => item.source === PlaylistSources.Songs && item.is_smart_block,
-        );
+        const {data} = await axios.get(listUrl.value);
+        smartBlocks.value = (data.rows ?? data ?? []) as SmartBlockListItem[];
     } catch (err) {
         notifyError(`${$gettext('Failed to load Smart Blocks.')}: ${getErrorAsString(err)}`);
     } finally {
@@ -174,23 +178,15 @@ const loadSmartBlocks = async (): Promise<void> => {
     }
 };
 
-const playlistUrl = (id: number): string => {
+const smartBlockUrl = (id: number): string => {
     const record = smartBlocks.value.find((item) => item.id === id);
-    return record?.links?.self ?? `${listUrl.value}/${id}`;
+    return record?.links?.self ?? getStationApiUrl(`/smart-block/${id}`).value;
 };
-
-const smartBlockUrl = (id: number): string => `${playlistUrl(id)}/smart-block`;
 
 const doCreate = async (): Promise<void> => {
     try {
         const {data} = await axios.post(listUrl.value, {
             name: $gettext('New Smart Block'),
-            source: PlaylistSources.Songs,
-            type: PlaylistTypes.Standard,
-            order: PlaylistOrders.Shuffle,
-            is_enabled: true,
-            weight: 3,
-            is_smart_block: true,
         });
 
         await loadSmartBlocks();

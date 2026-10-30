@@ -57,12 +57,14 @@
                                 @click="requestBuild"
                             >
                                 <span
-                                    v-if="isBuilding"
+                                    v-if="isBuilding && !heldUntil"
                                     class="spinner-border spinner-border-sm me-1"
                                     role="status"
                                     aria-hidden="true"
                                 />
-                                {{ isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH') }}
+                                {{ heldUntil
+                                    ? $gettext('REBUILD AT %{time}', {time: formatHeldTime(heldUntil)})
+                                    : (isBuilding ? $gettext('BUILDING') : $gettext('BUILD AND REFRESH')) }}
                             </button>
 
                             <a
@@ -110,16 +112,92 @@
                         {{ buildError }}
                     </div>
 
+                    <div v-else-if="heldUntil" class="build-status">
+                        <span>
+                            {{ $gettext('A rebuild is waiting for the top of the hour to pass. It starts at %{time}.', {time: formatHeldTime(heldUntil)}) }}
+                        </span>
+                        <span v-if="allItems.length" class="text-body-secondary">
+                            {{ $gettext('The log below keeps playing as it is until then.') }}
+                        </span>
+                    </div>
+
                     <div v-else-if="isBuilding" class="build-status">
                         <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
                         <span>
-                            {{ status === 'queued'
-                                ? $gettext('The Linear Log build is queued in the background.')
-                                : $gettext('AutoDJ is calculating the isolated playout projection in the background.') }}
+                            {{ $gettext('The log is being rebuilt. This takes a minute or two.') }}
                         </span>
                         <span v-if="allItems.length" class="text-body-secondary">
-                            {{ $gettext('The last completed snapshot remains visible below.') }}
+                            {{ $gettext('The log below keeps playing as it is until the rebuild finishes.') }}
                         </span>
+                    </div>
+
+                    <div
+                        v-if="setupLoaded"
+                        class="setup-status"
+                        :class="setupIssues.length ? 'has-issues' : 'is-ready'"
+                    >
+                        <template v-if="setupIssues.length === 0">
+                            <span class="setup-icon">&#10003;</span>
+                            <span>{{ $gettext('Log ready. No setup problems found.') }}</span>
+                        </template>
+                        <template v-else>
+                            <span class="setup-icon">!</span>
+                            <button
+                                type="button"
+                                class="btn btn-link p-0 setup-toggle"
+                                :aria-expanded="showSetup"
+                                @click="showSetup = !showSetup"
+                            >
+                                {{ setupIssues.length === 1
+                                    ? $gettext('1 setup problem')
+                                    : $gettext('%{n} setup problems', {n: String(setupIssues.length)}) }}
+                                <span class="small">{{ showSetup ? '▲' : '▼' }}</span>
+                            </button>
+                            <button
+                                v-if="setupFixableCount > 0"
+                                type="button"
+                                class="btn btn-sm btn-primary ms-auto"
+                                :disabled="setupFixing"
+                                @click="setupFixAll"
+                            >
+                                {{ setupFixableCount === setupIssues.length
+                                    ? $gettext('Fix all')
+                                    : $gettext('Fix %{n}', {n: String(setupFixableCount)}) }}
+                            </button>
+                        </template>
+                    </div>
+                    <ul
+                        v-if="showSetup && setupIssues.length"
+                        class="setup-list"
+                    >
+                        <li
+                            v-for="issue in setupIssues"
+                            :key="issue.id"
+                        >
+                            <span class="setup-message">{{ issue.message }}</span>
+                            <button
+                                v-if="issue.fix"
+                                type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                :disabled="setupFixing"
+                                @click="setupFixOne(issue.id)"
+                            >
+                                {{ issue.fix }}
+                            </button>
+                            <a
+                                v-else-if="issue.link"
+                                class="btn btn-sm btn-outline-secondary"
+                                :href="issue.link"
+                            >
+                                {{ $gettext('Open') }}
+                            </a>
+                        </li>
+                    </ul>
+                    <div
+                        v-if="setupFixError"
+                        class="alert alert-danger rounded-0 border-start-0 border-end-0 mb-0 small"
+                    >
+                        {{ setupFixError }}
                     </div>
 
                     <div
@@ -130,7 +208,7 @@
                             {{ gapCount }} {{ $gettext('projected gap(s) detected') }} — {{ totalGapDuration }}
                         </div>
                         <div class="small mt-1">
-                            {{ $gettext('A gap means AutoDJ could not find an eligible item for that simulated time after applying schedules, rotation, duplicate prevention, DMCA and other playout rules. The preview advanced up to five minutes (never past the top of the hour) and kept calculating instead of silently truncating the day.') }}
+                            {{ $gettext('Nothing is planned for these minutes. Usually a show\'s audio is shorter than its time slot, or nothing is allowed to play there. Check the setup problems above; they often fix it.') }}
                         </div>
                     </div>
 
@@ -155,7 +233,7 @@
                             </li>
                         </ul>
                         <div v-if="gapsAhead.some((gap) => gap.projected)" class="small">
-                            {{ $gettext('A projected gap is more than three hours away. The log is still topped up and re-timed before then, so it may close by itself.') }}
+                            {{ $gettext('Gaps marked PROJECTED are more than 3 hours away and often close by themselves before then.') }}
                         </div>
                     </div>
 
@@ -227,6 +305,17 @@
                     </div>
 
                     <div class="rules-bar">
+                        <button
+                            type="button"
+                            class="btn btn-link btn-sm p-0 log-settings-toggle"
+                            :aria-expanded="showLogSettings"
+                            @click="showLogSettings = !showLogSettings"
+                        >
+                            {{ $gettext('Log settings') }}
+                            <span class="small">{{ showLogSettings ? '▲' : '▼' }}</span>
+                        </button>
+
+                        <div v-if="showLogSettings" class="log-settings mt-2">
                         <div class="d-flex flex-wrap align-items-center gap-3">
                             <span class="filter-label">{{ $gettext('Operator rules') }}</span>
 
@@ -276,6 +365,7 @@
 
                         <div class="small mt-2 text-body-secondary">
                             {{ $gettext('These rules run by themselves on every build and every minute, and never touch a line you locked by hand.') }}
+                        </div>
                         </div>
 
                         <div class="d-flex flex-wrap align-items-center gap-2 mt-2 block-lock">
@@ -465,6 +555,7 @@ import type {
     LinearLogMediaOption,
 } from "~/entities/LinearLog";
 import {useLinearLog} from "~/functions/useLinearLog";
+import {useLinearLogSetupCheck} from "~/functions/useLinearLogSetupCheck";
 import useStationDateTimeFormatter from "~/functions/useStationDateTimeFormatter.ts";
 import {useTranslate} from "~/vendor/gettext";
 import {useApiRouter} from "~/functions/useApiRouter";
@@ -481,6 +572,7 @@ const {
     snapshotHours,
     builtAt,
     nextBuildAt,
+    heldUntil,
     coverageStart,
     coverageEnd,
     allItems,
@@ -500,6 +592,18 @@ const {
     setRule,
     searchMedia,
 } = useLinearLog();
+
+const {
+    issues: setupIssues,
+    loaded: setupLoaded,
+    isFixing: setupFixing,
+    fixError: setupFixError,
+    fixableCount: setupFixableCount,
+    fixOne: setupFixOne,
+    fixAll: setupFixAll,
+} = useLinearLogSetupCheck();
+const showSetup = ref(false);
+const showLogSettings = ref(false);
 
 async function onEdit(item: LinearLogItem, edit: string): Promise<void> {
     if (!item.log_entry_id) return;
@@ -737,6 +841,8 @@ function displayTitle(item: LinearLogItem): string {
 
 // Station time, like the station clock and Upcoming Song Queue, not the viewer's PC.
 const {formatTimestampAsTime, formatTimestampAsDateTime, timestampToDateTime} = useStationDateTimeFormatter();
+// "9:07 PM": the held rebuild starts on the minute; seconds only add noise.
+const formatHeldTime = (ts: number): string => timestampToDateTime(ts).toFormat('h:mm a');
 
 const zoneLabel = computed(() => timestampToDateTime(nowTs.value).offsetNameShort ?? "");
 
@@ -921,6 +1027,16 @@ const hourGroups = computed<LinearLogHourGroup[]>(() => {
 </script>
 
 <style scoped>
+.setup-status{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;border-top:1px solid rgba(var(--bs-body-color-rgb),.08);font-size:.9rem}
+.setup-status.is-ready{color:var(--bs-success-text-emphasis);background:var(--bs-success-bg-subtle)}
+.setup-status.has-issues{color:var(--bs-warning-text-emphasis);background:var(--bs-warning-bg-subtle)}
+.setup-status .setup-icon{font-weight:700;width:1.1rem;text-align:center}
+.setup-status .setup-toggle{color:inherit;font-weight:600;text-decoration:none}
+.setup-list{list-style:none;margin:0;padding:.25rem 1rem .5rem;background:var(--bs-warning-bg-subtle)}
+.setup-list li{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.4rem 0;border-top:1px solid rgba(var(--bs-body-color-rgb),.08);font-size:.88rem}
+.setup-list .setup-message{flex:1}
+.setup-list .btn{white-space:nowrap}
+.log-settings-toggle{font-size:.82rem;font-weight:700;text-decoration:none}
 .rules-bar{padding:.6rem 1rem;border-top:1px solid rgba(var(--bs-body-color-rgb),.08);background:rgba(var(--bs-body-color-rgb),.02)}
 .rules-bar .form-check-label{font-size:.82rem}
 .replace-backdrop{position:fixed;inset:0;z-index:1080;display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;background:rgba(0,0,0,.45)}

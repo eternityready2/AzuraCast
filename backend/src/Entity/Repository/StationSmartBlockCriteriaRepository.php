@@ -12,33 +12,33 @@ use App\Entity\Enums\SmartBlockMatchType;
 use App\Entity\SongHistory;
 use App\Entity\StationMedia;
 use App\Entity\StationMediaCustomField;
-use App\Entity\StationPlaylist;
-use App\Entity\StationPlaylistSmartBlockCriteria;
+use App\Entity\StationSmartBlock;
+use App\Entity\StationSmartBlockCriteria;
 use DateTimeImmutable;
 use Doctrine\ORM\QueryBuilder;
 
 /**
- * @extends Repository<StationPlaylistSmartBlockCriteria>
+ * @extends Repository<StationSmartBlockCriteria>
  */
-final class StationPlaylistSmartBlockCriteriaRepository extends Repository
+final class StationSmartBlockCriteriaRepository extends Repository
 {
-    protected string $entityClass = StationPlaylistSmartBlockCriteria::class;
+    protected string $entityClass = StationSmartBlockCriteria::class;
 
     /**
-     * Resolve the set of StationMedia currently matching a Smart Block playlist's
-     * criteria. Used both by the sync task (to keep membership up to date) and by the
-     * "Preview" API endpoint (so the person editing the playlist can see results live).
+     * The songs in the media library that match a smart block's rules right now.
+     * Used by the AutoDJ when it plays the smart block, by "Generate Now" for a static
+     * smart block, and by the Smart Blocks page's live preview.
      *
      * @return StationMedia[]
      */
-    public function getMatchingMedia(StationPlaylist $playlist): array
+    public function getMatchingMedia(StationSmartBlock $smartBlock): array
     {
         // Skip any criterion that's incomplete (e.g. "Custom Field" selected but no
         // actual field chosen yet, mid-edit) instead of treating it as impossible to
         // satisfy -- an unusable row should be ignored, not silently poison "Match ALL"
         // into never matching anything.
-        $criteria = $playlist->smart_block_criteria->filter(
-            static fn (StationPlaylistSmartBlockCriteria $c): bool =>
+        $criteria = $smartBlock->criteria->filter(
+            static fn (StationSmartBlockCriteria $c): bool =>
                 SmartBlockCriteriaField::CustomField !== $c->field || null !== $c->custom_field
         );
 
@@ -51,13 +51,13 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
             ->from(StationMedia::class, 'sm')
             ->where('sm.storage_location = :storageLocation')
             ->andWhere('sm.do_not_play_reason IS NULL')
-            ->setParameter('storageLocation', $playlist->station->media_storage_location);
+            ->setParameter('storageLocation', $smartBlock->station->media_storage_location);
 
         // Only join the Category relation when a criterion actually needs it -- it's a
         // nullable relation on StationMedia, so a plain inner join would silently drop
         // every track with no category assigned, even for rows we're not filtering on.
         $usesCategory = $criteria->exists(
-            static fn (int $i, StationPlaylistSmartBlockCriteria $c): bool =>
+            static fn (int $i, StationSmartBlockCriteria $c): bool =>
                 SmartBlockCriteriaField::Category === $c->field
         );
         if ($usesCategory) {
@@ -72,20 +72,20 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
             $paramIndex++;
         }
 
-        $combined = (SmartBlockMatchType::Any === $playlist->smart_block_match_type)
+        $combined = (SmartBlockMatchType::Any === $smartBlock->match_type)
             ? $qb->expr()->orX(...$conditions)
             : $qb->expr()->andX(...$conditions);
 
         $qb->andWhere($combined)
             ->orderBy('RAND()');
 
-        $limit = $playlist->smart_block_limit;
+        $limit = $smartBlock->limit;
 
         // Track-count limits can be applied directly in SQL. Duration limits can't (SQL
         // can't LIMIT on a running sum of a randomly-ordered result), so for those we
         // pull a generous random pool and trim it in PHP by accumulating track lengths
         // until the requested duration is reached.
-        if (null !== $limit && $limit > 0 && SmartBlockLimitType::Tracks === $playlist->smart_block_limit_type) {
+        if (null !== $limit && $limit > 0 && SmartBlockLimitType::Tracks === $smartBlock->limit_type) {
             $qb->setMaxResults($limit);
         } elseif (null !== $limit && $limit > 0) {
             $qb->setMaxResults(500);
@@ -94,7 +94,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
         /** @var StationMedia[] $results */
         $results = $qb->getQuery()->getResult();
 
-        if (null !== $limit && $limit > 0 && SmartBlockLimitType::Duration === $playlist->smart_block_limit_type) {
+        if (null !== $limit && $limit > 0 && SmartBlockLimitType::Duration === $smartBlock->limit_type) {
             $trimmed = [];
             $totalSeconds = 0.0;
 
@@ -115,7 +115,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
 
     private function buildCondition(
         QueryBuilder $qb,
-        StationPlaylistSmartBlockCriteria $criterion,
+        StationSmartBlockCriteria $criterion,
         int $paramIndex
     ): string {
         if (SmartBlockCriteriaField::CustomField === $criterion->field) {
@@ -145,7 +145,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
     private function buildTextCondition(
         QueryBuilder $qb,
         string $column,
-        StationPlaylistSmartBlockCriteria $criterion,
+        StationSmartBlockCriteria $criterion,
         int $paramIndex
     ): string {
         $paramName = 'val' . $paramIndex;
@@ -175,7 +175,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
     private function buildNumericCondition(
         QueryBuilder $qb,
         string $column,
-        StationPlaylistSmartBlockCriteria $criterion,
+        StationSmartBlockCriteria $criterion,
         int $paramIndex
     ): string {
         $paramName = 'val' . $paramIndex;
@@ -208,7 +208,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
      */
     private function buildLastPlayedCondition(
         QueryBuilder $qb,
-        StationPlaylistSmartBlockCriteria $criterion,
+        StationSmartBlockCriteria $criterion,
         int $paramIndex
     ): string {
         $subAlias = 'sh' . $paramIndex;
@@ -281,7 +281,7 @@ final class StationPlaylistSmartBlockCriteriaRepository extends Repository
      */
     private function buildCustomFieldCondition(
         QueryBuilder $qb,
-        StationPlaylistSmartBlockCriteria $criterion,
+        StationSmartBlockCriteria $criterion,
         int $paramIndex
     ): string {
         if (null === $criterion->custom_field) {

@@ -59,12 +59,6 @@
             </div>
             <div class="col-6 col-md-3">
                 <div class="border rounded p-2 text-center">
-                    <div class="fs-4 fw-semibold">{{ report.upcoming_holidays }}</div>
-                    <div class="small text-muted">{{ $gettext('Upcoming holidays') }}</div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="border rounded p-2 text-center">
                     <div class="fs-4 fw-semibold">
                         {{ report.autodj_enabled ? $gettext('On') : $gettext('Off') }}
                     </div>
@@ -125,7 +119,6 @@ interface HealthReport {
     empty_playlists: number;
     clock_wheel_fallbacks_7d: number;
     legal_id_compliance_percent: number | null;
-    upcoming_holidays: number;
     overall_status: string | null;
     stream_mounts: {name: string; format: string; bitrate: number; is_default: boolean}[];
 }

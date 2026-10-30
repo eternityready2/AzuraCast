@@ -25,6 +25,7 @@ final class ImportSummary
     public int $mediaRelinked = 0;
     public int $mediaGenerated = 0;
     public int $membersCreated = 0;
+    public int $smartBlocksCreated = 0;
     public int $smartBlockCriteriaCreated = 0;
 
     /** @var string[] */

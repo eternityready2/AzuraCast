@@ -21,7 +21,8 @@ use App\Entity\StationPlaylist;
 use App\Entity\StationPlaylistFolder;
 use App\Entity\StationPlaylistGroup;
 use App\Entity\StationPlaylistMedia;
-use App\Entity\StationPlaylistSmartBlockCriteria;
+use App\Entity\StationSmartBlock;
+use App\Entity\StationSmartBlockCriteria;
 use App\Entity\StationSchedule;
 use App\Entity\StorageLocation;
 use App\Service\PlaylistConfiguration\Schema\MediaEntry;
@@ -32,6 +33,7 @@ use App\Service\PlaylistConfiguration\Schema\PlaylistMediaEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistMemberEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistScheduleEntry;
 use App\Service\PlaylistConfiguration\Schema\PlaylistSmartBlockCriterionEntry;
+use App\Service\PlaylistConfiguration\Schema\SmartBlockEntry;
 use DateTimeImmutable;
 use RuntimeException;
 use Throwable;
@@ -70,6 +72,7 @@ final class PlaylistConfigurationImporter
             function () use ($station, $schema, $namePrefix, $summary): void {
                 $this->createPlaylists($station, $schema, $summary, $namePrefix);
                 $this->populatePlaylistContents($station, $schema, $summary);
+                $this->createSmartBlocks($station, $schema, $summary, $namePrefix);
                 $this->em->flush();
 
                 $this->recreateGroupMemberships($schema, $summary);
@@ -127,13 +130,6 @@ final class PlaylistConfigurationImporter
             $playlist->sponsor_contract_start = $this->parseDateTime($entry->sponsorContractStart);
             $playlist->sponsor_contract_end = $this->parseDateTime($entry->sponsorContractEnd);
 
-            $playlist->is_smart_block = $entry->isSmartBlock;
-            $playlist->smart_block_match_type = $entry->smartBlockMatchType;
-            $playlist->smart_block_limit = $entry->smartBlockLimit;
-            $playlist->smart_block_limit_type = $entry->smartBlockLimitType;
-            $playlist->smart_block_type = $entry->smartBlockType;
-            $playlist->smart_block_sort_order = $entry->smartBlockSortOrder;
-            $playlist->smart_block_avoid_duplicates = $entry->smartBlockAvoidDuplicates;
             $playlist->preserve_queue_on_restart = $entry->preserveQueueOnRestart;
 
             $this->em->persist($playlist);
@@ -168,7 +164,33 @@ final class PlaylistConfigurationImporter
             );
 
             $this->createSchedules($playlist, $summary, $entry->schedules);
-            $this->createSmartBlockCriteria($playlist, $summary, $entry->smartBlockCriteria);
+        }
+    }
+
+    /**
+     * Smart blocks: their rules and calendar times, as their own records.
+     */
+    private function createSmartBlocks(
+        Station $station,
+        PlaylistConfigurationSchema $schema,
+        ImportSummary $summary,
+        ?string $namePrefix
+    ): void {
+        foreach ($schema->smartBlockEntries as $entry) {
+            $smartBlock = new StationSmartBlock($station);
+            $smartBlock->name = (!empty($namePrefix) ? $namePrefix : '') . $entry->name;
+            $smartBlock->is_enabled = $entry->isEnabled;
+            $smartBlock->type = $entry->type;
+            $smartBlock->match_type = $entry->matchType;
+            $smartBlock->limit = $entry->limit;
+            $smartBlock->limit_type = $entry->limitType;
+            $smartBlock->sort_order = $entry->sortOrder;
+            $smartBlock->avoid_duplicates = $entry->avoidDuplicates;
+            $this->em->persist($smartBlock);
+            $summary->smartBlocksCreated++;
+
+            $this->createSmartBlockCriteria($smartBlock, $summary, $entry->criteria);
+            $this->createSchedules($smartBlock, $summary, $entry->schedules);
         }
     }
 
@@ -317,12 +339,12 @@ final class PlaylistConfigurationImporter
      * @param PlaylistScheduleEntry[] $scheduleEntries
      */
     private function createSchedules(
-        StationPlaylist $playlist,
+        StationPlaylist|StationSmartBlock $relation,
         ImportSummary $summary,
         array $scheduleEntries
     ): void {
         foreach ($scheduleEntries as $scheduleEntry) {
-            $schedule = new StationSchedule($playlist);
+            $schedule = new StationSchedule($relation);
             $schedule->start_time = $scheduleEntry->startTime;
             $schedule->end_time = $scheduleEntry->endTime;
             $schedule->days = $scheduleEntry->days;
@@ -359,7 +381,7 @@ final class PlaylistConfigurationImporter
      * @param PlaylistSmartBlockCriterionEntry[] $criteriaEntries
      */
     private function createSmartBlockCriteria(
-        StationPlaylist $playlist,
+        StationSmartBlock $smartBlock,
         ImportSummary $summary,
         array $criteriaEntries
     ): void {
@@ -370,12 +392,12 @@ final class PlaylistConfigurationImporter
             if ($field === null || $comparison === null) {
                 $summary->warnings[] = sprintf(
                     'Smart Block criterion on "%s" has an unsupported field or comparison; skipping.',
-                    $playlist->name
+                    $smartBlock->name
                 );
                 continue;
             }
 
-            $criterion = new StationPlaylistSmartBlockCriteria($playlist);
+            $criterion = new StationSmartBlockCriteria($smartBlock);
             $criterion->field = $field;
             $criterion->comparison = $comparison;
             $criterion->value = $entry->value;
@@ -392,7 +414,7 @@ final class PlaylistConfigurationImporter
                     $summary->warnings[] = sprintf(
                         'Custom field "%s" used by Smart Block "%s" does not exist on this installation.',
                         $entry->customFieldName,
-                        $playlist->name
+                        $smartBlock->name
                     );
                     continue;
                 }

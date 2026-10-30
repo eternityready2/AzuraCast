@@ -99,6 +99,8 @@ export interface LinearLogResponse {
     hours: number;
     configured_hours: number;
     built_at: number | null;
+    /** A rebuild waiting for the top of the hour to pass starts at this time. */
+    held_until?: number | null;
     next_build_at?: number | null;
     coverage_start: number | null;
     coverage_end: number | null;

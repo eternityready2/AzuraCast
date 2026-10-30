@@ -8,6 +8,7 @@ use App\Entity\Api\DetailedSongHistory;
 use App\Entity\Api\NowPlaying\SongHistory;
 use App\Entity\SongHistory as SongHistoryEntity;
 use App\Entity\StationClockWheel;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationPlaylist;
 use App\Entity\StationStreamer;
 use Carbon\CarbonImmutable;
@@ -53,6 +54,10 @@ final readonly class SongHistoryApiGenerator
         } else {
             $response->clock_wheel = '';
         }
+
+        $response->smart_block = ($record->smart_block instanceof StationSmartBlock)
+            ? $record->smart_block->name
+            : '';
 
         if ($record->streamer instanceof StationStreamer) {
             $response->streamer = $record->streamer->display_name;

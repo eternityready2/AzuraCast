@@ -11,8 +11,12 @@ export interface ClockWheelSlotLengths {
         avg_seconds: number;
         items: number;
         name: string;
-        is_smart_block: boolean;
         main_type: string;
+    }>;
+    smart_blocks?: Record<string, {
+        avg_seconds: number;
+        items: number;
+        name: string;
     }>;
     categories: Record<string, {avg_seconds: number; items: number}>;
     types: Record<string, {avg_seconds: number; items: number}>;
@@ -24,6 +28,7 @@ export interface ClockWheelFitEntry {
     duration_seconds: number | null;
     category_id: number | null;
     playlist_id?: number | null;
+    smart_block_id?: number | null;
 }
 
 /** Used only until the library lengths have loaded. */
@@ -56,6 +61,12 @@ export function estimateEntrySeconds(entry: ClockWheelFitEntry, lengths: ClockWh
         return entry.duration_seconds;
     }
     if (lengths) {
+        if (entry.smart_block_id != null) {
+            const smartBlock = lengths.smart_blocks?.[String(entry.smart_block_id)];
+            if (smartBlock && smartBlock.items > 0 && smartBlock.avg_seconds > 0) {
+                return smartBlock.avg_seconds;
+            }
+        }
         if (entry.playlist_id != null) {
             const playlist = lengths.playlists[String(entry.playlist_id)];
             if (playlist && playlist.items > 0 && playlist.avg_seconds > 0) {

@@ -9,6 +9,7 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationStreamer;
 use App\Utilities\DateRange;
 use App\Utilities\Time;
@@ -25,6 +26,7 @@ final class ScheduleApiGenerator
         $playlist = $scheduleItem->playlist;
         $streamer = $scheduleItem->streamer;
         $clockWheel = $scheduleItem->clock_wheel;
+        $smartBlock = $scheduleItem->smart_block;
 
         $stationTz = $station->getTimezoneObject();
         $now = Time::nowInTimezone($stationTz, $now);
@@ -55,6 +57,11 @@ final class ScheduleApiGenerator
             $row->name = $clockWheel->name;
             $row->title = $row->name;
             $row->description = sprintf(__('Clock Wheel: %s'), $row->name);
+        } elseif ($smartBlock instanceof StationSmartBlock) {
+            $row->type = StationScheduleApi::TYPE_SMART_BLOCK;
+            $row->name = $smartBlock->name;
+            $row->title = $row->name;
+            $row->description = sprintf(__('Smart Block: %s'), $row->name);
         }
 
         return $row;

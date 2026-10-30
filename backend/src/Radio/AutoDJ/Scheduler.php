@@ -15,7 +15,9 @@ use App\Entity\Station;
 use App\Entity\StationClockWheel;
 use App\Entity\StationPlaylist;
 use App\Entity\StationSchedule;
+use App\Entity\StationSmartBlock;
 use App\Entity\StationStreamer;
+use App\Radio\SmartBlock\SmartBlockAvailability;
 use App\Utilities\DateRange;
 use App\Utilities\ScheduleRecurrence;
 use App\Utilities\Time;
@@ -36,6 +38,7 @@ final class Scheduler
         private readonly StationQueueRepository $queueRepo,
         private readonly HourBoundaryPlanner $hourBoundaryPlanner,
         private readonly LinearLogPreviewContext $previewContext,
+        private readonly SmartBlockAvailability $smartBlockAvailability,
     ) {
     }
 
@@ -272,11 +275,27 @@ final class Scheduler
                 continue;
             }
 
-            foreach ($clockWheel->schedule_items as $schedule) {
-                $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-                if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
-                    $narrowest = $seconds;
-                }
+            $seconds = $this->narrowestOwnedWindowSeconds($clockWheel->schedule_items, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
+            }
+        }
+
+        // A scheduled smart block holds its calendar time the same way, while
+        // it still has a song it can play then. When it has none (all would
+        // repeat, or break a DMCA limit), normal music fills in, not dead air.
+        foreach ($station->smart_blocks as $smartBlock) {
+            if (!$smartBlock->is_enabled) {
+                continue;
+            }
+
+            $seconds = $this->narrowestOwnedWindowSeconds($smartBlock->schedule_items, $tz, $at);
+            if (
+                null !== $seconds
+                && (null === $narrowest || $seconds < $narrowest)
+                && $this->smartBlockAvailability->hasPlayableSong($smartBlock, $at)
+            ) {
+                $narrowest = $seconds;
             }
         }
 
@@ -299,22 +318,36 @@ final class Scheduler
         DateTimeImmutable $at
     ): bool {
         // A wheel with no schedule rows of its own is driven by something else
-        // (a holiday override, say); this rule has nothing to say about it.
-        if (0 === $clockWheel->schedule_items->count()) {
+        // (a daypart, say); this rule has nothing to say about it.
+        return $this->ownsScheduledAirAt($clockWheel->station, $clockWheel->schedule_items, $at);
+    }
+
+    /**
+     * True when a smart block's own calendar time is open at $at and no
+     * narrower calendar item holds the air then. Same rule as a clock wheel.
+     */
+    public function isSmartBlockAllowedAt(
+        StationSmartBlock $smartBlock,
+        DateTimeImmutable $at
+    ): bool {
+        // With no calendar time of its own it plays only inside a clock wheel
+        // slot, and the wheel's own rule governs it.
+        return $this->ownsScheduledAirAt($smartBlock->station, $smartBlock->schedule_items, $at);
+    }
+
+    /**
+     * True when one of these calendar rows is open at $at and no narrower
+     * calendar item holds the air then. No rows: nothing to judge, true.
+     *
+     * @param Collection<int, StationSchedule> $scheduleItems
+     */
+    private function ownsScheduledAirAt(Station $station, Collection $scheduleItems, DateTimeImmutable $at): bool
+    {
+        if (0 === $scheduleItems->count()) {
             return true;
         }
 
-        $station = $clockWheel->station;
-        $tz = $station->getTimezoneObject();
-
-        $ownWindow = null;
-        foreach ($clockWheel->schedule_items as $schedule) {
-            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
-            if (null !== $seconds && (null === $ownWindow || $seconds < $ownWindow)) {
-                $ownWindow = $seconds;
-            }
-        }
-
+        $ownWindow = $this->narrowestOwnedWindowSeconds($scheduleItems, $station->getTimezoneObject(), $at);
         if (null === $ownWindow) {
             return false;
         }
@@ -322,6 +355,28 @@ final class Scheduler
         $narrowestOpen = $this->narrowestOpenScheduleSeconds($station, $at);
 
         return null === $narrowestOpen || $ownWindow <= $narrowestOpen;
+    }
+
+    /**
+     * Length in seconds of the narrowest of these calendar rows open at $at,
+     * or null when none is.
+     *
+     * @param Collection<int, StationSchedule> $scheduleItems
+     */
+    private function narrowestOwnedWindowSeconds(
+        Collection $scheduleItems,
+        DateTimeZone $tz,
+        DateTimeImmutable $at
+    ): ?int {
+        $narrowest = null;
+        foreach ($scheduleItems as $schedule) {
+            $seconds = $this->ownedWindowSeconds($schedule, $tz, $at);
+            if (null !== $seconds && (null === $narrowest || $seconds < $narrowest)) {
+                $narrowest = $seconds;
+            }
+        }
+
+        return $narrowest;
     }
 
     /**

@@ -112,6 +112,16 @@ final class DmcaComplianceListener implements EventSubscriberInterface
             || $this->isCompliant($entry, $station, $at, false);
     }
 
+    /**
+     * True when $entry may air at $at, judged exactly as onBuildQueue would
+     * judge it right now (projected history during a linear log build).
+     */
+    public function allowsPick(StationQueue $entry, Station $station, DateTimeImmutable $at): bool
+    {
+        return !$station->backend_config->dmca_compliance_enabled
+            || $this->isCompliant($entry, $station, $at, $this->previewContext->isActive());
+    }
+
     private function isCompliant(
         StationQueue $entry,
         Station $station,

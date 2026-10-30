@@ -218,7 +218,7 @@ final readonly class StationDiagnosticsDashboard
             ['station' => $station, 'start' => $startDate, 'end' => $endDate]
         );
         $counters['smart-blocks']['successes'] = $this->countDql(
-            'SELECT COUNT(h.id) FROM App\\Entity\\SongHistory h JOIN h.playlist p WHERE h.station = :station AND h.timestamp_start BETWEEN :start AND :end AND p.is_smart_block = true',
+            'SELECT COUNT(h.id) FROM App\\Entity\\SongHistory h WHERE h.station = :station AND h.timestamp_start BETWEEN :start AND :end AND h.smart_block IS NOT NULL',
             ['station' => $station, 'start' => $startDate, 'end' => $endDate]
         );
         $counters['remote-streams']['successes'] = $this->countDql(
@@ -472,8 +472,8 @@ final readonly class StationDiagnosticsDashboard
     private function buildSmartBlocksFeature(Station $station, array $execution): array
     {
         $enabled = 0;
-        foreach ($station->playlists as $playlist) {
-            if ($playlist instanceof StationPlaylist && $playlist->is_enabled && $playlist->is_smart_block) {
+        foreach ($station->smart_blocks as $smartBlock) {
+            if ($smartBlock->is_enabled) {
                 ++$enabled;
             }
         }

@@ -20,16 +20,6 @@
                     :input-attrs="{required: true}"
                 />
 
-                <form-group-field
-                    id="smart_block_weight"
-                    class="col-md-4"
-                    v-model="basicInfo.weight"
-                    input-type="number"
-                    :input-attrs="{min: '0'}"
-                    :label="$gettext('Weight')"
-                    :description="$gettext('Larger numbers play more often relative to other playlists.')"
-                />
-
                 <form-group-checkbox
                     id="smart_block_is_enabled"
                     class="col-md-12"
@@ -49,7 +39,7 @@
                             stacked
                             radio
                             :label="$gettext('Type')"
-                            :description="$gettext('Dynamic stays in sync automatically. Static generates a one-time tracklist you can hand-edit, until you Generate again.')"
+                            :description="$gettext('Dynamic always uses the songs that match right now. Static makes a fixed song list when you save, and keeps it until you save again.')"
                         />
 
                         <form-group-multi-check
@@ -104,15 +94,15 @@
                             v-model="editor.smart_block_sort_order"
                             :options="sortOrderOptions"
                             :label="$gettext('Sort Tracks')"
-                            :description="$gettext('Controls the order tracks are weighted when the block syncs. For Sequential playlists this is the on-air playback order; for Shuffle/Random it seeds the initial order.')"
+                            :description="$gettext('The order songs take turns in. The song this smart block played longest ago always goes next; songs that are tied go in this order.')"
                         />
 
                         <form-group-checkbox
                             id="smart_block_avoid_duplicates"
                             class="col-md-6"
                             v-model="editor.smart_block_avoid_duplicates"
-                            :label="$gettext('Allow Repeated Tracks')"
-                            :description="$gettext('When unchecked, tracks already in this block are not re-added on the next sync — useful for small libraries where you want strict rotation.')"
+                            :label="$gettext('Avoid repeats')"
+                            :description="$gettext('On: a song that aired within the station\'s repeat window is skipped, and when every song in this block has aired recently, regular music fills the rest of its time. Off: this block plays its own songs again instead. Turn it off for a small block that must stay on its own songs.')"
                         />
                     </div>
                 </tab>
@@ -301,7 +291,7 @@
                     />
                     {{ editor.smart_block_type === SmartBlockType.Static
                         ? $gettext('Save & Generate Now')
-                        : $gettext('Save & Sync Now') }}
+                        : $gettext('Save') }}
                 </button>
             </div>
         </template>
@@ -380,7 +370,6 @@ const saving = ref<boolean>(false);
 
 const basicInfo = reactive({
     name: '',
-    weight: 3,
     is_enabled: true,
 });
 
@@ -579,7 +568,6 @@ const loadEditor = async (): Promise<void> => {
 
         if (props.standalone) {
             basicInfo.name = data.name ?? '';
-            basicInfo.weight = data.weight ?? 3;
             basicInfo.is_enabled = data.is_enabled ?? true;
         }
     } catch (err) {
@@ -645,7 +633,6 @@ const doSave = async (): Promise<void> => {
             ...(props.standalone ? {
                 name: basicInfo.name,
                 is_enabled: basicInfo.is_enabled,
-                weight: basicInfo.weight,
             } : {}),
             is_smart_block: true,
             smart_block_type: editor.value.smart_block_type,
@@ -666,8 +653,8 @@ const doSave = async (): Promise<void> => {
                     {added: data.added ?? 0, removed: data.removed ?? 0},
                 )
                 : $gettext(
-                    '%{added} tracks added, %{removed} removed. Smart Block synced.',
-                    {added: data.added ?? 0, removed: data.removed ?? 0},
+                    'Saved. %{count} songs match right now.',
+                    {count: data.total_members ?? 0},
                 ),
         );
 

@@ -12,35 +12,23 @@ use JsonSerializable;
 use OpenApi\Attributes as OA;
 
 /**
- * A single filter rule belonging to a Smart Block (a Songs playlist with
- * `is_smart_block = true`). The set of criteria rows on a playlist, combined via its
- * `smart_block_match_type` (ALL/ANY), determines which tracks from the station's media
- * library are automatically kept in sync as that playlist's membership.
- *
- * This is purely additive to the existing rotation model, in the same spirit as
- * {@see StationPlaylistFolder} and {@see StationPlaylistGroup}: the actual playback,
- * scheduling, rotation-goal, and duplicate-avoidance logic is entirely unchanged. Only
- * *which songs are members of the playlist* is automated, on a recurring sync task,
- * instead of managed by hand.
+ * One rule of a {@see StationSmartBlock}. A smart block's rules, combined by its
+ * match type (ALL/ANY), decide which songs from the media library it plays.
  */
 #[
-    OA\Schema(type: "object"),
+    OA\Schema(type: 'object'),
     ORM\Entity,
-    ORM\Table(name: 'station_playlist_smart_block_criteria'),
+    ORM\Table(name: 'station_smart_block_criteria'),
     Attributes\Auditable
 ]
-final class StationPlaylistSmartBlockCriteria implements JsonSerializable, IdentifiableEntityInterface
+final class StationSmartBlockCriteria implements JsonSerializable, IdentifiableEntityInterface
 {
     use Traits\HasAutoIncrementId;
     use Traits\TruncateStrings;
 
-    #[ORM\ManyToOne(fetch: 'EAGER', inversedBy: 'smart_block_criteria')]
-    #[ORM\JoinColumn(name: 'playlist_id', referencedColumnName: 'id', nullable: false, onDelete: 'CASCADE')]
-    public StationPlaylist $playlist;
-
-    /* TODO Remove direct identifier access. */
-    #[ORM\Column(nullable: false, insertable: false, updatable: false)]
-    public private(set) int $playlist_id;
+    #[ORM\ManyToOne(fetch: 'EAGER', inversedBy: 'criteria')]
+    #[ORM\JoinColumn(name: 'smart_block_id', referencedColumnName: 'id', nullable: false, onDelete: 'CASCADE')]
+    public StationSmartBlock $smart_block;
 
     #[
         OA\Property(example: 'genre'),
@@ -48,10 +36,6 @@ final class StationPlaylistSmartBlockCriteria implements JsonSerializable, Ident
     ]
     public SmartBlockCriteriaField $field = SmartBlockCriteriaField::Genre;
 
-    /**
-     * Only set (and only meaningful) when {@see self::$field} is CustomField -- which
-     * custom field (e.g. "BPM", "Mood", "Energy") this criterion inspects.
-     */
     #[ORM\ManyToOne(fetch: 'EAGER')]
     #[ORM\JoinColumn(name: 'custom_field_id', referencedColumnName: 'id', nullable: true, onDelete: 'CASCADE')]
     public ?CustomField $custom_field = null;
@@ -70,10 +54,6 @@ final class StationPlaylistSmartBlockCriteria implements JsonSerializable, Ident
         set => $this->truncateNullableString($value);
     }
 
-    /**
-     * Only used when {@see self::$comparison} is Between -- the upper bound of the range
-     * (e.g. "140" when filtering BPM between "120" and "140").
-     */
     #[
         OA\Property(example: '140'),
         ORM\Column(length: 255, nullable: true)
@@ -88,14 +68,11 @@ final class StationPlaylistSmartBlockCriteria implements JsonSerializable, Ident
     ]
     public int $weight = 0;
 
-    public function __construct(StationPlaylist $playlist)
+    public function __construct(StationSmartBlock $smartBlock)
     {
-        $this->playlist = $playlist;
+        $this->smart_block = $smartBlock;
     }
 
-    /**
-     * @inheritDoc
-     */
     public function jsonSerialize(): array
     {
         return [

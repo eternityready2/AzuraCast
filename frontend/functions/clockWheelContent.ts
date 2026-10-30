@@ -8,7 +8,7 @@ import {isMediaTypeValue, type MediaTypeValue} from '~/functions/mediaTypes.ts';
  *    category, one choice instead of separate Type and Category fields that
  *    could contradict each other. Keys: "type:<type>", "cat:<categoryId>".
  *  - playlist / smart_block: added with "+ Playlist" / "+ Smart block"; the
- *    dropdown lists only that kind. Key: "pl:<playlistId>".
+ *    dropdown lists only that kind. Keys: "pl:<playlistId>", "sb:<smartBlockId>".
  */
 export interface ClockWheelContentOption {
     key: string;
@@ -51,20 +51,23 @@ export function clockWheelContentKey(row: Pick<ClockWheelSlotEditorRow, 'type' |
     return row.category_id ? `cat:${row.category_id}` : `type:${row.type}`;
 }
 
-export function clockWheelPlaylistKey(row: Pick<ClockWheelSlotEditorRow, 'playlist_id'>): string {
+export function clockWheelPlaylistKey(row: Pick<ClockWheelSlotEditorRow, 'playlist_id' | 'smart_block_id'>): string {
+    if (row.smart_block_id) {
+        return `sb:${row.smart_block_id}`;
+    }
     return row.playlist_id ? `pl:${row.playlist_id}` : '';
 }
 
 export type ClockWheelSlotKind = 'content' | 'playlist' | 'smart_block';
 
 export function clockWheelSlotKind(
-    row: Pick<ClockWheelSlotEditorRow, 'playlist_id'>,
-    lengths: ClockWheelSlotLengths | null,
+    row: Pick<ClockWheelSlotEditorRow, 'playlist_id' | 'smart_block_id'>,
+    _lengths: ClockWheelSlotLengths | null = null,
 ): ClockWheelSlotKind {
-    if (!row.playlist_id) {
-        return 'content';
+    if (row.smart_block_id) {
+        return 'smart_block';
     }
-    return lengths?.playlists[String(row.playlist_id)]?.is_smart_block ? 'smart_block' : 'playlist';
+    return row.playlist_id ? 'playlist' : 'content';
 }
 
 /** The playlists (with songs) or the smart blocks, for that kind of slot. */
@@ -73,10 +76,13 @@ export function clockWheelPlaylistOptions(
     smart: boolean,
 ): ClockWheelContentOption[] {
     const asType = (t: string): MediaTypeValue => (isMediaTypeValue(t) ? t : 'music');
-    return Object.entries(lengths?.playlists ?? {})
-        .filter(([, p]) => (smart ? p.is_smart_block : !p.is_smart_block && p.items > 0))
-        .map(([id, p]) => ({key: `pl:${id}`, label: p.name, type: smart ? 'music' : asType(p.main_type)}))
-        .sort((a, b) => a.label.localeCompare(b.label));
+    const options: ClockWheelContentOption[] = smart
+        ? Object.entries(lengths?.smart_blocks ?? {})
+            .map(([id, b]) => ({key: `sb:${id}`, label: b.name, type: 'music' as MediaTypeValue}))
+        : Object.entries(lengths?.playlists ?? {})
+            .filter(([, p]) => p.items > 0)
+            .map(([id, p]) => ({key: `pl:${id}`, label: p.name, type: asType(p.main_type)}));
+    return options.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Applies a "Type / Category" choice; the playlist choice is left as it is. */
@@ -95,12 +101,12 @@ export function applyClockWheelContentKey(row: ClockWheelSlotEditorRow, key: str
 export function applyClockWheelPlaylistKey(
     row: ClockWheelSlotEditorRow,
     key: string,
-    lengths: ClockWheelSlotLengths | null,
+    _lengths: ClockWheelSlotLengths | null = null,
 ): void {
-    const id = key.startsWith('pl:') ? key.slice(3) : '';
-    row.playlist_id = id ? Number(id) : null;
-    // A smart block has no fixed list of files; it must use its own rotation.
-    row.pool_mode = id && lengths?.playlists[id]?.is_smart_block ? 'playlist_rotation' : 'restrict_pool';
+    const [kind, id] = key.split(':');
+    row.playlist_id = kind === 'pl' && id ? Number(id) : null;
+    row.smart_block_id = kind === 'sb' && id ? Number(id) : null;
+    row.pool_mode = 'restrict_pool';
 }
 
 /** Short description of an entry, e.g. "Music – Praise · Hymns and Favorites". */
@@ -112,6 +118,8 @@ export function clockWheelContentLabel(
     const key = clockWheelContentKey(row);
     const label = groups.flatMap((g) => g.options).find((o) => o.key === key)?.label ?? row.type;
     const short = label.split(' (')[0];
-    const playlist = row.playlist_id ? lengths?.playlists[String(row.playlist_id)]?.name : null;
-    return playlist ? `${short} · ${playlist}` : short;
+    const source = row.smart_block_id
+        ? lengths?.smart_blocks?.[String(row.smart_block_id)]?.name
+        : (row.playlist_id ? lengths?.playlists[String(row.playlist_id)]?.name : null);
+    return source ? `${short} · ${source}` : short;
 }

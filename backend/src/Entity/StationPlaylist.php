@@ -8,10 +8,6 @@ use App\Entity\Enums\PlaylistOrders;
 use App\Entity\Enums\PlaylistRemoteTypes;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
-use App\Entity\Enums\SmartBlockLimitType;
-use App\Entity\Enums\SmartBlockMatchType;
-use App\Entity\Enums\SmartBlockSortOrder;
-use App\Entity\Enums\SmartBlockType;
 use App\Utilities\File;
 use App\Utilities\Time;
 use Azura\Normalizer\Attributes\DeepNormalize;
@@ -356,57 +352,6 @@ final class StationPlaylist implements
     }
 
     #[
-        OA\Property(example: false),
-        ORM\Column(options: ['default' => false])
-    ]
-    public bool $is_smart_block = false;
-
-    #[
-        OA\Property(example: 'all'),
-        ORM\Column(type: 'string', length: 10, enumType: SmartBlockMatchType::class, options: ['default' => 'all'])
-    ]
-    public SmartBlockMatchType $smart_block_match_type = SmartBlockMatchType::All;
-
-    #[
-        OA\Property(example: 50, nullable: true),
-        ORM\Column(nullable: true)
-    ]
-    public ?int $smart_block_limit = null {
-        set (int|string|null $value) {
-            if (null === $value || '' === $value) {
-                $this->smart_block_limit = null;
-                return;
-            }
-            $limit = (int)$value;
-            $this->smart_block_limit = $limit > 0 ? $limit : null;
-        }
-    }
-
-    #[
-        OA\Property(example: 'tracks'),
-        ORM\Column(type: 'string', length: 10, enumType: SmartBlockLimitType::class, options: ['default' => 'tracks'])
-    ]
-    public SmartBlockLimitType $smart_block_limit_type = SmartBlockLimitType::Tracks;
-
-    #[
-        OA\Property(example: 'dynamic'),
-        ORM\Column(type: 'string', length: 10, enumType: SmartBlockType::class, options: ['default' => 'dynamic'])
-    ]
-    public SmartBlockType $smart_block_type = SmartBlockType::Dynamic;
-
-    #[
-        OA\Property(example: 'random'),
-        ORM\Column(type: 'string', length: 20, enumType: SmartBlockSortOrder::class, options: ['default' => 'random'])
-    ]
-    public SmartBlockSortOrder $smart_block_sort_order = SmartBlockSortOrder::Random;
-
-    #[
-        OA\Property(example: true),
-        ORM\Column(options: ['default' => true])
-    ]
-    public bool $smart_block_avoid_duplicates = true;
-
-    #[
         ORM\Column(type: 'datetime_immutable', precision: 6, nullable: true),
         Attributes\AuditIgnore
     ]
@@ -432,22 +377,6 @@ final class StationPlaylist implements
     /** @var Collection<int, StationPlaylistFolder> */
     #[ORM\OneToMany(targetEntity: StationPlaylistFolder::class, mappedBy: 'playlist', fetch: 'EXTRA_LAZY')]
     public private(set) Collection $folders;
-
-    /** @var Collection<int, StationPlaylistSmartBlockCriteria> */
-    #[
-        OA\Property(type: "array", items: new OA\Items()),
-        ORM\OneToMany(
-            targetEntity: StationPlaylistSmartBlockCriteria::class,
-            mappedBy: 'playlist',
-            fetch: 'EXTRA_LAZY',
-            cascade: ['persist', 'remove'],
-            orphanRemoval: true
-        ),
-        ORM\OrderBy(['weight' => 'ASC']),
-        DeepNormalize(true),
-        Serializer\MaxDepth(1)
-    ]
-    public private(set) Collection $smart_block_criteria;
 
     /** @var Collection<int, StationSchedule> */
     #[
@@ -518,7 +447,6 @@ final class StationPlaylist implements
 
         $this->media_items = new ArrayCollection();
         $this->folders = new ArrayCollection();
-        $this->smart_block_criteria = new ArrayCollection();
         $this->schedule_items = new ArrayCollection();
         $this->podcasts = new ArrayCollection();
         $this->playlists = new ArrayCollection();
@@ -576,7 +504,6 @@ final class StationPlaylist implements
 
         $this->media_items = new ArrayCollection();
         $this->folders = new ArrayCollection();
-        $this->smart_block_criteria = new ArrayCollection();
         $this->schedule_items = new ArrayCollection();
         $this->podcasts = new ArrayCollection();
         $this->playlists = new ArrayCollection();

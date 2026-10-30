@@ -242,6 +242,8 @@ class Icecast extends AbstractFrontend
                 $frontendConfig->trusted_proxy_address
             ),
 
+            'http-headers' => IcecastConfig::getHttpHeaders(),
+
             'mount' => [],
             'fileserve' => 1,
             'paths' => [
@@ -299,10 +301,8 @@ class Icecast extends AbstractFrontend
                 'stream-name' => $station->name,
             ];
 
-            if ($station->max_bitrate !== 0) {
-                $maxBitrateInBps = $station->max_bitrate * 1024 + 2500;
-                $mount['limit-rate'] = $maxBitrateInBps;
-            }
+            // Icecast 2.5 has no per-mount <limit-rate> (an Icecast-KH tag); it
+            // logs it as an unknown tag, so it is no longer written.
 
             if (!empty($station->description)) {
                 $mount['stream-description'] = $station->description;

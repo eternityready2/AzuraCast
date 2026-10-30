@@ -18,6 +18,7 @@ use App\Message\AbstractMessage;
 use App\Message\BuildLinearLogMessage;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Service\AiNewsGenerator;
+use App\Sync\Task\BuildLinearLogTask;
 use App\Utilities\Time;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -195,7 +196,14 @@ final class LinearLogBuilder
         }
 
         $hours = max(1, min(48, $hoursOverride ?? $station->backend_config->linear_log_hours));
-        $this->snapshotStore->holdBuild($station, $hours, $rebuild, $throughTomorrow, $replanLockWindow);
+        $this->snapshotStore->holdBuild(
+            $station,
+            $hours,
+            $rebuild,
+            $throughTomorrow,
+            $replanLockWindow,
+            $this->heldBuildStartsAt($wait),
+        );
 
         $this->logger->notice('Linear Log build held until the top of the hour has settled.', [
             'station_id' => $station->id,
@@ -205,6 +213,22 @@ final class LinearLogBuilder
         ]);
 
         return true;
+    }
+
+    /**
+     * When the hourly task will run a build held for the top of the hour: the
+     * first BuildLinearLogTask::BUILD_MINUTE once the hour has settled. Its
+     * cron pattern runs in UTC, so the minute is a UTC minute.
+     */
+    private function heldBuildStartsAt(int $waitSeconds): int
+    {
+        $clear = CarbonImmutable::createFromTimestamp(time() + $waitSeconds, 'UTC');
+        $next = $clear->setTime((int)$clear->format('G'), BuildLinearLogTask::BUILD_MINUTE);
+        if ($next->getTimestamp() < $clear->getTimestamp()) {
+            $next = $next->addHour();
+        }
+
+        return $next->getTimestamp();
     }
 
     /** @return array<string, mixed> */
@@ -456,6 +480,7 @@ final class LinearLogBuilder
                 $maxTracks,
                 true,
                 $seededPlannedAt,
+                $liveQueueIds,
             );
 
             $rows = $this->queueRepo->getUnplayedQueue($station);
@@ -1249,6 +1274,7 @@ final class LinearLogBuilder
         $sourceType = match (true) {
             null !== $row->request => 'request',
             null !== $row->clock_wheel => 'clock_wheel',
+            null !== $row->smart_block => 'smart_block',
             null !== $row->autodj_custom_uri => 'stream',
             null !== $row->playlist => 'playlist',
             default => 'autodj',
@@ -1271,6 +1297,8 @@ final class LinearLogBuilder
             'playlist_chain' => $row->playlist_chain,
             'clock_wheel' => $row->clock_wheel?->name,
             'clock_wheel_id' => $row->clock_wheel?->id,
+            'smart_block' => $row->smart_block?->name,
+            'smart_block_id' => $row->smart_block?->id,
             'media_type' => $mediaType,
             'source_type' => $sourceType,
             'is_request' => null !== $row->request,

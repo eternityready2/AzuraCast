@@ -25,12 +25,14 @@ use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
+use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+
 
 /**
  * Duration-aware format clock planner: selects the active anchor slot for the
@@ -61,6 +63,7 @@ final class ClockWheelPlaybackPlanner
         private readonly SponsorGuaranteedPlayoutService $sponsorGuarantee,
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
+        private readonly SmartBlockAvailability $smartBlockAvailability,
     ) {
     }
 
@@ -436,7 +439,15 @@ final class ClockWheelPlaybackPlanner
         $dql = 'SELECT m FROM App\Entity\StationMedia m
              WHERE m.storage_location = :storageLocation';
 
-        if ($playlistId !== null && $playlistId > 0) {
+        if (null !== $slot->smart_block) {
+            // The smart block's songs that can play now (no repeat, DMCA ok).
+            $smartBlockMediaIds = array_column(
+                $this->smartBlockAvailability->getPlayablePool($slot->smart_block, $expectedPlayTime),
+                'id'
+            );
+            $dql .= ' AND m.id IN (:smartBlockMediaIds)';
+            $params['smartBlockMediaIds'] = [] !== $smartBlockMediaIds ? $smartBlockMediaIds : [0];
+        } elseif ($playlistId !== null && $playlistId > 0) {
             $dql .= ' AND EXISTS (
                 SELECT 1 FROM App\Entity\StationPlaylistMedia spm
                 WHERE spm.media = m AND spm.playlist = :playlistId
@@ -576,6 +587,7 @@ final class ClockWheelPlaybackPlanner
 
         $queueEntry = StationQueue::fromMedia($station, $media);
         $queueEntry->clock_wheel = $slot->clock_wheel;
+        $queueEntry->smart_block = $slot->smart_block;
         $queueEntry->clock_wheel_max_play_seconds = (int)floor($maxDuration);
         $queueEntry->clock_wheel_schedule_mode = $scheduleMode->value;
         $queueEntry->clock_wheel_enforce_cap = $this->shouldEnforcePlaybackCap(

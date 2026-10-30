@@ -1,85 +1,100 @@
 <template>
-    <modal-form
+    <component
+        :is="inline ? InlineForm : ModalForm"
         ref="$modal"
         :loading="loading"
         :title="modalTitle"
         :error="error"
         :disable-save-button="!isFormValid"
         @submit="doSave"
-        @hidden="clearForm"
+        @shown="emit('shown')"
+        @hidden="onFormHidden"
     >
-        <!-- Source -->
-        <div v-if="!isScopedMode" class="mb-3">
-            <label class="form-label fw-semibold">{{ $gettext('Source') }}</label>
-            <select
-                v-model="form.source"
-                class="form-select"
-                @change="onSourceChange"
-            >
-                <option value="clock_wheel">
-                    {{ $gettext('Clock Wheel') }}
-                </option>
-                <option value="playlist">
-                    {{ $gettext('Playlist') }}
-                </option>
-                <option value="smart_block">
-                    {{ $gettext('Smart Block') }}
-                </option>
-                <option value="web_stream">
-                    {{ $gettext('Web / Remote Stream') }}
-                </option>
-            </select>
+        <!-- Step 1: What should play? -->
+        <div
+            v-if="!isScopedMode"
+            class="step-heading step-heading-source mb-3"
+        >
+            <span class="step-icon step-icon-source"><icon-ic-event /></span>
+            <span>
+                <strong>{{ $gettext('1. What should play?') }}</strong>
+                <small>{{ $gettext('Choose the type of content, then pick the specific item to schedule.') }}</small>
+            </span>
         </div>
 
-        <!-- Entity selection -->
-        <div v-if="!isScopedMode" class="mb-3">
-            <label class="form-label fw-semibold">
-                {{
-                    form.source === 'clock_wheel'
-                        ? $gettext('Clock Wheel')
-                        : form.source === 'smart_block'
-                            ? $gettext('Smart Block')
-                            : form.source === 'web_stream'
-                                ? $gettext('Web / Remote Stream')
-                                : $gettext('Playlist')
-                }}
-            </label>
-            <select
-                v-model="form.entity_id"
-                class="form-select"
-                :disabled="currentEntityOptions.length === 0"
-                @change="onEntityChange"
-            >
-                <option
-                    v-for="e in currentEntityOptions"
-                    :key="e.id"
-                    :value="e.id"
+        <div v-if="!isScopedMode" class="row g-3 mb-3">
+            <!-- Source -->
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">{{ $gettext('Source') }}</label>
+                <select
+                    v-model="form.source"
+                    class="form-select"
+                    @change="onSourceChange"
                 >
-                    {{ e.name }}
-                </option>
-            </select>
+                    <option value="clock_wheel">
+                        {{ $gettext('Clock Wheel') }}
+                    </option>
+                    <option value="playlist">
+                        {{ $gettext('Playlist') }}
+                    </option>
+                    <option value="smart_block">
+                        {{ $gettext('Smart Block') }}
+                    </option>
+                    <option value="web_stream">
+                        {{ $gettext('Web / Remote Stream') }}
+                    </option>
+                </select>
+            </div>
+
+            <!-- Entity selection -->
+            <div class="col-md-6">
+                <label class="form-label fw-semibold">
+                    {{
+                        form.source === 'clock_wheel'
+                            ? $gettext('Clock Wheel')
+                            : form.source === 'smart_block'
+                                ? $gettext('Smart Block')
+                                : form.source === 'web_stream'
+                                    ? $gettext('Web / Remote Stream')
+                                    : $gettext('Playlist')
+                    }}
+                </label>
+                <select
+                    v-model="form.entity_id"
+                    class="form-select"
+                    :disabled="currentEntityOptions.length === 0"
+                    @change="onEntityChange"
+                >
+                    <option
+                        v-for="e in currentEntityOptions"
+                        :key="e.id"
+                        :value="e.id"
+                    >
+                        {{ e.name }}
+                    </option>
+                </select>
+            </div>
         </div>
 
         <div
-            v-if="isPlaylistSchedule"
-            class="mb-3"
+            v-if="isPlaylistSchedule && !useNewSchedule"
+            class="col-12 mb-3"
         >
-            <div class="form-check">
+            <label class="request-option request-option-warning">
                 <input
                     id="edit_form_is_emergency"
-                    v-model="scheduleRow.is_emergency"
+                    v-model="emergencyOverride"
                     class="form-check-input"
                     type="checkbox"
                 >
-                <label class="form-check-label" for="edit_form_is_emergency">
-                    {{ $gettext('Emergency override') }}
-                </label>
-            </div>
-            <small class="form-text text-warning">
-                {{ $gettext('While this schedule is active, clock wheel AutoDJ will not run. Use for breaking news or other must-play windows.') }}
-            </small>
+                <span>
+                    <strong>{{ $gettext('Emergency override') }}</strong>
+                    <small>{{ $gettext('While this schedule is active, clock wheel AutoDJ will not run. Use for breaking news or other must-play windows.') }}</small>
+                </span>
+            </label>
         </div>
 
+        <template v-if="!useNewSchedule">
         <!-- Schedule Row - Time section -->
         <div class="row g-3 mb-3">
             <form-group-field
@@ -223,7 +238,7 @@
             </form-markup>
 
             <form-markup
-                v-if="isPlaylistSchedule"
+                v-if="isPlaylistSchedule && form.source !== 'smart_block'"
                 id="edit_form_scheduling"
                 class="col-md-4"
                 :label="$gettext('Start Timing')"
@@ -387,6 +402,74 @@
             />
         </div>
     </template>
+        </template>
+
+        <!-- New Schedule editor for the selected source -->
+        <div v-if="useNewSchedule" class="calendar-new-schedule">
+            <div v-if="nsLoading" class="text-center py-4">
+                {{ $gettext('Loading schedule...') }}
+            </div>
+
+            <!-- Playlist / Web Stream: full New Schedule editor -->
+            <calendar-schedule-editor
+                v-else-if="usePlaylistEditor"
+                v-model:schedule-items="nsItems"
+                :source="form.source === 'web_stream' ? 'web_stream' : 'playlist'"
+                :highlight-row="nsTargetRow"
+                :highlight-label="nsHighlightLabel"
+            />
+
+            <!-- Smart Block / Clock Wheel: same New Schedule layout and row editor -->
+            <template v-else>
+                <div
+                    v-if="currentEntityOptions.length === 0"
+                    class="schedule-overview is-unscheduled mb-3"
+                >
+                    <strong>
+                        {{ isClockWheelSchedule ? $gettext('No Clock Wheels yet') : $gettext('No Smart Blocks yet') }}
+                    </strong>
+                    <span>
+                        {{ isClockWheelSchedule
+                            ? $gettext('Create a Clock Wheel under Playlists & More > Clock Wheels, then schedule it here.')
+                            : $gettext('Create a Smart Block under Playlists & More > Smart Blocks, then schedule it here.') }}
+                    </span>
+                </div>
+
+                <template v-else>
+                    <div class="step-heading step-heading-source mb-3">
+                        <span class="step-icon step-icon-source"><icon-ic-event /></span>
+                        <span>
+                            <strong>{{ $gettext('2. When should this play?') }}</strong>
+                            <small>{{ isClockWheelSchedule
+                                ? $gettext('Set the days, times, date range, timing mode and repeat rules for each window.')
+                                : $gettext('Set the days, times, date range and repeat rules for each window.') }}</small>
+                        </span>
+                    </div>
+
+                    <playlists-form-schedule-row
+                        v-for="(row, index) in nsItems"
+                        :key="index"
+                        v-model:row="nsItems[index]"
+                        :index="index"
+                        :source="form.source"
+                        :highlight-label="nsTargetRow && row === nsTargetRow ? nsHighlightLabel : null"
+                        @remove="nsItems.splice(index, 1)"
+                    />
+
+                    <div class="buttons mb-4">
+                        <button
+                            type="button"
+                            class="btn btn-primary add-schedule-button"
+                            @click="addRowEditorItem"
+                        >
+                            <icon-ic-add />
+                            <span>{{ $gettext('Add Schedule Item') }}</span>
+                        </button>
+                    </div>
+
+                </template>
+            </template>
+        </div>
 
         <template
             v-if="editingScheduleId !== null"
@@ -416,11 +499,19 @@
                 {{ $gettext('Save Changes') }}
             </button>
         </template>
-    </modal-form>
+    </component>
 </template>
 
 <script setup lang="ts">
 import ModalForm from '~/components/Common/ModalForm.vue';
+import InlineForm from '~/components/Common/InlineForm.vue';
+import IconIcEvent from '~icons/ic/baseline-event';
+import CalendarScheduleEditor from '~/components/Stations/Common/CalendarScheduleEditor.vue';
+import PlaylistsFormScheduleRow from '~/components/Stations/Common/CalendarScheduleRow.vue';
+import IconIcAdd from '~icons/ic/baseline-add';
+import {useStationsPlaylistsForm} from '~/components/Stations/Playlists/Form/form.ts';
+import mergeExisting from '~/functions/mergeExisting.ts';
+import {storeToRefs} from 'pinia';
 import AmPmTimeInput from '~/components/Common/AmPmTimeInput.vue';
 import FormGroupField from '~/components/Form/FormGroupField.vue';
 import FormGroupCheckbox from '~/components/Form/FormGroupCheckbox.vue';
@@ -431,7 +522,7 @@ import TimeZone from '~/components/Stations/Common/TimeZone.vue';
 import {applyIf, minLength, minValue, required, requiredIf, withMessage} from '@regle/rules';
 import {createRule} from '@regle/core';
 import {useAppScopedRegle} from '~/vendor/regle.ts';
-import {ref, computed, onMounted, watch, useTemplateRef} from 'vue';
+import {ref, shallowRef, computed, nextTick, onMounted, watch, useTemplateRef} from 'vue';
 import {toRefs} from '@vueuse/core';
 import {DateTime} from 'luxon';
 import {useStationData} from '~/functions/useStationQuery.ts';
@@ -456,15 +547,23 @@ const {getStationApiUrl} = useApiRouter();
 const {notifySuccess} = useNotify();
 const {confirmDelete} = useDialog();
 
+withDefaults(defineProps<{
+    // Render in place on the page (calendar) instead of as a popup.
+    inline?: boolean,
+}>(), {
+    inline: false,
+});
+
 const emit = defineEmits<{
     relist: [];
+    shown: [];
+    hidden: [];
 }>();
 
 interface EntityOption {
     id: number;
     name: string;
     self_url: string;
-    is_smart_block?: boolean;
     source?: string;
 }
 
@@ -474,23 +573,30 @@ interface ClockWheelOption extends EntityOption {
 }
 
 const playlists = ref<EntityOption[]>([]);
+const smartBlocks = ref<EntityOption[]>([]);
 const webStreams = ref<EntityOption[]>([]);
 const clockWheels = ref<ClockWheelOption[]>([]);
 
 onMounted(async () => {
-    const [plResp, webResp, cwResp] = await Promise.all([
+    const [plResp, webResp, cwResp, sbResp] = await Promise.all([
         axios.get(getStationApiUrl('/playlists').value),
         axios.get(getStationApiUrl('/playlists').value, {
             params: {rowCount: -1, include_remote_url: 1},
         }),
         axios.get(getStationApiUrl('/clock-wheels').value),
+        axios.get(getStationApiUrl('/smart-blocks').value),
     ]);
+
+    smartBlocks.value = (sbResp.data as Array<Record<string, unknown>>).map((b) => ({
+        id: b.id as number,
+        name: b.name as string,
+        self_url: (b.links as Record<string, string>).self,
+    }));
 
     playlists.value = (plResp.data as Array<Record<string, unknown>>).map((p) => ({
         id: p.id as number,
         name: p.name as string,
         self_url: (p.links as Record<string, string>).self,
-        is_smart_block: Boolean(p.is_smart_block),
     }));
 
     const webRows = Array.isArray(webResp.data)
@@ -501,7 +607,6 @@ onMounted(async () => {
         id: p.id as number,
         name: p.name as string,
         self_url: (p.links as Record<string, string>).self,
-        is_smart_block: false,
         source: p.source as string,
     }));
 
@@ -514,24 +619,211 @@ onMounted(async () => {
 });
 
 const blankForm = () => ({
-    source: 'clock_wheel' as 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
+    source: 'playlist' as 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
     entity_id: null as number | null,
 });
 
 const form = ref(blankForm());
 
-/** Both 'playlist' and 'smart_block' sources ultimately POST to the same /playlist/{id}
- *  entity API endpoint -- a Smart Block is just a playlist under the hood. This keeps
- *  every one of the (several) places below that need to map source -> API entity type
- *  in agreement, instead of repeating the ternary and risking one getting missed. */
-const apiEntityType = (source: string): 'playlist' | 'clock-wheel' =>
-    'clock_wheel' === source ? 'clock-wheel' : 'playlist';
+/** The entity API each source saves its calendar times to: /playlist/{id},
+ *  /clock-wheel/{id} or /smart-block/{id}. Web streams are playlists. Kept in
+ *  one place so every caller below agrees. */
+const apiEntityType = (source: string): 'playlist' | 'clock-wheel' | 'smart-block' => {
+    if ('clock_wheel' === source) {
+        return 'clock-wheel';
+    }
+    return 'smart_block' === source ? 'smart-block' : 'playlist';
+};
 
 const startTimingMode = ref<'flexible' | 'strict'>('flexible');
 const clockWheelScheduleMode = ref<'flexible' | 'strict'>('flexible');
 
 // Schedule row state - matches PlaylistScheduleRow interface
 const scheduleRow = ref<PlaylistScheduleRow>(createScheduleItemDefaults());
+
+// ── New Schedule editor (Playlist / Web Stream sources) ─────────────────────
+// Playlist events open the New Schedule editor, which shows every schedule
+// window of the playlist plus its start/end behavior, presets and summary.
+const playlistFormStore = useStationsPlaylistsForm();
+const {form: playlistForm, r$: playlistR$} = storeToRefs(playlistFormStore);
+
+const nsItems = ref<Array<any>>([]);
+const nsLoading = ref(false);
+const nsTargetRow = shallowRef<Record<string, any> | null>(null);
+// True only when the editor was opened from a clicked time slot or a dropped
+// item: then a window for that time is added. Opening an existing event or the
+// Create Event button shows the saved schedule as-is.
+const nsAddNewRow = ref(false);
+
+// Tag on the highlighted window: the clicked event, or the window a clicked
+// time slot just added.
+const nsHighlightLabel = computed(() => (
+    editingScheduleId.value !== null ? $gettext('This event') : $gettext('New')
+));
+
+// Every source uses the New Schedule design. Playlists and web streams get the
+// full editor (start/end behavior and presets are playlist settings); Smart
+// Blocks and Clock Wheels get the same layout and row editor.
+const useNewSchedule = computed(() => true);
+const usePlaylistEditor = computed(() =>
+    form.value.source === 'playlist' || form.value.source === 'web_stream'
+);
+
+const apiItemToNewScheduleRow = (item: Record<string, unknown>): Record<string, any> => {
+    const row: Record<string, any> = {...item, ...apiScheduleItemToRow(item)};
+    delete row.playlist;
+    delete row.streamer;
+    delete row.clock_wheel;
+    return row;
+};
+
+const loadNewSchedule = async () => {
+    const entityId = form.value.entity_id;
+    if (!useNewSchedule.value || !entityId) {
+        return;
+    }
+    // While the Source is switching, entity_id can still hold the previous
+    // source's id for a moment; only load an item that belongs to this source.
+    if (!currentEntityOptions.value.some((option) => option.id === entityId)) {
+        return;
+    }
+
+    const source = form.value.source;
+    nsLoading.value = true;
+    try {
+        const {data} = await axios.get(getStationApiUrl(`/${apiEntityType(source)}/${entityId}`).value);
+        if (form.value.entity_id !== entityId || form.value.source !== source) {
+            return;
+        }
+
+        error.value = null;
+
+        if (usePlaylistEditor.value) {
+            playlistFormStore.$reset();
+            playlistR$.value.$reset({toState: mergeExisting(playlistR$.value.$value, data)});
+        }
+
+        const rows = ((data.schedule_items ?? []) as Record<string, unknown>[]).map(apiItemToNewScheduleRow);
+        if (source === 'clock_wheel') {
+            // Clock wheels store Flexible/Strict as clock_wheel_mode.
+            rows.forEach((row) => {
+                row.strict_start = row.clock_wheel_mode === 'strict';
+            });
+        }
+
+        let targetIndex = editingScheduleId.value !== null
+            ? rows.findIndex((row) => Number(row.id) === editingScheduleId.value)
+            : -1;
+
+        if (targetIndex === -1 && nsAddNewRow.value) {
+            // New event from the calendar: add a window at the clicked/dropped time.
+            const newRow: Record<string, any> = {
+                ...createScheduleItemDefaults(),
+                ...scheduleRow.value,
+                days: [...(scheduleRow.value.days ?? [])],
+                prevent_requests: false,
+                reset_queue_at_start: false,
+                reset_queue_recursive: false,
+            };
+            if (newRow.days.length === 0 && newRow.start_date) {
+                const weekday = DateTime.fromISO(newRow.start_date).weekday;
+                if (weekday) {
+                    newRow.days = [weekday];
+                }
+            }
+            if (!newRow.recurrence_type) {
+                newRow.recurrence_type = 'weekly';
+                newRow.recurrence_interval = 1;
+            }
+            // A clicked slot only gives a start time; default to a one-hour window.
+            if (newRow.start_time !== null && newRow.start_time === newRow.end_time) {
+                newRow.end_time = (Number(newRow.start_time) + 100) % 2400;
+            }
+            delete newRow.id;
+            rows.push(newRow);
+            targetIndex = rows.length - 1;
+        }
+
+        nsItems.value = rows;
+        nsTargetRow.value = targetIndex >= 0 ? (nsItems.value[targetIndex] ?? null) : null;
+
+        // Bring the window this event came from into view (once the cards
+        // are rendered, i.e. after the loading state ends).
+        if (nsTargetRow.value) {
+            nsLoading.value = false;
+            await nextTick();
+            document.querySelector('.calendar-new-schedule .is-this-event')
+                ?.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }
+    } catch (e: unknown) {
+        const err = e as {response?: {data?: {message?: string}}};
+        error.value = err?.response?.data?.message ?? $gettext('An error occurred.');
+    } finally {
+        nsLoading.value = false;
+    }
+};
+
+const addRowEditorItem = () => {
+    nsItems.value.push({
+        ...createScheduleItemDefaults(),
+        start_time: null,
+        end_time: null,
+        start_date: null,
+        end_date: null,
+        days: [],
+        prevent_requests: false,
+        reset_queue_at_start: false,
+        reset_queue_recursive: false,
+        recurrence_type: 'weekly',
+        recurrence_interval: 1,
+        recurrence_end_type: 'never',
+    });
+};
+
+
+const emergencyOverride = computed({
+    get: () => useNewSchedule.value
+        ? Boolean(nsTargetRow.value?.is_emergency)
+        : Boolean(scheduleRow.value.is_emergency),
+    set: (value: boolean) => {
+        if (useNewSchedule.value) {
+            if (nsTargetRow.value) {
+                nsTargetRow.value.is_emergency = value;
+            }
+        } else {
+            scheduleRow.value.is_emergency = value;
+        }
+    },
+});
+
+const newSchedulePayload = (): Record<string, unknown>[] => nsItems.value.map((item) => {
+    const out: Record<string, unknown> = {...item};
+    out.recurrence_type = item.recurrence_type ?? 'weekly';
+    out.recurrence_interval = (item.recurrence_type === 'biweekly' ? 2 : Number(item.recurrence_interval)) || 1;
+    out.recurrence_end_type = item.recurrence_end_type ?? 'never';
+    out.recurrence_end_after = (item.recurrence_end_type === 'after' && item.recurrence_end_after != null)
+        ? Number(item.recurrence_end_after) : null;
+    out.recurrence_end_date = null;
+    if (item.recurrence_end_type === 'after') {
+        out.end_date = null;
+    }
+    const normalizedDays = normalizeStationScheduleDays(item.days);
+    if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'date') {
+        out.days = [];
+    } else {
+        out.days = normalizedDays;
+    }
+    if (out.recurrence_type === 'monthly' && out.recurrence_monthly_pattern === 'day_of_week' && normalizedDays.length > 0) {
+        out.recurrence_monthly_day_of_week = normalizedDays[0];
+    }
+    if (out.id == null) {
+        delete out.id;
+    }
+    delete out.playlist;
+    delete out.streamer;
+    delete out.clock_wheel;
+    return out;
+});
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -657,11 +949,10 @@ const currentEntityOptions = computed(() => {
     if (form.value.source === 'web_stream') {
         return webStreams.value;
     }
-    // 'playlist' shows regular playlists; 'smart_block' shows just the Smart Blocks --
-    // two focused pickers over the same underlying /playlists collection.
-    return playlists.value.filter(
-        (p) => Boolean(p.is_smart_block) === (form.value.source === 'smart_block')
-    );
+    if (form.value.source === 'smart_block') {
+        return smartBlocks.value;
+    }
+    return playlists.value;
 });
 
 const isPlaylistSchedule = computed(() =>
@@ -670,6 +961,17 @@ const isPlaylistSchedule = computed(() =>
     || form.value.source === 'web_stream'
 );
 const isClockWheelSchedule = computed(() => form.value.source === 'clock_wheel');
+
+watch(
+    () => [useNewSchedule.value, form.value.source, form.value.entity_id] as const,
+    ([enabled, , entityId]) => {
+        nsItems.value = [];
+        nsTargetRow.value = null;
+        if (enabled && entityId) {
+            void loadNewSchedule();
+        }
+    }
+);
 
 // Auto-select first entity whenever options change or source changes
 watch(currentEntityOptions, (opts) => {
@@ -832,14 +1134,53 @@ const endDateSameAsStart = computed(() =>
     && scheduleRow.value.end_date <= scheduleRow.value.start_date
 );
 
-const isFormValid = computed(() =>
-    form.value.entity_id !== null &&
-    !r$.$invalid &&
-    !endDateSameAsStart.value
-);
+// The same recurrence rules the server checks before saving, so Save stays
+// off instead of failing.
+const isRecurrenceComplete = (row: Record<string, any>): boolean => {
+    // A one-time window is a single date; older ones were saved with no
+    // repeat type and no weekdays, which the server accepts.
+    if (row.start_date && row.start_date === row.end_date) {
+        return true;
+    }
+    const days = Array.isArray(row.days) ? row.days : [];
+    if (row.recurrence_end_type === 'after' && !(Number(row.recurrence_end_after) >= 1)) {
+        return false;
+    }
+    if (row.recurrence_end_type !== 'after' && !row.end_date) {
+        return false;
+    }
+    if (row.recurrence_type === 'monthly') {
+        if (row.recurrence_monthly_pattern === 'date') {
+            const day = Number(row.recurrence_monthly_day);
+            return day >= 1 && day <= 31;
+        }
+        const week = Number(row.recurrence_monthly_week);
+        return week >= 1 && week <= 5 && days.length > 0;
+    }
+    return days.length > 0;
+};
+
+const isFormValid = computed(() => {
+    if (form.value.entity_id === null) {
+        return false;
+    }
+    if (useNewSchedule.value) {
+        return !nsLoading.value && nsItems.value.every((row) =>
+            row.start_time !== null && row.start_time !== undefined && row.start_time !== ''
+            && row.end_time !== null && row.end_time !== undefined && row.end_time !== ''
+            && !!row.start_date
+            && isRecurrenceComplete(row)
+        );
+    }
+    return !r$.$invalid && !endDateSameAsStart.value;
+});
 
 const onSourceChange = () => {
-    form.value.entity_id = null;
+    error.value = null;
+    // Pick the first item of the new source. Browsers flush Vue's watchers between
+    // the select's input and change events, so the auto-select watcher has already
+    // run by now and would otherwise be undone here, leaving the picker blank.
+    form.value.entity_id = currentEntityOptions.value[0]?.id ?? null;
     if (form.value.source === 'clock_wheel') {
         scheduleRow.value.loop_once = false;
         scheduleRow.value.strict_start = false;
@@ -1006,6 +1347,14 @@ const clearForm = () => {
     error.value = null;
     editingScheduleId.value = null;
     isScopedMode.value = false;
+    nsItems.value = [];
+    nsTargetRow.value = null;
+    nsAddNewRow.value = false;
+};
+
+const onFormHidden = () => {
+    clearForm();
+    emit('hidden');
 };
 
 const open = () => {
@@ -1027,6 +1376,8 @@ const openForEdit = async (event: EventImpl) => {
 
     if (editUrl?.includes('/clock-wheel/')) {
         form.value.source = 'clock_wheel';
+    } else if (editUrl?.includes('/smart-block/')) {
+        form.value.source = 'smart_block';
     } else if (event.extendedProps.source === 'remote_url') {
         form.value.source = 'web_stream';
     } else {
@@ -1034,18 +1385,9 @@ const openForEdit = async (event: EventImpl) => {
     }
 
     if (editUrl) {
-        const m = editUrl.match(/\/(playlist|clock-wheel)\/(\d+)/);
+        const m = editUrl.match(/\/(playlist|clock-wheel|smart-block)\/(\d+)/);
         if (m?.[2]) {
             form.value.entity_id = Number(m[2]);
-
-            // If this is actually a Smart Block (not a regular playlist), reflect that
-            // in the Source dropdown too, rather than showing it as a generic Playlist.
-            if (form.value.source === 'playlist') {
-                const matchedPlaylist = playlists.value.find((p) => p.id === form.value.entity_id);
-                if (matchedPlaylist?.is_smart_block) {
-                    form.value.source = 'smart_block';
-                }
-            }
         }
     }
 
@@ -1106,10 +1448,11 @@ const openForEdit = async (event: EventImpl) => {
 // we already know exactly which item we're scheduling -- no FullCalendar
 // event object involved, so no Source/Entity dropdown needed at all.
 const openScopedForCreate = (
-    source: 'playlist' | 'clock_wheel' | 'web_stream',
+    source: 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
     entityId: number
 ) => {
     clearForm();
+    nsAddNewRow.value = true;
     isScopedMode.value = true;
     form.value.source = source;
     form.value.entity_id = entityId;
@@ -1117,7 +1460,7 @@ const openScopedForCreate = (
 };
 
 const openScopedForEdit = async (
-    source: 'playlist' | 'clock_wheel' | 'web_stream',
+    source: 'playlist' | 'smart_block' | 'clock_wheel' | 'web_stream',
     entityId: number,
     scheduleId: number,
 ) => {
@@ -1167,6 +1510,42 @@ const doSave = async () => {
 
     loading.value = true;
     error.value = null;
+
+    if (useNewSchedule.value) {
+        try {
+            const entityApiUrl = getStationApiUrl(`/${apiEntityType(form.value.source)}/${form.value.entity_id}`).value;
+            if (usePlaylistEditor.value) {
+                await axios.put(entityApiUrl, {
+                    schedule_items: newSchedulePayload(),
+                    backend_options: playlistForm.value.backend_options,
+                    is_sponsor: playlistForm.value.is_sponsor,
+                    sponsor_name: playlistForm.value.sponsor_name,
+                    sponsor_guaranteed_plays_per_day: playlistForm.value.sponsor_guaranteed_plays_per_day,
+                });
+            } else {
+                const items = newSchedulePayload();
+                if (form.value.source === 'clock_wheel') {
+                    items.forEach((item) => {
+                        item.clock_wheel_mode = item.strict_start ? 'strict' : 'flexible';
+                        item.strict_start = false;
+                        item.loop_once = false;
+                        item.is_emergency = false;
+                    });
+                }
+                await axios.put(entityApiUrl, {schedule_items: items});
+            }
+
+            notifySuccess(editingScheduleId.value !== null ? $gettext('Event updated.') : $gettext('Event created.'));
+            ($modal.value as any)?.hide();
+            emit('relist');
+        } catch (e: unknown) {
+            const err = e as {response?: {data?: {message?: string}}};
+            error.value = err?.response?.data?.message ?? $gettext('An error occurred.');
+        } finally {
+            loading.value = false;
+        }
+        return;
+    }
 
     try {
         // Build URL using getStationApiUrl to avoid Docker-internal host issues
@@ -1282,6 +1661,7 @@ const openForDrop = (
     source: 'playlist' | 'smart_block' | 'clock_wheel' = 'playlist',
 ) => {
     clearForm();
+    nsAddNewRow.value = true;
     form.value.source = source;
     form.value.entity_id = entityId;
     applyCalendarTimesToRow(start, end);
@@ -1423,6 +1803,10 @@ const checkIsRecurring = async (event: EventImpl): Promise<{isRecurring: boolean
 /** Called when user clicks an empty calendar slot — opens the modal with time pre-filled. */
 const openAtTime = (date: Date) => {
     clearForm();
+    nsAddNewRow.value = true;
+    if (currentEntityOptions.value.length > 0) {
+        form.value.entity_id = currentEntityOptions.value[0].id;
+    }
     applyCalendarTimesToRow(date);
     syncDurationFromTimes();
     ($modal.value as any)?.show();
@@ -1430,3 +1814,170 @@ const openAtTime = (date: Date) => {
 
 defineExpose({open, openForEdit, openScopedForCreate, openScopedForEdit, openForDrop, autoSaveFromDrop, autoSaveMove, checkIsRecurring, openAtTime});
 </script>
+
+<style scoped>
+.step-heading {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+    padding: .9rem 1rem;
+    border-radius: .7rem;
+}
+
+.step-heading strong,
+.step-heading small {
+    display: block;
+}
+
+.step-heading strong {
+    font-size: 1.08rem;
+}
+
+.step-heading small {
+    margin-top: .15rem;
+    color: var(--bs-secondary-color);
+    font-size: .84rem;
+}
+
+.step-heading-source {
+    border: 1px solid rgba(13, 110, 253, .2);
+    background: rgba(13, 110, 253, .12);
+    color: #1688f8;
+}
+
+.step-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.7rem;
+    height: 2.7rem;
+    flex: 0 0 2.7rem;
+    border-radius: .55rem;
+    color: #fff;
+    font-size: 1.55rem;
+}
+
+.step-icon-source {
+    background: #0d6efd;
+}
+
+.request-option {
+    display: flex;
+    align-items: flex-start;
+    gap: .7rem;
+    padding: .8rem .85rem;
+    margin: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .65rem;
+    background: var(--bs-tertiary-bg);
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease;
+}
+
+.request-option input {
+    margin-top: .2rem;
+}
+
+.request-option strong,
+.request-option small {
+    display: block;
+}
+
+.request-option strong {
+    font-size: .86rem;
+}
+
+.request-option small {
+    margin-top: .2rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.4;
+}
+
+.request-option-warning {
+    border-color: rgba(255, 193, 7, .45);
+    background: rgba(255, 193, 7, .08);
+}
+
+.request-option-warning strong {
+    color: #ffc107;
+}
+
+.request-option-warning:has(input:checked) {
+    border-color: #ffc107;
+    background: rgba(255, 193, 7, .16);
+}
+.schedule-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.05rem 1.2rem;
+    border-radius: .75rem;
+    background: linear-gradient(90deg, #0d6efd, #1688f8);
+    color: #fff;
+    box-shadow: 0 .2rem .65rem rgba(13, 110, 253, .18);
+}
+
+.schedule-hero p {
+    color: rgba(255, 255, 255, .9);
+    font-size: .92rem;
+    line-height: 1.4;
+}
+
+.schedule-overview {
+    padding: 1rem 1.1rem;
+    border: 1px solid;
+    border-radius: .7rem;
+}
+
+.schedule-overview strong,
+.schedule-overview span {
+    display: block;
+}
+
+.schedule-overview strong {
+    font-size: 1rem;
+}
+
+.schedule-overview span {
+    margin-top: .2rem;
+    font-size: .88rem;
+    line-height: 1.45;
+}
+
+.schedule-overview.is-scheduled {
+    border-color: rgba(13, 110, 253, .55);
+    background: rgba(13, 110, 253, .1);
+}
+
+.schedule-overview.is-unscheduled {
+    border-color: rgba(245, 158, 11, .55);
+    background: rgba(245, 158, 11, .1);
+}
+
+.add-schedule-button {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-weight: 600;
+}
+
+
+
+
+</style>
+
+<style>
+/* Widen the Create/Edit Event modal (popup use, e.g. Web Streams page) while the
+   New Schedule editor is shown. Sized via :has() because toggling the modal's
+   own class would drop Bootstrap's "show" class. */
+.modal-dialog:has(.calendar-new-schedule) {
+    width: calc(100vw - 2rem);
+    max-width: 960px;
+}
+
+@media (max-width: 767.98px) {
+    .modal-dialog:has(.calendar-new-schedule) {
+        width: calc(100vw - .75rem);
+    }
+}
+</style>

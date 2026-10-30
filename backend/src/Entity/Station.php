@@ -724,6 +724,18 @@ final class Station implements Stringable, IdentifiableEntityInterface
     ]
     public private(set) Collection $clock_wheels;
 
+    /** @var Collection<int, StationSmartBlock> */
+    #[
+        ORM\OneToMany(
+            targetEntity: StationSmartBlock::class,
+            mappedBy: 'station',
+            cascade: ['persist', 'remove'],
+            fetch: 'EXTRA_LAZY'
+        ),
+        ORM\OrderBy(['name' => 'ASC'])
+    ]
+    public private(set) Collection $smart_blocks;
+
     /** @var Collection<int, StationClockWheelTemplate> */
     #[
         ORM\OneToMany(
@@ -747,17 +759,6 @@ final class Station implements Stringable, IdentifiableEntityInterface
         ORM\OrderBy(['name' => 'ASC'])
     ]
     public private(set) Collection $clock_dayparts;
-
-    #[
-        ORM\OneToMany(
-            targetEntity: StationHolidayOverride::class,
-            mappedBy: 'station',
-            cascade: ['persist', 'remove'],
-            fetch: 'EXTRA_LAZY'
-        ),
-        ORM\OrderBy(['override_date' => 'ASC'])
-    ]
-    public private(set) Collection $holiday_overrides;
 
     #[
         ORM\ManyToOne,
@@ -789,9 +790,9 @@ final class Station implements Stringable, IdentifiableEntityInterface
         $this->sftp_users = new ArrayCollection();
         $this->requests = new ArrayCollection();
         $this->clock_wheels = new ArrayCollection();
+        $this->smart_blocks = new ArrayCollection();
         $this->clock_wheel_templates = new ArrayCollection();
         $this->clock_dayparts = new ArrayCollection();
-        $this->holiday_overrides = new ArrayCollection();
     }
 
     public function supportsAutoDjQueue(): bool

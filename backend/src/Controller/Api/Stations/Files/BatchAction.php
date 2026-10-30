@@ -292,6 +292,20 @@ final class BatchAction implements SingleActionInterface
                 $oldPath = $record->path;
                 $newPath = File::renameDirectoryInPath($oldPath, $from, $to, false);
 
+                // A file of the same name already in the target folder: moved,
+                // it would overwrite that file on disk, and the database refuses
+                // two media at one path, which failed the whole move with a
+                // database error (Rapture Ready, Sun 2026-10-26).
+                if ($newPath !== $oldPath && $this->pathIsTaken($storageLocation, $fs, $newPath)) {
+                    $result->errors[] = sprintf(
+                        '%s: "%s" already has a file named "%s". Rename or delete one of them, then move it again.',
+                        $oldPath,
+                        '' === $to ? '/' : $to,
+                        basename($newPath)
+                    );
+                    continue;
+                }
+
                 try {
                     $fs->move($oldPath, $newPath);
 
@@ -309,6 +323,16 @@ final class BatchAction implements SingleActionInterface
 
         foreach ($result->directories as $dirPath) {
             $newDirPath = File::renameDirectoryInPath($dirPath, $from, $to);
+
+            if ($newDirPath !== $dirPath && $fs->directoryExists($newDirPath)) {
+                $result->errors[] = sprintf(
+                    '%s: "%s" already has a folder named "%s". Rename one of them, then move it again.',
+                    $dirPath,
+                    '' === $to ? '/' : $to,
+                    basename($newDirPath)
+                );
+                continue;
+            }
 
             try {
                 $fs->move($dirPath, $newDirPath);
@@ -350,6 +374,21 @@ final class BatchAction implements SingleActionInterface
         $this->mediaListCache->clearCache($storageLocation);
 
         return $result;
+    }
+
+    private function pathIsTaken(
+        StorageLocation $storageLocation,
+        ExtendedFilesystemInterface $fs,
+        string $path
+    ): bool {
+        if ($fs->fileExists($path)) {
+            return true;
+        }
+
+        return null !== $this->em->getRepository(StationMedia::class)->findOneBy([
+            'storage_location' => $storageLocation,
+            'path' => $path,
+        ]);
     }
 
     private function doQueue(

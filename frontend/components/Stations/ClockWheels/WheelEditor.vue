@@ -974,7 +974,7 @@ const openBuilder = () => {
 };
 const runBuild = () => {
     const music = defaultClockWheelSlotEditorRow(0);
-    if (builder.value.musicKey.startsWith('pl:')) {
+    if (builder.value.musicKey.startsWith('pl:') || builder.value.musicKey.startsWith('sb:')) {
         applyClockWheelPlaylistKey(music, builder.value.musicKey, slotLengths.value);
     } else {
         applyClockWheelContentKey(music, builder.value.musicKey);
