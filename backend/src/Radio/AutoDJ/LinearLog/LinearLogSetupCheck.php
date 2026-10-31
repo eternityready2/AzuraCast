@@ -277,13 +277,13 @@ final class LinearLogSetupCheck
     {
         $station = $this->em->refetch($station);
 
-        $kinds = [];
+        $touched = [];
         $removed = [];
         foreach ($this->check($station) as $issue) {
             if (null === $issue['fix'] || isset($removed[$issue['id']])) {
                 continue;
             }
-            $kinds[] = $this->apply($station, $issue['id']);
+            $touched[] = $this->apply($station, $issue['id']);
             if (str_starts_with($issue['id'], 'duplicate:')) {
                 // A removed copy's own problems go with it.
                 $id = substr($issue['id'], strlen('duplicate:'));
@@ -293,41 +293,45 @@ final class LinearLogSetupCheck
             }
         }
 
-        if ([] !== $kinds) {
-            $this->save($station, $kinds);
+        if ([] !== $touched) {
+            $this->save($station, $touched);
         }
 
-        return count($kinds);
+        return count($touched);
     }
 
-    /** Stages one fix (no save); returns its kind. */
-    private function apply(Station $station, string $issueId): string
+    /**
+     * Stages one fix (no save). Returns the playlist whose schedule it changed,
+     * or null when it changed no schedule.
+     */
+    private function apply(Station $station, string $issueId): ?StationPlaylist
     {
         [$kind, $id] = array_pad(explode(':', $issueId, 2), 2, null);
         $id = (int)$id;
 
         switch ($kind) {
             case 'duplicate':
-                $this->em->remove($this->scheduleOf($station, $id));
-                break;
+                $schedule = $this->scheduleOf($station, $id);
+                $this->em->remove($schedule);
+                return $schedule->playlist;
 
             case 'repeat':
                 $schedule = $this->scheduleOf($station, $id);
                 $schedule->recurrence_type = RecurrenceType::Weekly;
                 $this->em->persist($schedule);
-                break;
+                return $schedule->playlist;
 
             case 'start':
                 $schedule = $this->scheduleOf($station, $id);
                 $schedule->start_time -= $schedule->start_time % 100;
                 $this->em->persist($schedule);
-                break;
+                return $schedule->playlist;
 
             case 'end':
                 $schedule = $this->scheduleOf($station, $id);
                 $schedule->end_time = $this->nextHour($schedule->end_time);
                 $this->em->persist($schedule);
-                break;
+                return $schedule->playlist;
 
             case 'show':
                 $playlist = $this->em->find(StationPlaylist::class, $id);
@@ -336,7 +340,7 @@ final class LinearLogSetupCheck
                 }
                 $playlist->is_programme = true;
                 $this->em->persist($playlist);
-                break;
+                return null;
 
             case 'idtag':
                 $media = $this->em->find(StationMedia::class, $id);
@@ -348,28 +352,58 @@ final class LinearLogSetupCheck
                 }
                 $media->type = 'talk';
                 $this->em->persist($media);
-                break;
+                return null;
 
             default:
                 throw new InvalidArgumentException('Unknown problem.');
         }
-
-        return (string)$kind;
     }
 
-    /** @param list<string> $kinds */
-    private function save(Station $station, array $kinds): void
+    /** @param list<StationPlaylist|null> $touched */
+    private function save(Station $station, array $touched): void
     {
         $this->em->flush();
 
-        // Schedules and shows are written into the station's playout config:
-        // the station shows its usual "restart to apply" notice.
-        if ([] !== array_diff($kinds, ['idtag'])) {
+        // Only a schedule that is written into the station's Liquidsoap config
+        // needs a restart to apply; the AutoDJ reads every other schedule live.
+        // The notice used to show after every fix, and pressing Reload for
+        // nothing restarted the station's playout.
+        $needsRestart = false;
+        foreach ($touched as $playlist) {
+            if (null !== $playlist && $this->isInPlayoutConfig($station, $playlist)) {
+                $needsRestart = true;
+                break;
+            }
+        }
+
+        if ($needsRestart) {
             $this->em->getConnection()->executeStatement(
                 'UPDATE station SET needs_restart = 1 WHERE id = ?',
                 [$station->id]
             );
         }
+    }
+
+    /**
+     * Whether Liquidsoap's config carries this playlist's schedule (the rule in
+     * ConfigWriter::shouldWritePlaylist). Web streams are left out: their
+     * schedule changes are applied automatically (WebStreamAutoApply).
+     */
+    private function isInPlayoutConfig(Station $station, StationPlaylist $playlist): bool
+    {
+        if (PlaylistSources::RemoteUrl === $playlist->source) {
+            return false;
+        }
+
+        $backendConfig = $station->backend_config;
+
+        return $backendConfig->write_playlists_to_liquidsoap
+            || $backendConfig->use_manual_autodj
+            || PlaylistSources::Songs !== $playlist->source
+            || $playlist->backendInterruptOtherSongs()
+            || $playlist->backendPlaySingleTrack()
+            || $playlist->backendMerge()
+            || PlaylistTypes::Advanced === $playlist->type;
     }
 
     private function scheduleOf(Station $station, int $id): StationSchedule
