@@ -895,9 +895,16 @@ LIQ;
             ignore(radio_without_live)
 
             # Live Broadcasting
-            live = input.harbor({$harborParams})
-            live.on_connect(synchronous=false, azuracast.live_connected)
-            live.on_disconnect(synchronous=false, azuracast.live_disconnected)
+            live_input = input.harbor({$harborParams})
+            live_input.on_connect(synchronous=false, azuracast.live_connected)
+            live_input.on_disconnect(synchronous=false, azuracast.live_disconnected)
+
+            # The tempo stage after the live switch (Top-of-Hour fit) pulls
+            # its input ahead of real time. Reading the harbor directly, it
+            # drained the DJ buffer: live audio sped up, stuttered and fell
+            # back to AutoDJ every few seconds. buffer() feeds it from its
+            # own clock, so the DJ is read at exactly real time.
+            live = buffer(id="live_buffer", buffer=1., max=10., live_input)
 
             def insert_missing(m) =
                 def updates =
@@ -966,7 +973,7 @@ LIQ;
                             ""
                         end
                     end,
-                    live,
+                    live_input,
                     fallible=true,
                     on_close=fun (tempPath) -> begin
                         newPath = string.replace(pattern=".tmp$", (fun(_) -> ""), tempPath)
