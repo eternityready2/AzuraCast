@@ -10,9 +10,7 @@ use App\Entity\Station;
 use App\Entity\StationHlsStream;
 use App\Entity\StationMount;
 use App\Entity\StationPlaylist;
-use App\Entity\Enums\PlaylistSources;
 use App\Entity\StationRemote;
-use App\Entity\StationSchedule;
 use Doctrine\Common\EventSubscriber;
 use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Events;
@@ -23,10 +21,10 @@ use ReflectionObject;
  * A hook into Doctrine's event listener to mark a station as
  * needing restart if one of its related entities is changed.
  *
- * Web streams (and their schedule times) are written into liquidsoap.liq, so
- * saving one marks the station too; the operator restarts when it suits them.
- * (0.31 restarted the station automatically within a minute of every save,
- * mid-show, which knocked stations off the air while a stream was being set up.)
+ * Web streams are not marked: the Linear Log airs scheduled web streams as
+ * queue rows and picks up changes when it rebuilds, so saving one needs no
+ * restart. (0.31 restarted the station within a minute of every web stream
+ * save, mid-show, which knocked stations off the air.)
  */
 final class StationRequiresRestart implements EventSubscriber
 {
@@ -64,21 +62,6 @@ final class StationRequiresRestart implements EventSubscriber
 
         foreach ($collectionsToCheck as [$changeType, $collection]) {
             foreach ($collection as $entity) {
-                $webStream = match (true) {
-                    $entity instanceof StationPlaylist => $entity,
-                    $entity instanceof StationSchedule => $entity->playlist,
-                    default => null,
-                };
-                if (
-                    null !== $webStream
-                    && PlaylistSources::RemoteUrl === $webStream->source
-                    && $webStream->station->hasLocalServices()
-                    && !$this->isOnlyIgnoredChanges($uow, $changeType, $entity)
-                ) {
-                    $stationsToRestart[$webStream->station->id] = $webStream->station;
-                    continue;
-                }
-
                 if (
                     ($entity instanceof StationMount)
                     || ($entity instanceof StationHlsStream)
