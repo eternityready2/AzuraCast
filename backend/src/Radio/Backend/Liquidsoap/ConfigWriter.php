@@ -61,7 +61,11 @@ final class ConfigWriter implements EventSubscriberInterface
                 ['writePlaylistConfiguration', 30],
                 ['writeNewsBulletinConfiguration', 28],
                 ['writeCrossfadeConfiguration', 25],
-                ['writeHarborConfiguration', 20],
+                // Live DJ goes after the plugin sections (Top-of-Hour 14, AI DJ 15,
+                // Rigid 16), so a live DJ overrides everything, as upstream.
+                // At 20 the Top-of-Hour tempo stage read the DJ input and drained
+                // it: live audio sped up, stuttered and fell back to AutoDJ.
+                ['writeHarborConfiguration', 12],
                 ['writePreBroadcastConfiguration', 10],
                 ['writeEncodingConfiguration', 7],
                 ['writeLocalBroadcastConfiguration', 5],
