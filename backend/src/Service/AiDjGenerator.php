@@ -943,7 +943,7 @@ final class AiDjGenerator
             // so the DJ never re-introduces herself mid-conversation.
             return match ($content->type) {
                 AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
-                    ? sprintf("Here's a scripture from %s. %s. Let that truth settle in your heart today.", $reference, $text)
+                    ? sprintf("Here's a scripture from %s. %s. Keep that word in your heart today.", $reference, $text)
                     : sprintf("%s. Stay blessed.", $text)),
                 AiDjContent::TYPE_JOKE => sprintf("Here's a little something to brighten your day. %s. Hope that put a smile on your face!", $text),
                 AiDjContent::TYPE_ENCOURAGEMENT => sprintf("%s. Remember, you are loved and you are not alone.", $text),
@@ -955,7 +955,7 @@ final class AiDjGenerator
 
         return match ($content->type) {
             AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
-                ? sprintf("You're listening to %s with %s. I want to share a scripture with you from %s. %s. Let that truth settle in your heart today.", $stationName, $djName, $reference, $text)
+                ? sprintf("You're listening to %s with %s. I want to share a scripture with you from %s. %s. Keep that word in your heart today.", $stationName, $djName, $reference, $text)
                 : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text)),
             AiDjContent::TYPE_JOKE => sprintf("Hey, it's %s here on %s, and I've got a little something to brighten your day. %s. Hope that put a smile on your face!", $djName, $stationName, $text),
             AiDjContent::TYPE_ENCOURAGEMENT => sprintf("This is %s on %s with some words of encouragement for you today. %s. Remember, you are loved and you are not alone.", $djName, $stationName, $text),
