@@ -113,7 +113,9 @@ import CardPage from "~/components/Common/CardPage.vue";
 import AddButton from "~/components/Common/AddButton.vue";
 import DataTable from "~/components/Common/DataTable.vue";
 import EditModal from "~/components/Stations/WebStreams/EditModal.vue";
-import CreateEventModal from "~/components/Stations/Common/CreateEventModal.vue";
+// The schedule form this page had before the calendar's New Schedule editor
+// (2026-10-26); the Schedule page keeps the new editor.
+import CreateEventModal from "~/components/Stations/WebStreams/ScheduleModal.vue";
 import ScheduleListModal from "~/components/Stations/WebStreams/ScheduleListModal.vue";
 import {useApiRouter} from "~/functions/useApiRouter.ts";
 import {useAxios} from "~/vendor/axios.ts";

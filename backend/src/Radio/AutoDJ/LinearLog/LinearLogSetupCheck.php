@@ -387,7 +387,7 @@ final class LinearLogSetupCheck
     /**
      * Whether Liquidsoap's config carries this playlist's schedule (the rule in
      * ConfigWriter::shouldWritePlaylist). Web streams are left out: their
-     * schedule changes are applied automatically (WebStreamAutoApply).
+     * schedule changes mark the station "restart to apply" (StationRequiresRestart).
      */
     private function isInPlayoutConfig(Station $station, StationPlaylist $playlist): bool
     {
