@@ -62,6 +62,10 @@ final class RestartRadioCommand extends CommandAbstract
             $io->section('Restarting all radio stations...');
 
             $stations = $this->stationRepo->fetchAll();
+
+            foreach ($this->configuration->disableOrphanedSupervisorConfigs($stations) as $file) {
+                $io->note('Turned off leftover config of a station that no longer exists: ' . $file);
+            }
         }
 
         $io->progressStart(count($stations));

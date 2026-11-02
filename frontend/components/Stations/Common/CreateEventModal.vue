@@ -648,6 +648,16 @@ const playlistFormStore = useStationsPlaylistsForm();
 const {form: playlistForm, r$: playlistR$} = storeToRefs(playlistFormStore);
 
 const nsItems = ref<Array<any>>([]);
+
+// Each saved window exactly as the server sent it, plus how its editor row
+// looked on load. Saving one event puts every window of the source back, so a
+// window the user did not touch is sent back unchanged instead of being
+// re-normalized (that rewrote repeat types, end rules and dates on windows
+// nobody edited).
+const nsOriginals = new Map<number, {raw: Record<string, unknown>, snapshot: string}>();
+
+const isUntouchedRow = (row: Record<string, any>): boolean =>
+    row.id != null && nsOriginals.get(Number(row.id))?.snapshot === JSON.stringify(row);
 const nsLoading = ref(false);
 const nsTargetRow = shallowRef<Record<string, any> | null>(null);
 // True only when the editor was opened from a clicked time slot or a dropped
@@ -710,6 +720,13 @@ const loadNewSchedule = async () => {
                 row.strict_start = row.clock_wheel_mode === 'strict';
             });
         }
+
+        nsOriginals.clear();
+        ((data.schedule_items ?? []) as Record<string, unknown>[]).forEach((raw, i) => {
+            if (raw.id != null && rows[i]) {
+                nsOriginals.set(Number(raw.id), {raw, snapshot: JSON.stringify(rows[i])});
+            }
+        });
 
         let targetIndex = editingScheduleId.value !== null
             ? rows.findIndex((row) => Number(row.id) === editingScheduleId.value)
@@ -797,6 +814,19 @@ const emergencyOverride = computed({
 });
 
 const newSchedulePayload = (): Record<string, unknown>[] => nsItems.value.map((item) => {
+    if (isUntouchedRow(item)) {
+        const unchanged: Record<string, unknown> = {...nsOriginals.get(Number(item.id))!.raw};
+        delete unchanged.playlist;
+        delete unchanged.streamer;
+        delete unchanged.clock_wheel;
+        delete unchanged.smart_block;
+        // The clock wheel save step derives clock_wheel_mode from strict_start.
+        if (form.value.source === 'clock_wheel') {
+            unchanged.strict_start = unchanged.clock_wheel_mode === 'strict';
+        }
+        return unchanged;
+    }
+
     const out: Record<string, unknown> = {...item};
     out.recurrence_type = item.recurrence_type ?? 'weekly';
     out.recurrence_interval = (item.recurrence_type === 'biweekly' ? 2 : Number(item.recurrence_interval)) || 1;
@@ -966,6 +996,7 @@ watch(
     () => [useNewSchedule.value, form.value.source, form.value.entity_id] as const,
     ([enabled, , entityId]) => {
         nsItems.value = [];
+        nsOriginals.clear();
         nsTargetRow.value = null;
         if (enabled && entityId) {
             void loadNewSchedule();
@@ -1165,12 +1196,12 @@ const isFormValid = computed(() => {
         return false;
     }
     if (useNewSchedule.value) {
-        return !nsLoading.value && nsItems.value.every((row) =>
+        return !nsLoading.value && nsItems.value.every((row) => isUntouchedRow(row) || (
             row.start_time !== null && row.start_time !== undefined && row.start_time !== ''
             && row.end_time !== null && row.end_time !== undefined && row.end_time !== ''
             && !!row.start_date
             && isRecurrenceComplete(row)
-        );
+        ));
     }
     return !r$.$invalid && !endDateSameAsStart.value;
 });
@@ -1348,6 +1379,7 @@ const clearForm = () => {
     editingScheduleId.value = null;
     isScopedMode.value = false;
     nsItems.value = [];
+    nsOriginals.clear();
     nsTargetRow.value = null;
     nsAddNewRow.value = false;
 };

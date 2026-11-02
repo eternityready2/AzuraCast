@@ -413,6 +413,46 @@ final class Configuration
         }
     }
 
+    /**
+     * Turn off station Supervisor configs that no current station owns.
+     *
+     * Supervisor loads every stations/<name>/config/supervisord.conf, so a file
+     * left behind by a deleted station (or by a station whose base directory
+     * moved) keeps running that station's Liquidsoap and Icecast. The file is
+     * renamed, not deleted.
+     *
+     * @param Station[] $stations
+     * @return string[] The files that were turned off.
+     */
+    public function disableOrphanedSupervisorConfigs(array $stations): array
+    {
+        if ($this->environment->isTesting()) {
+            return [];
+        }
+
+        $owned = [];
+        foreach ($stations as $station) {
+            $path = self::getSupervisorConfPath($station);
+            $owned[realpath($path) ?: $path] = true;
+        }
+
+        $pattern = $this->environment->getStationDirectory() . '/*/' . Station::CONFIG_DIR
+            . '/' . self::PER_STATION_SUPERVISOR_CONF;
+
+        $disabled = [];
+        foreach (glob($pattern) ?: [] as $file) {
+            if (isset($owned[realpath($file) ?: $file])) {
+                continue;
+            }
+
+            if (@rename($file, $file . '.orphaned')) {
+                $disabled[] = $file;
+            }
+        }
+
+        return $disabled;
+    }
+
     protected static function buildEnvironment(array $values): string
     {
         return implode(
