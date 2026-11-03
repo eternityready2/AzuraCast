@@ -4,6 +4,33 @@
             {{ $gettext('Manage reusable content for your AI DJ personalities.') }}
         </p>
 
+        <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+            <label
+                class="form-label mb-0 fw-semibold"
+                for="cl_library"
+            >{{ $gettext('Library') }}</label>
+            <select
+                id="cl_library"
+                v-model="library"
+                class="form-select form-select-sm w-auto"
+                @change="setTab(activeTab)"
+            >
+                <option value="shared">
+                    {{ $gettext('Shared library') }}
+                </option>
+                <option
+                    v-for="dj in djs"
+                    :key="dj.id"
+                    :value="dj.id"
+                >
+                    {{ $gettext('%{name}\'s own library', {name: dj.name}) }}
+                </option>
+            </select>
+            <span class="text-muted small">
+                {{ libraryNote }}
+            </span>
+        </div>
+
         <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
             <ul class="nav nav-pills flex-wrap gap-1 mb-0">
                 <li
@@ -64,6 +91,7 @@
             </div>
             <p class="text-muted small mb-3">
                 {{ $gettext("Song Intros and Post-Song are required by the AI DJ engine and can't be removed, but you can still clear their content. Other categories can be deleted entirely.") }}
+                {{ $gettext('Deleting a category removes it from every library.') }}
             </p>
             <ul class="list-group">
                 <li
@@ -74,7 +102,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <span class="fw-semibold">{{ tab.label }}</span>
                         <span class="badge text-bg-secondary">
-                            {{ $gettext('%{count} items', {count: countByType(tab.type)}) }}
+                            {{ $gettext('%{count} items', {count: countAllByType(tab.type)}) }}
                         </span>
                     </div>
 
@@ -224,6 +252,32 @@
                 >
                     {{ isBulkDeleting ? $gettext('Deleting…') : $gettext('Delete Selected') }} ({{ selectedIds.size }})
                 </button>
+                <div
+                    v-if="selectedIds.size > 0"
+                    class="input-group input-group-sm w-auto"
+                >
+                    <select
+                        v-model="copyTarget"
+                        class="form-select form-select-sm"
+                        :aria-label="$gettext('Copy to library')"
+                    >
+                        <option
+                            v-for="opt in copyTargets"
+                            :key="String(opt.value)"
+                            :value="opt.value"
+                        >
+                            {{ opt.label }}
+                        </option>
+                    </select>
+                    <button
+                        type="button"
+                        class="btn btn-outline-primary"
+                        :disabled="isCopying || copyTarget === null"
+                        @click="copySelected"
+                    >
+                        {{ isCopying ? $gettext('Copying…') : $gettext('Copy Selected') }} ({{ selectedIds.size }})
+                    </button>
+                </div>
                 <button
                     v-if="!isActiveTabRequired"
                     type="button"
@@ -428,6 +482,29 @@
                         >
                     </div>
 
+                    <div class="mb-3">
+                        <label
+                            class="form-label"
+                            for="cl_item_library"
+                        >{{ $gettext('Library') }}</label>
+                        <select
+                            id="cl_item_library"
+                            v-model="formLibrary"
+                            class="form-select"
+                        >
+                            <option value="shared">
+                                {{ $gettext('Shared library') }}
+                            </option>
+                            <option
+                                v-for="dj in djs"
+                                :key="dj.id"
+                                :value="dj.id"
+                            >
+                                {{ $gettext('%{name}\'s own library', {name: dj.name}) }}
+                            </option>
+                        </select>
+                    </div>
+
                     <div class="form-check form-switch mb-2">
                         <input
                             id="cl_item_enabled"
@@ -503,6 +580,8 @@ interface ContentItem {
     reference: string | null;
     is_enabled: boolean;
     is_global: boolean;
+    /** DJs whose own library holds this item; empty = shared library. */
+    ai_djs: number[];
 }
 
 interface ContentForm {
@@ -511,7 +590,22 @@ interface ContentForm {
     reference: string | null;
     is_enabled: boolean;
     is_global: boolean;
+    ai_djs: number[];
 }
+
+interface LibraryDj {
+    id: number;
+    name: string;
+}
+
+/** 'shared' or the id of a DJ whose own library is shown. */
+type Library = 'shared' | number;
+
+const props = withDefaults(defineProps<{
+    djs?: LibraryDj[];
+}>(), {
+    djs: () => [],
+});
 
 interface ContentTab {
     type: string;
@@ -644,6 +738,44 @@ const isActiveTabRequired = computed(() =>
     tabs.value.find((t) => t.type === activeTab.value)?.is_required === true
 );
 const items = ref<ContentItem[]>([]);
+const library = ref<Library>('shared');
+const formLibrary = ref<Library>('shared');
+const copyTarget = ref<Library | null>(null);
+const isCopying = ref(false);
+
+const libraryDjIds = (lib: Library): number[] => (lib === 'shared' ? [] : [lib]);
+
+const inLibrary = (item: ContentItem, lib: Library): boolean =>
+    lib === 'shared' ? item.ai_djs.length === 0 : item.ai_djs.includes(lib);
+
+const libraryLabel = (lib: Library): string => {
+    if (lib === 'shared') {
+        return $gettext('Shared library');
+    }
+    const name = props.djs.find((d) => d.id === lib)?.name ?? '';
+    return $gettext('%{name}\'s own library', {name});
+};
+
+const djHasOwnLibrary = (djId: number): boolean =>
+    items.value.some((i) => i.ai_djs.includes(djId));
+
+const libraryNote = computed(() => {
+    if (library.value === 'shared') {
+        const own = props.djs.filter((d) => djHasOwnLibrary(d.id)).map((d) => d.name);
+        return own.length > 0
+            ? $gettext('Used by every DJ except: %{names}', {names: own.join(', ')})
+            : $gettext('Used by every DJ.');
+    }
+    return djHasOwnLibrary(library.value)
+        ? $gettext('This DJ uses only this library. Artist bios still play.')
+        : $gettext('Empty, so this DJ uses the shared library. Add items to give them their own.');
+});
+
+const copyTargets = computed(() =>
+    (['shared', ...props.djs.map((d) => d.id)] as Library[])
+        .filter((lib) => lib !== library.value)
+        .map((lib) => ({value: lib, label: $gettext('Copy to %{library}', {library: libraryLabel(lib)})}))
+);
 const editorOpen = ref(false);
 const editorEl = ref<HTMLElement | null>(null);
 const editingItem = ref<ContentItem | null>(null);
@@ -658,12 +790,13 @@ const defaultForm = (): ContentForm => ({
     reference: null,
     is_enabled: true,
     is_global: false,
+    ai_djs: libraryDjIds(library.value),
 });
 
 const form = ref<ContentForm>(defaultForm());
 
 const filteredItems = computed(() => {
-    let result = items.value.filter((i) => i.type === activeTab.value);
+    let result = items.value.filter((i) => i.type === activeTab.value && inLibrary(i, library.value));
     if (searchQuery.value.trim()) {
         const q = searchQuery.value.toLowerCase();
         result = result.filter((i) =>
@@ -682,6 +815,9 @@ const activeItems = computed(() => {
 });
 
 const countByType = (type: string): number =>
+    items.value.filter((i) => i.type === type && inLibrary(i, library.value)).length;
+
+const countAllByType = (type: string): number =>
     items.value.filter((i) => i.type === type).length;
 
 const needsReference = computed(() => activeTab.value === 'bible_verse');
@@ -714,6 +850,8 @@ const setTab = (type: string): void => {
     activeTab.value = type;
     searchQuery.value = '';
     currentPage.value = 1;
+    selectedIds.value = new Set();
+    copyTarget.value = copyTargets.value[0]?.value ?? null;
     closeEditor();
     deleteTarget.value = null;
 };
@@ -727,7 +865,9 @@ const loadItems = async (): Promise<void> => {
     isLoading.value = true;
     try {
         const resp = await axios.get<ContentItem[]>(listUrl.value);
-        items.value = Array.isArray(resp.data) ? resp.data : [];
+        items.value = Array.isArray(resp.data)
+            ? resp.data.map((i) => ({...i, ai_djs: i.ai_djs ?? []}))
+            : [];
     } catch {
         notifyError($gettext('Failed to load content library.'));
     } finally {
@@ -744,6 +884,7 @@ const openCreate = (): void => {
     editingItem.value = null;
     form.value = defaultForm();
     form.value.type = activeTab.value;
+    formLibrary.value = library.value;
     deleteTarget.value = null;
     editorOpen.value = true;
     void scrollToEditor();
@@ -757,7 +898,9 @@ const openEdit = (item: ContentItem): void => {
         reference: item.reference,
         is_enabled: item.is_enabled,
         is_global: item.is_global,
+        ai_djs: [...item.ai_djs],
     };
+    formLibrary.value = item.ai_djs[0] ?? 'shared';
     deleteTarget.value = null;
     editorOpen.value = true;
     void scrollToEditor();
@@ -776,6 +919,7 @@ const cancelBulkImport = (): void => {
 
 const saveForm = async (): Promise<void> => {
     isSaving.value = true;
+    form.value.ai_djs = libraryDjIds(formLibrary.value);
     try {
         if (editingItem.value) {
             await axios.put(itemUrl(editingItem.value.id).value, form.value);
@@ -868,11 +1012,19 @@ const deleteAllInCategory = async (): Promise<void> => {
     const label = activeTabLabel.value;
     const count = countByType(activeTab.value);
     if (count === 0) return;
-    if (!confirm($gettext('Delete ALL %{count} items in "%{label}"? This cannot be undone.', {count, label}))) return;
+    if (!confirm($gettext('Delete ALL %{count} items in "%{label}" from %{library}? This cannot be undone.', {
+        count,
+        label,
+        library: libraryLabel(library.value),
+    }))) return;
 
     isBulkDeleting.value = true;
     try {
-        await axios.post(deleteByTypeUrl.value, {type: activeTab.value, remove_category: false});
+        await axios.post(deleteByTypeUrl.value, {
+            type: activeTab.value,
+            remove_category: false,
+            library: library.value,
+        });
         notifySuccess($gettext('All items in %{label} were deleted.', {label}));
         selectedIds.value = new Set();
         currentPage.value = 1;
@@ -901,6 +1053,40 @@ const deleteCategory = async (tab: ContentTab): Promise<void> => {
     }
 };
 
+const copySelected = async (): Promise<void> => {
+    const target = copyTarget.value;
+    if (target === null || selectedIds.value.size === 0) return;
+
+    isCopying.value = true;
+    let copied = 0;
+    let failed = 0;
+    for (const item of items.value.filter((i) => selectedIds.value.has(i.id))) {
+        try {
+            await axios.post(listUrl.value, {
+                type: item.type,
+                content: item.content,
+                reference: item.reference,
+                is_enabled: item.is_enabled,
+                is_global: false,
+                ai_djs: libraryDjIds(target),
+            });
+            copied++;
+        } catch {
+            failed++;
+        }
+    }
+
+    const libraryName = libraryLabel(target);
+    if (failed > 0) {
+        notifyError($gettext('%{copied} items copied to %{library}, %{failed} failed.', {copied, failed, library: libraryName}));
+    } else {
+        notifySuccess($gettext('%{copied} items copied to %{library}.', {copied, library: libraryName}));
+    }
+    selectedIds.value = new Set();
+    await loadItems();
+    isCopying.value = false;
+};
+
 const doBulkImport = async (): Promise<void> => {
     const lines = bulkText.value.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
     if (lines.length === 0) return;
@@ -917,6 +1103,7 @@ const doBulkImport = async (): Promise<void> => {
                 reference: null,
                 is_enabled: true,
                 is_global: false,
+                ai_djs: libraryDjIds(library.value),
             });
             created++;
         } catch {
@@ -935,6 +1122,7 @@ const doBulkImport = async (): Promise<void> => {
 };
 
 onMounted(async () => {
+    copyTarget.value = copyTargets.value[0]?.value ?? null;
     await Promise.all([loadTypes(), loadItems()]);
 });
 </script>

@@ -28,6 +28,10 @@ use Psr\Http\Message\ResponseInterface;
             type: 'object',
             properties: [
                 'type' => new OA\Property(description: 'Content type slug', type: 'string'),
+                'library' => new OA\Property(
+                    description: "Only delete from this library: 'shared' or a DJ id",
+                    type: 'string'
+                ),
                 'remove_category' => new OA\Property(
                     description: 'When true, also hide/remove the category tab (not just wipe items)',
                     type: 'boolean'
@@ -81,16 +85,25 @@ final class DeleteByTypeAction implements SingleActionInterface
             ]);
         }
 
+        // library: 'shared' or a DJ id limits the delete to that library;
+        // removing the whole category clears every library.
+        $library = is_array($body) && !$removeCategory ? ($body['library'] ?? null) : null;
+        $libraryDql = match (true) {
+            'shared' === $library => ' AND c.ai_djs IS EMPTY',
+            is_numeric($library) => ' AND :dj MEMBER OF c.ai_djs',
+            default => '',
+        };
+
         // Efficient bulk delete (no entity hydration) — handles large categories
         // like tens of thousands of Bible verses in a single query.
-        $deleted = $this->em->createQuery(
-            <<<'DQL'
-                DELETE FROM App\Entity\AiDjContent c
-                WHERE c.station = :station AND c.type = :type
-            DQL
+        $query = $this->em->createQuery(
+            'DELETE FROM App\Entity\AiDjContent c WHERE c.station = :station AND c.type = :type' . $libraryDql
         )->setParameter('station', $station)
-            ->setParameter('type', $type)
-            ->execute();
+            ->setParameter('type', $type);
+        if (is_numeric($library)) {
+            $query->setParameter('dj', (int) $library);
+        }
+        $deleted = $query->execute();
 
         $categoryRemoved = false;
         if ($removeCategory) {

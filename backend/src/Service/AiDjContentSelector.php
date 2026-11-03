@@ -36,7 +36,10 @@ final class AiDjContentSelector
         int $stationId,
         ?callable $accept = null,
     ): ?AiDjContent {
-        $allContent = $this->getAvailableContent($stationId, $contentType);
+        // A DJ with their own library uses only that library; the rest use the shared one.
+        $allContent = $this->djHasOwnLibrary($djId)
+            ? $this->getDjContent($djId, $contentType)
+            : $this->getAvailableContent($stationId, $contentType);
         if (null !== $accept) {
             $allContent = array_filter($allContent, $accept);
         }
@@ -58,7 +61,28 @@ final class AiDjContentSelector
         return $selected;
     }
 
+    /** Whether the DJ has their own library (then they use only that library). */
+    public function djHasOwnLibrary(int $djId): bool
+    {
+        return $this->contentRepo->djHasOwnLibrary($djId);
+    }
+
     /**
+     * @return array<int, AiDjContent>
+     */
+    private function getDjContent(int $djId, string $contentType): array
+    {
+        $djContent = [];
+        foreach ($this->contentRepo->findEnabledForDj($djId, $contentType) as $content) {
+            $djContent[$content->id] = $content;
+        }
+
+        return $djContent;
+    }
+
+    /**
+     * Shared library: the station's items plus global items, minus any DJ's own items.
+     *
      * @return array<int, AiDjContent>
      */
     private function getAvailableContent(int $stationId, string $contentType): array

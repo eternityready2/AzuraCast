@@ -660,7 +660,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
      *
      * @return string[]
      */
-    private function getLinerTypes(Station $station): array
+    private function getLinerTypes(Station $station, AiDj $dj): array
     {
         $excluded = [
             AiDjContent::TYPE_SONG_INTRO_TEMPLATE,
@@ -668,13 +668,24 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ];
 
         try {
-            /** @var string[] $types */
-            $types = $this->em->createQuery(
-                <<<'DQL'
-                    SELECT DISTINCT c.type FROM App\Entity\AiDjContent c
-                    WHERE c.station = :station AND c.is_enabled = true
-                DQL
-            )->setParameter('station', $station)->getSingleColumnResult();
+            // Categories come from the DJ's own library when they have one, else the shared library.
+            if ($this->contentSelector->djHasOwnLibrary($dj->getId())) {
+                /** @var string[] $types */
+                $types = $this->em->createQuery(
+                    <<<'DQL'
+                        SELECT DISTINCT c.type FROM App\Entity\AiDjContent c JOIN c.ai_djs d
+                        WHERE d.id = :djId AND c.is_enabled = true
+                    DQL
+                )->setParameter('djId', $dj->getId())->getSingleColumnResult();
+            } else {
+                /** @var string[] $types */
+                $types = $this->em->createQuery(
+                    <<<'DQL'
+                        SELECT DISTINCT c.type FROM App\Entity\AiDjContent c
+                        WHERE c.station = :station AND c.is_enabled = true AND c.ai_djs IS EMPTY
+                    DQL
+                )->setParameter('station', $station)->getSingleColumnResult();
+            }
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to load liner categories: %s', $e->getMessage()));
             return self::LINER_TYPES;
@@ -694,9 +705,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * @param string[]|null $onlyTypes
      * @return non-empty-array<int, string>
      */
-    private function linerTypesAmong(Station $station, ?array $onlyTypes): array
+    private function linerTypesAmong(Station $station, AiDj $dj, ?array $onlyTypes): array
     {
-        $linerTypes = $this->getLinerTypes($station);
+        $linerTypes = $this->getLinerTypes($station, $dj);
         if (null === $onlyTypes) {
             return $linerTypes;
         }
@@ -1001,7 +1012,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?string $excludeType,
         bool $withIntro,
     ): ?AiDjContent {
-        $linerTypes = $this->getLinerTypes($station);
+        $linerTypes = $this->getLinerTypes($station, $dj);
         // Keep long, self-contained content out of combos. Testimonies and stories average
         // well over the per-segment budget (COMBO_SEGMENT_CHARS = 230), and truncateForTts
         // only keeps complete sentences, so a truncated testimony or story can lose its
@@ -1185,7 +1196,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?array $onlyTypes = null,
     ): void {
         try {
-            $linerTypes = $this->linerTypesAmong($station, $onlyTypes);
+            $linerTypes = $this->linerTypesAmong($station, $dj, $onlyTypes);
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 

@@ -81,7 +81,12 @@ final readonly class IndexAction implements SingleActionInterface
             $content = array_filter($content, fn(AiDjContent $item) => $item->is_global === $global);
         }
 
-        $result = array_map(fn(AiDjContent $item) => $item->api(), array_values($content));
+        // ai_djs: the DJs whose own library holds the item; empty = shared library.
+        $djIdsByContent = $this->contentRepo->getDjIdsByContent((int) $station->id);
+        $result = array_map(
+            fn(AiDjContent $item) => [...$item->api(), 'ai_djs' => $djIdsByContent[$item->id] ?? []],
+            array_values($content)
+        );
 
         return $response->withJson($result);
     }

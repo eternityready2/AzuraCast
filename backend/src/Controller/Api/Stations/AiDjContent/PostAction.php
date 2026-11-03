@@ -7,6 +7,7 @@ namespace App\Controller\Api\Stations\AiDjContent;
 use App\Container\EntityManagerAwareTrait;
 use App\Controller\SingleActionInterface;
 use App\Entity\AiDjContent;
+use App\Entity\Repository\AiDjRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
@@ -35,6 +36,7 @@ final class PostAction implements SingleActionInterface
 
     public function __construct(
         private readonly ValidatorInterface $validator,
+        private readonly AiDjRepository $djRepo,
     ) {
     }
 
@@ -79,6 +81,19 @@ final class PostAction implements SingleActionInterface
 
         $this->em->flush();
 
-        return $response->withJson($content->api())->withStatus(201);
+        // ai_djs: put the item in these DJs' own libraries instead of the shared one.
+        $requested = array_map('intval', (array) ($body['ai_djs'] ?? []));
+        $djIds = [];
+        foreach ($this->djRepo->findByStation($station->id) as $dj) {
+            if (in_array($dj->getId(), $requested, true)) {
+                $this->em->getConnection()->insert(
+                    'ai_dj_has_content',
+                    ['ai_dj_id' => $dj->getId(), 'ai_dj_content_id' => $content->id]
+                );
+                $djIds[] = $dj->getId();
+            }
+        }
+
+        return $response->withJson([...$content->api(), 'ai_djs' => $djIds])->withStatus(201);
     }
 }

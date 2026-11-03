@@ -616,7 +616,7 @@
             </div>
 
             <div class="card-body">
-                <ai-dj-content-library />
+                <ai-dj-content-library :djs="djs" />
             </div>
         </section>
     </div>

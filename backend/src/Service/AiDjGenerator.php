@@ -10,6 +10,7 @@ use App\Entity\AiDjContent;
 use App\Entity\Repository\AiDjContentRepository;
 use App\Entity\Station;
 use App\Radio\AutoDJ\AiDjTalkRules;
+use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Psr\SimpleCache\CacheInterface;
 use RuntimeException;
@@ -511,8 +512,15 @@ final class AiDjGenerator
         }
 
         $identFree = !$this->claimIdentification($station, $dj);
-        $template = $this->selectRandomTemplate($dj->getContents(), $identFree)
-            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_SONG_INTRO_TEMPLATE, $identFree)
+        // A DJ with their own library never borrows the shared library's templates.
+        // Queried by type: a DJ library can hold tens of thousands of verses.
+        $template = $this->selectRandomTemplate(
+            new ArrayCollection($this->contentRepo->findEnabledForDj($dj->getId(), AiDjContent::TYPE_SONG_INTRO_TEMPLATE)),
+            $identFree
+        )
+            ?? (!$this->contentRepo->djHasOwnLibrary($dj->getId())
+                ? $this->selectStationTemplate($station->id, AiDjContent::TYPE_SONG_INTRO_TEMPLATE, $identFree)
+                : null)
             ?? $this->getDefaultSongIntro($identFree);
 
         $this->logger->info('AI DJ: Song intro metadata', [
@@ -587,8 +595,14 @@ final class AiDjGenerator
         $hasNext = ($nextArtist !== null && $nextArtist !== '');
         $identFree = !$identify;
 
-        $template = $this->selectRandomPostSongTemplate($dj->getContents(), $hasNext, $identFree)
-            ?? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE, $identFree)
+        $template = $this->selectRandomPostSongTemplate(
+            new ArrayCollection($this->contentRepo->findEnabledForDj($dj->getId(), AiDjContent::TYPE_POST_SONG_TEMPLATE)),
+            $hasNext,
+            $identFree
+        )
+            ?? (!$this->contentRepo->djHasOwnLibrary($dj->getId())
+                ? $this->selectStationTemplate($station->id, AiDjContent::TYPE_POST_SONG_TEMPLATE, $identFree)
+                : null)
             ?? $this->getDefaultPostSong($hasNext, $identFree);
 
         // Safety net: never let a post-song template mention a "next" song when we
