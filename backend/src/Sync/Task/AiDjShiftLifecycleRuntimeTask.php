@@ -644,7 +644,7 @@ final class AiDjShiftLifecycleRuntimeTask extends AbstractTask
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('artist', $dj->getName())
-                ->setParameter('titles', ['Welcome', 'AI DJ Welcome'])
+                ->setParameter('titles', ['DJ Welcome', 'AI DJ Welcome', 'Welcome'])
                 ->setParameter('startsAt', $startsAtUtc)
                 ->setParameter('endsAt', $endsAtUtc)
                 ->getSingleScalarResult();

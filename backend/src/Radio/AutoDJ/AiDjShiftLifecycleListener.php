@@ -136,7 +136,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $alreadySignedOff = $this->hasDurableShiftMarker(
             $station,
             $dj,
-            'Sign-off',
+            'DJ Sign-off',
             $startsAt,
             $endsAt,
         );
@@ -207,7 +207,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $welcomeAlreadyExists = $this->hasDurableShiftMarker(
             $station,
             $dj,
-            'Welcome',
+            'DJ Welcome',
             $startsAt,
             $endsAt,
         );
@@ -416,7 +416,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('artist', $dj->getName())
-                ->setParameter('titles', [$title, 'AI DJ ' . $title])
+                ->setParameter('titles', [$title, 'AI ' . $title, substr($title, 3)])
                 ->setParameter('startsAt', $startsAtUtc)
                 ->setParameter('endsAt', $endsAtUtc)
                 ->getSingleScalarResult();
@@ -447,7 +447,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 return false;
             }
 
-            $title = 'Welcome';
+            $title = 'DJ Welcome';
             $track = sprintf(
                 'annotate:title="%s",artist="%s",liq_cross_duration="0",' .
                 'liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",' .
@@ -516,7 +516,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 return false;
             }
 
-            $title = 'Sign-off';
+            $title = 'DJ Sign-off';
             $track = sprintf(
                 'annotate:title="%s",artist="%s",liq_cross_duration="0",' .
                 'liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",' .

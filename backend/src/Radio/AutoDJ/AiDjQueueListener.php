@@ -863,7 +863,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="Song Intro",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Intro",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath);
 
@@ -931,7 +931,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
-    private function createQueueEntry(Station $station, string $djName, string $clipPath, string $title = 'Song Intro'): void
+    private function createQueueEntry(Station $station, string $djName, string $clipPath, string $title = 'DJ Intro'): void
     {
         try {
             $song = Song::createFromText(sprintf('%s - %s', $djName, $title));
@@ -1409,9 +1409,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Welcome');
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'DJ Welcome');
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued shift intro clip for DJ "%s" (clip: %s)',
@@ -1435,9 +1435,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="Sign-off",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Sign-off",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'Sign-off');
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'DJ Sign-off');
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued outro clip for DJ "%s" (clip: %s)',
