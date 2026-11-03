@@ -20,6 +20,7 @@ use App\Entity\StationQueue;
 use App\Http\Router;
 use App\Radio\Adapters;
 use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\PendingAiDjSpeech;
 use App\Radio\AutoDJ\RigidScheduleForecastService;
 use App\Utilities\Time;
 use Exception;
@@ -45,6 +46,7 @@ final class NowPlayingApiGenerator
         private readonly NowPlayingCache $nowPlayingCache,
         private readonly RigidScheduleForecastService $rigidScheduleForecast,
         private readonly AiNewsScheduleForecastService $aiNewsScheduleForecast,
+        private readonly PendingAiDjSpeech $pendingAiDjSpeech,
     ) {
     }
 
@@ -179,6 +181,18 @@ final class NowPlayingApiGenerator
         ?UriInterface $baseUri,
         ?NowPlaying $npOld = null,
     ): void {
+        // A DJ clip handed to Liquidsoap airs at the next song change, before
+        // whatever song or programme is lined up, so it is what plays next.
+        $waitingDjClip = $this->pendingAiDjSpeech->nextWaiting($station);
+        if (null !== $waitingDjClip) {
+            $np->playing_next = ($this->stationQueueApiGenerator)(
+                $waitingDjClip,
+                $baseUri,
+                true
+            );
+            return;
+        }
+
         // Strict / Exact Time playlists play from a dedicated native Liquidsoap
         // source. While that source owns the air, Playing Next must use the same
         // live remaining cursor as Upcoming Song Queue, not the day-ahead Linear

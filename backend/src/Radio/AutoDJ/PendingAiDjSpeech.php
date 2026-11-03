@@ -48,6 +48,25 @@ final class PendingAiDjSpeech
     /** Seconds of AI DJ speech waiting in Liquidsoap, which airs before anything AutoDJ sends next. */
     public function secondsWaiting(Station $station): float
     {
+        $seconds = 0.0;
+        foreach ($this->waitingClips($station) as $clip) {
+            $seconds += $this->lengthOf((string)$clip->autodj_custom_uri);
+        }
+
+        return $seconds;
+    }
+
+    /** The AI DJ clip that airs next, ahead of the next song, if one is waiting. */
+    public function nextWaiting(Station $station): ?StationQueue
+    {
+        return $this->waitingClips($station)[0] ?? null;
+    }
+
+    /**
+     * @return StationQueue[] waiting clips, oldest first
+     */
+    private function waitingClips(Station $station): array
+    {
         /** @var StationQueue[] $clips */
         $clips = $this->em->createQuery(
             <<<'DQL'
@@ -58,20 +77,17 @@ final class PendingAiDjSpeech
                 AND sq.media IS NULL
                 AND sq.autodj_custom_uri LIKE :aiDjPath
                 AND sq.timestamp_cued >= :since
+                ORDER BY sq.timestamp_cued ASC
             DQL
         )->setParameter('station', $station)
             ->setParameter('aiDjPath', '%/ai_dj/%')
             ->setParameter('since', Time::nowUtc()->subSeconds(self::STALE_SECONDS))
             ->getResult();
 
-        $seconds = 0.0;
-        foreach ($clips as $clip) {
-            if ($this->isWaiting($station, $clip)) {
-                $seconds += $this->lengthOf((string)$clip->autodj_custom_uri);
-            }
-        }
-
-        return $seconds;
+        return array_values(array_filter(
+            $clips,
+            fn(StationQueue $clip): bool => $this->isWaiting($station, $clip)
+        ));
     }
 
     private function isWaiting(Station $station, StationQueue $clip): bool
