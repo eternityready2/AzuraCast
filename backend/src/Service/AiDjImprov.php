@@ -411,16 +411,16 @@ final class AiDjImprov
     ];
 
     private const array JOKES = [
-        'Why could Jonah not trust the ocean? He knew there was something fishy about it.',
-        'Who was the greatest comedian in the Bible? Samson. He brought the house down.',
-        'What kind of car did the apostles drive? They were all in one Accord.',
+        'I tried counting sheep tonight, but they kept wandering off. Turns out they needed a shepherd, not somebody counting them.',
+        'My grandmother reads her Bible every night before bed. She says it reads her right to sleep, and she means that as a compliment.',
+        'The night owl asked the early bird for advice. The early bird said, go to bed. The night owl said, I would, but the music is too good.',
         'Who was the best financier in the Bible? Noah. He was floating his stock while the whole world was in liquidation.',
-        'Where is tennis first mentioned in the Bible? When Joseph served in Pharaoh\'s court.',
-        'Why did they not play cards on the ark? Because Noah was standing on the deck.',
+        'Somebody asked me why I talk so softly on the overnight show. I said, I am not whispering. The whole world is just being very quiet around me.',
+        'The church bulletin promised the early service would be shorter this week. Turns out they just printed it in a smaller font.',
         'Which animal could Noah never trust? The cheetah.',
-        'What did Adam say the day before Christmas? It\'s Christmas, Eve.',
+        'The Psalm says He that keepeth Israel shall neither slumber nor sleep. Every night watchman reads that and says, finally, someone who understands the job.',
         'How do we know Peter was a wealthy fisherman? By his net income.',
-        'Why did Moses wander in the desert for forty years? Even back then, men would not stop and ask for directions.',
+        'I asked the Lord for patience at three in the morning. Then the coffee maker took eleven minutes. Prayer answered, lesson in progress.',
         'Who was the shortest man in the Bible? Some say Bildad the Shuhite. Others say Nehemiah. Knee high Miah.',
         'How did Adam and Eve feel when they had to leave the garden? Well, they were put out.',
         'What is the best way to study the Bible? You Luke into it.',
@@ -436,7 +436,7 @@ final class AiDjImprov
         'Somebody asked me if I talk to myself on the overnight shift. I said no, I talk to you. You just happen to be very quiet.',
         'They say the early bird gets the worm. The overnight bird gets the last donut in the break room.',
         'My grandson asked me what the Internet was like when I was young. I told him we called it the encyclopedia, and it lived on a shelf.',
-        'Where does Noah keep his bees? In the ark hives.',
+        'The pastor announced a three part sermon series. One of the deacons showed up with three pillows, just to be ready.',
         'What do you call a sheep who knows every hymn by heart? A lamb of praise. I will stop now.',
     ];
 
