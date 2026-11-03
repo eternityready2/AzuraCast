@@ -122,6 +122,20 @@ final class AiDjGenerator
     public const string MOOD_UPBEAT = 'upbeat';
     public const string MOOD_AMUSED = 'amused';
 
+    /** Liner categories a DJ's own library can hold beyond the built-ins. */
+    public const string TYPE_COMMENT = 'comment';
+    public const string TYPE_POEM = 'poem';
+    public const string TYPE_QUOTE = 'quote';
+    public const string TYPE_PRAYER = 'prayer';
+
+    /** Follow-up lines: never aired alone, only added to a verse, artist bio or hymn. */
+    public const string TYPE_VERSE_COMMENT = 'verse_comment';
+    public const string TYPE_ARTIST_COMMENT = 'artist_comment';
+    public const string TYPE_HYMN_REFLECTION = 'hymn_reflection';
+
+    /** Longest text a follow-up line may grow a clip to (TTS cuts at MAX_TTS_CHARS). */
+    private const int FOLLOW_UP_MAX_CHARS = 490;
+
     public static function moodForContentType(string $type): string
     {
         return match ($type) {
@@ -595,7 +609,8 @@ final class AiDjGenerator
         $hasNext = ($nextArtist !== null && $nextArtist !== '');
         $identFree = !$identify;
 
-        $template = $this->selectRandomPostSongTemplate(
+        $template = $this->selectHymnReflection($dj, $station, $prevArtist, $prevTitle, $identFree)
+            ?? $this->selectRandomPostSongTemplate(
             new ArrayCollection($this->contentRepo->findEnabledForDj($dj->getId(), AiDjContent::TYPE_POST_SONG_TEMPLATE)),
             $hasNext,
             $identFree
@@ -702,10 +717,31 @@ final class AiDjGenerator
         }
 
         $text = $this->buildLinerText($dj, $content, $station, $this->claimIdentification($station, $dj));
+        if (AiDjContent::TYPE_BIBLE_VERSE === $content->type && 1 === mt_rand(0, 1)) {
+            $text = $this->withFollowUp($dj, $text, self::TYPE_VERSE_COMMENT);
+        }
 
         $outputPath = $this->buildClipOutputPath($station, 'liner');
 
         return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::moodForContentType($content->type), $this->bedFor($dj, [$content->type]));
+    }
+
+    /**
+     * Render an on-the-fly line (AiDjImprov) as a liner clip.
+     */
+    public function generateImprovLiner(AiDj $dj, Station $station, string $line): ?string
+    {
+        if ($this->isOverDiskQuota($station)) {
+            return null;
+        }
+
+        $text = $this->claimIdentification($station, $dj)
+            ? sprintf('%s here on %s. %s', $this->getSpokenName($dj->getName()), $station->name, $line)
+            : $line;
+
+        $outputPath = $this->buildClipOutputPath($station, 'liner');
+
+        return $this->generateAudio($text, $dj->getVoiceModelPath(), $outputPath, $dj->getVoiceSpeed(), $this->usesSyntheticPad($dj), self::MOOD_WARM, $this->bedFor($dj, [self::TYPE_COMMENT]));
     }
 
     /**
@@ -963,6 +999,10 @@ final class AiDjGenerator
                 AiDjContent::TYPE_ENCOURAGEMENT => sprintf("%s. Remember, you are loved and you are not alone.", $text),
                 AiDjContent::TYPE_TESTIMONY => sprintf("%s. What an amazing testimony.", $text),
                 AiDjContent::TYPE_INSPIRATION, AiDjContent::TYPE_STORY => sprintf("And here's something worth sharing. %s.", $text),
+                self::TYPE_COMMENT => $text,
+                self::TYPE_POEM => sprintf("Here's a little poem%s. %s", self::poemTitle($content), $text),
+                self::TYPE_QUOTE => self::quoteText($content, $text),
+                self::TYPE_PRAYER => sprintf("Let's pray together. %s", $text),
                 default => sprintf("And here's something for you. %s.", $text),
             };
         }
@@ -976,8 +1016,89 @@ final class AiDjGenerator
             AiDjContent::TYPE_INSPIRATION => sprintf("This is %s on %s, and I want to share something inspiring with you right now. %s.", $djName, $stationName, $text),
             AiDjContent::TYPE_TESTIMONY => sprintf("I'm %s on %s, and I want to share something powerful with you. %s. What an amazing testimony.", $djName, $stationName, $text),
             AiDjContent::TYPE_STORY => sprintf("This is %s on %s, and I've got a story for you. %s.", $djName, $stationName, $text),
+            self::TYPE_COMMENT => sprintf("%s here on %s. %s", $djName, $stationName, $text),
+            self::TYPE_POEM => sprintf("This is %s on %s, and here's a little poem for you%s. %s", $djName, $stationName, self::poemTitle($content), $text),
+            self::TYPE_QUOTE => sprintf("This is %s on %s. %s", $djName, $stationName, self::quoteText($content, $text)),
+            self::TYPE_PRAYER => sprintf("This is %s on %s. Let's take a moment and pray together%s. %s", $djName, $stationName, $reference ? ', from ' . $reference : '', $text),
             default => sprintf("This is %s on %s, and I want to share something with you. %s.", $djName, $stationName, $text),
         };
+    }
+
+    private static function poemTitle(AiDjContent $content): string
+    {
+        $title = trim((string)$content->reference);
+
+        return '' === $title ? '' : ', called ' . $title;
+    }
+
+    private static function quoteText(AiDjContent $content, string $text): string
+    {
+        $author = trim((string)$content->reference);
+
+        if ('' === $author) {
+            return $text;
+        }
+
+        return sprintf(['%s once wrote, %s', 'In the words of %s, %s'][$content->id % 2], $author, $text);
+    }
+
+    /**
+     * Add a random line from the DJ's own follow-up category ("verse_comment",
+     * "artist_comment") to a clip's text, when it still fits the TTS limit.
+     */
+    public function withFollowUp(AiDj $dj, string $text, string $type, array $variables = []): string
+    {
+        $lines = array_map(
+            static fn(AiDjContent $c): string => $c->content,
+            $this->contentRepo->findEnabledForDj($dj->getId(), $type)
+        );
+        if ([] === $lines) {
+            return $text;
+        }
+
+        $line = $this->replaceTemplateVariables($lines[array_rand($lines)], $variables);
+        $combined = rtrim($text) . ' ' . $line;
+
+        return mb_strlen($combined) <= self::FOLLOW_UP_MAX_CHARS ? $combined : $text;
+    }
+
+    /**
+     * A hymn line for the song that just ended, when the DJ's own library has hymn
+     * lines and the song is in a hymn playlist. A line written for that very hymn
+     * (its reference is part of the title) is preferred over a general one.
+     */
+    private function selectHymnReflection(AiDj $dj, Station $station, ?string $artist, ?string $title, bool $identFree): ?string
+    {
+        if (null === $title || '' === trim($title) || mt_rand(1, 100) > 60) {
+            return null;
+        }
+
+        $lines = $this->contentRepo->findEnabledForDj($dj->getId(), self::TYPE_HYMN_REFLECTION);
+        if ([] === $lines || !$this->contentRepo->isHymn($station->id, $artist, $title)) {
+            return null;
+        }
+
+        // Compare letters only, so "Be Still My Soul" matches "Be Still, My Soul".
+        $letters = static fn(string $s): string => (string)preg_replace('/[^a-z0-9]+/', ' ', mb_strtolower($s));
+        $spokenTitle = ' ' . $letters($title) . ' ';
+        $specific = [];
+        $general = [];
+        foreach ($lines as $line) {
+            $ref = trim($letters((string)$line->reference));
+            if ('' === $ref) {
+                $general[] = $line->content;
+            } elseif (str_contains($spokenTitle, ' ' . $ref)) {
+                $specific[] = $line->content;
+            }
+        }
+        if ($identFree) {
+            $specific = array_values(array_filter($specific, self::isIdentFree(...)));
+            $general = array_values(array_filter($general, self::isIdentFree(...)));
+        }
+
+        $pool = ([] !== $specific && ([] === $general || mt_rand(1, 100) <= 70)) ? $specific : $general;
+
+        return [] === $pool ? null : $pool[array_rand($pool)];
     }
 
     /**

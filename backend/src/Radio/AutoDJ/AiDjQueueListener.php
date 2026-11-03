@@ -20,6 +20,7 @@ use App\Entity\AiDjContent;
 use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjImprov;
 use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
@@ -50,9 +51,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * A combo cuts each half to complete sentences within its budget, so a
      * testimony or story would lose its ending there.
      */
+    /** Share of a library-owning DJ's liners that are made up on the fly (AiDjImprov). */
+    private const int IMPROV_PERCENT = 35;
+
     private const array STANDALONE_ONLY_TYPES = [
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
+        AiDjGenerator::TYPE_POEM,
+        AiDjGenerator::TYPE_PRAYER,
     ];
 
     /**
@@ -99,6 +105,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly AiDjArtistHistoryService $artistHistoryService,
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
         private readonly AiDjRecordings $recordings,
+        private readonly AiDjImprov $improv,
     ) {
     }
 
@@ -665,6 +672,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
         $excluded = [
             AiDjContent::TYPE_SONG_INTRO_TEMPLATE,
             AiDjContent::TYPE_POST_SONG_TEMPLATE,
+            // Follow-up lines only air after a verse, artist bio or hymn.
+            AiDjGenerator::TYPE_VERSE_COMMENT,
+            AiDjGenerator::TYPE_ARTIST_COMMENT,
+            AiDjGenerator::TYPE_HYMN_REFLECTION,
         ];
 
         try {
@@ -967,6 +978,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $this->pushContentLiner($dj, $station, $backend);
                 return;
             }
+            if (1 === mt_rand(0, 1)) {
+                $historyText = $this->generator->withFollowUp(
+                    $dj,
+                    $historyText,
+                    AiDjGenerator::TYPE_ARTIST_COMMENT,
+                    ['artist' => $artist]
+                );
+            }
 
             $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
             $outputPath = $outputDir . '/artist_' . uniqid() . '.mp3';
@@ -1032,7 +1051,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // leaving only "Here's a scripture from ..." (1 Kings 8:48, 2026-10-07). A combo
         // takes only a verse whose whole spoken text fits; the longer ones air as
         // standalone liners. Scripture stays in combos, where most of it airs.
-        $accept = AiDjContent::TYPE_BIBLE_VERSE === $type
+        $accept = in_array($type, [AiDjContent::TYPE_BIBLE_VERSE, AiDjGenerator::TYPE_QUOTE, AiDjGenerator::TYPE_COMMENT], true)
             ? fn(AiDjContent $content): bool => $this->generator->fitsComboSegment(
                 $dj,
                 $content,
@@ -1153,6 +1172,29 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
+    /** Queue an on-the-fly line. False when none could be made, so the caller uses the library. */
+    private function pushImprovLiner(AiDj $dj, Station $station, Liquidsoap $backend): bool
+    {
+        $line = $this->improv->improvise($dj, $station);
+        if (null === $line) {
+            return false;
+        }
+
+        $clipPath = $this->generator->generateImprovLiner($dj, $station, $line);
+        if (null === $clipPath) {
+            return false;
+        }
+
+        $title = 'On the Fly';
+        $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
+        $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+        $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
+
+        $this->logger->info(sprintf('AI DJ: Queued on-the-fly line for DJ "%s": %s', $dj->getName(), $line));
+
+        return true;
+    }
+
     private function getLinerTitle(string $type): string
     {
         return match ($type) {
@@ -1196,6 +1238,17 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?array $onlyTypes = null,
     ): void {
         try {
+            // A DJ with their own library sometimes says something on the fly
+            // instead of reading from the library.
+            if (
+                null === $onlyTypes
+                && mt_rand(1, 100) <= self::IMPROV_PERCENT
+                && $this->contentSelector->djHasOwnLibrary($dj->getId())
+                && $this->pushImprovLiner($dj, $station, $backend)
+            ) {
+                return;
+            }
+
             $linerTypes = $this->linerTypesAmong($station, $dj, $onlyTypes);
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
@@ -1203,6 +1256,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
             if (null === $content) {
                 $this->logger->debug('AI DJ: No content available for liner.', ['type' => $type]);
                 return;
+            }
+
+            if (AiDjContent::TYPE_BIBLE_VERSE === $content->type) {
+                $this->improv->rememberVerse($dj, $content->reference);
             }
 
             $clipPath = $this->generator->generateContentLiner($dj, $content, $station);

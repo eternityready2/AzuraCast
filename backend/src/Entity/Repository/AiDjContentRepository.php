@@ -74,6 +74,24 @@ final class AiDjContentRepository extends Repository
         );
     }
 
+    /** Whether the song is in one of the station's playlists with "hymn" in its name. */
+    public function isHymn(int $stationId, ?string $artist, string $title): bool
+    {
+        $sql = <<<'SQL'
+            SELECT 1 FROM station_media m
+            INNER JOIN station_playlist_media spm ON spm.media_id = m.id
+            INNER JOIN station_playlists p ON p.id = spm.playlist_id
+            WHERE p.station_id = :stationId AND p.name LIKE '%hymn%' AND m.title = :title
+            SQL;
+        $params = ['stationId' => $stationId, 'title' => $title];
+        if (null !== $artist && '' !== $artist) {
+            $sql .= ' AND m.artist = :artist';
+            $params['artist'] = $artist;
+        }
+
+        return false !== $this->em->getConnection()->fetchOne($sql . ' LIMIT 1', $params);
+    }
+
     /**
      * Which DJ libraries each of the station's items belongs to, in one query.
      *
