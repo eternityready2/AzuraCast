@@ -9,6 +9,7 @@ use App\Controller\SingleActionInterface;
 use App\Entity\Api\Error;
 use App\Entity\Api\Status;
 use App\Entity\Repository\AiDjContentRepository;
+use App\Entity\Repository\AiDjRepository;
 use App\Http\Response;
 use App\Http\ServerRequest;
 use App\OpenApi;
@@ -45,6 +46,7 @@ final class PutAction implements SingleActionInterface
     public function __construct(
         private readonly AiDjContentRepository $contentRepo,
         private readonly ValidatorInterface $validator,
+        private readonly AiDjRepository $djRepo,
     ) {
     }
 
@@ -91,7 +93,22 @@ final class PutAction implements SingleActionInterface
         }
 
         $this->em->persist($content);
+
         $this->em->flush();
+
+        // ai_djs: which DJs' own libraries hold the item; empty = shared library.
+        // Written to the link table directly so a big DJ library is never loaded.
+        if (array_key_exists('ai_djs', $body)) {
+            $djIds = array_map('intval', (array) $body['ai_djs']);
+            $conn = $this->em->getConnection();
+            foreach ($this->djRepo->findByStation($station->id) as $dj) {
+                $link = ['ai_dj_id' => $dj->getId(), 'ai_dj_content_id' => $content->id];
+                $conn->delete('ai_dj_has_content', $link);
+                if (in_array($dj->getId(), $djIds, true)) {
+                    $conn->insert('ai_dj_has_content', $link);
+                }
+            }
+        }
 
         return $response->withJson(Status::updated());
     }

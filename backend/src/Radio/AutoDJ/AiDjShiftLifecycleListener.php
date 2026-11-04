@@ -136,7 +136,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $alreadySignedOff = $this->hasDurableShiftMarker(
             $station,
             $dj,
-            'AI DJ Sign-off',
+            'DJ Sign-off',
             $startsAt,
             $endsAt,
         );
@@ -207,7 +207,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
         $welcomeAlreadyExists = $this->hasDurableShiftMarker(
             $station,
             $dj,
-            'AI DJ Welcome',
+            'DJ Welcome',
             $startsAt,
             $endsAt,
         );
@@ -410,13 +410,13 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                     SELECT COUNT(sh.id) FROM App\Entity\SongHistory sh
                     WHERE sh.station = :station
                     AND sh.artist = :artist
-                    AND sh.title = :title
+                    AND sh.title IN (:titles)
                     AND sh.timestamp_start >= :startsAt
                     AND sh.timestamp_start < :endsAt
                 DQL
             )->setParameter('station', $station)
                 ->setParameter('artist', $dj->getName())
-                ->setParameter('title', $title)
+                ->setParameter('titles', [$title, 'AI ' . $title, substr($title, 3)])
                 ->setParameter('startsAt', $startsAtUtc)
                 ->setParameter('endsAt', $endsAtUtc)
                 ->getSingleScalarResult();
@@ -447,7 +447,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 return false;
             }
 
-            $title = 'AI DJ Welcome';
+            $title = 'DJ Welcome';
             $track = sprintf(
                 'annotate:title="%s",artist="%s",liq_cross_duration="0",' .
                 'liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",' .
@@ -516,7 +516,7 @@ final class AiDjShiftLifecycleListener implements EventSubscriberInterface
                 return false;
             }
 
-            $title = 'AI DJ Sign-off';
+            $title = 'DJ Sign-off';
             $track = sprintf(
                 'annotate:title="%s",artist="%s",liq_cross_duration="0",' .
                 'liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",' .

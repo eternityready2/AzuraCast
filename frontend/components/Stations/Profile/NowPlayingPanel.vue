@@ -52,7 +52,7 @@
             <div class="row">
                 <div class="col-md-6">
                     <div class="clearfix">
-                        <div class="d-table">
+                        <div class="d-table np-table">
                             <div class="d-table-row">
                                 <div class="d-table-cell align-middle text-end pe-2 pb-2">
                                     <icon-ic-music-note/>
@@ -79,7 +79,7 @@
                                         >
                                     </a>
                                 </div>
-                                <div class="d-table-cell align-middle w-100">
+                                <div class="d-table-cell align-middle w-100 np-text-cell">
                                     <div v-if="!np.is_online">
                                         <h5 class="media-heading m-0 text-muted">
                                             {{ stationData.offlineText ?? $gettext('Station Offline') }}
@@ -142,7 +142,7 @@
                         v-if="!np.live?.is_live && np.playing_next"
                         class="clearfix"
                     >
-                        <div class="d-table">
+                        <div class="d-table np-table">
                             <div class="d-table-row">
                                 <div class="d-table-cell align-middle pe-2 text-end pb-2">
                                     <icon-ic-skip-next/>
@@ -169,7 +169,7 @@
                                         >
                                     </a>
                                 </div>
-                                <div class="d-table-cell align-middle w-100">
+                                <div class="d-table-cell align-middle w-100 np-text-cell">
                                     <div v-if="np.playing_next?.song?.title">
                                         <h6
                                             class="media-heading m-0"
@@ -367,3 +367,23 @@ const updateMetadata = () => {
     $updateMetadataModal.value?.open();
 }
 </script>
+
+<style scoped>
+/*
+ * d-table grows to fit its widest content, so a long playlist badge pushed
+ * the Now Playing / Playing Next block past its column. Pin the table to the
+ * column width and let the text cell shrink (max-width: 0 is the table-cell
+ * trick that makes text-truncate work), so long names end in "…" instead.
+ */
+.np-table {
+    width: 100%;
+}
+
+.np-text-cell {
+    max-width: 0;
+}
+
+.np-text-cell h6 {
+    overflow-wrap: anywhere;
+}
+</style>

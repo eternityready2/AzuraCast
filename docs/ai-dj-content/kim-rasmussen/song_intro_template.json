@@ -1,0 +1,1218 @@
+[
+ {
+  "content": "This is {{dj_name}}. Next on {{show_name}}, {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, and here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's settle in with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "From {{artist}}, a favorite of mine, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here comes {{song}}, sung by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "On this quiet night, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and you are listening to {{show_name}} on {{station_name}}. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Let's let {{artist}} sing to us for a while. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and here is a sweet one now from {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here on {{station_name}} with {{dj_name}}, it's {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Pull up a chair and listen to {{artist}} sing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "The night is still, and the Lord is near. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "You are keeping company with {{dj_name}} on {{show_name}}. Here is {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Now a song that has blessed a lot of hearts over the years, {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "If you are up late tonight, this one is for you. {{artist}}, singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Some songs feel like coming home after a long day. Here is one of them, {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I remember hearing {{artist}} on the radio years ago, and it still warms my heart. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is a song of hope for the wee hours. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{show_name}}, and I am {{dj_name}}. Let's lift our hearts together with {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Whatever you are carrying tonight, set it down for a few minutes and listen. This is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Next up, {{artist}}, and a song called {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here on {{show_name}}, a little bit of heaven in song. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "The old favorites never get old. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, keeping watch with you through the night on {{station_name}}. Here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's turn our thoughts toward the Lord with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Good night or good morning, depending on how you look at it. This is {{dj_name}}, and here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is a voice many of us grew up with. {{artist}}, singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "If you are driving through the night, keep your eyes on the road and your heart on the Lord. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{station_name}}. I love sharing songs like this one with you. {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Here is a song for the quiet hours, {{song}}, sung by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "On {{show_name}}, we play the songs that carried us through. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's slow down and listen together to {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. If you are sitting at a hospital bedside tonight, or keeping vigil for someone you love, may this song bring you comfort. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{artist}}, with a song that points us to the Savior. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and this is one I have been looking forward to playing. {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. From the treasure chest of favorites, here is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "The house is quiet, the lights are low, and here comes {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{show_name}}. Sometimes a song says what our hearts have been trying to say all day. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{song}}. Sing along softly if you like. {{artist}} will lead the way.",
+  "reference": null
+ },
+ {
+  "content": "You are listening to {{station_name}}. I am {{dj_name}}, and here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Let's remember tonight that God is faithful, yesterday, today, and forever. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Back in the day, songs like this filled our churches and our living rooms. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. I am thankful you are here with me in these late hours. Here is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Now on {{show_name}}, {{artist}} sings {{song}}. May it bless your soul.",
+  "reference": null
+ },
+ {
+  "content": "Here is a gentle one for the night watch. {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and this is {{show_name}}. Let's spend a few minutes with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "For anyone who needs a reminder that God has not forgotten them, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{artist}}. The song is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, here on {{station_name}}. Grab a warm cup of something and enjoy {{song}} with {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "A song of faith from {{artist}}, here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let this next one wash over you. {{artist}}, with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. When I was a young man, I needed songs like this more than I knew. I still do. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Next, a classic from {{artist}}. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "On {{station_name}}, here is {{song}}, sung by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. The night may be dark outside, but there is light in this song. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is a song to remind us that we are never alone. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{show_name}} with {{dj_name}}. Here is a favorite of many of our listeners, {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Let's worship together for a moment. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. If you can't sleep tonight, that's all right. Let the Lord keep you company. Here is {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{artist}}, singing a song that never fails to lift my heart, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}} on {{station_name}}. The Lord has been good to us, and this next song says it well. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, and here comes a good one. {{artist}}, and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, and you are listening to {{show_name}}. Let's go back a few years with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "For the night owls and the early risers, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. I believe music is one of God's sweetest gifts. Here is a beautiful example of it, {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Now let's hear from {{artist}}. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. My mother used to say that a song in the night is a prayer that climbs straight to heaven. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here on {{show_name}}, it's time for {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{station_name}}. Let's rest in the Lord together as {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{artist}} with {{song}}, a song that has stood the test of time.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and this next song is for anyone who has ever felt weary. The Lord gives rest. Here is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{song}}, from {{artist}}, on {{station_name}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's thank God for another night under His care, and listen to {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Next on {{show_name}}, a little encouragement from {{artist}}. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Somebody out there needs this song tonight. Maybe it's you. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is a song about the goodness of God. {{artist}}, with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and you are listening to {{station_name}}. Here is {{artist}}, and a song I think you will love, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. The world rushes along, but here we can take our time. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's let the music do the talking for a while. {{artist}}, with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{show_name}}. I am {{dj_name}}, and here is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. God's mercies are new every morning, and the morning is not far off. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Here is an old friend of a song, {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}} on {{show_name}}. Close your eyes, breathe deep, and listen to {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, and here's a song I never tire of. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Many of us first heard this kind of music in a little church with a piano and a faithful choir. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}, here on {{station_name}}. Let your heart be still and know that He is God. Here is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Here is {{artist}} with a song of praise, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and you are with me on {{show_name}}. Let's hear {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. If someone in your family taught you to love these songs, thank the Lord for them tonight. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Through every season of life, the Lord remains the same. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{station_name}}, and up next is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. There is nothing quite like a song that turns your eyes back to Jesus. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's keep the music going with {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, here with you through the long night. This is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{show_name}}. Here is a song filled with hope, {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. You may be tired, but the Lord is never tired of you. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{station_name}}. A beautiful song now from {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Here is a song I hope will stay with you long after it ends. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Thanks for listening to {{show_name}}. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Some songs are simple, but they go straight to the heart. Here is {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Let's lift up the name of Jesus together with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}, and the coffee is warm here at {{station_name}}. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Wherever you are listening from tonight, the Lord sees you and loves you. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Here is {{artist}} with one of the good ones, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}} on {{show_name}}. Let's rest a while in the presence of the Lord with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. When the hours grow long, a good song makes good company. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here is {{artist}} with {{song}}, right here on {{show_name}}.",
+  "reference": null
+ },
+ {
+  "content": "The stars are out and the world is asleep, but heaven is wide awake. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I am {{dj_name}}. Let's give thanks for every mercy of this day, and listen to {{artist}} sing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "This is {{dj_name}}. Here is a song that sounds like a Sunday evening service, {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Pardon me while I find my reading glasses. There we are. {{dj_name}} here, and next is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Lamp light and a slow song. That is the whole plan for the next few minutes. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Settle back into that pillow. {{artist}} is about to sing {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "A gentle one coming up from {{artist}}. It is called {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "For the folks on the night shift, here is {{song}}, from {{artist}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Truckers out on the interstate, this next one rides along with you. {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "New parents pacing the hallway with a little one, this is for you. {{song}}, sung by {{artist}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "To the caregiver sitting up with someone you love, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Quiet house, quiet heart. Let {{artist}} fill the room with {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Somewhere a clock is ticking softly, and here comes {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Pour another cup of decaf and listen to {{artist}} sing {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Let us take this one slow. {{artist}}, and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Stars overhead and a Shepherd keeping watch. Here is {{song}} by {{artist}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "An old favorite for an old friend, that is you. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Now, {{song}}. {{artist}} sings it like a prayer. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Next we have {{artist}}, and a song that feels like home. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Rest easy. {{artist}} has {{song}} for us. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Close the book, dim the lamp, and enjoy {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Hymns and favorites all night long. This one is {{song}}, by {{artist}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Whoever is lying awake right now, the Lord knows it, and so does {{artist}}. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "I have been known to hum this one in my sleep. {{artist}} with {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "If this song were a quilt, it would be the one on Grandma's bed. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Over the next few minutes, just breathe. {{artist}} will do the singing. {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Softly now, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Shepherd of the night watch, sing over us. Here is {{artist}} with {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Moonlight on the windowsill and {{song}} on the radio. Here is {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Keep the volume low and the heart open. {{artist}}, {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Peace for the restless and rest for the weary. {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Sometimes the best sermon is a song. Here is {{artist}} with {{song}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "It is a good hour for {{song}}. {{artist}} sings it for us now.",
+  "reference": null
+ },
+ {
+  "content": "Hold on to this one. {{artist}}, {{song}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Faithful voices, faithful God. Here is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Your night companion this hour is {{artist}}, with {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Morning is on its way, but first, {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Turn the pillow to the cool side and listen. {{artist}} with {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "All is calm here, and {{artist}} is about to make it calmer still. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Heaven has not gone to bed. Neither has {{artist}}. Here is {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Gentle music for gentle hours. {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "What a treasure this one is. {{artist}} with {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Lay your burdens down for a while, and listen to {{artist}} sing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Sweet and simple, here is {{song}} by {{artist}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Through the night, the Lord is near. {{artist}} reminds us with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Just one more before you drift off, maybe. {{artist}} and {{song}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Ah, {{artist}}. Always a welcome voice at this hour. Here is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Into the stillness comes {{song}}, sung by {{artist}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Everything can wait until morning. {{song}} cannot. Here is {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Off we go, gently, with {{artist}} and {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Wherever the road has taken you tonight, {{artist}} has a song for you. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Every so often a song comes along that fits the night just right. {{artist}}, {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Following that, a sweet one from {{artist}} called {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Good company for the wee hours, {{artist}} with {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Kind words, a kind melody, and a kind Savior. {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Nobody sings quite like {{artist}}. Here is {{song}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Lean back and let {{artist}} bring you {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Let me slip in a favorite now, {{song}}, by {{artist}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Blessings to all of you awake at this hour. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Bless your heart for staying up with me. Here is {{song}} from {{artist}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Like a warm blanket on a cold night, here is {{song}}. {{artist}} sings it.",
+  "reference": null
+ },
+ {
+  "content": "One of the sweet ones now. {{artist}}, {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "One for the porch swing and the cricket choir, {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Fresh from the record shelf, well, not so fresh, but still lovely. {{artist}} with {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Old records, old friends, and an ever faithful God. {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Old saints listening tonight, I think you will know this one. {{song}}, from {{artist}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Wrap yourself up and listen to {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Slowly now, here is {{artist}}, and {{song}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Listen close, there is a lot of grace in this one. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Listen for the hope tucked inside {{song}}. Here is {{artist}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Still awake? Me too. Let us listen to {{artist}} sing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Still the night, still the heart. {{song}}, by {{artist}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Stay with me now for {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Right about now, this feels like the right song. {{artist}} with {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Prop your feet up, friend. {{artist}} brings us {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Here we go, nice and easy. {{song}}, from {{artist}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "A little night music, gospel style. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "A favorite from years gone by, here is {{artist}} with {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "And now, for your listening rest, {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "And here is something lovely for the quiet hours. {{song}} by {{artist}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Tucked in? Good. Here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Twilight is long gone and dawn is a ways off, so here is {{artist}} with {{song}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Should you need a reason to smile, {{artist}} has one. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Never underestimate an old song sung well. {{artist}}, {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Words worth remembering, a melody worth humming. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Even the night owls need a lullaby. {{artist}} sings {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Even now, at this hour, God is good. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Beautiful, isn't it, how a song can carry a prayer? {{artist}}, {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Sing along softly if you know it, and if you do not, just rest. {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "May this next song be a quiet comfort. {{artist}} with {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "May the Lord bless this hour for you. Here is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Comfort comes in many forms. Tonight it comes from {{artist}} and {{song}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Can you hear the gentle piano starting? {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Dear friend, this is for you. {{artist}} sings {{song}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Hush now, here comes {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Easy listening for an easy heart, {{artist}} with {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Mellow and sweet, {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Thinking of those who are grieving tonight as {{artist}} sings {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Remember, the Lord neither slumbers nor sleeps. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Remembering the good old songs tonight, here is {{song}} from {{artist}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "Praise the Lord for songs like this one. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Down the hall the house is sleeping. Here, {{artist}} is singing {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Out on the farm, in the city, on the highway, wherever you are, here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Time for {{song}}. {{artist}} sings it beautifully. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Simple, honest, and true. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Gather up your thoughts and give them to the Lord while {{artist}} sings {{song}}. {{dj_name}} here, keeping you company.",
+  "reference": null
+ },
+ {
+  "content": "Very few songs say it better. {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Glory to God in the quiet hours. {{artist}} brings us {{song}}. With you till dawn, {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Rocking chair music, that is what I call this. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Not a bad way to spend a few sleepless minutes. {{artist}} sings {{song}}. Rest well, from {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Not long now and the birds will be stirring. Until then, {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "The hour is late on {{show_name}}, so let us keep it gentle. {{artist}} sings {{song}}. {{dj_name}} on the night watch.",
+  "reference": null
+ },
+ {
+  "content": "{{show_name}} rolls on with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "{{artist}} is up next with {{song}}. Rest well.",
+  "reference": null
+ },
+ {
+  "content": "{{artist}} sang this one years ago, and it still warms the heart. {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "{{song}} is next, from {{artist}}. Let it carry you toward sleep.",
+  "reference": null
+ },
+ {
+  "content": "{{song}} now, sung by {{artist}}, here on {{station_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Welcome to {{show_name}}, or welcome back if you dozed off. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "{{dj_name}} with you still, and glad of the company. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "{{dj_name}} on the night watch. Up next, {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "It is {{dj_name}}, and I have saved a good one for this hour. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "It is {{dj_name}} on {{show_name}}. Let us rest a spell with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "My name is {{dj_name}}, and this next song has kept me company on many long nights. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "My friend, this is {{dj_name}}, and I am so glad you are here. Here is {{song}}, sung by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "You and me and a good song, that is all we need right now. {{dj_name}} here, with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "You are hearing {{show_name}} with {{dj_name}}. Next is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "With you through the night, I am {{dj_name}}. Here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "With the house all quiet, {{dj_name}} here, playing {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Hello again, night owls. {{dj_name}} here, and next up is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Hello to the nurses at the station desk tonight. {{dj_name}} sending you {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Hi there, it is {{dj_name}}. Let me play you {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Good to have you with me, this is {{dj_name}}. {{artist}} brings us {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Good evening, or is it morning already? {{dj_name}} here, with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "{{dj_name}} again, keeping the lamp lit on {{station_name}}. Next is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Your host {{dj_name}} here. The coffee is hot and the next song is sweet. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Your friend {{dj_name}} here on {{show_name}}. Let us listen together to {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Thanks for keeping me company, I am {{dj_name}}. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Thanks for tuning in to {{station_name}}. {{dj_name}} here, and next is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Riding along with you tonight, {{dj_name}} on {{station_name}}. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Keeping vigil with you, {{dj_name}} here. {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Keeping things slow and steady here on {{show_name}}. I am {{dj_name}}, and this is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Sitting here with the studio lights turned low, this is {{dj_name}}. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Sitting by the window watching the stars, {{dj_name}} here. Let us hear {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Behind the microphone tonight, your friend {{dj_name}}. Here comes {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Behold, a hymn lover's delight. {{dj_name}} here with {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "So glad you are listening. I am {{dj_name}}, and next is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "So many nights this song has blessed me. {{dj_name}} here, with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Peaceful hours on {{show_name}}. This is {{dj_name}}, playing {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Peaceful dreams to those drifting off. {{dj_name}} here, and here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Quiet greetings from {{dj_name}}. Next on {{station_name}}, {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Quietly, here at {{station_name}}, {{dj_name}} brings you {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "At this hour, {{dj_name}} likes to play something tender. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "At the risk of sounding sentimental, this is one of my favorites. {{dj_name}} here, with {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Not to brag, but I have the best listeners in radio. {{dj_name}} here, and this one is for you. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Back when I was a young man, I nearly wore out a record of this one. {{dj_name}} here, with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "For whoever needs it most tonight, {{dj_name}} offers {{song}}, sung by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "For anyone listening alone, you are not alone. I am {{dj_name}}, and here is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Friends, {{dj_name}} here. Let us take a few minutes with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Friends of the night, this is {{dj_name}}. Here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Dear listener, {{dj_name}} here. I have a feeling this one will do you good. {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Gently, gently, here is {{song}}. This is {{dj_name}}, and the voice you hear next belongs to {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Gently into the next song we go. {{dj_name}} here with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Lord willing, this one will bless you as much as it blesses me. {{dj_name}} here. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Now and then I just have to play this one. {{dj_name}} here, with {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Now let us welcome {{artist}} to the {{show_name}} lineup with {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "Right here on {{station_name}}, it is {{dj_name}}, and next is {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Another quiet hour, another good song. {{dj_name}} here, playing {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Another favorite from the hymnal and the heart. {{dj_name}} here, with {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Another one for the night watch, from {{dj_name}} to you. {{artist}}, singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Up late with {{dj_name}}? Good. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Up next on {{show_name}}, {{artist}} with {{song}}. I am {{dj_name}}, and I will be right here when it ends.",
+  "reference": null
+ },
+ {
+  "content": "Okay, friends, {{dj_name}} here with a gentle one. {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Well now, {{dj_name}} here, and I think you will enjoy this. {{artist}} sings {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Well, the night is still young, or old, depending how you count it. {{dj_name}} here with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Before we go any further, {{dj_name}} wants you to hear {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Before the sun comes up, let us hear {{artist}} sing {{song}}. This is {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "In the stillness of {{show_name}}, {{dj_name}} brings you {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "In case you just tuned in, this is {{dj_name}} on {{station_name}}. Here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Pull the covers up, friend. {{dj_name}} here, and {{artist}} is singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Wide awake or nearly asleep, you are welcome here. {{dj_name}} with {{song}} by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Grateful for you tonight, I am {{dj_name}}. Now here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Grateful hearts sing best. {{dj_name}} here, with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Thank the Lord for another quiet hour. This is {{dj_name}}, and here is {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "From my chair to yours, this is {{dj_name}}. Here is {{artist}} singing {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "From the hymnal shelf at {{station_name}}, {{dj_name}} pulls out {{song}}. Here is {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Through the long dark hours, {{dj_name}} is right here. Next, {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "To everybody listening from a hospital room tonight, {{dj_name}} is praying for you. Here is {{song}}, by {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "To the folks working the early bakery shift, {{dj_name}} says good morning. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Kindly turn it down low so the house can sleep. {{dj_name}} here with {{artist}} and {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Late as it is, {{dj_name}} still has a song or two left. Here is {{song}} from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Late night, soft light, and {{artist}} singing {{song}}. I am {{dj_name}}.",
+  "reference": null
+ },
+ {
+  "content": "The porch light is on and the night is still. Here is {{artist}} with {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "For everyone keeping watch with me tonight, a gentle one from {{artist}}. This is {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "Settle in, friend. {{dj_name}} here with an old favorite, {{song}}, from {{artist}}.",
+  "reference": null
+ },
+ {
+  "content": "Let the quiet hours carry this one to you. {{song}}, by {{artist}}, on {{station_name}}.",
+  "reference": null
+ },
+ {
+  "content": "If sleep is close, let this song walk you the rest of the way. Here is {{artist}}, {{song}}.",
+  "reference": null
+ },
+ {
+  "content": "From the hymnbook of the heart, here is {{artist}} singing {{song}}. I am {{dj_name}}.",
+  "reference": null
+ }
+]

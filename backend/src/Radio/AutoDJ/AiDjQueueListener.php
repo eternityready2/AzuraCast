@@ -20,6 +20,7 @@ use App\Entity\AiDjContent;
 use App\Service\AiDjArtistHistoryService;
 use App\Service\AiDjContentSelector;
 use App\Service\AiDjGenerator;
+use App\Service\AiDjImprov;
 use App\Service\AiDjRecordings;
 use App\Service\AiDjScheduler;
 use DateTimeImmutable;
@@ -50,9 +51,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * A combo cuts each half to complete sentences within its budget, so a
      * testimony or story would lose its ending there.
      */
+    /** Share of a library-owning DJ's liners that are made up on the fly (AiDjImprov). */
+    private const int IMPROV_PERCENT = 35;
+
     private const array STANDALONE_ONLY_TYPES = [
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
+        AiDjGenerator::TYPE_POEM,
+        AiDjGenerator::TYPE_PRAYER,
     ];
 
     /**
@@ -99,6 +105,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         private readonly AiDjArtistHistoryService $artistHistoryService,
         private readonly LinearLogPreviewContext $linearLogPreviewContext,
         private readonly AiDjRecordings $recordings,
+        private readonly AiDjImprov $improv,
     ) {
     }
 
@@ -660,21 +667,36 @@ final class AiDjQueueListener implements EventSubscriberInterface
      *
      * @return string[]
      */
-    private function getLinerTypes(Station $station): array
+    private function getLinerTypes(Station $station, AiDj $dj): array
     {
         $excluded = [
             AiDjContent::TYPE_SONG_INTRO_TEMPLATE,
             AiDjContent::TYPE_POST_SONG_TEMPLATE,
+            // Follow-up lines only air after a verse, artist bio or hymn.
+            AiDjGenerator::TYPE_VERSE_COMMENT,
+            AiDjGenerator::TYPE_ARTIST_COMMENT,
+            AiDjGenerator::TYPE_HYMN_REFLECTION,
         ];
 
         try {
-            /** @var string[] $types */
-            $types = $this->em->createQuery(
-                <<<'DQL'
-                    SELECT DISTINCT c.type FROM App\Entity\AiDjContent c
-                    WHERE c.station = :station AND c.is_enabled = true
-                DQL
-            )->setParameter('station', $station)->getSingleColumnResult();
+            // Categories come from the DJ's own library when they have one, else the shared library.
+            if ($this->contentSelector->djHasOwnLibrary($dj->getId())) {
+                /** @var string[] $types */
+                $types = $this->em->createQuery(
+                    <<<'DQL'
+                        SELECT DISTINCT c.type FROM App\Entity\AiDjContent c JOIN c.ai_djs d
+                        WHERE d.id = :djId AND c.is_enabled = true
+                    DQL
+                )->setParameter('djId', $dj->getId())->getSingleColumnResult();
+            } else {
+                /** @var string[] $types */
+                $types = $this->em->createQuery(
+                    <<<'DQL'
+                        SELECT DISTINCT c.type FROM App\Entity\AiDjContent c
+                        WHERE c.station = :station AND c.is_enabled = true AND c.ai_djs IS EMPTY
+                    DQL
+                )->setParameter('station', $station)->getSingleColumnResult();
+            }
         } catch (\Throwable $e) {
             $this->logger->error(sprintf('AI DJ: Failed to load liner categories: %s', $e->getMessage()));
             return self::LINER_TYPES;
@@ -694,9 +716,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
      * @param string[]|null $onlyTypes
      * @return non-empty-array<int, string>
      */
-    private function linerTypesAmong(Station $station, ?array $onlyTypes): array
+    private function linerTypesAmong(Station $station, AiDj $dj, ?array $onlyTypes): array
     {
-        $linerTypes = $this->getLinerTypes($station);
+        $linerTypes = $this->getLinerTypes($station, $dj);
         if (null === $onlyTypes) {
             return $linerTypes;
         }
@@ -841,7 +863,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ Intro",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Intro",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
             $this->createQueueEntry($station, $dj->getName(), $clipPath);
 
@@ -909,7 +931,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
-    private function createQueueEntry(Station $station, string $djName, string $clipPath, string $title = 'AI DJ Intro'): void
+    private function createQueueEntry(Station $station, string $djName, string $clipPath, string $title = 'DJ Intro'): void
     {
         try {
             $song = Song::createFromText(sprintf('%s - %s', $djName, $title));
@@ -956,6 +978,14 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $this->pushContentLiner($dj, $station, $backend);
                 return;
             }
+            if (1 === mt_rand(0, 1)) {
+                $historyText = $this->generator->withFollowUp(
+                    $dj,
+                    $historyText,
+                    AiDjGenerator::TYPE_ARTIST_COMMENT,
+                    ['artist' => $artist]
+                );
+            }
 
             $outputDir = '/var/azuracast/stations/' . $station->id . '/ai_dj';
             $outputPath = $outputDir . '/artist_' . uniqid() . '.mp3';
@@ -1001,7 +1031,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?string $excludeType,
         bool $withIntro,
     ): ?AiDjContent {
-        $linerTypes = $this->getLinerTypes($station);
+        $linerTypes = $this->getLinerTypes($station, $dj);
         // Keep long, self-contained content out of combos. Testimonies and stories average
         // well over the per-segment budget (COMBO_SEGMENT_CHARS = 230), and truncateForTts
         // only keeps complete sentences, so a truncated testimony or story can lose its
@@ -1021,7 +1051,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         // leaving only "Here's a scripture from ..." (1 Kings 8:48, 2026-10-07). A combo
         // takes only a verse whose whole spoken text fits; the longer ones air as
         // standalone liners. Scripture stays in combos, where most of it airs.
-        $accept = AiDjContent::TYPE_BIBLE_VERSE === $type
+        $accept = in_array($type, [AiDjContent::TYPE_BIBLE_VERSE, AiDjGenerator::TYPE_QUOTE, AiDjGenerator::TYPE_COMMENT], true)
             ? fn(AiDjContent $content): bool => $this->generator->fitsComboSegment(
                 $dj,
                 $content,
@@ -1142,6 +1172,29 @@ final class AiDjQueueListener implements EventSubscriberInterface
         }
     }
 
+    /** Queue an on-the-fly line. False when none could be made, so the caller uses the library. */
+    private function pushImprovLiner(AiDj $dj, Station $station, Liquidsoap $backend): bool
+    {
+        $line = $this->improv->improvise($dj, $station);
+        if (null === $line) {
+            return false;
+        }
+
+        $clipPath = $this->generator->generateImprovLiner($dj, $station, $line);
+        if (null === $clipPath) {
+            return false;
+        }
+
+        $title = 'On the Fly';
+        $track = sprintf('annotate:title="%s",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $title, $dj->getName(), $clipPath);
+        $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
+        $this->createQueueEntry($station, $dj->getName(), $clipPath, $title);
+
+        $this->logger->info(sprintf('AI DJ: Queued on-the-fly line for DJ "%s": %s', $dj->getName(), $line));
+
+        return true;
+    }
+
     private function getLinerTitle(string $type): string
     {
         return match ($type) {
@@ -1185,13 +1238,28 @@ final class AiDjQueueListener implements EventSubscriberInterface
         ?array $onlyTypes = null,
     ): void {
         try {
-            $linerTypes = $this->linerTypesAmong($station, $onlyTypes);
+            // A DJ with their own library sometimes says something on the fly
+            // instead of reading from the library.
+            if (
+                null === $onlyTypes
+                && mt_rand(1, 100) <= self::IMPROV_PERCENT
+                && $this->contentSelector->djHasOwnLibrary($dj->getId())
+                && $this->pushImprovLiner($dj, $station, $backend)
+            ) {
+                return;
+            }
+
+            $linerTypes = $this->linerTypesAmong($station, $dj, $onlyTypes);
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
             if (null === $content) {
                 $this->logger->debug('AI DJ: No content available for liner.', ['type' => $type]);
                 return;
+            }
+
+            if (AiDjContent::TYPE_BIBLE_VERSE === $content->type) {
+                $this->improv->rememberVerse($dj, $content->reference);
             }
 
             $clipPath = $this->generator->generateContentLiner($dj, $content, $station);
@@ -1341,9 +1409,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Welcome",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Welcome');
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'DJ Welcome');
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued shift intro clip for DJ "%s" (clip: %s)',
@@ -1367,9 +1435,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $track = sprintf('annotate:title="AI DJ Sign-off",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Sign-off",artist="%s",liq_cross_duration="0",liq_fade_in="0",liq_fade_out="0",liq_cue_in="0",jingle_mode="true",azuracast_autocue="false":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::AiDj, $track);
-            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'AI DJ Sign-off');
+            $this->createQueueEntry($station, $dj->getName(), $clipPath, 'DJ Sign-off');
 
             $this->logger->info(sprintf(
                 'AI DJ: Queued outro clip for DJ "%s" (clip: %s)',

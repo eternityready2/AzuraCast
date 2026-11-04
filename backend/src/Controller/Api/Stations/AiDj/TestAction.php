@@ -86,7 +86,7 @@ final class TestAction implements SingleActionInterface
         $backend = $this->adapters->getBackendAdapter($station);
         $queued = false;
         if ($backend instanceof Liquidsoap) {
-            $track = sprintf('annotate:title="AI DJ Test",artist="%s":%s', $dj->getName(), $clipPath);
+            $track = sprintf('annotate:title="DJ Test",artist="%s":%s', $dj->getName(), $clipPath);
             $backend->enqueue($station, LiquidsoapQueues::Requests, $track);
             $queued = true;
         }
