@@ -143,43 +143,6 @@ final class ClockWheelPlaybackPlanner
             );
         }
 
-        // Flexible mode lets a song finish past the next anchor (no mid-hour cuts), so a
-        // song can run straight over a short promo/ID/ad window. That slot then plays
-        // right after the song instead of being skipped for the hour.
-        if (
-            ClockWheelScheduleMode::Strict !== $scheduleMode
-            && $this->isFlexibleMusicSlot($activeSlot)
-        ) {
-            $missedSlot = $this->findMissedShortFormSlot($slots, $activeIndex, $station, $recentHistory, $expectedPlayTime);
-            if (null !== $missedSlot) {
-                $this->logger->info(
-                    'Clock Wheel: short-form slot was passed by an overrunning song; playing it now.',
-                    [
-                        'clock_wheel_id' => $wheel->id,
-                        'missed_position_seconds' => $missedSlot->position_seconds,
-                        'seconds_into_hour' => $secondsIntoHour,
-                    ]
-                );
-
-                $catchUp = $this->resolveSlot(
-                    $wheel,
-                    $missedSlot,
-                    $recentHistory,
-                    max(self::MIN_SHORT_FORM_WINDOW_SECONDS, $availableSeconds),
-                    $scheduleMode,
-                    $station,
-                    $expectedPlayTime,
-                    $secondsIntoHour,
-                    false,
-                );
-
-                // Nothing playable for the missed slot: carry on with the music slot.
-                if (null !== $catchUp) {
-                    return $catchUp;
-                }
-            }
-        }
-
         if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
             if ($activeSlot->is_hard_anchor) {
                 if ($availableSeconds < self::MIN_SHORT_FORM_WINDOW_SECONDS) {
@@ -634,6 +597,7 @@ final class ClockWheelPlaybackPlanner
             $maxDuration,
             $isEndOfHour,
         );
+        $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
 
         // Every slot in the log is eligible for stretch/squeeze -- not just the
         // one before a mandatory anchor -- so gaps close smoothly station-wide.
@@ -707,68 +671,6 @@ final class ClockWheelPlaybackPlanner
         }
 
         return false;
-    }
-
-    /**
-     * The latest short-form slot (promo, ID, ad) earlier in this hour that nothing from
-     * its pool has aired for since its position. Mandatory top-of-hour IDs and smart-block
-     * slots are left to their own handling.
-     *
-     * @param StationClockWheelSlot[] $slots
-     * @param array<array{song_id:string, timestamp_played:mixed, title:string|null, artist:string|null}> $recentHistory
-     */
-    private function findMissedShortFormSlot(
-        array $slots,
-        int $activeIndex,
-        Station $station,
-        array $recentHistory,
-        DateTimeImmutable $expectedPlayTime,
-    ): ?StationClockWheelSlot {
-        $hourStart = $this->resolveTopOfHourExpectedPlayAt($station, $expectedPlayTime)->getTimestamp();
-        if ($hourStart > $expectedPlayTime->getTimestamp()) {
-            $hourStart -= HourBoundaryPlanner::HOUR_SECONDS;
-        }
-
-        for ($i = $activeIndex - 1; $i >= 0; $i--) {
-            $slot = $slots[$i];
-            $type = $slot->type;
-            if (
-                null === $type
-                || $this->isFlexibleMusicSlot($slot)
-                || null !== $slot->smart_block
-                || ClockWheelSlotTypes::isMandatoryTopOfHourSlot($type, $slot->position_seconds)
-            ) {
-                continue;
-            }
-
-            $poolSongs = [];
-            foreach ($this->loadMediaCandidates($station, $type, $slot) as $media) {
-                $poolSongs[$media->song_id] = true;
-            }
-            if ($poolSongs === []) {
-                continue;
-            }
-
-            $slotStart = $hourStart + $slot->position_seconds;
-            $aired = false;
-            foreach ($recentHistory as $row) {
-                if (!isset($poolSongs[$row['song_id'] ?? ''])) {
-                    continue;
-                }
-                $played = $row['timestamp_played'] ?? null;
-                $playedTs = $played instanceof DateTimeInterface
-                    ? $played->getTimestamp()
-                    : (is_string($played) ? (int)strtotime($played) : (is_int($played) ? $played : 0));
-                if ($playedTs >= $slotStart - 60) {
-                    $aired = true;
-                    break;
-                }
-            }
-
-            return $aired ? null : $slot;
-        }
-
-        return null;
     }
 
     /**
@@ -1141,6 +1043,7 @@ final class ClockWheelPlaybackPlanner
                 $maxDuration,
                 $isEndOfHour,
             );
+            $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
             $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
                 $media->getCalculatedLength(),
                 $availableSeconds,
@@ -1310,6 +1213,19 @@ final class ClockWheelPlaybackPlanner
         // Flexible: never cut mid-hour. A track longer than the window plays in full
         // and the next slot starts later; the hour boundary is still capped above.
         return false;
+    }
+
+    /**
+     * Flexible tracks may run past their own window, never past the top of the hour:
+     * a track that would cross :00 is capped there, as the last slot of the hour is.
+     */
+    private function guardHourBoundary(StationQueue $queueEntry, StationMedia $media, int $secondsIntoHour): void
+    {
+        $untilHour = HourBoundaryPlanner::HOUR_SECONDS - $secondsIntoHour;
+        if (!$queueEntry->clock_wheel_enforce_cap && $media->getCalculatedLength() > $untilHour) {
+            $queueEntry->clock_wheel_enforce_cap = true;
+            $queueEntry->clock_wheel_max_play_seconds = max(1, $untilHour);
+        }
     }
 
     private function filterByDuration(

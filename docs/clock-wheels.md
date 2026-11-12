@@ -102,12 +102,12 @@ Two automatic layers — **no operator toggle** between “PHP only” and Liqui
 | Short-form slot (ID / promo / ad / slot `duration_seconds`) | Yes |
 | Schedule **flexible** + music/talk that **fits** the window | No — play naturally |
 | Schedule **flexible** + music/talk with **no fitting track** (shortest overflow) | No — plays in full; the next slot starts later (no mid-hour cuts) |
-| Schedule **flexible** + short-form slot passed over by an overrunning song | — the promo/ID/ad plays right after that song |
+| Track that would cross :00 (any slot) | Yes — capped at the top of the hour |
 | Slot with its own `duration_seconds` | Yes — capped at the slot length |
 
 **Per schedule row** (`clock_wheel_mode` on clock wheel calendar events only):
 
-- `flexible`: full songs, never cut mid-hour. Overflow pushes the next slot later; a short-form slot that a long song ran over plays right after it. Only the hour boundary (and slots with their own length) is capped.
+- `flexible`: full songs, never cut mid-hour. Overflow pushes the next slot later (a short-form slot that a long song ran past is skipped for that hour). Only the top of the hour, strict schedules and slots with their own length are capped.
 - `strict`: must fit at selection time; fallback cap at every anchor for safety.
 
 **Not used:** playlist `loop_once` on clock wheel schedules; no `loop_once` UI for clock wheels.
