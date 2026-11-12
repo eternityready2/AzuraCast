@@ -20,13 +20,11 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
-use App\Radio\AutoDJ\DmcaComplianceListener;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
-use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -66,8 +64,6 @@ final class ClockWheelPlaybackPlanner
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
         private readonly SmartBlockAvailability $smartBlockAvailability,
-        private readonly TopOfHourClock $topOfHourClock,
-        private readonly DmcaComplianceListener $dmca,
     ) {
     }
 
@@ -145,23 +141,6 @@ final class ClockWheelPlaybackPlanner
                 $secondsIntoHour,
                 $availableSeconds,
             );
-        }
-
-        // A flexible music slot with too little time left hands over to the next
-        // slot at once. Deferring returned nothing, and the Linear Log builder
-        // treated that as an empty stretch (a hole) until something else fit.
-        while (
-            ClockWheelScheduleMode::Strict !== $scheduleMode
-            && $this->isFlexibleMusicSlot($activeSlot)
-            && !$activeSlot->is_hard_anchor
-            && $availableSeconds < $minWindow
-            && isset($slots[$activeIndex + 1])
-        ) {
-            $activeIndex++;
-            $activeSlot = $slots[$activeIndex];
-            $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
-            $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
-            $minWindow = $this->getMinWindowSeconds($activeSlot);
         }
 
         if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
@@ -513,16 +492,15 @@ final class ClockWheelPlaybackPlanner
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
         $strictSchedule = ClockWheelScheduleMode::Strict === $scheduleMode;
 
-        $handOff = $this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour);
         $candidates = $this->filterByDuration(
             $candidates,
             $maxDuration,
             $slot,
-            $strictSchedule || ($isEndOfHour && !$handOff),
-            $isEndOfHour && !$handOff,
+            $strictSchedule || $isEndOfHour,
+            $isEndOfHour,
         );
 
-        if ($isEndOfHour && !$handOff && $candidates !== []) {
+        if ($isEndOfHour && $candidates !== []) {
             usort(
                 $candidates,
                 static fn (StationMedia $a, StationMedia $b): int =>
@@ -577,32 +555,8 @@ final class ClockWheelPlaybackPlanner
             $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
         }
 
-        // Skip picks the DMCA rules would turn down (e.g. a third song in a row from
-        // one album). The pick order is deterministic, so without this every retry
-        // returned the same rejected song and the Linear Log planned a hole.
-        $validTrack = null;
-        for ($dmcaTries = 0; $dmcaTries < 25; $dmcaTries++) {
-            $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
-                ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
-            if (null === $validTrack) {
-                break;
-            }
-
-            $pick = $this->em->find(StationMedia::class, $validTrack->media_id);
-            if (
-                !$pick instanceof StationMedia
-                || $this->dmca->allowsPick(StationQueue::fromMedia($station, $pick), $station, $expectedPlayTime)
-            ) {
-                break;
-            }
-
-            $rejectedId = $validTrack->media_id;
-            $mediaQueue = array_values(array_filter(
-                $mediaQueue,
-                static fn (StationPlaylistQueue $q): bool => $q->media_id !== $rejectedId
-            ));
-            $validTrack = null;
-        }
+        $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
+            ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
 
         if ($validTrack === null) {
             $this->eventLogger->recordFallback(
@@ -644,17 +598,14 @@ final class ClockWheelPlaybackPlanner
             $isEndOfHour,
         );
         $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
-        $this->handFinalSlotToTopOfHour($queueEntry, $slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour, null);
 
-        if (null !== $queueEntry->clock_wheel) {
-            // Every slot in the log is eligible for stretch/squeeze -- not just the
-            // one before a mandatory anchor -- so gaps close smoothly station-wide.
-            // Still only within the safe +/-5% range computed in the calculator.
-            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-                $media->getCalculatedLength(),
-                $availableSeconds,
-            );
-        }
+        // Every slot in the log is eligible for stretch/squeeze -- not just the
+        // one before a mandatory anchor -- so gaps close smoothly station-wide.
+        // Still only within the safe +/-5% range computed in the calculator.
+        $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+            $media->getCalculatedLength(),
+            $availableSeconds,
+        );
 
         $this->em->persist($queueEntry);
 
@@ -1052,18 +1003,12 @@ final class ClockWheelPlaybackPlanner
                 continue;
             }
 
-            if (!$this->dmca->allowsPick(StationQueue::fromMedia($station, $media), $station, $expectedPlayTime)) {
-                $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
-                continue;
-            }
-
-            $handOff = $this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour);
             $durationCandidates = $this->filterByDuration(
                 [$media],
                 $maxDuration,
                 $slot,
-                $strictSchedule || ($isEndOfHour && !$handOff),
-                $isEndOfHour && !$handOff,
+                $strictSchedule || $isEndOfHour,
+                $isEndOfHour,
             );
 
             if ($durationCandidates === []) {
@@ -1099,13 +1044,10 @@ final class ClockWheelPlaybackPlanner
                 $isEndOfHour,
             );
             $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
-            $this->handFinalSlotToTopOfHour($queueEntry, $slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour, $playlist);
-            if (null !== $queueEntry->clock_wheel) {
-                $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-                    $media->getCalculatedLength(),
-                    $availableSeconds,
-                );
-            }
+            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                $media->getCalculatedLength(),
+                $availableSeconds,
+            );
             $this->em->persist($queueEntry);
 
             $this->eventLogger->recordTrackQueued(
@@ -1271,64 +1213,6 @@ final class ClockWheelPlaybackPlanner
         // Flexible: never cut mid-hour. A track longer than the window plays in full
         // and the next slot starts later; the hour boundary is still capped above.
         return false;
-    }
-
-    /**
-     * True for a flexible wheel's last music slot of the hour when the station's
-     * Top-of-Hour swap owns the boundary: that track goes to the swap as an ordinary
-     * row and is not limited to what fits before :00 (the swap/stretch lands it).
-     */
-    private function handsFinalSlotToTopOfHour(
-        StationClockWheelSlot $slot,
-        ClockWheelScheduleMode $scheduleMode,
-        Station $station,
-        DateTimeImmutable $expectedPlayTime,
-        bool $isEndOfHour,
-    ): bool {
-        return $isEndOfHour
-            && ClockWheelScheduleMode::Flexible === $scheduleMode
-            && null === $slot->smart_block
-            && null !== $slot->playlist_id && $slot->playlist_id > 0
-            && $this->topOfHourClock->isEnabled($station)
-            && $this->topOfHourClock->isSwapEnabled($station)
-            && !$this->topOfHourClock->clockWheelOwnsBoundary(
-                $station,
-                $this->topOfHourClock->getNextBoundary($station, $expectedPlayTime)
-            );
-    }
-
-    /**
-     * The last music slot of a flexible hour hands its track to the Top-of-Hour
-     * system as an ordinary playlist row, so the tested final-slot swap/stretch
-     * lands it on the station ID. Wheel rows are skipped by that swap, which left
-     * dead air before the ID when the wheel's last song ended early.
-     */
-    private function handFinalSlotToTopOfHour(
-        StationQueue $queueEntry,
-        StationClockWheelSlot $slot,
-        ClockWheelScheduleMode $scheduleMode,
-        Station $station,
-        DateTimeImmutable $expectedPlayTime,
-        bool $isEndOfHour,
-        ?StationPlaylist $playlist,
-    ): void {
-        if (!$this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour)) {
-            return;
-        }
-
-        if (null === $playlist && null !== $slot->playlist_id && $slot->playlist_id > 0) {
-            $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
-        }
-        if (!$playlist instanceof StationPlaylist) {
-            return;
-        }
-
-        $queueEntry->playlist = $playlist;
-        $queueEntry->clock_wheel = null;
-        $queueEntry->clock_wheel_enforce_cap = false;
-        $queueEntry->clock_wheel_max_play_seconds = null;
-        $queueEntry->clock_wheel_stretch_ratio = null;
-        $queueEntry->clock_wheel_schedule_mode = null;
     }
 
     /**
