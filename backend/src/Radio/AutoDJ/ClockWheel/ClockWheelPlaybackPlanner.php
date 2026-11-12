@@ -145,6 +145,23 @@ final class ClockWheelPlaybackPlanner
             );
         }
 
+        // A flexible music slot with too little time left hands over to the next
+        // slot at once. Deferring returned nothing, and the Linear Log builder
+        // treated that as an empty stretch (a hole) until something else fit.
+        while (
+            ClockWheelScheduleMode::Strict !== $scheduleMode
+            && $this->isFlexibleMusicSlot($activeSlot)
+            && !$activeSlot->is_hard_anchor
+            && $availableSeconds < $minWindow
+            && isset($slots[$activeIndex + 1])
+        ) {
+            $activeIndex++;
+            $activeSlot = $slots[$activeIndex];
+            $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
+            $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
+            $minWindow = $this->getMinWindowSeconds($activeSlot);
+        }
+
         if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
             if ($activeSlot->is_hard_anchor) {
                 if ($availableSeconds < self::MIN_SHORT_FORM_WINDOW_SECONDS) {
@@ -494,15 +511,16 @@ final class ClockWheelPlaybackPlanner
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
         $strictSchedule = ClockWheelScheduleMode::Strict === $scheduleMode;
 
+        $handOff = $this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour);
         $candidates = $this->filterByDuration(
             $candidates,
             $maxDuration,
             $slot,
-            $strictSchedule || $isEndOfHour,
-            $isEndOfHour,
+            $strictSchedule || ($isEndOfHour && !$handOff),
+            $isEndOfHour && !$handOff,
         );
 
-        if ($isEndOfHour && $candidates !== []) {
+        if ($isEndOfHour && !$handOff && $candidates !== []) {
             usort(
                 $candidates,
                 static fn (StationMedia $a, StationMedia $b): int =>
@@ -1008,12 +1026,13 @@ final class ClockWheelPlaybackPlanner
                 continue;
             }
 
+            $handOff = $this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour);
             $durationCandidates = $this->filterByDuration(
                 [$media],
                 $maxDuration,
                 $slot,
-                $strictSchedule || $isEndOfHour,
-                $isEndOfHour,
+                $strictSchedule || ($isEndOfHour && !$handOff),
+                $isEndOfHour && !$handOff,
             );
 
             if ($durationCandidates === []) {
@@ -1224,6 +1243,30 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
+     * True for a flexible wheel's last music slot of the hour when the station's
+     * Top-of-Hour swap owns the boundary: that track goes to the swap as an ordinary
+     * row and is not limited to what fits before :00 (the swap/stretch lands it).
+     */
+    private function handsFinalSlotToTopOfHour(
+        StationClockWheelSlot $slot,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        bool $isEndOfHour,
+    ): bool {
+        return $isEndOfHour
+            && ClockWheelScheduleMode::Flexible === $scheduleMode
+            && null === $slot->smart_block
+            && null !== $slot->playlist_id && $slot->playlist_id > 0
+            && $this->topOfHourClock->isEnabled($station)
+            && $this->topOfHourClock->isSwapEnabled($station)
+            && !$this->topOfHourClock->clockWheelOwnsBoundary(
+                $station,
+                $this->topOfHourClock->getNextBoundary($station, $expectedPlayTime)
+            );
+    }
+
+    /**
      * The last music slot of a flexible hour hands its track to the Top-of-Hour
      * system as an ordinary playlist row, so the tested final-slot swap/stretch
      * lands it on the station ID. Wheel rows are skipped by that swap, which left
@@ -1238,17 +1281,7 @@ final class ClockWheelPlaybackPlanner
         bool $isEndOfHour,
         ?StationPlaylist $playlist,
     ): void {
-        if (
-            !$isEndOfHour
-            || ClockWheelScheduleMode::Flexible !== $scheduleMode
-            || null !== $slot->smart_block
-            || !$this->topOfHourClock->isEnabled($station)
-            || !$this->topOfHourClock->isSwapEnabled($station)
-            || $this->topOfHourClock->clockWheelOwnsBoundary(
-                $station,
-                $this->topOfHourClock->getNextBoundary($station, $expectedPlayTime)
-            )
-        ) {
+        if (!$this->handsFinalSlotToTopOfHour($slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour)) {
             return;
         }
 
