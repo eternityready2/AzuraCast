@@ -9,6 +9,7 @@ use App\Container\EntityManagerAwareTrait;
 use App\Entity\Repository\SongHistoryRepository;
 use App\Entity\Repository\StationQueueRepository;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelLegalIdPlaybackService;
+use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Song;
 use App\Entity\SongHistory;
 use App\Entity\Station;
@@ -64,6 +65,29 @@ final class FeedbackCommand extends AbstractCommand
         return true;
     }
 
+    /**
+     * True when a queue row that already aired is playing on after a station
+     * ID: the overview names an ID now, and the row started recently enough
+     * that it can still be playing. A replay after a player restart names the
+     * song already shown, and stays refused.
+     */
+    private function isResumedAfterId(Station $station, StationQueue $sq): bool
+    {
+        $current = $station->current_song;
+        if (null === $current || !StationMediaTypes::isStationId($current->media?->type)) {
+            return false;
+        }
+
+        $startedAt = $sq->timestamp_played?->getTimestamp();
+        $length = (float)($sq->duration ?? $sq->media?->getCalculatedLength() ?? 0.0);
+        if (null === $startedAt || $length <= 0.0) {
+            return false;
+        }
+
+        // Its own length, plus the ID and any news it waited through.
+        return time() < $startedAt + $length + 300;
+    }
+
     private function getSongHistory(
         Station $station,
         array $payload
@@ -103,6 +127,14 @@ final class FeedbackCommand extends AbstractCommand
 
         if (!empty($payload['sq_id'])) {
             $sq = $this->em->find(StationQueue::class, $payload['sq_id']);
+
+            if ($sq instanceof StationQueue && $sq->is_played && $this->isResumedAfterId($station, $sq)) {
+                // The song the Top-of-Hour ID interrupted plays on after it: Now
+                // Playing names it again instead of the ID it showed meanwhile.
+                // Refused, the overview read "Station ID" for the 4 minutes
+                // Skillet played on after the 9pm ID (Wed 2026-11-11).
+                return SongHistory::fromQueue($sq);
+            }
 
             if ($sq instanceof StationQueue && $sq->is_played) {
                 throw new RuntimeException(
