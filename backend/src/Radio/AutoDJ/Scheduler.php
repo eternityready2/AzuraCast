@@ -259,6 +259,14 @@ final class Scheduler
                 continue;
             }
 
+            // Short-form rotations (promos, IDs: the "once per" playlist types) may
+            // fill a wheel's window too, as in normal hours. Without them the
+            // Top-of-Hour swap had nothing to fill the last minute or two before the
+            // station ID and planned a hole (no music track was short enough).
+            if (PlaylistTypes::Standard !== $playlist->type && PlaylistTypes::Advanced !== $playlist->type) {
+                return true;
+            }
+
             foreach ($clockWheel->slots as $slot) {
                 if ($slot->playlist_id === $playlist->id) {
                     return true;
