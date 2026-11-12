@@ -12,6 +12,7 @@ use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
 use App\Entity\StationSchedule;
 use App\Event\Radio\BuildQueue;
+use App\Event\Radio\RevalidateQueuedSong;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelEventLogger;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelPlaybackPlanner;
 use App\Radio\AutoDJ\ClockWheel\ClockWheelSeparationSettings;
@@ -48,7 +49,17 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             BuildQueue::class => [
                 ['buildFromClockWheel', 3],
             ],
+            // With the Top-of-Hour swap (-1), which holds ordinary songs the same way.
+            RevalidateQueuedSong::class => [
+                ['holdUnderIdLane', -1],
+            ],
         ];
+    }
+
+    /** A wheel song due under the ID/news lane opens the new hour. */
+    public function holdUnderIdLane(RevalidateQueuedSong $event): void
+    {
+        $this->planner->holdUnderIdLane($event);
     }
 
     public function buildFromClockWheel(BuildQueue $event): void

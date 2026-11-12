@@ -20,11 +20,17 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
+use App\Event\Radio\RevalidateQueuedSong;
+use App\Radio\AutoDJ\AiNewsScheduleForecastService;
+use App\Radio\AutoDJ\AiredLength;
+use App\Radio\AutoDJ\DmcaComplianceListener;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
+use App\Radio\AutoDJ\StretchSqueezeQueueTiming;
+use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -48,6 +54,12 @@ final class ClockWheelPlaybackPlanner
     private const int MIN_TALK_WINDOW_SECONDS = 45;
 
     private const int MIN_SHORT_FORM_WINDOW_SECONDS = 10;
+    /**
+     * The hour's last item may end this much before the ID (as the Top-of-Hour
+     * swap holds back anything due in its last 45s); a pick due later than
+     * this opens the next hour after the ID instead.
+     */
+    private const int ID_EARLY_SECONDS = 15;
 
     /** @deprecated Use HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS or station config. */
     public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS;
@@ -64,7 +76,120 @@ final class ClockWheelPlaybackPlanner
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
         private readonly SmartBlockAvailability $smartBlockAvailability,
+        private readonly DmcaComplianceListener $dmca,
+        private readonly TopOfHourClock $topOfHourClock,
+        private readonly AiredLength $airedLength,
+        private readonly AiNewsScheduleForecastService $aiNewsForecast,
     ) {
+    }
+
+    /**
+     * Holds a Clock Wheel song due under the Top-of-Hour ID lane (the ID, and
+     * the AI News after it) until the lane hands the air back, so it opens the
+     * new hour, as the Top-of-Hour swap holds an ordinary hour's first song.
+     *
+     * The swap leaves Clock Wheel rows alone, so a wheel hour's first song was
+     * timed at :00:14 while the ID and a 2:20 news bulletin aired first: the
+     * whole wheel hour ran 2:19 late and the next ID faded its last song
+     * (Power Drive, 5pm Thu 2026-11-12, in the log build). The lane is worked
+     * out as the swap works it out: the ID start from TopOfHourClock, the
+     * queued ID's length, and the recent bulletins' average when news airs.
+     */
+    public function holdUnderIdLane(RevalidateQueuedSong $event): void
+    {
+        $row = $event->getQueueRow();
+        if (
+            null === $row->clock_wheel
+            || $row->top_of_hour_legal_id
+            || $row->clock_wheel_legal_id_substitute
+            || null !== $row->request
+        ) {
+            return;
+        }
+
+        $media = $row->media;
+        if (null === $media || StationMediaTypes::isStationId($media->type)) {
+            return;
+        }
+
+        $station = $event->getStation();
+        if (!$this->topOfHourClock->isEnabled($station)) {
+            return;
+        }
+
+        $start = CarbonImmutable::instance($event->getExpectedPlayAt());
+        $release = $this->idLaneReleaseContaining($station, $start);
+        if (null === $release) {
+            return;
+        }
+
+        $event->holdBack();
+        $event->opensAfter($release->toDateTimeImmutable());
+
+        $this->logger->notice(
+            'Clock Wheel: holding the new hour\'s first song until the ID lane hands the air back.',
+            [
+                'queue_id' => $row->id,
+                'media_id' => $media->id,
+                'start' => $start->toIso8601String(),
+                'release' => $release->toIso8601String(),
+            ]
+        );
+    }
+
+    /**
+     * When the ID lane that $start falls under hands the air back, or null when
+     * $start is outside it (before the ID start, or after the lane released).
+     */
+    private function idLaneReleaseContaining(Station $station, CarbonImmutable $start): ?CarbonImmutable
+    {
+        $boundary = CarbonImmutable::instance(
+            $this->topOfHourClock->getNextBoundary($station, $start->subMinutes(10)->toDateTimeImmutable())
+        );
+        if ($this->topOfHourClock->clockWheelOwnsBoundary($station, $boundary->toDateTimeImmutable())) {
+            return null;
+        }
+
+        $target = $boundary
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->topOfHourClock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->topOfHourClock->getIdStartSecond($station));
+        if ($start->lessThan($target->subSecond())) {
+            return null;
+        }
+
+        $conn = $this->em->getConnection();
+        $idSeconds = (float)($conn->fetchOne(
+            'SELECT duration FROM station_queue
+            WHERE station_id = ? AND top_of_hour_legal_id = 1 AND is_played = 0
+            ORDER BY id DESC LIMIT 1',
+            [$station->id]
+        ) ?: 38.0);
+        $release = $target->addSeconds((int)ceil($idSeconds));
+
+        $newsAtBoundary = $this->aiNewsForecast->getAiringTimes(
+            $station,
+            $target->subMinute()->toDateTimeImmutable(),
+            $boundary->addMinutes(3)->toDateTimeImmutable(),
+        );
+        if ([] !== $newsAtBoundary) {
+            $newsSeconds = (float)($conn->fetchOne(
+                'SELECT AVG(d) FROM (
+                    SELECT duration AS d FROM song_history
+                    WHERE station_id = ? AND text = ? AND duration > 30
+                    ORDER BY id DESC LIMIT 5
+                ) recent',
+                [$station->id, 'Eternity Ready - News Hour']
+            ) ?: 150.0);
+            $release = $release->addSeconds((int)ceil($newsSeconds));
+        }
+
+        if ($this->topOfHourClock->getIdStartMinuteOffset($station) <= 0) {
+            $release = $release->max($boundary);
+        }
+
+        return $start->lessThan($release) ? $release : null;
     }
 
     /**
@@ -143,7 +268,26 @@ final class ClockWheelPlaybackPlanner
             );
         }
 
-        if ($this->isFlexibleMusicSlot($activeSlot) && $availableSeconds < $minWindow) {
+        // A soft slot whose time is up hands the clock to the next slot, as a
+        // music log moves to its next category; the hour's last slot keeps
+        // picking. Returning nothing here left a hole in the log.
+        while (
+            $this->isSoftSlot($activeSlot, $scheduleMode)
+            && $availableSeconds < $minWindow
+            && isset($slots[$activeIndex + 1])
+        ) {
+            $activeIndex++;
+            $activeSlot = $slots[$activeIndex];
+            $nextAnchor = $this->getNextAnchorSeconds($slots, $activeIndex);
+            $availableSeconds = max(1, $nextAnchor - $secondsIntoHour);
+            $minWindow = $this->getMinWindowSeconds($activeSlot);
+        }
+
+        if (
+            $this->isFlexibleMusicSlot($activeSlot)
+            && $availableSeconds < $minWindow
+            && !$this->isSoftSlot($activeSlot, $scheduleMode)
+        ) {
             if ($activeSlot->is_hard_anchor) {
                 if ($availableSeconds < self::MIN_SHORT_FORM_WINDOW_SECONDS) {
                     $this->logger->warning(
@@ -208,6 +352,37 @@ final class ClockWheelPlaybackPlanner
         }
 
         $isEndOfHour = $this->isEndOfHourMusicSlot($slots, $activeIndex);
+
+        if ($this->isSoftSlot($activeSlot, $scheduleMode)) {
+            $untilId = $this->secondsUntilId($station, $expectedPlayTime);
+
+            // The hour's last seconds: nothing starts only to be faded by the ID.
+            // The next hour's own first item opens after it (this wheel's, a
+            // show's or another wheel's), as when an ordinary hour ends.
+            if (null !== $untilId && $untilId > 0.0 && $untilId <= self::ID_EARLY_SECONDS) {
+                $this->eventLogger->recordDeferred(
+                    $station,
+                    $wheel,
+                    $activeSlot,
+                    $expectedPlayTime,
+                    ClockWheelFallbackReason::DeferredInsufficientWindow,
+                    $secondsIntoHour,
+                );
+
+                return null;
+            }
+
+            if (
+                null !== $untilId
+                && $untilId > self::ID_EARLY_SECONDS
+                && $untilId < $this->shortestSongSeconds($activeSlot)
+            ) {
+                $filler = $this->resolveIdFiller($wheel, $activeSlot, $scheduleMode, $station, $expectedPlayTime, $untilId);
+                if (null !== $filler) {
+                    return $filler;
+                }
+            }
+        }
 
         $queueEntry = $this->resolveSlot(
             $wheel,
@@ -492,15 +667,18 @@ final class ClockWheelPlaybackPlanner
         $maxDuration = $this->resolveMaxDuration($slot, $availableSeconds);
         $strictSchedule = ClockWheelScheduleMode::Strict === $scheduleMode;
 
-        $candidates = $this->filterByDuration(
-            $candidates,
-            $maxDuration,
-            $slot,
-            $strictSchedule || $isEndOfHour,
-            $isEndOfHour,
-        );
+        $soft = $this->isSoftSlot($slot, $scheduleMode);
+        if (!$soft) {
+            $candidates = $this->filterByDuration(
+                $candidates,
+                $maxDuration,
+                $slot,
+                $strictSchedule || $isEndOfHour,
+                $isEndOfHour,
+            );
+        }
 
-        if ($isEndOfHour && $candidates !== []) {
+        if (!$soft && $isEndOfHour && $candidates !== []) {
             usort(
                 $candidates,
                 static fn (StationMedia $a, StationMedia $b): int =>
@@ -549,14 +727,63 @@ final class ClockWheelPlaybackPlanner
         // Nothing fits the window: filterByDuration() returned the candidates
         // shortest first, and that order is the choice -- the slot's algorithm
         // would put a long song first and the cap would cut most of it.
-        $noneFit = $candidates[0]->getCalculatedLength() > $maxDuration;
+        $noneFit = !$soft && $candidates[0]->getCalculatedLength() > $maxDuration;
         if (!$noneFit) {
             $algorithm = $slot->algorithm ?? ClockWheelSlotAlgorithms::Random;
             $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
         }
 
-        $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
-            ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
+        /** @var array<int, float> $landingRatios media id => stretch ratio that lands it on the ID */
+        $landingRatios = [];
+        if ($soft) {
+            [$mediaQueue, $landingRatios, $needsFiller] = $this->orderForIdLanding($station, $candidates, $mediaQueue, $expectedPlayTime);
+            if ($needsFiller) {
+                $untilId = (float)$this->secondsUntilId($station, $expectedPlayTime);
+                $filler = $this->resolveIdFiller($slot->clock_wheel, $slot, $scheduleMode, $station, $expectedPlayTime, $untilId);
+                if (null !== $filler) {
+                    return $filler;
+                }
+            }
+        }
+
+        // Past picks the DMCA rules would turn down (a third song in a row from
+        // one album, say): the pick order is fixed, so every retry returned the
+        // same rejected song and the log planned a hole.
+        $validTrack = null;
+        for ($dmcaTries = 0; $dmcaTries < 25; $dmcaTries++) {
+            $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
+                ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
+            if (null === $validTrack) {
+                break;
+            }
+
+            $pick = $this->em->find(StationMedia::class, $validTrack->media_id);
+            if (
+                !$pick instanceof StationMedia
+                || $this->dmca->allowsPick(StationQueue::fromMedia($station, $pick), $station, $expectedPlayTime)
+            ) {
+                break;
+            }
+
+            $rejectedId = $validTrack->media_id;
+            $mediaQueue = array_values(array_filter(
+                $mediaQueue,
+                static fn (StationPlaylistQueue $q): bool => $q->media_id !== $rejectedId
+            ));
+            $validTrack = null;
+        }
+
+        // Every song that fits before the ID was turned down (repeats, DMCA):
+        // a promo before the ID rather than a song that runs into it.
+        if ($validTrack === null && $soft) {
+            $untilId = $this->secondsUntilId($station, $expectedPlayTime);
+            if (null !== $untilId && $untilId > self::ID_EARLY_SECONDS && $untilId < 2.0 * HourBoundaryPlanner::HOUR_SECONDS / 12) {
+                $filler = $this->resolveIdFiller($slot->clock_wheel, $slot, $scheduleMode, $station, $expectedPlayTime, $untilId);
+                if (null !== $filler) {
+                    return $filler;
+                }
+            }
+        }
 
         if ($validTrack === null) {
             $this->eventLogger->recordFallback(
@@ -597,15 +824,22 @@ final class ClockWheelPlaybackPlanner
             $maxDuration,
             $isEndOfHour,
         );
-        $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
+        if ($soft) {
+            $this->playInFull($queueEntry, $slot, null);
+            if (isset($landingRatios[$media->id])) {
+                $queueEntry->clock_wheel_stretch_ratio = $landingRatios[$media->id];
+            }
+        } else {
+            $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
 
-        // Every slot in the log is eligible for stretch/squeeze -- not just the
-        // one before a mandatory anchor -- so gaps close smoothly station-wide.
-        // Still only within the safe +/-5% range computed in the calculator.
-        $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-            $media->getCalculatedLength(),
-            $availableSeconds,
-        );
+            // Every slot in the log is eligible for stretch/squeeze -- not just the
+            // one before a mandatory anchor -- so gaps close smoothly station-wide.
+            // Still only within the safe +/-5% range computed in the calculator.
+            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                $media->getCalculatedLength(),
+                $availableSeconds,
+            );
+        }
 
         $this->em->persist($queueEntry);
 
@@ -1003,13 +1237,20 @@ final class ClockWheelPlaybackPlanner
                 continue;
             }
 
-            $durationCandidates = $this->filterByDuration(
-                [$media],
-                $maxDuration,
-                $slot,
-                $strictSchedule || $isEndOfHour,
-                $isEndOfHour,
-            );
+            if (!$this->dmca->allowsPick(StationQueue::fromMedia($station, $media), $station, $expectedPlayTime)) {
+                $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
+                continue;
+            }
+
+            $durationCandidates = $this->isSoftSlot($slot, $scheduleMode)
+                ? [$media]
+                : $this->filterByDuration(
+                    [$media],
+                    $maxDuration,
+                    $slot,
+                    $strictSchedule || $isEndOfHour,
+                    $isEndOfHour,
+                );
 
             if ($durationCandidates === []) {
                 $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
@@ -1043,11 +1284,15 @@ final class ClockWheelPlaybackPlanner
                 $maxDuration,
                 $isEndOfHour,
             );
-            $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
-            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-                $media->getCalculatedLength(),
-                $availableSeconds,
-            );
+            if ($this->isSoftSlot($slot, $scheduleMode)) {
+                $this->playInFull($queueEntry, $slot, $playlist);
+            } else {
+                $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
+                $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                    $media->getCalculatedLength(),
+                    $availableSeconds,
+                );
+            }
             $this->em->persist($queueEntry);
 
             $this->eventLogger->recordTrackQueued(
@@ -1213,6 +1458,259 @@ final class ClockWheelPlaybackPlanner
         // Flexible: never cut mid-hour. A track longer than the window plays in full
         // and the next slot starts later; the hour boundary is still capped above.
         return false;
+    }
+
+    /**
+     * A soft slot: a flexible wheel's music slot with no length of its own and
+     * no hard anchor. It plays as a music log's category does -- the clock
+     * picks the category and the order, the song plays in full, and the slot
+     * starts when the song before it ends. The hour is landed on the ID the
+     * way every other hour is (Linear Log hour fit, backtime, Top-of-Hour
+     * swap), and any song they swap in comes from this slot's own playlist.
+     */
+    private function isSoftSlot(StationClockWheelSlot $slot, ClockWheelScheduleMode $scheduleMode): bool
+    {
+        return ClockWheelScheduleMode::Flexible === $scheduleMode
+            && $this->isFlexibleMusicSlot($slot)
+            && !$slot->is_hard_anchor;
+    }
+
+    /**
+     * Seconds from $at to this hour's Top-of-Hour ID start, the same deadline the
+     * Top-of-Hour swap lands ordinary hours on. Null when the station has no ID.
+     */
+    private function secondsUntilId(Station $station, DateTimeImmutable $at): ?float
+    {
+        if (!$this->topOfHourClock->isEnabled($station)) {
+            return null;
+        }
+
+        $target = CarbonImmutable::instance($this->topOfHourClock->getNextBoundary($station, $at))
+            ->subMinute()
+            ->startOfMinute()
+            ->subMinutes($this->topOfHourClock->getIdStartMinuteOffset($station))
+            ->addSeconds($this->topOfHourClock->getIdStartSecond($station));
+
+        return (float)($target->getTimestamp() - $at->getTimestamp())
+            - (float)$at->format('u') / 1_000_000;
+    }
+
+    /** @return array{0: float, 1: float} the most a song may be slowed down and sped up, as ratios */
+    private function stretchRange(Station $station): array
+    {
+        $raw = $station->backend_config->toArray(true) ?? [];
+        if (false === (bool)($raw['playout_stretch_squeeze_enabled'] ?? true)) {
+            return [1.0, 1.0];
+        }
+
+        [$stretch, $squeeze] = StretchSqueezeQueueTiming::getStretchSqueezePercents($raw);
+
+        return [1.0 - $stretch / 100.0, 1.0 + $squeeze / 100.0];
+    }
+
+    /** The shortest music in a slot's playlist, in aired seconds (150 when unknown). */
+    private function shortestSongSeconds(StationClockWheelSlot $slot): float
+    {
+        if (null === $slot->playlist_id || $slot->playlist_id <= 0) {
+            return 150.0;
+        }
+
+        $min = $this->em->createQuery(
+            'SELECT MIN(m.length) FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m
+            WHERE spm.playlist = :playlist AND m.type = :music AND m.length > 0'
+        )->setParameter('playlist', $slot->playlist_id)
+            ->setParameter('music', 'music')
+            ->getSingleScalarResult();
+
+        return null !== $min ? max(30.0, (float)$min - 15.0) : 150.0;
+    }
+
+    /**
+     * Puts first the picks that end the hour on its ID, as music logs are
+     * backtimed: a song that lands on the ID at a tempo within the station's
+     * stretch/squeeze range, then a song after which one more song lands on it,
+     * then the slot's own order. Outside the hour's last stretch the order is
+     * left as the slot's algorithm made it.
+     *
+     * @param StationMedia[] $candidates
+     * @param StationPlaylistQueue[] $mediaQueue
+     * @return array{0: StationPlaylistQueue[], 1: array<int, float>, 2: bool} the order, landing
+     *     tempos, and whether a promo has to go first because no song can
+     */
+    private function orderForIdLanding(
+        Station $station,
+        array $candidates,
+        array $mediaQueue,
+        DateTimeImmutable $expectedPlayTime,
+    ): array {
+        $untilId = $this->secondsUntilId($station, $expectedPlayTime);
+        if (null === $untilId || $untilId <= self::ID_EARLY_SECONDS || [] === $candidates) {
+            return [$mediaQueue, [], false];
+        }
+
+        $aired = [];
+        foreach ($candidates as $m) {
+            $aired[$m->id] = $this->airedLength->lengthOf($m);
+        }
+        $longest = max($aired);
+        $shortest = min($aired);
+        if ($untilId > 2.0 * $longest) {
+            return [$mediaQueue, [], false];
+        }
+
+        [$slowest, $fastest] = $this->stretchRange($station);
+        $early = (float)self::ID_EARLY_SECONDS;
+        // The tempo that ends $length on the ID, or as close before it as the
+        // slowest tempo allows (no more than ID_EARLY_SECONDS early). Null when
+        // it would run into the ID or end too early.
+        $ratioFor = static function (float $length, float $room) use ($slowest, $fastest, $early): ?float {
+            if ($room <= 0.0) {
+                return null;
+            }
+            $ratio = $length / $room;
+            if ($ratio > $fastest + 0.0005) {
+                return null;
+            }
+            if ($ratio >= $slowest - 0.0005) {
+                return round(min(max($ratio, $slowest), $fastest), 4);
+            }
+            return $room - $length / $slowest <= $early ? round($slowest, 4) : null;
+        };
+        $promoLengths = $this->promoLengths($station);
+        $landable = static function (float $room, int $exceptId) use ($aired, $ratioFor, $promoLengths, $early): bool {
+            if ($room <= $early) {
+                return true;
+            }
+            foreach ($aired as $id => $length) {
+                if ($id !== $exceptId && null !== $ratioFor($length, $room)) {
+                    return true;
+                }
+            }
+            foreach ($promoLengths as $promo) {
+                if ($promo <= $room && $room - $promo <= $early) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        $lands = [];
+        $opens = [];
+        $roomy = [];
+        $rest = [];
+        $ratios = [];
+        foreach ($mediaQueue as $q) {
+            $length = $aired[$q->media_id] ?? null;
+            if (null === $length) {
+                continue;
+            }
+            $ratio = $ratioFor($length, $untilId);
+            if (null !== $ratio) {
+                $lands[] = $q;
+                $ratios[$q->media_id] = $ratio;
+            } elseif ($length < $untilId && $landable($untilId - $length, $q->media_id)) {
+                $opens[] = $q;
+            } elseif ($length < $untilId && $untilId - $length >= 2.0 * $shortest) {
+                // Leaves room for two more songs: the landing is worked out later.
+                $roomy[] = $q;
+            } else {
+                $rest[] = $q;
+            }
+        }
+
+        // Never a song that runs into the ID or leaves a gap no song fits:
+        // with nothing else, a promo goes first and the hour lands after it.
+        if ([] === $lands && [] === $opens && [] === $roomy) {
+            return [$mediaQueue, [], true];
+        }
+
+        return [[...$lands, ...$opens, ...$roomy], $ratios, false];
+    }
+
+    /** @return list<float> lengths of the promos the ID filler may use */
+    private function promoLengths(Station $station): array
+    {
+        $rows = $this->em->createQuery(
+            'SELECT DISTINCT m.length FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
+            WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
+            AND m.type = :promo AND m.length > 0'
+        )->setParameter('station', $station)
+            ->setParameter('promo', 'promo')
+            ->getSingleColumnResult();
+
+        return array_map('floatval', $rows);
+    }
+
+    /**
+     * Less time before the ID than any song in the slot: the closest-fitting
+     * promo from the station's enabled promo pools, as the Top-of-Hour swap
+     * fills the last seconds of an ordinary hour. Null leaves the seconds to
+     * the ID lane.
+     */
+    private function resolveIdFiller(
+        StationClockWheel $wheel,
+        StationClockWheelSlot $slot,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        float $untilId,
+    ): ?StationQueue {
+        if ($untilId < 5.0) {
+            return null;
+        }
+
+        /** @var \App\Entity\StationPlaylistMedia[] $rows */
+        $rows = $this->em->createQuery(
+            'SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
+            WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
+            AND m.type = :promo AND m.length > 0 AND m.length <= :room
+            ORDER BY m.length DESC, spm.last_played ASC'
+        )->setParameter('station', $station)
+            ->setParameter('promo', 'promo')
+            ->setParameter('room', $untilId + 2.0)
+            ->getResult();
+
+        foreach ($rows as $spm) {
+            $media = $spm->media;
+            $entry = StationQueue::fromMedia($station, $media);
+            if (!$this->dmca->allowsPick($entry, $station, $expectedPlayTime)) {
+                continue;
+            }
+
+            $entry->clock_wheel = $wheel;
+            $entry->playlist = $spm->playlist;
+            $entry->clock_wheel_schedule_mode = $scheduleMode->value;
+            $entry->clock_wheel_enforce_cap = false;
+            $this->em->persist($entry);
+
+            $this->logger->info('Clock Wheel: promo fills the seconds before the ID.', [
+                'media_id' => $media->id,
+                'until_id' => round($untilId, 1),
+                'length' => $media->length,
+            ]);
+
+            return $entry;
+        }
+
+        return null;
+    }
+
+    /**
+     * A soft slot's song: no cap, no tempo change, and the slot's playlist on
+     * the row so a song swapped in for it comes from the same category.
+     */
+    private function playInFull(StationQueue $queueEntry, StationClockWheelSlot $slot, ?StationPlaylist $playlist): void
+    {
+        $queueEntry->clock_wheel_enforce_cap = false;
+        $queueEntry->clock_wheel_max_play_seconds = null;
+        $queueEntry->clock_wheel_stretch_ratio = null;
+
+        if (null === $playlist && null === $slot->smart_block && null !== $slot->playlist_id && $slot->playlist_id > 0) {
+            $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
+        }
+        if ($playlist instanceof StationPlaylist) {
+            $queueEntry->playlist = $playlist;
+        }
     }
 
     /**

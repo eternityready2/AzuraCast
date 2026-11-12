@@ -462,7 +462,7 @@ final class LinearLogRefill
             $pickPlaylist,
             $plannedAt,
             'Refilled: replaces a dropped line',
-            ['refill_of' => $id]
+            ['refill_of' => $id, ...self::wheelOf($payload)]
         );
 
         $delta = (int)round($media->getCalculatedLength() - $duration);
@@ -510,8 +510,12 @@ final class LinearLogRefill
         $playlist = null;
         if (
             $ownPlaylist instanceof StationPlaylist
-            && $this->isRefillSource($ownPlaylist, $wantShort)
-            && $this->scheduler->isPlaylistAllowedAt($ownPlaylist, $at)
+            && (
+                ($this->isRefillSource($ownPlaylist, $wantShort) && $this->scheduler->isPlaylistAllowedAt($ownPlaylist, $at))
+                // A clock wheel slot's song is swapped for another from the
+                // same slot playlist, even one switched off for rotation.
+                || (!$wantShort && $this->scheduler->isPlaylistInWheelOpenAt($ownPlaylist, $at))
+            )
         ) {
             $playlist = $ownPlaylist;
         } elseif (!$wantShort) {
@@ -682,7 +686,9 @@ final class LinearLogRefill
             return null;
         }
 
-        return $this->isRefillSource($playlist, false) ? $playlist : null;
+        return $this->isRefillSource($playlist, false) || $this->scheduler->isPlaylistInWheelOpenAt($playlist, $at)
+            ? $playlist
+            : null;
     }
 
     private function isRefillSource(StationPlaylist $playlist, bool $short): bool
@@ -891,6 +897,22 @@ final class LinearLogRefill
     }
 
     /** @return array<string, mixed> */
+    /**
+     * The clock wheel a line belongs to, kept when its song is replaced so the
+     * log still shows the wheel and its rules still apply to the line.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public static function wheelOf(array $payload): array
+    {
+        return array_intersect_key($payload, [
+            'clock_wheel_id' => true,
+            'clock_wheel' => true,
+            'clock_wheel_schedule_mode' => true,
+        ]);
+    }
+
     private static function decodePayload(mixed $raw): array
     {
         if (!is_string($raw) || '' === $raw) {

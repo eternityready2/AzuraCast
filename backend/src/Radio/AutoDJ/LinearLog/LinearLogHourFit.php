@@ -746,7 +746,6 @@ final class LinearLogHourFit
         return $line instanceof StationLogEntry
             && null !== $line->media
             && LinearLogHourGuard::isHourBound($line)
-            && null === ($line->payload['clock_wheel_id'] ?? null)
             && !str_starts_with((string)$line->note, StationLogEntry::REOFFERED_NOTE)
             ? $line
             : null;
@@ -771,7 +770,10 @@ final class LinearLogHourFit
      */
     private static function keptPayload(StationLogEntry $line): array
     {
-        return array_intersect_key($line->payload ?? [], ['top_up' => true, 'refill_of' => true]);
+        return [
+            ...array_intersect_key($line->payload ?? [], ['top_up' => true, 'refill_of' => true]),
+            ...LinearLogRefill::wheelOf($line->payload ?? []),
+        ];
     }
 
     /**

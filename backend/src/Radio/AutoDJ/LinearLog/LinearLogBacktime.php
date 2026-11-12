@@ -309,7 +309,6 @@ final class LinearLogBacktime
         if (
             !empty($row['is_programme'])
             || null !== $row['autodj_custom_uri']
-            || null !== $row['clock_wheel_id']
             || null === $row['media_id']
             || (float)$row['duration'] >= LinearLogRefill::PROGRAMME_MIN_SECONDS
         ) {
@@ -459,7 +458,6 @@ final class LinearLogBacktime
             && null !== $row['log_entry_id']
             && null !== $row['playlist_id']
             && null === $row['request_id']
-            && null === $row['clock_wheel_id']
             && null === $row['clock_wheel_stretch_ratio']
             && null === $row['top_of_hour_boundary_at']
             && null === $row['group_playlist_id']

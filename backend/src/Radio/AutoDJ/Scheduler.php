@@ -238,7 +238,39 @@ final class Scheduler
             return true;
         }
 
+        // A clock wheel slot's playlist may play while that wheel holds the air:
+        // the wheel picks the category, and the log's hour fit, refill and
+        // backtime swap a wheel song only for another from the same playlist.
+        if (null !== $narrowestOpen && $this->isPlaylistInWheelOpenAt($playlist, $at)) {
+            return true;
+        }
+
         return null === $narrowestOpen;
+    }
+
+    /**
+     * True when $playlist is pinned to a slot of a clock wheel whose own
+     * schedule holds the air at $at.
+     */
+    public function isPlaylistInWheelOpenAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
+    {
+        foreach ($playlist->station->clock_wheels as $clockWheel) {
+            if (
+                !$this->canClockWheelOwnScheduledAir($clockWheel)
+                || 0 === $clockWheel->schedule_items->count()
+                || !$this->isClockWheelAllowedAt($clockWheel, $at)
+            ) {
+                continue;
+            }
+
+            foreach ($clockWheel->slots as $slot) {
+                if ($slot->playlist_id === $playlist->id) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
