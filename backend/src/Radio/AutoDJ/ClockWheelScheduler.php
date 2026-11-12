@@ -67,6 +67,9 @@ final class ClockWheelScheduler implements EventSubscriberInterface
     public function holdUnderIdLane(RevalidateQueuedSong $event): void
     {
         if (!$this->previewContext->isActive()) {
+            // On air: a wheel song that would run into the ID gets one that
+            // ends on it instead; nothing is held back.
+            $this->planner->landWheelRowOnId($event);
             return;
         }
 

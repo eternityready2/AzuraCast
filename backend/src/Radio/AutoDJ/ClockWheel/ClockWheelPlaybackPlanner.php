@@ -138,6 +138,187 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
+     * On air, a wheel song that would run into the Top-of-Hour ID is not
+     * started: the row gets a song from its own (slot) playlist that ends on
+     * the ID, or, when none does, a promo that fits before it. The swap does
+     * this for every other song and leaves wheel rows alone, so a wheel song
+     * handed over late was faded by the ID ("Awesome God", 12:58:08-12:59:59
+     * Thu 2026-11-12). Nothing is held back: the row always has something to
+     * play.
+     */
+    public function landWheelRowOnId(RevalidateQueuedSong $event): void
+    {
+        $row = $event->getQueueRow();
+        if (
+            null === $row->clock_wheel
+            || $row->top_of_hour_legal_id
+            || $row->clock_wheel_legal_id_substitute
+            || null !== $row->request
+        ) {
+            return;
+        }
+
+        $media = $row->media;
+        if (null === $media || 'music' !== $media->type) {
+            return;
+        }
+
+        $station = $event->getStation();
+        $start = $event->getExpectedPlayAt();
+        $untilId = $this->secondsUntilId($station, $start);
+        if (null === $untilId || $untilId <= 0.0) {
+            return;
+        }
+
+        $ratio = (float)($row->clock_wheel_stretch_ratio ?: 1.0);
+        $plays = $this->airedLength->lengthOf($media) / ($ratio > 0.0 ? $ratio : 1.0);
+        if ($plays <= $untilId + 2.0) {
+            return;
+        }
+
+        $playlist = $row->playlist;
+        if (!$playlist instanceof StationPlaylist && null !== $row->log_entry_id) {
+            $playlist = $this->em->find(\App\Entity\StationLogEntry::class, $row->log_entry_id)?->playlist;
+        }
+
+        $pick = $playlist instanceof StationPlaylist
+            ? $this->songThatLandsOnId($station, $playlist, $untilId, $start, $media->id)
+            : null;
+        if (null !== $pick) {
+            [$newMedia, $newRatio] = $pick;
+            $this->putOnRow($row, $newMedia, $playlist, $newRatio, $start);
+            $this->logger->notice('Clock Wheel: a song that would run into the ID was swapped for one from its slot playlist that ends on it.', [
+                'queue_id' => $row->id,
+                'was' => $media->text,
+                'now' => $newMedia->text,
+                'until_id' => round($untilId, 1),
+                'stretch_ratio' => $newRatio,
+            ]);
+            return;
+        }
+
+        /** @var \App\Entity\StationPlaylistMedia[] $promos */
+        $promos = $this->em->createQuery(
+            'SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
+            WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
+            AND m.type = :promo AND m.length > 0 AND m.length <= :room
+            ORDER BY m.length DESC, spm.last_played ASC'
+        )->setParameter('station', $station)
+            ->setParameter('promo', 'promo')
+            ->setParameter('room', $untilId + 2.0)
+            ->setMaxResults(1)
+            ->getResult();
+        if ([] !== $promos) {
+            $spm = $promos[0];
+            $this->putOnRow($row, $spm->media, $spm->playlist, null, $start);
+            $this->logger->notice('Clock Wheel: a song that would run into the ID was swapped for a promo that ends before it.', [
+                'queue_id' => $row->id,
+                'was' => $media->text,
+                'now' => $spm->media->text,
+                'until_id' => round($untilId, 1),
+            ]);
+            return;
+        }
+
+        $this->logger->warning('Clock Wheel: nothing in the slot playlist or the promos fits before the ID.', [
+            'queue_id' => $row->id,
+            'song' => $media->text,
+            'until_id' => round($untilId, 1),
+        ]);
+    }
+
+    /**
+     * The song in $playlist that ends on the ID from $start at a tempo within
+     * the station's stretch/squeeze range (or up to ID_EARLY_SECONDS before
+     * it), the closest first, that has not aired lately, is not queued and
+     * passes the DMCA rules.
+     *
+     * @return array{0: StationMedia, 1: ?float}|null the song and its tempo
+     */
+    private function songThatLandsOnId(
+        Station $station,
+        StationPlaylist $playlist,
+        float $untilId,
+        DateTimeImmutable $start,
+        int $exceptMediaId,
+    ): ?array {
+        [$slowest, $fastest] = $this->stretchRange($station);
+
+        /** @var StationMedia[] $songs */
+        $songs = $this->em->createQuery(
+            'SELECT m FROM App\Entity\StationMedia m
+            WHERE m.type = :music AND m.length > 0 AND m.id != :except
+            AND EXISTS (SELECT 1 FROM App\Entity\StationPlaylistMedia spm WHERE spm.media = m AND spm.playlist = :playlist)'
+        )->setParameter('music', 'music')
+            ->setParameter('except', $exceptMediaId)
+            ->setParameter('playlist', $playlist)
+            ->getResult();
+
+        $fits = [];
+        foreach ($songs as $song) {
+            $aired = $this->airedLength->lengthOf($song);
+            $ratio = $aired / $untilId;
+            if ($ratio > $fastest + 0.0005) {
+                continue;
+            }
+            if ($ratio >= $slowest - 0.0005) {
+                $fits[] = [abs($ratio - 1.0), $song, round(min(max($ratio, $slowest), $fastest), 4)];
+            } elseif ($untilId - $aired / $slowest <= self::ID_EARLY_SECONDS) {
+                $fits[] = [1.0 + $untilId - $aired / $slowest, $song, round($slowest, 4)];
+            }
+        }
+        usort($fits, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+
+        $conn = $this->em->getConnection();
+        $since = $start->getTimestamp() - max(60, $station->backend_config->duplicate_prevention_time_range) * 60;
+        foreach (array_slice($fits, 0, 25) as [, $song, $ratio]) {
+            $recent = $conn->fetchOne(
+                'SELECT 1 FROM song_history WHERE station_id = ? AND song_id = ? AND timestamp_start >= FROM_UNIXTIME(?) LIMIT 1',
+                [$station->id, $song->song_id, $since]
+            );
+            $queued = $conn->fetchOne(
+                'SELECT 1 FROM station_queue WHERE station_id = ? AND song_id = ? AND is_played = 0 LIMIT 1',
+                [$station->id, $song->song_id]
+            );
+            if (
+                false === $recent
+                && false === $queued
+                && $this->dmca->allowsPick(StationQueue::fromMedia($station, $song), $station, $start)
+            ) {
+                return [$song, abs($ratio - 1.0) < 0.0005 ? null : $ratio];
+            }
+        }
+
+        return null;
+    }
+
+    private function putOnRow(
+        StationQueue $row,
+        StationMedia $media,
+        ?StationPlaylist $playlist,
+        ?float $ratio,
+        DateTimeImmutable $start,
+    ): void {
+        $row->setSong($media);
+        $row->media = $media;
+        if (null !== $playlist) {
+            $row->playlist = $playlist;
+        }
+        $row->clock_wheel_enforce_cap = false;
+        $row->clock_wheel_max_play_seconds = null;
+        $row->clock_wheel_stretch_ratio = $ratio;
+        $row->duration = $media->getCalculatedLength() / ($ratio ?? 1.0);
+        $this->em->persist($row);
+
+        if (null !== $playlist) {
+            $this->em->getConnection()->executeStatement(
+                'UPDATE station_playlist_media SET last_played = ? WHERE playlist_id = ? AND media_id = ?',
+                [$start->getTimestamp(), $playlist->id, $media->id]
+            );
+        }
+    }
+
+    /**
      * When the ID lane that $start falls under hands the air back, or null when
      * $start is outside it (before the ID start, or after the lane released).
      */
