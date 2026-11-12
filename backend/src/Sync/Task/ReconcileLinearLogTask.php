@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Sync\Task;
 
+use App\Radio\AutoDJ\LinearLogSnapshotStore;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Station;
 use App\Entity\StationLogEntry;
@@ -63,6 +64,7 @@ final class ReconcileLinearLogTask extends AbstractTask
         private readonly LinearLogBacktime $backtime,
         private readonly LinearLogStore $store,
         private readonly StrictProgrammeClock $strictProgrammeClock,
+        private readonly LinearLogSnapshotStore $snapshotStore,
     ) {
     }
 
@@ -89,6 +91,17 @@ final class ReconcileLinearLogTask extends AbstractTask
 
             try {
                 $this->reconcile($station);
+
+                // While a build writes its plan, lines dropped or added here
+                // made it throw its whole first attempt away and start over
+                // (113s instead of ~77s, Wed 2026-11-11 21:08). The build
+                // applies the rules itself and replaces the unlocked lines;
+                // the on-air hour is still backtimed.
+                if (in_array($this->snapshotStore->get($station)['status'] ?? null, ['queued', 'building'], true)) {
+                    $this->backtime->backtime($station);
+                    continue;
+                }
+
                 // A show's lines are timed from the file its playlist holds
                 // now, and a song whose file was deleted is dropped for the
                 // refill, before anything below measures the hours.
