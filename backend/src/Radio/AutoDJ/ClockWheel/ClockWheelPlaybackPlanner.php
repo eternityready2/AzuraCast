@@ -177,18 +177,37 @@ final class ClockWheelPlaybackPlanner
             return;
         }
 
-        // A line of the next hour is that hour's opener, not this hour's end.
-        if (null !== $row->log_entry_id) {
-            $line = $this->em->find(\App\Entity\StationLogEntry::class, $row->log_entry_id);
-            if (null !== $line && $line->planned_at >= $start->getTimestamp() + (int)floor($untilId)) {
-                return;
-            }
-        }
-
         $ratio = (float)($row->clock_wheel_stretch_ratio ?: 1.0);
         $plays = $this->airedLength->lengthOf($media) / ($ratio > 0.0 ? $ratio : 1.0);
         if ($plays <= $untilId + 2.0) {
             return;
+        }
+
+        // The next hour's opener handed over just before the ID: a promo takes
+        // the seconds before the ID and the line goes back to the log to open
+        // its hour after it (LinearLogHourGuard::isFillerBeforeLine), as the
+        // Top-of-Hour swap does for an ordinary opener. Left alone, the 6pm
+        // opener would have started at 5:59:24 and been cut by the ID.
+        if (null !== $row->log_entry_id) {
+            $line = $this->em->find(\App\Entity\StationLogEntry::class, $row->log_entry_id);
+            if (null !== $line && $line->planned_at >= $start->getTimestamp() + (int)floor($untilId)) {
+                $promo = $this->promoBefore($station, $untilId);
+                if (null !== $promo) {
+                    $this->putOnRow($row, $promo->media, $promo->playlist, null, $start);
+                    // The promo is not the next wheel's song: it airs as an
+                    // ordinary promo of this hour.
+                    $row->clock_wheel = null;
+                    $row->clock_wheel_schedule_mode = null;
+                    $this->em->persist($row);
+                    $this->logger->notice('Clock Wheel: the next hour\'s opener was due before the ID; a promo fills the seconds and the opener waits for its hour.', [
+                        'queue_id' => $row->id,
+                        'opener' => $media->text,
+                        'now' => $promo->media->text,
+                        'until_id' => round($untilId, 1),
+                    ]);
+                }
+                return;
+            }
         }
 
         $playlist = $row->playlist;
@@ -212,19 +231,8 @@ final class ClockWheelPlaybackPlanner
             return;
         }
 
-        /** @var \App\Entity\StationPlaylistMedia[] $promos */
-        $promos = $this->em->createQuery(
-            'SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
-            WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
-            AND m.type = :promo AND m.length > 0 AND m.length <= :room
-            ORDER BY m.length DESC, spm.last_played ASC'
-        )->setParameter('station', $station)
-            ->setParameter('promo', 'promo')
-            ->setParameter('room', $untilId + 2.0)
-            ->setMaxResults(1)
-            ->getResult();
-        if ([] !== $promos) {
-            $spm = $promos[0];
+        $spm = $this->promoBefore($station, $untilId);
+        if (null !== $spm) {
             $this->putOnRow($row, $spm->media, $spm->playlist, null, $start);
             $this->logger->notice('Clock Wheel: a song that would run into the ID was swapped for a promo that ends before it.', [
                 'queue_id' => $row->id,
@@ -305,6 +313,29 @@ final class ClockWheelPlaybackPlanner
         }
 
         return null;
+    }
+
+    /**
+     * The longest item from the station's enabled promo/liner pools that ends
+     * before the ID, least recently played first: the pools the Top-of-Hour
+     * swap fills the seconds before an ordinary hour's ID from.
+     */
+    private function promoBefore(Station $station, float $untilId): ?\App\Entity\StationPlaylistMedia
+    {
+        $promos = $this->em->createQuery(
+            'SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
+            WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
+            AND m.type IN (:promo) AND m.length > 0 AND m.length <= :room
+            ORDER BY m.length DESC, spm.last_played ASC'
+        )->setParameter('station', $station)
+            ->setParameter('promo', ['promo', 'ad'])
+            // By file length with a second to spare, as LinearLogHour judges
+            // whether an item runs into the ID.
+            ->setParameter('room', $untilId - 1.0)
+            ->setMaxResults(1)
+            ->getResult();
+
+        return $promos[0] ?? null;
     }
 
     private function putOnRow(

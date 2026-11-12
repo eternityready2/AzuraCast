@@ -245,6 +245,12 @@ final class Scheduler
             return true;
         }
 
+        // The station's promo/liner pools fill the seconds before the ID in a
+        // wheel's hour as they do in any other hour.
+        if (null !== $narrowestOpen && $playlist->is_jingle && $playlist->is_enabled && $this->isWheelOpenAt($playlist->station, $at)) {
+            return true;
+        }
+
         return null === $narrowestOpen;
     }
 
@@ -252,6 +258,22 @@ final class Scheduler
      * True when $playlist is pinned to a slot of a clock wheel whose own
      * schedule holds the air at $at.
      */
+    /** True when a clock wheel's own schedule holds the air at $at. */
+    private function isWheelOpenAt(Station $station, DateTimeImmutable $at): bool
+    {
+        foreach ($station->clock_wheels as $clockWheel) {
+            if (
+                $this->canClockWheelOwnScheduledAir($clockWheel)
+                && $clockWheel->schedule_items->count() > 0
+                && $this->isClockWheelAllowedAt($clockWheel, $at)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function isPlaylistInWheelOpenAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
     {
         foreach ($playlist->station->clock_wheels as $clockWheel) {
