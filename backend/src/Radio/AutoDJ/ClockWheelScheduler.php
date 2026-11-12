@@ -39,6 +39,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         private readonly ScheduleConflictChecker $conflictChecker,
         private readonly ClockWheelEventLogger $eventLogger,
         private readonly LinearLog\LinearLogPlayout $linearLogPlayout,
+        private readonly LinearLogPreviewContext $previewContext,
     ) {
     }
 
@@ -56,9 +57,19 @@ final class ClockWheelScheduler implements EventSubscriberInterface
         ];
     }
 
-    /** A wheel song due under the ID/news lane opens the new hour. */
+    /**
+     * In the log build only, a wheel song due under the ID/news lane is timed
+     * to open the new hour, so the plan matches the air. Never on air: holding
+     * the hour's first song there left Liquidsoap with nothing after the noon
+     * ID, and it replayed the Christian Music Spotlight file from its start
+     * (12:00:36 Thu 2026-11-12).
+     */
     public function holdUnderIdLane(RevalidateQueuedSong $event): void
     {
+        if (!$this->previewContext->isActive()) {
+            return;
+        }
+
         $this->planner->holdUnderIdLane($event);
     }
 
