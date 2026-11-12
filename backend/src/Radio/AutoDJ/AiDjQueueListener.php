@@ -54,6 +54,9 @@ final class AiDjQueueListener implements EventSubscriberInterface
     /** Share of a library-owning DJ's liners that are made up on the fly (AiDjImprov). */
     private const int IMPROV_PERCENT = 35;
 
+    /** Seconds before a DJ airs the same kind of break (joke, verse, encouragement...) again. */
+    private const int TYPE_SPACING_SECONDS = 1800;
+
     private const array STANDALONE_ONLY_TYPES = [
         AiDjContent::TYPE_TESTIMONY,
         AiDjContent::TYPE_STORY,
@@ -676,6 +679,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
             AiDjGenerator::TYPE_VERSE_COMMENT,
             AiDjGenerator::TYPE_ARTIST_COMMENT,
             AiDjGenerator::TYPE_HYMN_REFLECTION,
+            // A DJ's own break wording, never aired alone.
+            AiDjContent::TYPE_DJ_LINE,
         ];
 
         try {
@@ -1044,6 +1049,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
         if ($linerTypes === []) {
             return null;
         }
+        $linerTypes = $this->spacedTypes($station, $dj, $linerTypes);
         $type = $linerTypes[array_rand($linerTypes)];
 
         // A Bible verse is read whole or not at all. 13,508 of 31,086 run past the
@@ -1060,7 +1066,49 @@ final class AiDjQueueListener implements EventSubscriberInterface
             )
             : null;
 
-        return $this->contentSelector->selectContent($dj->getId(), $type, $station->id, $accept);
+        $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id, $accept);
+        if (null !== $content) {
+            $this->markTypeAired($station, $dj, $content->type);
+        }
+
+        return $content;
+    }
+
+    /**
+     * Leave out break types this DJ aired in the last TYPE_SPACING_SECONDS, so the
+     * same kind of break is not heard again right away. When every type is that
+     * recent, keep the one aired longest ago.
+     *
+     * @param non-empty-array<int, string> $types
+     * @return non-empty-array<int, string>
+     */
+    private function spacedTypes(Station $station, AiDj $dj, array $types): array
+    {
+        $lastAired = [];
+        foreach ($types as $type) {
+            $lastAired[$type] = (int)($this->cache->get($this->typeAiredKey($station, $dj, $type)) ?? 0);
+        }
+
+        $spaced = array_values(array_filter(
+            $types,
+            static fn(string $t): bool => time() - $lastAired[$t] >= self::TYPE_SPACING_SECONDS
+        ));
+        if ([] !== $spaced) {
+            return $spaced;
+        }
+
+        asort($lastAired);
+        return [(string)array_key_first($lastAired)];
+    }
+
+    private function markTypeAired(Station $station, AiDj $dj, string $type): void
+    {
+        $this->cache->set($this->typeAiredKey($station, $dj, $type), time(), self::TYPE_SPACING_SECONDS);
+    }
+
+    private function typeAiredKey(Station $station, AiDj $dj, string $type): string
+    {
+        return 'ai_dj_type_aired_' . $station->id . '_' . $dj->getId() . '_' . $type;
     }
 
     /**
@@ -1081,6 +1129,8 @@ final class AiDjQueueListener implements EventSubscriberInterface
         try {
             $introText = null;
             $usedType = null;
+            $c1 = null;
+            $ident = false;
             $segment1Title = 'Song Commentary';
             $haveSong = ($curArtist !== null && $curArtist !== '');
 
@@ -1116,12 +1166,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
                     $this->pushContentLiner($dj, $station, $backend);
                     return;
                 }
-                $introText = $this->generator->buildLinerText(
-                    $dj,
-                    $c1,
-                    $station,
-                    $this->generator->claimIdentification($station, $dj),
-                );
+                // More talk follows segment 1, so it is built without the
+                // encouragement's closing line; see below if nothing follows.
+                $ident = $this->generator->claimIdentification($station, $dj);
+                $introText = $this->generator->buildLinerText($dj, $c1, $station, $ident, false);
                 $usedType = $c1->type;
                 $segment1Title = $this->getLinerTitle($c1->type);
             }
@@ -1130,6 +1178,10 @@ final class AiDjQueueListener implements EventSubscriberInterface
             // available the combo degrades to a valid single-segment clip.
             $c2 = $this->selectLinerContent($dj, $station, $usedType, false);
             $payloadText = $c2 !== null ? $this->generator->buildLinerText($dj, $c2, $station, false) : '';
+            if ($c1 !== null && $c2 === null) {
+                // Segment 1 is the whole break after all: it gets its closing line back.
+                $introText = $this->generator->buildLinerText($dj, $c1, $station, $ident);
+            }
             $segment2Title = $c2 !== null ? $this->getLinerTitle($c2->type) : null;
             $title = $segment2Title !== null && $segment2Title !== $segment1Title
                 ? $segment1Title . ' + ' . $segment2Title
@@ -1249,7 +1301,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 return;
             }
 
-            $linerTypes = $this->linerTypesAmong($station, $dj, $onlyTypes);
+            $linerTypes = $this->spacedTypes($station, $dj, $this->linerTypesAmong($station, $dj, $onlyTypes));
             $type = $linerTypes[array_rand($linerTypes)];
             $content = $this->contentSelector->selectContent($dj->getId(), $type, $station->id);
 
@@ -1257,6 +1309,7 @@ final class AiDjQueueListener implements EventSubscriberInterface
                 $this->logger->debug('AI DJ: No content available for liner.', ['type' => $type]);
                 return;
             }
+            $this->markTypeAired($station, $dj, $content->type);
 
             if (AiDjContent::TYPE_BIBLE_VERSE === $content->type) {
                 $this->improv->rememberVerse($dj, $content->reference);

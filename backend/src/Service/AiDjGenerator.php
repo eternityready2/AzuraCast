@@ -136,6 +136,51 @@ final class AiDjGenerator
     /** Longest text a follow-up line may grow a clip to (TTS cuts at MAX_TTS_CHARS). */
     private const int FOLLOW_UP_MAX_CHARS = 490;
 
+    /**
+     * The fixed parts of a break, by slot. A DJ with dj_line items for a slot (slot
+     * name in the item's reference) takes turns through those instead, in item
+     * order, so the same words never air twice in a row. Without any, the DJ says
+     * the wording below, exactly as before.
+     *
+     * @var array<string, string|list<string>>
+     */
+    private const array DJ_LINE_DEFAULTS = [
+        'verse_open' => "Here's a scripture from {{reference}}.",
+        'verse_close' => 'Keep that word in your heart today.',
+        'joke_open' => "Here's a little something to brighten your day.",
+        'joke_close' => 'Hope that put a smile on your face!',
+        'encouragement_close' => 'Remember, you are loved and you are not alone.',
+        'testimony_close' => 'What an amazing testimony.',
+        'inspiration_open' => "And here's something worth sharing.",
+        'prayer_open' => "Let's pray together.",
+        'verse_intro' => "You're listening to {{station_name}} with {{dj_name}}. I want to share a scripture with you from {{reference}}.",
+        'joke_intro' => "Hey, it's {{dj_name}} here on {{station_name}}, and I've got a little something to brighten your day.",
+        'encouragement_intro' => 'This is {{dj_name}} on {{station_name}} with some words of encouragement for you today.',
+        'inspiration_intro' => 'This is {{dj_name}} on {{station_name}}, and I want to share something inspiring with you right now.',
+        'testimony_intro' => "I'm {{dj_name}} on {{station_name}}, and I want to share something powerful with you.",
+        'story_intro' => "This is {{dj_name}} on {{station_name}}, and I've got a story for you.",
+        'short_ident' => [
+            "It's {{dj_name}} here on {{station_name}}. More great music ahead.",
+            '{{dj_name}} with you on {{station_name}}. Stay right here.',
+            "You're listening to {{station_name}}, I'm {{dj_name}}. Let's keep it going.",
+        ],
+        'short' => [
+            'Stay with us, more great music is on the way.',
+            "So glad you're here. Let's keep the music going.",
+            'More uplifting music coming right up.',
+            "Here's another one for you.",
+        ],
+    ];
+
+    /** How long a DJ's dj_line items are reused in one process before re-reading them. */
+    private const int DJ_LINE_CACHE_SECONDS = 60;
+
+    /** @var array<int, array{at: int, lines: array<string, list<string>>}> */
+    private array $djLines = [];
+
+    /** While true, djLine() only measures (longest line, no turn taken). */
+    private bool $measuring = false;
+
     public static function moodForContentType(string $type): string
     {
         return match ($type) {
@@ -753,21 +798,9 @@ final class AiDjGenerator
             return null;
         }
 
-        $lines = $this->claimIdentification($station, $dj)
-            ? [
-                "It's {{dj_name}} here on {{station_name}}. More great music ahead.",
-                "{{dj_name}} with you on {{station_name}}. Stay right here.",
-                "You're listening to {{station_name}}, I'm {{dj_name}}. Let's keep it going.",
-            ]
-            : [
-                "Stay with us, more great music is on the way.",
-                "So glad you're here. Let's keep the music going.",
-                "More uplifting music coming right up.",
-                "Here's another one for you.",
-            ];
-
-        $text = $this->replaceTemplateVariables(
-            $lines[array_rand($lines)],
+        $text = $this->djLine(
+            $dj,
+            $this->claimIdentification($station, $dj) ? 'short_ident' : 'short',
             [
                 'dj_name' => $this->getSpokenName($dj->getName()),
                 'station_name' => $station->name,
@@ -972,20 +1005,36 @@ final class AiDjGenerator
      */
     public function fitsComboSegment(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro): bool
     {
-        $text = trim($this->buildLinerText($dj, $content, $station, $includeIntro));
+        $this->measuring = true;
+        try {
+            $text = trim($this->buildLinerText($dj, $content, $station, $includeIntro));
+        } finally {
+            $this->measuring = false;
+        }
 
         return mb_strlen($text) <= self::COMBO_SEGMENT_CHARS;
     }
 
     /**
      * Build spoken text for a content liner based on its type.
+     *
+     * $endsBreak: false when more talk follows in the same break, so the
+     * encouragement's closing line ("you are loved...") is left off.
      */
-    public function buildLinerText(AiDj $dj, AiDjContent $content, Station $station, bool $includeIntro = true): string
-    {
+    public function buildLinerText(
+        AiDj $dj,
+        AiDjContent $content,
+        Station $station,
+        bool $includeIntro = true,
+        bool $endsBreak = true,
+    ): string {
         $djName = $this->getSpokenName($dj->getName());
         $stationName = $station->name;
         $text = $content->content;
         $reference = $content->reference ? self::spokenBibleReference($content->reference) : null;
+        $vars = ['dj_name' => $djName, 'station_name' => $stationName, 'reference' => (string)$reference];
+        $line = fn(string $slot): string => $this->djLine($dj, $slot, $vars);
+        $encouragementEnd = fn(): string => $endsBreak ? ' ' . $line('encouragement_close') : '';
 
         if (!$includeIntro) {
             // Intro-free variant for the second segment of a combo break: payload
@@ -993,35 +1042,88 @@ final class AiDjGenerator
             // so the DJ never re-introduces herself mid-conversation.
             return match ($content->type) {
                 AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
-                    ? sprintf("Here's a scripture from %s. %s. Keep that word in your heart today.", $reference, $text)
+                    ? sprintf('%s %s. %s', $line('verse_open'), $text, $line('verse_close'))
                     : sprintf("%s. Stay blessed.", $text)),
-                AiDjContent::TYPE_JOKE => sprintf("Here's a little something to brighten your day. %s. Hope that put a smile on your face!", $text),
-                AiDjContent::TYPE_ENCOURAGEMENT => sprintf("%s. Remember, you are loved and you are not alone.", $text),
-                AiDjContent::TYPE_TESTIMONY => sprintf("%s. What an amazing testimony.", $text),
-                AiDjContent::TYPE_INSPIRATION, AiDjContent::TYPE_STORY => sprintf("And here's something worth sharing. %s.", $text),
+                AiDjContent::TYPE_JOKE => sprintf('%s %s. %s', $line('joke_open'), $text, $line('joke_close')),
+                AiDjContent::TYPE_ENCOURAGEMENT => sprintf('%s.%s', $text, $encouragementEnd()),
+                AiDjContent::TYPE_TESTIMONY => sprintf('%s. %s', $text, $line('testimony_close')),
+                AiDjContent::TYPE_INSPIRATION, AiDjContent::TYPE_STORY => sprintf('%s %s.', $line('inspiration_open'), $text),
                 self::TYPE_COMMENT => $text,
                 self::TYPE_POEM => sprintf("Here's a little poem%s. %s", self::poemTitle($content), $text),
                 self::TYPE_QUOTE => self::quoteText($content, $text),
-                self::TYPE_PRAYER => sprintf("Let's pray together. %s", $text),
+                self::TYPE_PRAYER => sprintf('%s %s', $line('prayer_open'), $text),
                 default => sprintf("And here's something for you. %s.", $text),
             };
         }
 
         return match ($content->type) {
             AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
-                ? sprintf("You're listening to %s with %s. I want to share a scripture with you from %s. %s. Keep that word in your heart today.", $stationName, $djName, $reference, $text)
+                ? sprintf('%s %s. %s', $line('verse_intro'), $text, $line('verse_close'))
                 : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text)),
-            AiDjContent::TYPE_JOKE => sprintf("Hey, it's %s here on %s, and I've got a little something to brighten your day. %s. Hope that put a smile on your face!", $djName, $stationName, $text),
-            AiDjContent::TYPE_ENCOURAGEMENT => sprintf("This is %s on %s with some words of encouragement for you today. %s. Remember, you are loved and you are not alone.", $djName, $stationName, $text),
-            AiDjContent::TYPE_INSPIRATION => sprintf("This is %s on %s, and I want to share something inspiring with you right now. %s.", $djName, $stationName, $text),
-            AiDjContent::TYPE_TESTIMONY => sprintf("I'm %s on %s, and I want to share something powerful with you. %s. What an amazing testimony.", $djName, $stationName, $text),
-            AiDjContent::TYPE_STORY => sprintf("This is %s on %s, and I've got a story for you. %s.", $djName, $stationName, $text),
+            AiDjContent::TYPE_JOKE => sprintf('%s %s. %s', $line('joke_intro'), $text, $line('joke_close')),
+            AiDjContent::TYPE_ENCOURAGEMENT => sprintf('%s %s.%s', $line('encouragement_intro'), $text, $encouragementEnd()),
+            AiDjContent::TYPE_INSPIRATION => sprintf('%s %s.', $line('inspiration_intro'), $text),
+            AiDjContent::TYPE_TESTIMONY => sprintf('%s %s. %s', $line('testimony_intro'), $text, $line('testimony_close')),
+            AiDjContent::TYPE_STORY => sprintf('%s %s.', $line('story_intro'), $text),
             self::TYPE_COMMENT => sprintf("%s here on %s. %s", $djName, $stationName, $text),
             self::TYPE_POEM => sprintf("This is %s on %s, and here's a little poem for you%s. %s", $djName, $stationName, self::poemTitle($content), $text),
             self::TYPE_QUOTE => sprintf("This is %s on %s. %s", $djName, $stationName, self::quoteText($content, $text)),
             self::TYPE_PRAYER => sprintf("This is %s on %s. Let's take a moment and pray together%s. %s", $djName, $stationName, $reference ? ', from ' . $reference : '', $text),
             default => sprintf("This is %s on %s, and I want to share something with you. %s.", $djName, $stationName, $text),
         };
+    }
+
+    /**
+     * The DJ's next line for one fixed slot of a break (see DJ_LINE_DEFAULTS).
+     *
+     * @param array<string, string> $vars
+     */
+    private function djLine(AiDj $dj, string $slot, array $vars = []): string
+    {
+        $lines = $this->djLinesFor($dj)[$slot] ?? [];
+
+        if ([] === $lines) {
+            $default = self::DJ_LINE_DEFAULTS[$slot];
+            $line = is_array($default) ? $default[array_rand($default)] : $default;
+        } elseif ($this->measuring) {
+            // Fit checks run for many items at once: take the longest, take no turn.
+            $line = array_reduce($lines, static fn(string $a, string $b) => mb_strlen($b) > mb_strlen($a) ? $b : $a, '');
+        } else {
+            // Turns are kept in the shared cache: each clip is made in its own process.
+            $key = 'ai_dj_line_turn_' . $dj->getId() . '_' . $slot;
+            $turn = (int)($this->cache->get($key) ?? 0);
+            $this->cache->set($key, $turn + 1, 30 * 86400);
+            $line = $lines[$turn % count($lines)];
+        }
+
+        return $this->replaceTemplateVariables($line, $vars);
+    }
+
+    /**
+     * The DJ's own dj_line items, by slot, in item order.
+     *
+     * @return array<string, list<string>>
+     */
+    private function djLinesFor(AiDj $dj): array
+    {
+        $djId = $dj->getId();
+        $cached = $this->djLines[$djId] ?? null;
+        if (null !== $cached && time() - $cached['at'] < self::DJ_LINE_CACHE_SECONDS) {
+            return $cached['lines'];
+        }
+
+        $lines = [];
+        foreach ($this->contentRepo->findEnabledForDj($djId, AiDjContent::TYPE_DJ_LINE) as $item) {
+            $slot = trim((string)$item->reference);
+            $text = trim($item->content);
+            if (isset(self::DJ_LINE_DEFAULTS[$slot]) && '' !== $text) {
+                $lines[$slot][] = $text;
+            }
+        }
+
+        $this->djLines[$djId] = ['at' => time(), 'lines' => $lines];
+
+        return $lines;
     }
 
     private static function poemTitle(AiDjContent $content): string

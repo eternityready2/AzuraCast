@@ -65,12 +65,16 @@ final class AiDjContentRepository extends Repository
             ->getResult();
     }
 
-    /** Whether the DJ has any items in their own library (then they use only that library). */
+    /**
+     * Whether the DJ has any items in their own library (then they use only that library).
+     * The DJ's own break wording (dj_line) does not count.
+     */
     public function djHasOwnLibrary(int $djId): bool
     {
         return false !== $this->em->getConnection()->fetchOne(
-            'SELECT 1 FROM ai_dj_has_content WHERE ai_dj_id = :djId LIMIT 1',
-            ['djId' => $djId]
+            'SELECT 1 FROM ai_dj_has_content h JOIN ai_dj_content c ON c.id = h.ai_dj_content_id'
+            . ' WHERE h.ai_dj_id = :djId AND c.type <> :lineType LIMIT 1',
+            ['djId' => $djId, 'lineType' => AiDjContent::TYPE_DJ_LINE]
         );
     }
 

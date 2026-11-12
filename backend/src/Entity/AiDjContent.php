@@ -37,6 +37,13 @@ final class AiDjContent implements Interfaces\IdentifiableEntityInterface
     public const string TYPE_TESTIMONY = 'testimony';
     public const string TYPE_STORY = 'story';
 
+    /**
+     * A DJ's own wording for the fixed parts of a break (openers, closers, intros,
+     * short lines). The slot it fills is in `reference`. Never aired alone, and not
+     * counted as the DJ having their own library.
+     */
+    public const string TYPE_DJ_LINE = 'dj_line';
+
     public const array TYPES = [
         self::TYPE_SONG_INTRO_TEMPLATE,
         self::TYPE_POST_SONG_TEMPLATE,
