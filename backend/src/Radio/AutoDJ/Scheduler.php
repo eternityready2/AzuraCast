@@ -238,7 +238,35 @@ final class Scheduler
             return true;
         }
 
+        // A playlist used by the clock wheel that holds the air now may fill that
+        // wheel's window (its final song is handed to the Top-of-Hour swap as an
+        // ordinary row, and swap/refill must be allowed to use the same music).
+        if (null !== $narrowestOpen && $this->isPlaylistInWheelOpenAt($playlist, $at)) {
+            return true;
+        }
+
         return null === $narrowestOpen;
+    }
+
+    private function isPlaylistInWheelOpenAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
+    {
+        foreach ($playlist->station->clock_wheels as $clockWheel) {
+            if (
+                !$this->canClockWheelOwnScheduledAir($clockWheel)
+                || 0 === $clockWheel->schedule_items->count()
+                || !$this->isClockWheelAllowedAt($clockWheel, $at)
+            ) {
+                continue;
+            }
+
+            foreach ($clockWheel->slots as $slot) {
+                if ($slot->playlist_id === $playlist->id) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

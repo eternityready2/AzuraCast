@@ -25,6 +25,7 @@ use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
 use App\Radio\AutoDJ\QueueBuilder;
 use App\Radio\AutoDJ\SponsorGuaranteedPlayoutService;
+use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
@@ -64,6 +65,7 @@ final class ClockWheelPlaybackPlanner
         private readonly ClockWheelStretchCalculator $stretchCalculator,
         private readonly LoggerInterface $logger,
         private readonly SmartBlockAvailability $smartBlockAvailability,
+        private readonly TopOfHourClock $topOfHourClock,
     ) {
     }
 
@@ -598,14 +600,17 @@ final class ClockWheelPlaybackPlanner
             $isEndOfHour,
         );
         $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
+        $this->handFinalSlotToTopOfHour($queueEntry, $slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour, null);
 
-        // Every slot in the log is eligible for stretch/squeeze -- not just the
-        // one before a mandatory anchor -- so gaps close smoothly station-wide.
-        // Still only within the safe +/-5% range computed in the calculator.
-        $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-            $media->getCalculatedLength(),
-            $availableSeconds,
-        );
+        if (null !== $queueEntry->clock_wheel) {
+            // Every slot in the log is eligible for stretch/squeeze -- not just the
+            // one before a mandatory anchor -- so gaps close smoothly station-wide.
+            // Still only within the safe +/-5% range computed in the calculator.
+            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                $media->getCalculatedLength(),
+                $availableSeconds,
+            );
+        }
 
         $this->em->persist($queueEntry);
 
@@ -1044,10 +1049,13 @@ final class ClockWheelPlaybackPlanner
                 $isEndOfHour,
             );
             $this->guardHourBoundary($queueEntry, $media, $secondsIntoHour);
-            $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
-                $media->getCalculatedLength(),
-                $availableSeconds,
-            );
+            $this->handFinalSlotToTopOfHour($queueEntry, $slot, $scheduleMode, $station, $expectedPlayTime, $isEndOfHour, $playlist);
+            if (null !== $queueEntry->clock_wheel) {
+                $queueEntry->clock_wheel_stretch_ratio = $this->stretchCalculator->calculate(
+                    $media->getCalculatedLength(),
+                    $availableSeconds,
+                );
+            }
             $this->em->persist($queueEntry);
 
             $this->eventLogger->recordTrackQueued(
@@ -1213,6 +1221,50 @@ final class ClockWheelPlaybackPlanner
         // Flexible: never cut mid-hour. A track longer than the window plays in full
         // and the next slot starts later; the hour boundary is still capped above.
         return false;
+    }
+
+    /**
+     * The last music slot of a flexible hour hands its track to the Top-of-Hour
+     * system as an ordinary playlist row, so the tested final-slot swap/stretch
+     * lands it on the station ID. Wheel rows are skipped by that swap, which left
+     * dead air before the ID when the wheel's last song ended early.
+     */
+    private function handFinalSlotToTopOfHour(
+        StationQueue $queueEntry,
+        StationClockWheelSlot $slot,
+        ClockWheelScheduleMode $scheduleMode,
+        Station $station,
+        DateTimeImmutable $expectedPlayTime,
+        bool $isEndOfHour,
+        ?StationPlaylist $playlist,
+    ): void {
+        if (
+            !$isEndOfHour
+            || ClockWheelScheduleMode::Flexible !== $scheduleMode
+            || null !== $slot->smart_block
+            || !$this->topOfHourClock->isEnabled($station)
+            || !$this->topOfHourClock->isSwapEnabled($station)
+            || $this->topOfHourClock->clockWheelOwnsBoundary(
+                $station,
+                $this->topOfHourClock->getNextBoundary($station, $expectedPlayTime)
+            )
+        ) {
+            return;
+        }
+
+        if (null === $playlist && null !== $slot->playlist_id && $slot->playlist_id > 0) {
+            $playlist = $this->em->find(StationPlaylist::class, $slot->playlist_id);
+        }
+        if (!$playlist instanceof StationPlaylist) {
+            return;
+        }
+
+        $queueEntry->playlist = $playlist;
+        $queueEntry->clock_wheel = null;
+        $queueEntry->clock_wheel_enforce_cap = false;
+        $queueEntry->clock_wheel_max_play_seconds = null;
+        $queueEntry->clock_wheel_stretch_ratio = null;
+        $queueEntry->clock_wheel_schedule_mode = null;
     }
 
     /**
