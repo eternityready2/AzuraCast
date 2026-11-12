@@ -148,6 +148,13 @@ final class ClockWheelPlaybackPlanner
      */
     public function landWheelRowOnId(RevalidateQueuedSong $event): void
     {
+        // Only as the row is handed to the player, when its start is real: the
+        // queue's projection had the 6pm opener starting at 5:59:24 and it was
+        // swapped for a promo every re-check (Thu 2026-11-12, 5:02pm).
+        if (!$event->isHandOff()) {
+            return;
+        }
+
         $row = $event->getQueueRow();
         if (
             null === $row->clock_wheel
@@ -168,6 +175,14 @@ final class ClockWheelPlaybackPlanner
         $untilId = $this->secondsUntilId($station, $start);
         if (null === $untilId || $untilId <= 0.0) {
             return;
+        }
+
+        // A line of the next hour is that hour's opener, not this hour's end.
+        if (null !== $row->log_entry_id) {
+            $line = $this->em->find(\App\Entity\StationLogEntry::class, $row->log_entry_id);
+            if (null !== $line && $line->planned_at >= $start->getTimestamp() + (int)floor($untilId)) {
+                return;
+            }
         }
 
         $ratio = (float)($row->clock_wheel_stretch_ratio ?: 1.0);
