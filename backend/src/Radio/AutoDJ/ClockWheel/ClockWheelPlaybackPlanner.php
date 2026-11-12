@@ -20,6 +20,7 @@ use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
 use App\Entity\StationQueue;
 use App\Entity\StationSchedule;
+use App\Radio\AutoDJ\DmcaComplianceListener;
 use App\Radio\AutoDJ\DuplicatePrevention;
 use App\Radio\AutoDJ\HourBoundaryPlanner;
 use App\Radio\AutoDJ\MediaPlayability;
@@ -66,6 +67,7 @@ final class ClockWheelPlaybackPlanner
         private readonly LoggerInterface $logger,
         private readonly SmartBlockAvailability $smartBlockAvailability,
         private readonly TopOfHourClock $topOfHourClock,
+        private readonly DmcaComplianceListener $dmca,
     ) {
     }
 
@@ -575,8 +577,32 @@ final class ClockWheelPlaybackPlanner
             $mediaQueue = $this->applyAlgorithm($mediaQueue, $candidates, $algorithm, $recentHistory);
         }
 
-        $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
-            ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
+        // Skip picks the DMCA rules would turn down (e.g. a third song in a row from
+        // one album). The pick order is deterministic, so without this every retry
+        // returned the same rejected song and the Linear Log planned a hole.
+        $validTrack = null;
+        for ($dmcaTries = 0; $dmcaTries < 25; $dmcaTries++) {
+            $validTrack = $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, false)
+                ?? $this->duplicatePrevention->preventDuplicates($mediaQueue, $recentHistory, true);
+            if (null === $validTrack) {
+                break;
+            }
+
+            $pick = $this->em->find(StationMedia::class, $validTrack->media_id);
+            if (
+                !$pick instanceof StationMedia
+                || $this->dmca->allowsPick(StationQueue::fromMedia($station, $pick), $station, $expectedPlayTime)
+            ) {
+                break;
+            }
+
+            $rejectedId = $validTrack->media_id;
+            $mediaQueue = array_values(array_filter(
+                $mediaQueue,
+                static fn (StationPlaylistQueue $q): bool => $q->media_id !== $rejectedId
+            ));
+            $validTrack = null;
+        }
 
         if ($validTrack === null) {
             $this->eventLogger->recordFallback(
@@ -1022,6 +1048,11 @@ final class ClockWheelPlaybackPlanner
             }
 
             if ($slot->category_id !== null && $media->category_id !== $slot->category_id) {
+                $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
+                continue;
+            }
+
+            if (!$this->dmca->allowsPick(StationQueue::fromMedia($station, $media), $station, $expectedPlayTime)) {
                 $attemptHistory = $this->appendSyntheticHistory($attemptHistory, $media, $expectedPlayTime);
                 continue;
             }
