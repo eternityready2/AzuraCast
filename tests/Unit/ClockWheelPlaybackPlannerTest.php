@@ -201,10 +201,26 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         );
     }
 
-    public function testShouldEnforceCapForShortFormSlot(): void
+    public function testShouldNotEnforceCapForShortFormSlotUnderFlexibleSchedule(): void
     {
         $slot = $this->makeSlot(ClockWheelSlotTypes::Promo);
         $media = $this->makeMedia(1, 20.0);
+
+        self::assertFalse(
+            $this->invokeShouldEnforcePlaybackCap(
+                $slot,
+                ClockWheelScheduleMode::Flexible,
+                $media,
+                10.0,
+            )
+        );
+    }
+
+    public function testShouldEnforceCapWhenSlotHasItsOwnLength(): void
+    {
+        $slot = $this->makeSlot(ClockWheelSlotTypes::Talk);
+        $slot->duration_seconds = 300;
+        $media = $this->makeMedia(1, 400.0);
 
         self::assertTrue(
             $this->invokeShouldEnforcePlaybackCap(
@@ -231,12 +247,12 @@ final class ClockWheelPlaybackPlannerTest extends Unit
         );
     }
 
-    public function testShouldEnforceCapWhenFlexibleMusicOverflows(): void
+    public function testShouldNotCutFlexibleMusicThatOverflowsMidHour(): void
     {
         $slot = $this->makeSlot(ClockWheelSlotTypes::Music);
         $media = $this->makeMedia(1, 400.0);
 
-        self::assertTrue(
+        self::assertFalse(
             $this->invokeShouldEnforcePlaybackCap(
                 $slot,
                 ClockWheelScheduleMode::Flexible,

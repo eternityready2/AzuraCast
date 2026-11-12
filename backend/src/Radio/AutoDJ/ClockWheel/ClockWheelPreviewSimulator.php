@@ -165,8 +165,9 @@ final class ClockWheelPreviewSimulator
 
         if ($fittingCount === 0) {
             $item->warnings[] = sprintf(
-                'No track in this category fits the %ds window at this position — using the shortest available instead. '
-                . 'Consider widening the spacing between anchors here, or check this category\'s typical track lengths.',
+                'No track in this category fits the %ds window at this position — the shortest available plays in full '
+                . 'and the next slot starts later. Consider widening the spacing between anchors here, or check this '
+                . 'category\'s typical track lengths.',
                 (int)$maxDuration
             );
         }
