@@ -61,6 +61,9 @@ final class ClockWheelPlaybackPlanner
      */
     private const int ID_EARLY_SECONDS = 15;
 
+    /** A promo or ad is not put before the ID again within this long of its last airing. */
+    private const int PROMO_REPEAT_SECONDS = 3600;
+
     /** @deprecated Use HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS or station config. */
     public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS;
 
@@ -322,8 +325,8 @@ final class ClockWheelPlaybackPlanner
     }
 
     /**
-     * The longest item from the station's enabled promo/liner pools that ends
-     * before the ID, least recently played first: the pools the Top-of-Hour
+     * An item from the station's enabled promo/liner pools that ends before
+     * the ID and has not aired in the last hour, least recently played first: the pools the Top-of-Hour
      * swap fills the seconds before an ordinary hour's ID from.
      */
     private function promoBefore(Station $station, float $untilId): ?\App\Entity\StationPlaylistMedia
@@ -332,9 +335,14 @@ final class ClockWheelPlaybackPlanner
             'SELECT spm, m, p FROM App\Entity\StationPlaylistMedia spm JOIN spm.media m JOIN spm.playlist p
             WHERE p.station = :station AND p.is_enabled = true AND p.is_jingle = true
             AND m.type IN (:promo) AND m.length > 0 AND m.length <= :room
-            ORDER BY m.length DESC, spm.last_played ASC'
+            AND spm.last_played < :recent
+            ORDER BY spm.last_played ASC, m.length DESC'
         )->setParameter('station', $station)
             ->setParameter('promo', ['promo', 'ad'])
+            // Never one that aired in the last hour, and the least recently
+            // played first: longest-first picked the same 72s promo for every
+            // slot from 10:55 to 11:01pm, five times running (Thu 2026-11-12).
+            ->setParameter('recent', time() - self::PROMO_REPEAT_SECONDS)
             // By file length with a second to spare, as LinearLogHour judges
             // whether an item runs into the ID.
             ->setParameter('room', $untilId - 1.0)
