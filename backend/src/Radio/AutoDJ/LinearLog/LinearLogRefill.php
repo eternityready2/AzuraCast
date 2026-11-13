@@ -381,6 +381,14 @@ final class LinearLogRefill
         // nearly its whole length (10pm hour, Mon 2026-10-26).
         $plannedAt = min(max($endsAt, $lastPlannedEndsAt), $idAt - 1);
 
+        // Where the log's own lines run later than the live queue, that spot can be too late for the
+        // song to air before the ID: a 6:25 song was written at 10:59:58pm, under the 11pm ID, and
+        // listed as overlapping the next hour (Last Light, Thu 2026-11-12). Such a line never airs;
+        // the hour is left to the queue, which had room.
+        if ($plannedAt + $media->getCalculatedLength() > $idAt + self::ID_GRACE_SECONDS) {
+            return 0;
+        }
+
         // The search may have cleared the entity manager.
         $station = $this->em->find(Station::class, $station->id) ?? $station;
         $newId = $this->writeLine(
