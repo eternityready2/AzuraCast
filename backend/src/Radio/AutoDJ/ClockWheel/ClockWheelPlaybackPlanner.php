@@ -205,7 +205,9 @@ final class ClockWheelPlaybackPlanner
                         'now' => $promo->media->text,
                         'until_id' => round($untilId, 1),
                     ]);
+                    return;
                 }
+                $this->holdForNextHour($event, $station, $start, $untilId);
                 return;
             }
         }
@@ -240,6 +242,10 @@ final class ClockWheelPlaybackPlanner
                 'now' => $spm->media->text,
                 'until_id' => round($untilId, 1),
             ]);
+            return;
+        }
+
+        if ($this->holdForNextHour($event, $station, $start, $untilId)) {
             return;
         }
 
@@ -386,6 +392,14 @@ final class ClockWheelPlaybackPlanner
             return null;
         }
 
+        $release = $this->idLaneRelease($station, $boundary, $target);
+
+        return $start->lessThan($release) ? $release : null;
+    }
+
+    /** When the ID lane at $boundary (ID start $target) hands the air back: the ID, plus the news when it airs. */
+    private function idLaneRelease(Station $station, CarbonImmutable $boundary, CarbonImmutable $target): CarbonImmutable
+    {
         $conn = $this->em->getConnection();
         $idSeconds = (float)($conn->fetchOne(
             'SELECT duration FROM station_queue
@@ -416,7 +430,39 @@ final class ClockWheelPlaybackPlanner
             $release = $release->max($boundary);
         }
 
-        return $start->lessThan($release) ? $release : null;
+        return $release;
+    }
+
+    /**
+     * A wheel song due in the swap's hold window before the ID that would be
+     * cut by it, with nothing short enough to take its seconds: not sent now;
+     * it opens the new hour once the ID (and news) hand the air back, as the
+     * Top-of-Hour swap holds an ordinary song there. Started instead, the 7pm
+     * opener was cut 6s in and the overview kept its name for the next song
+     * (Ray Boltz 6:59:53, Avalon on air from 7:00:11, Thu 2026-11-12).
+     */
+    private function holdForNextHour(RevalidateQueuedSong $event, Station $station, DateTimeImmutable $start, float $untilId): bool
+    {
+        if ($untilId > \App\Radio\AutoDJ\LinearLog\LinearLogHour::ID_HOLD_WINDOW_SECONDS) {
+            return false;
+        }
+
+        $at = CarbonImmutable::instance($start);
+        $boundary = CarbonImmutable::instance($this->topOfHourClock->getNextBoundary($station, $start));
+        $target = $at->addSeconds((int)floor($untilId));
+        $release = $this->idLaneRelease($station, $boundary, $target);
+
+        $event->holdBack();
+        $event->opensAfter($release->toDateTimeImmutable());
+
+        $this->logger->notice('Clock Wheel: holding a song due just before the ID; it opens the new hour.', [
+            'queue_id' => $event->getQueueRow()->id,
+            'song' => $event->getQueueRow()->media?->text,
+            'until_id' => round($untilId, 1),
+            'release' => $release->toIso8601String(),
+        ]);
+
+        return true;
     }
 
     /**
