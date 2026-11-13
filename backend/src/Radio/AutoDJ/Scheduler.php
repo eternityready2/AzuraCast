@@ -6,6 +6,7 @@ namespace App\Radio\AutoDJ;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Enums\PlaylistSources;
 use App\Entity\Enums\PlaylistTypes;
 use App\Entity\Repository\StationPlaylistMediaRepository;
@@ -254,25 +255,50 @@ final class Scheduler
         return null === $narrowestOpen;
     }
 
+    /** True when a clock wheel's own schedule holds the air at $at. */
+    private function isWheelOpenAt(Station $station, DateTimeImmutable $at): bool
+    {
+        return null !== $this->wheelOpenAt($station, $at);
+    }
+
+    /**
+     * The clock wheel whose own schedule holds the air at $at, with the
+     * schedule mode of its row open then: what a line written into the
+     * wheel's hour after the plan was built is tagged with, so it is the
+     * wheel's line like the rest. Null when no wheel holds the air.
+     *
+     * @return array{StationClockWheel, ?ClockWheelScheduleMode}|null
+     */
+    public function wheelOpenAt(Station $station, DateTimeImmutable $at): ?array
+    {
+        $tz = $station->getTimezoneObject();
+        foreach ($station->clock_wheels as $clockWheel) {
+            if (
+                !$this->canClockWheelOwnScheduledAir($clockWheel)
+                || 0 === $clockWheel->schedule_items->count()
+                || !$this->isClockWheelAllowedAt($clockWheel, $at)
+            ) {
+                continue;
+            }
+
+            $mode = null;
+            foreach ($clockWheel->schedule_items as $schedule) {
+                if (null !== $this->ownedWindowSeconds($schedule, $tz, $at)) {
+                    $mode = $schedule->clock_wheel_mode;
+                    break;
+                }
+            }
+
+            return [$clockWheel, $mode];
+        }
+
+        return null;
+    }
+
     /**
      * True when $playlist is pinned to a slot of a clock wheel whose own
      * schedule holds the air at $at.
      */
-    /** True when a clock wheel's own schedule holds the air at $at. */
-    private function isWheelOpenAt(Station $station, DateTimeImmutable $at): bool
-    {
-        foreach ($station->clock_wheels as $clockWheel) {
-            if (
-                $this->canClockWheelOwnScheduledAir($clockWheel)
-                && $clockWheel->schedule_items->count() > 0
-                && $this->isClockWheelAllowedAt($clockWheel, $at)
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     public function isPlaylistInWheelOpenAt(StationPlaylist $playlist, DateTimeImmutable $at): bool
     {

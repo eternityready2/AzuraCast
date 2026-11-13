@@ -6,8 +6,12 @@ namespace App\Radio\AutoDJ\LinearLog;
 
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
+use App\Entity\Enums\ClockWheelScheduleMode;
+use App\Entity\Enums\ClockWheelSlotTypes;
 use App\Entity\Enums\StationMediaTypes;
 use App\Entity\Station;
+use App\Entity\StationClockWheel;
+use App\Entity\StationClockWheelSlot;
 use App\Entity\StationLogEntry;
 use App\Entity\StationMedia;
 use App\Entity\StationPlaylist;
@@ -77,6 +81,20 @@ final class LinearLogRefill
 
     /** A slot starting closer than this to the ID is left to the Top-of-Hour hold and filler. */
     private const int MIN_ROOM_BEFORE_ID_SECONDS = 60;
+
+    /**
+     * How far apart the same song or title is kept when no song of the
+     * playlist is clear of the station's own window, and then at the least
+     * (separationSteps()).
+     */
+    private const int EASED_SEPARATION_SECONDS = 3600;
+    private const int LEAST_SEPARATION_SECONDS = 1800;
+
+    /**
+     * A refill outcome that is tried again on the next pass: the slot is
+     * empty until a song is found for it or the queue reaches it.
+     */
+    private const string RETRIED = 'no_fit';
 
     /** How far past the ID a planned line may end: the swap's tolerance. */
     public const int ID_GRACE_SECONDS = 5;
@@ -156,7 +174,9 @@ final class LinearLogRefill
         $handled = 0;
         foreach ($candidates as $line) {
             $payload = self::decodePayload($line['payload']);
-            if (!empty($payload['refill'])) {
+            // A slot nothing fitted is still a hole: it is tried again each
+            // pass, as the log near it changes, until the queue reaches it.
+            if (!empty($payload['refill']) && self::RETRIED !== $payload['refill']) {
                 continue;
             }
             if ($handled >= self::MAX_PER_PASS) {
@@ -322,16 +342,33 @@ final class LinearLogRefill
         $songs = max(1, (int)floor($shortBy / self::TYPICAL_SONG_SECONDS));
         $landsOnId = $landsOnId && 1 === $songs;
         $perSong = $landsOnId ? 0.0 : $this->airTimePerSong->secondsBeyondFile($station, $hourStart);
+        $at = CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable();
+
+        // In a Clock Wheel's hour the song comes from the wheel's own slot
+        // open where the line goes, as the plan's lines do, and the line is
+        // the wheel's: the page lists it under the wheel and the wheel's own
+        // rules at the ID apply to it. Asked for a pick that close to the ID,
+        // the AutoDJ's own pipeline answers with the wheel's end-of-hour promo
+        // or nothing, and the hour stayed short (8pm, Thu 2026-11-12).
+        $wheelOpen = $this->scheduler->wheelOpenAt($station, $at);
+        $slotPlaylist = null !== $wheelOpen ? self::slotPlaylistAt($wheelOpen[0], $endsAt - $hourStart) : null;
+        $wheelFields = self::wheelFields($wheelOpen);
+
         $pick = $this->pickReplacement(
             $station,
-            CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable(),
+            $at,
             $shortBy / $songs - $perSong,
             $shortBy + self::ID_GRACE_SECONDS - $perSong,
-            null,
+            $slotPlaylist,
             null,
             $landsOnId ? LinearLogSongMatch::OnId : LinearLogSongMatch::About
         );
         if (null === $pick) {
+            $this->logger->notice('Linear Log: an hour is running short and no song fits the room left.', [
+                'hour_starts_at' => $hourStart,
+                'short_by' => $shortBy,
+                'playlist' => $slotPlaylist?->name,
+            ]);
             return 0;
         }
 
@@ -343,13 +380,16 @@ final class LinearLogRefill
         // a second after the last line's start, the fill overlapped it by
         // nearly its whole length (10pm hour, Mon 2026-10-26).
         $plannedAt = min(max($endsAt, $lastPlannedEndsAt), $idAt - 1);
+
+        // The search may have cleared the entity manager.
+        $station = $this->em->find(Station::class, $station->id) ?? $station;
         $newId = $this->writeLine(
             $station,
             $media,
             $playlist,
             $plannedAt,
             'Filled: the hour was running short',
-            ['top_up' => true]
+            ['top_up' => true, ...$wheelFields]
         );
 
         $this->logger->notice('Linear Log: topped up an hour that was running short.', [
@@ -448,11 +488,13 @@ final class LinearLogRefill
                 return 'closed_up';
             }
 
-            $this->logger->notice('Linear Log: no replacement fits a dropped line; the AutoDJ fills it on air.', [
-                'log_entry_id' => $id,
-                'planned_at' => $plannedAt,
-            ]);
-            return $this->markHandled($id, $payload, 'no_fit');
+            if (self::RETRIED !== ($payload['refill'] ?? null)) {
+                $this->logger->notice('Linear Log: no replacement fits a dropped line yet; it is tried again each minute.', [
+                    'log_entry_id' => $id,
+                    'planned_at' => $plannedAt,
+                ]);
+            }
+            return $this->markHandled($id, $payload, self::RETRIED);
         }
 
         [$media, $pickPlaylist] = $pick;
@@ -526,8 +568,8 @@ final class LinearLogRefill
             return null;
         }
 
-        $range = $station->backend_config->duplicate_prevention_time_range;
-        [$nearSongIds, $nearArtists, $nearTitles] = $this->logNear($station, $at->getTimestamp(), max(60, $range) * 60);
+        $range = max(60, (int)$station->backend_config->duplicate_prevention_time_range) * 60;
+        $near = $this->logNear($station, $at->getTimestamp(), $range);
 
         $window = $wantShort ? $duration * 0.5 : max(self::LENGTH_MATCH_SECONDS, $duration * 0.15);
 
@@ -547,21 +589,11 @@ final class LinearLogRefill
             ->setParameter('idTypes', StationMediaTypes::stationIdTypeValues())
             ->getResult();
 
-        $scored = [];
+        // Every song of the playlist that fits the slot, before the separation rules.
+        $fits = [];
         foreach ($rows as $spm) {
             $media = $spm->media;
             if ($media->id === $excludeMediaId) {
-                continue;
-            }
-            if (isset($nearSongIds[$media->song_id])) {
-                continue;
-            }
-            $artist = mb_strtolower(trim((string)$media->artist));
-            if ('' !== $artist && isset($nearArtists[$artist])) {
-                continue;
-            }
-            $title = mb_strtolower(trim((string)$media->title));
-            if ('' !== $title && isset($nearTitles[$title])) {
                 continue;
             }
 
@@ -576,11 +608,38 @@ final class LinearLogRefill
             if ($wantShort && $diff > $window) {
                 continue;
             }
-            $scored[] = ['diff' => $diff, 'media' => $media];
+            $fits[] = ['diff' => $diff, 'media' => $media];
+        }
+
+        // The separation rules, eased a step at a time when no song of the
+        // playlist is clear of them, as the AutoDJ eases its own on air
+        // (DuplicatePrevention). A Clock Wheel whose one slot playlist holds
+        // 62 songs plays it for four hours under a 120-minute rule: by the
+        // last hour no song was clear, every slot dropped after the plan was
+        // built stayed a hole, and the hour ran out 9 minutes before its ID
+        // (Rapture Ready Nights, Thu 2026-11-12 8:51pm). A short item keeps
+        // the full rules: a liner has no hour to fill.
+        $scored = [];
+        $eased = 0;
+        foreach (self::separationSteps($range, $wantShort) as $eased => [$seconds, $byArtist]) {
+            $scored = self::clearOf($fits, $near, $seconds, $byArtist);
+            if ([] !== $scored) {
+                break;
+            }
         }
 
         if ([] === $scored) {
             return null;
+        }
+
+        if ($eased > 0) {
+            $this->logger->notice('Linear Log: the separation rules were eased to fill a slot.', [
+                'playlist' => $playlist->name,
+                'at' => $at->format(DATE_ATOM),
+                'step' => $eased,
+                'songs_fitting' => count($fits),
+                'songs_clear' => count($scored),
+            ]);
         }
 
         // Closest length first; among equally close, least recently played
@@ -702,16 +761,88 @@ final class LinearLogRefill
     }
 
     /**
-     * Song ids, artists and titles of the log's lines within $seconds of $at.
-     * A title counts on its own, as the AutoDJ's DuplicatePrevention counts it:
-     * another artist's recording of a song is still the same song to a listener.
+     * The separation rules a pick is tried against, strictest first: the
+     * station's own window with artist and title, then without the artist,
+     * then the same song or title kept an hour apart, then half an hour.
      *
-     * @return array{array<string, true>, array<string, true>, array<string, true>}
+     * @return list<array{int, bool}> seconds apart, and whether the artist counts
+     */
+    private static function separationSteps(int $range, bool $wantShort): array
+    {
+        if ($wantShort) {
+            return [[$range, true]];
+        }
+
+        $steps = [[$range, true], [$range, false]];
+        foreach ([self::EASED_SEPARATION_SECONDS, self::LEAST_SEPARATION_SECONDS] as $seconds) {
+            if ($seconds < $range) {
+                $steps[] = [$seconds, false];
+            }
+        }
+
+        return $steps;
+    }
+
+    /**
+     * The songs of $fits that no line of the log plays within $seconds of the
+     * slot: not the same song, not the same title (another artist's recording
+     * is the same song to a listener, as DuplicatePrevention counts it) and,
+     * when $byArtist, not the same artist.
+     *
+     * @param list<array{diff: float, media: StationMedia}> $fits
+     * @param list<array{song_id: ?string, artist: string, title: string, distance: int}> $near
+     * @return list<array{diff: float, media: StationMedia}>
+     */
+    private static function clearOf(array $fits, array $near, int $seconds, bool $byArtist): array
+    {
+        $songIds = [];
+        $artists = [];
+        $titles = [];
+        foreach ($near as $row) {
+            if ($row['distance'] > $seconds) {
+                continue;
+            }
+            if (null !== $row['song_id']) {
+                $songIds[$row['song_id']] = true;
+            }
+            if ('' !== $row['artist']) {
+                $artists[$row['artist']] = true;
+            }
+            if ('' !== $row['title']) {
+                $titles[$row['title']] = true;
+            }
+        }
+
+        $clear = [];
+        foreach ($fits as $fit) {
+            $media = $fit['media'];
+            if (isset($songIds[$media->song_id])) {
+                continue;
+            }
+            $artist = mb_strtolower(trim((string)$media->artist));
+            if ($byArtist && '' !== $artist && isset($artists[$artist])) {
+                continue;
+            }
+            $title = mb_strtolower(trim((string)$media->title));
+            if ('' !== $title && isset($titles[$title])) {
+                continue;
+            }
+            $clear[] = $fit;
+        }
+
+        return $clear;
+    }
+
+    /**
+     * The songs the log's lines play within $seconds of $at, each with how far
+     * from $at it is planned.
+     *
+     * @return list<array{song_id: ?string, artist: string, title: string, distance: int}>
      */
     private function logNear(Station $station, int $at, int $seconds): array
     {
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT e.payload, m.song_id, m.artist, m.title
+            'SELECT e.planned_at, m.song_id, m.artist, m.title
             FROM station_log_entries e
             LEFT JOIN station_media m ON m.id = e.media_id
             WHERE e.station_id = ? AND e.status <> ?
@@ -719,24 +850,17 @@ final class LinearLogRefill
             [$station->id, StationLogEntry::STATUS_DROPPED, $at - $seconds, $at + $seconds]
         );
 
-        $songIds = [];
-        $artists = [];
-        $titles = [];
+        $near = [];
         foreach ($rows as $row) {
-            if (!empty($row['song_id'])) {
-                $songIds[(string)$row['song_id']] = true;
-            }
-            $artist = mb_strtolower(trim((string)($row['artist'] ?? '')));
-            if ('' !== $artist) {
-                $artists[$artist] = true;
-            }
-            $title = mb_strtolower(trim((string)($row['title'] ?? '')));
-            if ('' !== $title) {
-                $titles[$title] = true;
-            }
+            $near[] = [
+                'song_id' => !empty($row['song_id']) ? (string)$row['song_id'] : null,
+                'artist' => mb_strtolower(trim((string)($row['artist'] ?? ''))),
+                'title' => mb_strtolower(trim((string)($row['title'] ?? ''))),
+                'distance' => abs((int)$row['planned_at'] - $at),
+            ];
         }
 
-        return [$songIds, $artists, $titles];
+        return $near;
     }
 
     /** True when a line planned after this slot has already been handed to the queue. */
@@ -831,7 +955,7 @@ final class LinearLogRefill
      * seconds, up to the hour's end or the next programme, whichever is first.
      * Locked lines and programmes keep their times.
      */
-    private function shiftHour(int $stationId, int $plannedAt, int $delta, ?int $skipId = null): void
+    public function shiftHour(int $stationId, int $plannedAt, int $delta, ?int $skipId = null): void
     {
         if (0 === $delta) {
             return;
@@ -911,6 +1035,57 @@ final class LinearLogRefill
             'clock_wheel' => true,
             'clock_wheel_schedule_mode' => true,
         ]);
+    }
+
+    /**
+     * The clock wheel that holds the air, as a line's payload names it
+     * (wheelOf()); nothing when no wheel does.
+     *
+     * @param array{StationClockWheel, ?ClockWheelScheduleMode}|null $open from Scheduler::wheelOpenAt()
+     * @return array<string, mixed>
+     */
+    private static function wheelFields(?array $open): array
+    {
+        if (null === $open) {
+            return [];
+        }
+
+        [$wheel, $mode] = $open;
+
+        return [
+            'clock_wheel_id' => $wheel->id,
+            'clock_wheel' => $wheel->name,
+            'clock_wheel_schedule_mode' => $mode?->value,
+        ];
+    }
+
+    /**
+     * The playlist of the wheel's music slot open $secondsIntoHour into the
+     * hour: the last music slot pinned to a playlist at or before that
+     * position, as the wheel plays its hour, or its first when none is yet.
+     * Null for a wheel with no such slot.
+     */
+    private static function slotPlaylistAt(StationClockWheel $wheel, int $secondsIntoHour): ?StationPlaylist
+    {
+        $slots = array_filter(
+            $wheel->slots->toArray(),
+            static fn(StationClockWheelSlot $slot): bool => ClockWheelSlotTypes::Music === $slot->type
+                && $slot->playlist instanceof StationPlaylist
+        );
+        usort(
+            $slots,
+            static fn(StationClockWheelSlot $a, StationClockWheelSlot $b): int => $a->position_seconds <=> $b->position_seconds
+                ?: $a->slot_order <=> $b->slot_order
+        );
+
+        $open = null;
+        foreach ($slots as $slot) {
+            if ($slot->position_seconds <= $secondsIntoHour || null === $open) {
+                $open = $slot;
+            }
+        }
+
+        return $open?->playlist;
     }
 
     private static function decodePayload(mixed $raw): array

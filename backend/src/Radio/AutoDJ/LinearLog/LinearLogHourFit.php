@@ -788,11 +788,30 @@ final class LinearLogHourFit
      */
     private function putSong(array $refit, float $offBy): int
     {
-        $refitted = (int)$this->em->getConnection()->update(
+        $conn = $this->em->getConnection();
+        $before = $conn->fetchAssociative(
+            'SELECT station_id, planned_at, duration FROM station_log_entries WHERE id = ?',
+            [$refit['id']]
+        );
+
+        $refitted = (int)$conn->update(
             'station_log_entries',
             $refit['fields'],
             ['id' => $refit['id'], 'status' => StationLogEntry::STATUS_PLANNED, 'is_locked' => 0]
         );
+
+        // The lines after it in the hour start when it now ends, as on air:
+        // left where they were, a shorter song before the hour's last one left
+        // a 50s hole in the saved log (Fri 4:56pm, seen Thu 2026-11-12) and a
+        // longer one an overlap.
+        if ($refitted > 0 && false !== $before) {
+            $this->refill->shiftHour(
+                (int)$before['station_id'],
+                (int)$before['planned_at'],
+                (int)round((float)$refit['fields']['duration'] - (float)$before['duration']),
+                (int)$refit['id']
+            );
+        }
 
         if ($refitted > 0) {
             $this->logger->notice('Linear Log: re-fitted a song so its hour lands on its ID.', [
