@@ -176,7 +176,17 @@ final class ClockWheelPlaybackPlanner
         $station = $event->getStation();
         $start = $event->getExpectedPlayAt();
         $untilId = $this->secondsUntilId($station, $start);
-        if (null === $untilId || $untilId <= 0.0) {
+        if (null === $untilId) {
+            return;
+        }
+
+        // Due at the ID's own second or after it, while the ID (and news) still
+        // hold the air: the Top-of-Hour swap leaves wheel rows alone, so nothing
+        // else holds it. Handed over at 2:59:58pm and 5:59:58pm, the next hour's
+        // opener started, the ID cut it after 0.2s and it never aired (Rock Ready
+        // Saturday and Totally 2000s, Sat 2026-11-14). It waits for the ID.
+        if ($untilId <= 1.0) {
+            $this->holdUnderAiringId($event, $station, CarbonImmutable::instance($start), $untilId);
             return;
         }
 
@@ -449,6 +459,32 @@ final class ClockWheelPlaybackPlanner
      * opener was cut 6s in and the overview kept its name for the next song
      * (Ray Boltz 6:59:53, Avalon on air from 7:00:11, Thu 2026-11-12).
      */
+    /**
+     * Hold a wheel row due within a second of the ID, or under it, until the
+     * ID (and the news after it) hand the air back.
+     */
+    private function holdUnderAiringId(RevalidateQueuedSong $event, Station $station, CarbonImmutable $start, float $untilId): void
+    {
+        $target = $start->addSeconds((int)floor($untilId));
+        $boundary = CarbonImmutable::instance(
+            $this->topOfHourClock->getNextBoundary($station, $target->subSeconds(5)->toDateTimeImmutable())
+        );
+        $release = $this->idLaneRelease($station, $boundary, $target);
+        if (!$start->lessThan($release)) {
+            return;
+        }
+
+        $event->holdBack();
+        $event->opensAfter($release->toDateTimeImmutable());
+
+        $this->logger->notice('Clock Wheel: a song due under the ID waits until the ID hands the air back.', [
+            'queue_id' => $event->getQueueRow()->id,
+            'song' => $event->getQueueRow()->media?->text,
+            'until_id' => round($untilId, 1),
+            'release' => $release->toIso8601String(),
+        ]);
+    }
+
     private function holdForNextHour(RevalidateQueuedSong $event, Station $station, DateTimeImmutable $start, float $untilId): bool
     {
         if ($untilId > \App\Radio\AutoDJ\LinearLog\LinearLogHour::ID_HOLD_WINDOW_SECONDS) {
