@@ -1537,7 +1537,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
             return false;
         }
-        if (null !== $row->clock_wheel || null !== $row->request) {
+        // Flexible clock wheel songs end the hour like playlist songs: swapped from
+        // their own slot playlist, held for the new hour, never started only to be
+        // cut. Strict wheels still time their own hour (owner, 2026-11-14).
+        if ((null !== $row->clock_wheel && 'strict' === $row->clock_wheel_schedule_mode) || null !== $row->request) {
             return false;
         }
         // A Clock Wheel cap is a deliberate programming choice. An hour-boundary
@@ -1896,7 +1899,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
             return false;
         }
-        if (null !== $row->clock_wheel || null !== $row->request) {
+        // Flexible clock wheel songs end the hour like playlist songs: swapped from
+        // their own slot playlist, held for the new hour, never started only to be
+        // cut. Strict wheels still time their own hour (owner, 2026-11-14).
+        if ((null !== $row->clock_wheel && 'strict' === $row->clock_wheel_schedule_mode) || null !== $row->request) {
             return false;
         }
         $media = $row->media;
@@ -2325,7 +2331,10 @@ final class TopOfHourSongSwapSelector implements EventSubscriberInterface
         if ($row->top_of_hour_legal_id || $row->clock_wheel_legal_id_substitute) {
             return false;
         }
-        if (null !== $row->clock_wheel || null !== $row->request) {
+        // Flexible clock wheel songs end the hour like playlist songs: swapped from
+        // their own slot playlist, held for the new hour, never started only to be
+        // cut. Strict wheels still time their own hour (owner, 2026-11-14).
+        if ((null !== $row->clock_wheel && 'strict' === $row->clock_wheel_schedule_mode) || null !== $row->request) {
             return false;
         }
         $media = $row->media;
