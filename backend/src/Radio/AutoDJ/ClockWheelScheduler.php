@@ -7,8 +7,6 @@ namespace App\Radio\AutoDJ;
 use App\Container\EntityManagerAwareTrait;
 use App\Container\LoggerAwareTrait;
 use App\Entity\Enums\ClockWheelFallbackReason;
-use App\Event\Radio\RevalidateQueuedSong;
-use App\Entity\Enums\ClockWheelScheduleMode;
 use App\Entity\Repository\StationQueueRepository;
 use App\Entity\Repository\StationScheduleRepository;
 use App\Entity\Station;
@@ -51,98 +49,7 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             BuildQueue::class => [
                 ['buildFromClockWheel', 3],
             ],
-            // Before the Top-of-Hour swap (-1), so it lands the wheel's own song.
-            RevalidateQueuedSong::class => [
-                ['keepWheelHourOwnSong', 0],
-            ],
         ];
-    }
-
-    /**
-     * A queued song that slid into a clock wheel's hour from a playlist the
-     * wheel does not allow -- the next hour's opener, once the wheel's songs
-     * ran shorter on air than planned -- gets a song from the wheel's own slot.
-     * The Top-of-Hour swap then lands that song on the ID, as it lands a
-     * playlist hour's last song, and the opener's line goes back to the log for
-     * its own hour (LinearLogHourGuard). Left as it was, the swap matched it
-     * from its own playlist, the schedule guard threw it out every 10s and the
-     * hour ran out before the ID (Decades Lunch, 12:57pm Mon 2026-11-16).
-     */
-    public function keepWheelHourOwnSong(RevalidateQueuedSong $event): void
-    {
-        if ($this->previewContext->isActive()) {
-            return;
-        }
-
-        $row = $event->getQueueRow();
-        if (
-            !$this->em->contains($row)
-            || $row->sent_to_autodj
-            || $row->is_played
-            || null !== $row->clock_wheel
-            || null !== $row->request
-            || $row->top_of_hour_legal_id
-            || $row->clock_wheel_legal_id_substitute
-        ) {
-            return;
-        }
-
-        $media = $row->media;
-        $playlist = $row->playlist;
-        if (null === $media || null === $playlist || 'music' !== $media->type || true === $playlist->is_programme) {
-            return;
-        }
-
-        $station = $event->getStation();
-        $at = $event->getExpectedPlayAt();
-        $schedule = $this->findActiveClockWheelSchedule($station, $at);
-        $wheel = $schedule?->clock_wheel;
-        if (
-            null === $wheel
-            || !$wheel->is_active
-            || ClockWheelScheduleMode::Strict === $schedule->clock_wheel_mode
-            || $this->scheduler->isPlaylistAllowedAt($playlist, $at)
-        ) {
-            return;
-        }
-
-        $history = $this->queueRepo->getRecentlyPlayedWithCategoryByTimeRange(
-            $station,
-            $at,
-            $station->backend_config->duplicate_prevention_time_range
-        );
-        $pick = $this->planner->resolveNextQueueEntry($wheel, $history, $at, $schedule);
-        if (null === $pick) {
-            return;
-        }
-        // The planner made a row of its own for the pick; this slot keeps its row.
-        if ($this->em->contains($pick)) {
-            $this->em->detach($pick);
-        }
-        $newMedia = $pick->media;
-        if (null === $newMedia || 'music' !== $newMedia->type) {
-            return;
-        }
-
-        $was = $media->text;
-        $row->setSong($newMedia);
-        $row->media = $newMedia;
-        $row->playlist = $pick->playlist ?? $row->playlist;
-        $row->clock_wheel = $wheel;
-        $row->clock_wheel_schedule_mode = $pick->clock_wheel_schedule_mode ?? $schedule->clock_wheel_mode?->value;
-        $row->clock_wheel_enforce_cap = false;
-        $row->clock_wheel_max_play_seconds = null;
-        $row->clock_wheel_stretch_ratio = null;
-        $row->duration = $newMedia->getCalculatedLength();
-        $this->em->persist($row);
-
-        $this->logger->notice('Clock Wheel: a song from outside the wheel slid into its hour; the wheel gives that slot a song of its own.', [
-            'queue_id' => $row->id,
-            'was' => $was,
-            'now' => $newMedia->text,
-            'wheel' => $wheel->name,
-            'airs_at' => $at->format(DATE_ATOM),
-        ]);
     }
 
     public function buildFromClockWheel(BuildQueue $event): void
@@ -151,13 +58,8 @@ final class ClockWheelScheduler implements EventSubscriberInterface
             return;
         }
 
-        // The saved linear log already holds this hour's clock-wheel items. When
-        // the log's only line for the slot belongs to the next hour (its opener,
-        // or a show that waits for its start), the wheel fills its own hour.
-        if (
-            $this->linearLogPlayout->ownsSelection($event)
-            && !$this->linearLogPlayout->offersOnlyLaterHour($event->getStation(), $event->getExpectedPlayTime())
-        ) {
+        // The saved linear log already holds this hour's clock-wheel items.
+        if ($this->linearLogPlayout->ownsSelection($event)) {
             return;
         }
 
