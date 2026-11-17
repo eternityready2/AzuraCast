@@ -30,6 +30,9 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
     /** A song ending this close to :59:59 is treated as the hour's final, swap-landed song. */
     private const int FINAL_SONG_TOLERANCE_SECONDS = 10;
 
+    /** A song that aired this recently is never played again, not even as the hour's final song. */
+    private const int BACK_TO_BACK_MINUTES = 30;
+
     public static function getSubscribedEvents(): array
     {
         // After the Top-of-Hour listener (-1) and ScheduleWindowGuard (-10).
@@ -80,9 +83,7 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
             ->addMinutes(59)
             ->addSeconds(59);
         $endsAt = $airsAt->addSeconds((int)round((float)($row->duration ?? $row->media->length)));
-        if (abs($endsAt->getTimestamp() - $idTarget->getTimestamp()) <= self::FINAL_SONG_TOLERANCE_SECONDS) {
-            return;
-        }
+        $isFinalSong = abs($endsAt->getTimestamp() - $idTarget->getTimestamp()) <= self::FINAL_SONG_TOLERANCE_SECONDS;
 
         $since = $airsAt->subMinutes($minutes);
         $conn = $this->em->getConnection();
@@ -93,6 +94,16 @@ final class QueuedRepeatGuard implements EventSubscriberInterface
             ORDER BY timestamp_start DESC LIMIT 1',
             [$station->id, $row->song_id, $since->utc()->format('Y-m-d H:i:s')]
         );
+
+        // Never back to back, final song or not: the same song aired three
+        // times running at 12:54, 12:57 and 12:59 (Mon 2026-11-16), each copy
+        // the swap's landing pick. A repeat from earlier in the window is
+        // still the swap's to take as the hour's final song.
+        $backToBack = false !== $aired
+            && (int)strtotime($aired . ' UTC') >= $airsAt->subMinutes(self::BACK_TO_BACK_MINUTES)->getTimestamp();
+        if ($isFinalSong && !$backToBack) {
+            return;
+        }
 
         $queuedAhead = false === $aired
             ? $conn->fetchOne(

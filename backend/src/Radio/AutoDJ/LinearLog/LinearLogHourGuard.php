@@ -46,6 +46,9 @@ final class LinearLogHourGuard implements EventSubscriberInterface
     use EntityManagerAwareTrait;
     use LoggerAwareTrait;
 
+    /** Note on a line whose song the Top-of-Hour swap changed at air time so the hour lands on the ID. */
+    public const string RETIMED_NOTE = 'Re-timed at air time to land on the ID; planned: ';
+
     public function __construct(
         private readonly LinearLogPreviewContext $previewContext,
         private readonly LinearLogHour $hour,
@@ -124,7 +127,30 @@ final class LinearLogHourGuard implements EventSubscriberInterface
         }
 
         $rowHourEnd = $this->hour->endOf($station, $startsAt->getTimestamp(), (float)($row->duration ?? INF));
-        if ($rowHourEnd <= $this->hour->endOf($station, $entry->planned_at, $entry->duration)) {
+        if ($rowHourEnd <= $this->hour->endOf($station, $entry->planned_at)) {
+            // The line airs in its hour. When the Top-of-Hour swap has given
+            // its row another song so the hour lands on the ID, the log takes
+            // that song: the 24-hour log stays the record of what airs, and
+            // nothing reads the line as unplayed and offers it again.
+            if (null !== $row->media && $entry->media?->id !== $row->media->id) {
+                $this->logger->notice(
+                    'Linear Log: the hour\'s line was re-timed to land on the ID; the log takes its song.',
+                    ['queue_id' => $row->id, 'log_entry_id' => $entry->id, 'planned' => $entry->text, 'airs' => $row->text]
+                );
+                if (null === $entry->note || !str_starts_with($entry->note, self::RETIMED_NOTE)) {
+                    $entry->note = self::RETIMED_NOTE . ($entry->text ?? '');
+                }
+                $entry->media = $row->media;
+                if (null !== $row->playlist) {
+                    $entry->playlist = $row->playlist;
+                }
+                $entry->text = $row->text;
+                $entry->title = $row->title;
+                $entry->artist = $row->artist;
+                $entry->duration = (float)($row->duration ?? $row->media->length);
+                $this->em->persist($entry);
+                $this->em->flush();
+            }
             return;
         }
 

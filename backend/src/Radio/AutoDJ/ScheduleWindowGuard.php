@@ -87,6 +87,23 @@ final class ScheduleWindowGuard implements EventSubscriberInterface
 
         $airsAtImmutable = DateTimeImmutable::createFromInterface($airsAt);
 
+        // A row that plays a line of the log is the log's choice for its slot,
+        // and the line's own window is what is judged (its wheel, for a
+        // wheel's line), not the playlist the Top-of-Hour swap found a fitting
+        // song in. Judged by that playlist, the swap's pick for a wheel hour's
+        // last slot was removed twice and the slot churned until the ID
+        // (Today's Hits, 12:54 Mon 2026-11-16).
+        if (null !== $row->log_entry_id) {
+            $entry = $this->em->find(StationLogEntry::class, $row->log_entry_id);
+            if (
+                $entry instanceof StationLogEntry
+                && in_array($entry->status, [StationLogEntry::STATUS_PLANNED, StationLogEntry::STATUS_QUEUED], true)
+                && $this->lineWindow->mayAirAt($entry, $airsAtImmutable)
+            ) {
+                return;
+            }
+        }
+
         // A wheel's tracks are drawn from member playlists that usually carry no
         // schedule of their own. Judge such a row by the wheel that owns the
         // slot, or the wheel's own programme would delete itself.

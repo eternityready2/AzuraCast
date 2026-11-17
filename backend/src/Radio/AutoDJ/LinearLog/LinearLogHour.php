@@ -84,8 +84,14 @@ final class LinearLogHour
      */
     public function isFillerBeforeLine(Station $station, StationQueue $row, int $startsAt, StationLogEntry $line): bool
     {
+        // The line's hour is the one it is planned in, whatever its first
+        // song's length. Judged by that length, this hour's closing line read
+        // as the next hour's as soon as the Top-of-Hour swap gave its row a
+        // song that does fit before the ID: the line went back to the log
+        // while its row aired, the log offered it again, and the same song
+        // aired three times running (Rich Mullins, 12:54-12:59 Mon 2026-11-16).
         return $row->media?->id !== $line->media?->id
             && $this->endOf($station, $startsAt, (float)($row->duration ?? INF))
-                < $this->endOf($station, $line->planned_at, $line->duration);
+                < $this->endOf($station, $line->planned_at);
     }
 }
