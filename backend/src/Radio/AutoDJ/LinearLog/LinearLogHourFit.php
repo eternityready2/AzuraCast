@@ -80,6 +80,13 @@ final class LinearLogHourFit
      */
     private const int ON_TIME_SECONDS = 30;
 
+    /**
+     * How many songs back from the hour's last line the fit looks for one to
+     * re-fit, when neither the last song nor the one before it can land the
+     * hour: each look reads a playlist.
+     */
+    private const int MAX_EARLIER_SONGS = 6;
+
     /** The ID that closes an hour starts within this before the hour's end, or on it. */
     private const int CLOSING_ID_SECONDS = 120;
 
@@ -325,7 +332,14 @@ final class LinearLogHourFit
         // A line there is no room for stays planned behind the last one: it
         // airs if the hour runs short, and playout closes it out once the
         // hour has ended (LinearLogPlayout).
-        if (abs($offBy) <= self::ON_TIME_SECONDS) {
+        //
+        // An hour that ends on a song is on time within what the Top-of-Hour
+        // swap and Liquidsoap's fit land by themselves. One that ends on a
+        // promo or a liner is not: neither re-times it, so whatever it leaves
+        // before the ID is dead air. Read as on time 24s short, the 8pm
+        // Rapture Ready Nights hour ended on a promo, the ID started early
+        // and silence ran to the hour (8:59pm Sun 2026-11-15).
+        if (abs($offBy) <= self::onTimeFor($closing)) {
             return 0;
         }
 
@@ -383,11 +397,50 @@ final class LinearLogHourFit
         if (0 === $changed) {
             $changed = $this->landClosingSong($stationId, $hour, $closing, $offBy);
         }
+
+        // No song lands it and the room left is too little for one: a short
+        // item closes the hour on its ID, rather than the ID starting early
+        // into silence (8:59pm Sun 2026-11-15).
+        if (0 === $changed && !$isQueueHour && $offBy < 0) {
+            $lastPlannedEndsAt = $hour['start'];
+            foreach ($openLines as $line) {
+                if ((int)$line['planned_at'] >= $hour['start']) {
+                    $lastPlannedEndsAt = max(
+                        $lastPlannedEndsAt,
+                        (int)$line['planned_at'] + (int)ceil((float)$line['duration'])
+                    );
+                }
+            }
+            $fillFrom = (int)ceil(self::landsAt($closing));
+            $changed = $this->refill->addFill(
+                $station,
+                $hour['start'],
+                $hour['id_at'],
+                $fillFrom,
+                $hour['id_at'] - $fillFrom,
+                $lastPlannedEndsAt
+            );
+        }
         if (0 === $changed) {
             $this->cache->set($restKey, $state, self::REST_SECONDS);
         }
 
         return $changed;
+    }
+
+    /**
+     * How far from the ID an hour may end and still be on time: what the
+     * Top-of-Hour swap and Liquidsoap's fit land by themselves when it ends on
+     * a song, and only the ID's grace when it ends on a promo or a liner,
+     * which neither re-times.
+     *
+     * @param array<string, mixed> $closing the hour's last line, as the page lists it
+     */
+    private static function onTimeFor(array $closing): int
+    {
+        return LinearLogRefill::MUSIC_TYPE === ($closing['media_type'] ?? null)
+            ? self::ON_TIME_SECONDS
+            : LinearLogRefill::ID_GRACE_SECONDS;
     }
 
     /**
@@ -506,13 +559,29 @@ final class LinearLogHourFit
 
         // The song before is looked for unless the last line's own song is
         // written and brings the hour on time.
-        $landsOnTime = null !== $ofClosing
-            && self::landsCloser($ofClosing, $offBy)
-            && abs($ofClosing['lands_off_by']) <= self::ON_TIME_SECONDS;
+        $onTime = self::onTimeFor($closing);
+        $landsOnTime = static fn(?array $refit): bool => null !== $refit
+            && self::landsCloser($refit, $offBy)
+            && abs($refit['lands_off_by']) <= $onTime;
         $refits = array_filter([
             $ofClosing,
-            $landsOnTime ? null : $this->refitOfSongBefore($stationId, $hour, $closing, $offBy),
+            $landsOnTime($ofClosing) ? null : $this->refitOfSongBefore($stationId, $hour, $closing, $offBy),
         ]);
+
+        // Neither lands it: a song further back in the hour can, as a music
+        // scheduler balances an hour's length on any of its songs. The 8pm
+        // Rapture Ready Nights hour ended on a promo 24s short of its ID; no
+        // song in its pool was the length to replace the 455s song before it,
+        // and one 24s longer than the song before that one was (Tue 2026-11-17).
+        if ([] === array_filter($refits, $landsOnTime)) {
+            foreach ($this->earlierSongs($hour['lines'], $closing) as $earlier) {
+                $refit = $this->refitOfSongBefore($stationId, $hour, $closing, $offBy, $earlier);
+                if ($landsOnTime($refit)) {
+                    $refits[] = $refit;
+                    break;
+                }
+            }
+        }
 
         // The one that lands the hour closer is written. Where its line was
         // claimed for the queue or locked in the meantime, the other is.
@@ -599,9 +668,14 @@ final class LinearLogHourFit
      * @param float $offBy seconds it ends past the ID; negative when short of it
      * @return array{id: int, fields: array<string, mixed>, song: string, lands_off_by: float}|null
      */
-    private function refitOfSongBefore(int $stationId, array $hour, array $closing, float $offBy): ?array
-    {
-        $before = $this->songBefore($hour['lines'], $closing);
+    private function refitOfSongBefore(
+        int $stationId,
+        array $hour,
+        array $closing,
+        float $offBy,
+        ?array $before = null
+    ): ?array {
+        $before ??= $this->songBefore($hour['lines'], $closing);
         $line = null !== $before ? $this->fittableSong($before) : null;
         $station = $this->em->find(Station::class, $stationId);
         if (null === $before || null === $line || !$station instanceof Station) {
@@ -689,6 +763,48 @@ final class LinearLogHourFit
         }
 
         return null;
+    }
+
+    /**
+     * The songs further back in the hour than the one before its last line,
+     * newest first, that the fit may give another length: planned and
+     * unlocked, with only planned, unlocked lines after them up to the last
+     * one, since every one of those moves with it.
+     *
+     * @param non-empty-list<array<string, mixed>> $lines the hour's lines, as the page lists them
+     * @param array<string, mixed> $closing the hour's last line
+     * @return list<array<string, mixed>>
+     */
+    private function earlierSongs(array $lines, array $closing): array
+    {
+        $earlier = array_filter(
+            $lines,
+            static fn(array $line): bool => (int)$line['played_at'] < (int)$closing['played_at']
+        );
+        usort($earlier, static fn(array $a, array $b): int => (int)$b['played_at'] <=> (int)$a['played_at']);
+
+        $songs = [];
+        $passedSongBefore = false;
+        foreach ($earlier as $line) {
+            if (!self::isPlannedAndUnlocked($line) || self::isShow($line)) {
+                break;
+            }
+            if (LinearLogRefill::MUSIC_TYPE !== ($line['media_type'] ?? null)) {
+                continue;
+            }
+            if (!$passedSongBefore) {
+                // refitOfSongBefore() has tried this one already.
+                $passedSongBefore = true;
+                continue;
+            }
+
+            $songs[] = $line;
+            if (count($songs) >= self::MAX_EARLIER_SONGS) {
+                break;
+            }
+        }
+
+        return $songs;
     }
 
     /**

@@ -411,6 +411,90 @@ final class LinearLogRefill
     }
 
     /**
+     * Close an hour that ends $shortBy seconds short of its ID, too little
+     * for a song, with a liner or promo that ends on the ID: fill before
+     * stretch, as FM automation closes an hour. The item comes from the
+     * station's own jingle playlists that may play there, and never runs past
+     * the ID; one that would leave more than the ID's grace is not written.
+     *
+     * @param int $lastPlannedEndsAt when the hour's last planned line ends, by
+     *     the log's own times (planned_at + duration)
+     * @return int lines added
+     */
+    public function addFill(
+        Station $station,
+        int $hourStart,
+        int $idAt,
+        int $endsAt,
+        int $shortBy,
+        int $lastPlannedEndsAt,
+    ): int {
+        if ($shortBy <= self::ID_GRACE_SECONDS || $shortBy >= self::MIN_SONG_SECONDS) {
+            return 0;
+        }
+
+        $at = CarbonImmutable::createFromTimestamp($endsAt, 'UTC')->toDateTimeImmutable();
+
+        $best = null;
+        foreach ($station->playlists as $playlist) {
+            if (
+                !$playlist->is_jingle
+                || !$this->isRefillSource($playlist, true)
+                || !$this->scheduler->isPlaylistAllowedAt($playlist, $at)
+            ) {
+                continue;
+            }
+
+            $pick = $this->pickReplacement($station, $at, $shortBy, $shortBy, $playlist, null, LinearLogSongMatch::Closest);
+            if (null === $pick) {
+                continue;
+            }
+
+            $leaves = $shortBy - $pick[0]->getCalculatedLength();
+            if ($leaves >= 0 && $leaves <= self::ID_GRACE_SECONDS && (null === $best || $leaves < $best[2])) {
+                $best = [$pick[0], $pick[1], $leaves];
+            }
+        }
+
+        if (null === $best) {
+            $this->logger->notice('Linear Log: an hour ends short of its ID and no liner or promo fits the room left.', [
+                'hour_starts_at' => $hourStart,
+                'short_by' => $shortBy,
+            ]);
+            return 0;
+        }
+
+        [$media, $playlist] = $best;
+        $plannedAt = min(max($endsAt, $lastPlannedEndsAt), $idAt - 1);
+        if ($plannedAt + $media->getCalculatedLength() > $idAt) {
+            return 0;
+        }
+
+        $wheelFields = self::wheelFields($this->scheduler->wheelOpenAt($station, $at));
+
+        // The search may have cleared the entity manager.
+        $station = $this->em->find(Station::class, $station->id) ?? $station;
+        $newId = $this->writeLine(
+            $station,
+            $media,
+            $playlist,
+            $plannedAt,
+            'Filled: a short item lands the hour on its ID',
+            ['top_up' => true, ...$wheelFields]
+        );
+
+        $this->logger->notice('Linear Log: closed an hour on its ID with a short item.', [
+            'log_entry_id' => $newId,
+            'planned_at' => $plannedAt,
+            'short_by' => $shortBy,
+            'item' => $media->text,
+            'leaves' => round($best[2], 1),
+        ]);
+
+        return 1;
+    }
+
+    /**
      * @param array<string, mixed> $line
      * @param array<string, mixed> $payload
      */
