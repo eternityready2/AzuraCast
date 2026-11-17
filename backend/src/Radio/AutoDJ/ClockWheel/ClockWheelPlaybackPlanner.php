@@ -31,6 +31,8 @@ use App\Radio\AutoDJ\StretchSqueezeQueueTiming;
 use App\Radio\AutoDJ\TopOfHour\TopOfHourClock;
 use App\Radio\SmartBlock\SmartBlockAvailability;
 use Carbon\CarbonImmutable;
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\ParameterType;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
@@ -54,6 +56,13 @@ final class ClockWheelPlaybackPlanner
 
     /** @deprecated Use HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS or station config. */
     public const int LEGAL_ID_COMPLIANCE_TOLERANCE_SECONDS = HourBoundaryPlanner::DEFAULT_COMPLIANCE_TOLERANCE_SECONDS;
+
+    /** Custom field (short name) holding a song's energy: slow, mid or upbeat. */
+    private const string ENERGY_FIELD = 'energy';
+
+    /** Daytime, when the tempo rule applies (station time). */
+    private const int TEMPO_RULE_FROM_HOUR = 6;
+    private const int TEMPO_RULE_UNTIL_HOUR = 19;
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -544,6 +553,10 @@ final class ClockWheelPlaybackPlanner
             $slot->category_id,
         );
         $candidates = $separationResult->candidates;
+
+        if ($soft && $candidates !== []) {
+            $candidates = $this->notSlowAfterSlow($station, $candidates, $recentHistory, $expectedPlayTime);
+        }
 
         if ($candidates === []) {
             $this->logger->warning(
@@ -1279,6 +1292,68 @@ final class ClockWheelPlaybackPlanner
         // Flexible: never cut mid-hour. A track longer than the window plays in full
         // and the next slot starts later; the hour boundary is still capped above.
         return false;
+    }
+
+    /**
+     * FM tempo rule: in the daytime, a slow song is never followed by another
+     * slow one. A song's energy (slow, mid, upbeat) is its "energy" custom field,
+     * measured from the audio. When every candidate is slow, the slot plays one
+     * anyway: a slow song beats no song.
+     *
+     * @param StationMedia[] $candidates
+     * @param array<array{song_id:string, timestamp_played:mixed}> $recentHistory newest first
+     * @return StationMedia[]
+     */
+    private function notSlowAfterSlow(Station $station, array $candidates, array $recentHistory, DateTimeImmutable $at): array
+    {
+        $hour = (int)CarbonImmutable::instance($at)->setTimezone($station->getTimezoneObject())->format('G');
+        if ($hour < self::TEMPO_RULE_FROM_HOUR || $hour >= self::TEMPO_RULE_UNTIL_HOUR) {
+            return $candidates;
+        }
+
+        // The songs just before: IDs, promos and DJ clips carry no energy and are passed over.
+        $recentIds = [];
+        foreach (array_slice($recentHistory, 0, 6) as $row) {
+            if (!empty($row['song_id'])) {
+                $recentIds[] = (string)$row['song_id'];
+            }
+        }
+        $candidateIds = array_values(array_unique(array_map(static fn(StationMedia $m): string => (string)$m->song_id, $candidates)));
+        if ([] === $recentIds) {
+            return $candidates;
+        }
+
+        $energy = [];
+        foreach (
+            $this->em->getConnection()->fetchAllAssociative(
+                'SELECT m.song_id, f.field_value FROM station_media_custom_field f
+                JOIN custom_field c ON c.id = f.field_id AND c.short_name = ?
+                JOIN station_media m ON m.id = f.media_id
+                WHERE m.song_id IN (?)',
+                [self::ENERGY_FIELD, array_values(array_unique([...$recentIds, ...$candidateIds]))],
+                [ParameterType::STRING, ArrayParameterType::STRING]
+            ) as $row
+        ) {
+            $energy[(string)$row['song_id']] = strtolower(trim((string)$row['field_value']));
+        }
+
+        $previous = null;
+        foreach ($recentIds as $id) {
+            if (isset($energy[$id])) {
+                $previous = $energy[$id];
+                break;
+            }
+        }
+        if ('slow' !== $previous) {
+            return $candidates;
+        }
+
+        $kept = array_values(array_filter(
+            $candidates,
+            static fn(StationMedia $m): bool => 'slow' !== ($energy[(string)$m->song_id] ?? null)
+        ));
+
+        return [] !== $kept ? $kept : $candidates;
     }
 
     /**
