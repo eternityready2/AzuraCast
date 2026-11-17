@@ -108,6 +108,31 @@ final class LinearLogPlayout implements EventSubscriberInterface
     }
 
     /**
+     * True when the only line the log would play in the slot at $expected is
+     * one that belongs after the clock hour the slot is in: the next hour's
+     * opener (taken in the swap's hold window) or a show that waits for its own
+     * start. A clock wheel that holds the air fills its own hour then, as FM
+     * automation fills an hour from its own clock (Sun 8:59am 2026-11-15: the
+     * 9am show was offered at 8:59, could not start, and the ID went early).
+     */
+    public function offersOnlyLaterHour(Station $station, DateTimeInterface $expected): bool
+    {
+        $entry = $this->nextLineFor($station, $expected);
+        if (!$entry instanceof StationLogEntry) {
+            return false;
+        }
+
+        $clockHourEnd = CarbonImmutable::instance(DateTimeImmutable::createFromInterface($expected))
+            ->setTimezone($station->getTimezoneObject())
+            ->startOfHour()
+            ->addHour()
+            ->getTimestamp();
+
+        return $entry->planned_at >= $clockHourEnd - (int)LinearLogHour::ID_HOLD_WINDOW_SECONDS
+            && $expected->getTimestamp() < $clockHourEnd;
+    }
+
+    /**
      * True when the log has a line to play in the slot at $expected.
      */
     private function hasLineForHour(Station $station, DateTimeInterface $expected): bool
