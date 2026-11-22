@@ -140,7 +140,8 @@ final class AiDjGenerator
      * The fixed parts of a break, by slot. A DJ with dj_line items for a slot (slot
      * name in the item's reference) takes turns through those instead, in item
      * order, so the same words never air twice in a row. Without any, the DJ says
-     * the wording below, exactly as before.
+     * the wording below, exactly as before. With lines for a slot that are all
+     * turned off, the DJ says nothing there.
      *
      * @var array<string, string|list<string>>
      */
@@ -1034,7 +1035,10 @@ final class AiDjGenerator
         $reference = $content->reference ? self::spokenBibleReference($content->reference) : null;
         $vars = ['dj_name' => $djName, 'station_name' => $stationName, 'reference' => (string)$reference];
         $line = fn(string $slot): string => $this->djLine($dj, $slot, $vars);
-        $encouragementEnd = fn(): string => $endsBreak ? ' ' . $line('encouragement_close') : '';
+        $encouragementEnd = static function () use ($endsBreak, $line): string {
+            $close = $endsBreak ? $line('encouragement_close') : '';
+            return '' === $close ? '' : ' ' . $close;
+        };
 
         if (!$includeIntro) {
             // Intro-free variant for the second segment of a combo break: payload
@@ -1080,7 +1084,13 @@ final class AiDjGenerator
      */
     private function djLine(AiDj $dj, string $slot, array $vars = []): string
     {
-        $lines = $this->djLinesFor($dj)[$slot] ?? [];
+        $djLines = $this->djLinesFor($dj);
+        $lines = $djLines[$slot] ?? [];
+
+        if (isset($djLines[$slot]) && [] === $lines) {
+            // The DJ has lines for this slot but turned them all off: say nothing here.
+            return '';
+        }
 
         if ([] === $lines) {
             $default = self::DJ_LINE_DEFAULTS[$slot];
@@ -1113,10 +1123,14 @@ final class AiDjGenerator
         }
 
         $lines = [];
-        foreach ($this->contentRepo->findEnabledForDj($djId, AiDjContent::TYPE_DJ_LINE) as $item) {
+        foreach ($this->contentRepo->findAllForDj($djId, AiDjContent::TYPE_DJ_LINE) as $item) {
             $slot = trim((string)$item->reference);
             $text = trim($item->content);
-            if (isset(self::DJ_LINE_DEFAULTS[$slot]) && '' !== $text) {
+            if (!isset(self::DJ_LINE_DEFAULTS[$slot]) || '' === $text) {
+                continue;
+            }
+            $lines[$slot] ??= [];
+            if ($item->is_enabled) {
                 $lines[$slot][] = $text;
             }
         }

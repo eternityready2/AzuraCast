@@ -66,6 +66,26 @@ final class AiDjContentRepository extends Repository
     }
 
     /**
+     * All items of one type from a DJ's own library, turned on or off.
+     *
+     * @return AiDjContent[]
+     */
+    public function findAllForDj(int $djId, string $type): array
+    {
+        return $this->em->createQueryBuilder()
+            ->select('content')
+            ->from(AiDjContent::class, 'content')
+            ->innerJoin('content.ai_djs', 'dj')
+            ->andWhere('dj.id = :djId')
+            ->andWhere('content.type = :type')
+            ->setParameter('djId', $djId)
+            ->setParameter('type', $type)
+            ->orderBy('content.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * Whether the DJ has any items in their own library (then they use only that library).
      * The DJ's own break wording (dj_line) does not count.
      */
