@@ -1044,7 +1044,7 @@ final class AiDjGenerator
             // Intro-free variant for the second segment of a combo break: payload
             // only, with a light connector and no "This is <dj> on <station>" prefix,
             // so the DJ never re-introduces herself mid-conversation.
-            return match ($content->type) {
+            return self::singleStops(match ($content->type) {
                 AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
                     ? sprintf('%s %s. %s', $line('verse_open'), $text, $line('verse_close'))
                     : sprintf("%s. Stay blessed.", $text)),
@@ -1057,10 +1057,10 @@ final class AiDjGenerator
                 self::TYPE_QUOTE => self::quoteText($content, $text),
                 self::TYPE_PRAYER => sprintf('%s %s', $line('prayer_open'), $text),
                 default => sprintf("And here's something for you. %s.", $text),
-            };
+            });
         }
 
-        return match ($content->type) {
+        return self::singleStops(match ($content->type) {
             AiDjContent::TYPE_BIBLE_VERSE => self::cleanScriptureForTts($reference
                 ? sprintf('%s %s. %s', $line('verse_intro'), $text, $line('verse_close'))
                 : sprintf("Here's a word from the Lord for you today, from %s on %s. %s. Stay blessed.", $djName, $stationName, $text)),
@@ -1074,7 +1074,17 @@ final class AiDjGenerator
             self::TYPE_QUOTE => sprintf("This is %s on %s. %s", $djName, $stationName, self::quoteText($content, $text)),
             self::TYPE_PRAYER => sprintf("This is %s on %s. Let's take a moment and pray together%s. %s", $djName, $stationName, $reference ? ', from ' . $reference : '', $text),
             default => sprintf("This is %s on %s, and I want to share something with you. %s.", $djName, $stationName, $text),
-        };
+        });
+    }
+
+    /**
+     * One full stop after a sentence: item texts often end with their own
+     * punctuation and the wording around them adds another ("exit.." / "today?.").
+     * An ellipsis ("...") is left alone.
+     */
+    private static function singleStops(string $text): string
+    {
+        return (string)preg_replace('/(?<!\.)([.!?])\.(?!\.)/', '$1', $text);
     }
 
     /**
